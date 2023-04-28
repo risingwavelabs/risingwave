@@ -72,7 +72,7 @@ fn create_hash_agg_executor(
         return_type,
     )];
 
-    let agg_factories: Vec<_> = agg_calls
+    let agg_init_states: Vec<_> = agg_calls
         .iter()
         .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(agg::build))
         .try_collect()
@@ -86,13 +86,13 @@ fn create_hash_agg_executor(
     let fields = group_key_types
         .iter()
         .cloned()
-        .chain(agg_factories.iter().map(|fac| fac.return_type()))
+        .chain(agg_init_states.iter().map(|fac| fac.return_type()))
         .map(Field::unnamed)
         .collect_vec();
     let schema = Schema { fields };
 
     Box::new(HashAggExecutor::<hash::Key64>::new(
-        agg_factories,
+        agg_init_states,
         group_key_columns,
         group_key_types,
         schema,

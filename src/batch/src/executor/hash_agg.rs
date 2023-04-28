@@ -40,7 +40,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            self.agg_factories,
+            self.agg_init_states,
             self.group_key_columns,
             self.group_key_types,
             self.schema,
@@ -56,7 +56,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 }
 
 pub struct HashAggExecutorBuilder {
-    agg_factories: Vec<BoxedAggState>,
+    agg_init_states: Vec<BoxedAggState>,
     group_key_columns: Vec<usize>,
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
@@ -74,7 +74,7 @@ impl HashAggExecutorBuilder {
         identity: String,
         chunk_size: usize,
     ) -> Result<BoxedExecutor> {
-        let agg_factories: Vec<_> = hash_agg_node
+        let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
             .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
@@ -96,12 +96,12 @@ impl HashAggExecutorBuilder {
         let fields = group_key_types
             .iter()
             .cloned()
-            .chain(agg_factories.iter().map(|e| e.return_type()))
+            .chain(agg_init_states.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let builder = HashAggExecutorBuilder {
-            agg_factories,
+            agg_init_states,
             group_key_columns,
             group_key_types,
             child,
@@ -142,7 +142,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub struct HashAggExecutor<K> {
     /// Factories to construct aggregator for each groups
-    agg_factories: Vec<BoxedAggState>,
+    agg_init_states: Vec<BoxedAggState>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// Data types of group key columns
@@ -157,7 +157,7 @@ pub struct HashAggExecutor<K> {
 
 impl<K> HashAggExecutor<K> {
     pub fn new(
-        agg_factories: Vec<BoxedAggState>,
+        agg_init_states: Vec<BoxedAggState>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
         schema: Schema,
@@ -166,7 +166,7 @@ impl<K> HashAggExecutor<K> {
         chunk_size: usize,
     ) -> Self {
         HashAggExecutor {
-            agg_factories,
+            agg_init_states,
             group_key_columns,
             group_key_types,
             schema,
@@ -206,7 +206,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             for (row_id, key) in keys.into_iter().enumerate() {
                 let states: &mut Vec<BoxedAggState> = groups
                     .entry(key)
-                    .or_insert_with(|| self.agg_factories.clone());
+                    .or_insert_with(|| self.agg_init_states.clone());
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
@@ -226,7 +226,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .collect();
 
             let mut agg_builders: Vec<_> = self
-                .agg_factories
+                .agg_init_states
                 .iter()
                 .map(|agg| agg.return_type().create_array_builder(cardinality))
                 .collect();

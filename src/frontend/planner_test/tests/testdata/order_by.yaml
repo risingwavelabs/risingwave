@@ -70,7 +70,11 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
-  binder_error: 'Item not found: Invalid column: v'
+  binder_error: |-
+    Bind error: failed to bind expression: v
+
+    Caused by:
+      Item not found: Invalid column: v
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5;
@@ -155,7 +159,11 @@
   sql: |
     create table t (x int, y int);
     select x + y as sum from t order by sum + 1;
-  binder_error: 'Item not found: Invalid column: sum'
+  binder_error: |-
+    Bind error: failed to bind expression: sum + 1
+
+    Caused by:
+      Item not found: Invalid column: sum
 - name: select distinct with order by expressions not appear in select list
   sql: |
     create table t (x int, y int);

@@ -14,22 +14,7 @@
 
 //! This module provides utility functions for SQL data type conversion and manipulation.
 
-/// Expands a type wildcard string into a list of concrete types.
-pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
-    match ty {
-        "*" => TYPE_MATRIX
-            .trim()
-            .lines()
-            .map(|l| l.split_whitespace().next().unwrap())
-            .collect(),
-        "*int" => vec!["int16", "int32", "int64"],
-        "*numeric" => vec!["decimal"],
-        "*float" => vec!["float32", "float64"],
-        _ => vec![ty],
-    }
-}
-
-//  name        data type   variant     array           owned           ref             primitive
+//  name        data type   variant     array type      owned type      ref type        primitive?
 const TYPE_MATRIX: &str = "
     boolean     Boolean     Bool        BoolArray       bool            bool            _
     int16       Int16       Int16       I16Array        i16             i16             y
@@ -92,6 +77,21 @@ fn lookup_matrix(ty: &str, idx: usize) -> &str {
         }
     });
     s.unwrap_or_else(|| panic!("unknown type: {}", ty))
+}
+
+/// Expands a type wildcard string into a list of concrete types.
+pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
+    match ty {
+        "*" => TYPE_MATRIX
+            .trim()
+            .lines()
+            .map(|l| l.split_whitespace().next().unwrap())
+            .collect(),
+        "*int" => vec!["int16", "int32", "int64"],
+        "*numeric" => vec!["decimal"],
+        "*float" => vec!["float32", "float64"],
+        _ => vec![ty],
+    }
 }
 
 /// Computes the minimal compatible type between a pair of data types.

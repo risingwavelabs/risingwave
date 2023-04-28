@@ -109,8 +109,9 @@ struct FunctionAttr {
     name: String,
     args: Vec<String>,
     ret: String,
-    batch: Option<String>,
+    batch_fn: Option<String>,
     state: Option<String>,
+    init_state: Option<String>,
     user_fn: UserFunctionAttr,
 }
 

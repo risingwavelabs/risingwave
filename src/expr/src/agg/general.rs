@@ -28,6 +28,8 @@ use crate::{ExprError, Result};
 #[aggregate("sum(float64) -> float64")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
+#[aggregate("sum(int256) -> int256", state = "Int256")]
+#[aggregate("sum0(int64) -> int64", init_state = "Some(0)")]
 fn sum<S, T>(state: S, input: T) -> Result<S>
 where
     S: From<T> + CheckedAdd<Output = S>,
@@ -47,9 +49,7 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
-#[aggregate("bit_and(int16) -> int16")]
-#[aggregate("bit_and(int32) -> int32")]
-#[aggregate("bit_and(int64) -> int64")]
+#[aggregate("bit_and(*int) -> auto")]
 fn bit_and<T>(state: T, input: T) -> T
 where
     T: BitAnd<Output = T>,
@@ -57,9 +57,7 @@ where
     state.bitand(input)
 }
 
-#[aggregate("bit_or(int16) -> int16")]
-#[aggregate("bit_or(int32) -> int32")]
-#[aggregate("bit_or(int64) -> int64")]
+#[aggregate("bit_or(*int) -> auto")]
 fn bit_or<T>(state: T, input: T) -> T
 where
     T: BitOr<Output = T>,
@@ -67,9 +65,7 @@ where
     state.bitor(input)
 }
 
-#[aggregate("bit_xor(int16) -> int16")]
-#[aggregate("bit_xor(int32) -> int32")]
-#[aggregate("bit_xor(int64) -> int64")]
+#[aggregate("bit_xor(*int) -> auto")]
 fn bit_xor<T>(state: T, input: T) -> T
 where
     T: BitXor<Output = T>,
@@ -109,7 +105,7 @@ fn first<T>(state: T, _: T) -> T {
 /// statement ok
 /// drop table t;
 /// ```
-#[aggregate("count(*) -> int64")] // we have a hack for `count` that the initial state is 0
+#[aggregate("count(*) -> int64", init_state = "Some(0)")]
 fn count<T>(state: i64, _: T) -> i64 {
     state + 1
 }

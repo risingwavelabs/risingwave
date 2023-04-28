@@ -52,8 +52,8 @@ use core::str::FromStr;
 
 pub use num_traits::Float;
 use num_traits::{
-    AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
-    FromPrimitive, Num, NumCast, One, Pow, Signed, ToPrimitive, Zero,
+    Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Pow,
+    Signed, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -565,114 +565,12 @@ impl<T: One> One for OrderedFloat<T> {
     }
 }
 
-impl<T: NumCast> NumCast for OrderedFloat<T> {
-    #[inline]
-    fn from<F: ToPrimitive>(n: F) -> Option<Self> {
-        T::from(n).map(OrderedFloat)
-    }
-}
-
-impl<T: FromPrimitive> FromPrimitive for OrderedFloat<T> {
-    fn from_i64(n: i64) -> Option<Self> {
-        T::from_i64(n).map(OrderedFloat)
-    }
-
-    fn from_u64(n: u64) -> Option<Self> {
-        T::from_u64(n).map(OrderedFloat)
-    }
-
-    fn from_isize(n: isize) -> Option<Self> {
-        T::from_isize(n).map(OrderedFloat)
-    }
-
-    fn from_i8(n: i8) -> Option<Self> {
-        T::from_i8(n).map(OrderedFloat)
-    }
-
-    fn from_i16(n: i16) -> Option<Self> {
-        T::from_i16(n).map(OrderedFloat)
-    }
-
-    fn from_i32(n: i32) -> Option<Self> {
-        T::from_i32(n).map(OrderedFloat)
-    }
-
-    fn from_usize(n: usize) -> Option<Self> {
-        T::from_usize(n).map(OrderedFloat)
-    }
-
-    fn from_u8(n: u8) -> Option<Self> {
-        T::from_u8(n).map(OrderedFloat)
-    }
-
-    fn from_u16(n: u16) -> Option<Self> {
-        T::from_u16(n).map(OrderedFloat)
-    }
-
-    fn from_u32(n: u32) -> Option<Self> {
-        T::from_u32(n).map(OrderedFloat)
-    }
-
-    fn from_f32(n: f32) -> Option<Self> {
-        T::from_f32(n).map(OrderedFloat)
-    }
-
-    fn from_f64(n: f64) -> Option<Self> {
-        T::from_f64(n).map(OrderedFloat)
-    }
-}
-
-impl<T: ToPrimitive> ToPrimitive for OrderedFloat<T> {
-    fn to_i64(&self) -> Option<i64> {
-        self.0.to_i64()
-    }
-
-    fn to_u64(&self) -> Option<u64> {
-        self.0.to_u64()
-    }
-
-    fn to_isize(&self) -> Option<isize> {
-        self.0.to_isize()
-    }
-
-    fn to_i8(&self) -> Option<i8> {
-        self.0.to_i8()
-    }
-
-    fn to_i16(&self) -> Option<i16> {
-        self.0.to_i16()
-    }
-
-    fn to_i32(&self) -> Option<i32> {
-        self.0.to_i32()
-    }
-
-    fn to_usize(&self) -> Option<usize> {
-        self.0.to_usize()
-    }
-
-    fn to_u8(&self) -> Option<u8> {
-        self.0.to_u8()
-    }
-
-    fn to_u16(&self) -> Option<u16> {
-        self.0.to_u16()
-    }
-
-    fn to_u32(&self) -> Option<u32> {
-        self.0.to_u32()
-    }
-
-    fn to_f32(&self) -> Option<f32> {
-        self.0.to_f32()
-    }
-
-    fn to_f64(&self) -> Option<f64> {
-        self.0.to_f64()
-    }
-}
-
-impl<T: Float> Float for OrderedFloat<T> {
+/// Similar to [`num_traits::Float`], but without requiring `NumCast` and `ToPrimitive`.
+#[easy_ext::ext(FloatExt)]
+pub impl<T: Float> OrderedFloat<T>
+where
+    Self: Sized + Copy,
+{
     fn nan() -> Self {
         OrderedFloat(T::nan())
     }
@@ -1013,76 +911,8 @@ mod impl_rand {
     impl_uniform_sampler! { f64 }
 }
 
-mod impl_as_primitive {
-    use num_traits::AsPrimitive;
-
-    use super::*;
-
-    impl<T, F> AsPrimitive<T> for OrderedFloat<F>
-    where
-        F: 'static + Float + AsPrimitive<T>,
-        T: 'static + Copy,
-    {
-        fn as_(self) -> T {
-            AsPrimitive::as_(self.0)
-        }
-    }
-
-    macro_rules! impl_as_primitive_for {
-        ($ty:ty) => {
-            impl<F> AsPrimitive<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                $ty: AsPrimitive<F>,
-            {
-                fn as_(self) -> OrderedFloat<F> {
-                    let inner: F = AsPrimitive::as_(self);
-                    inner.into()
-                }
-            }
-        };
-    }
-
-    impl_as_primitive_for!(i8);
-    impl_as_primitive_for!(i16);
-    impl_as_primitive_for!(i32);
-    impl_as_primitive_for!(i64);
-
-    impl_as_primitive_for!(u8);
-    impl_as_primitive_for!(u16);
-    impl_as_primitive_for!(u32);
-    impl_as_primitive_for!(u64);
-
-    impl_as_primitive_for!(f32);
-    impl_as_primitive_for!(f64);
-}
-
 mod impl_from {
     use super::*;
-
-    macro_rules! impl_from_for {
-        ($ty:ty) => {
-            impl<F> From<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                Self: From<F>,
-            {
-                fn from(value: OrderedFloat<F>) -> Self {
-                    From::from(value.0)
-                }
-            }
-        };
-    }
-
-    impl_from_for!(i8);
-    impl_from_for!(i16);
-    impl_from_for!(i32);
-    impl_from_for!(i64);
-
-    impl_from_for!(u8);
-    impl_from_for!(u16);
-    impl_from_for!(u32);
-    impl_from_for!(u64);
 
     impl From<OrderedFloat<f32>> for OrderedFloat<f64> {
         fn from(s: OrderedFloat<f32>) -> Self {
@@ -1090,7 +920,7 @@ mod impl_from {
         }
     }
 
-    macro_rules! impl_from {
+    macro_rules! impl_from_lossless {
         ($ty:ty, $f:ty) => {
             impl From<$ty> for OrderedFloat<$f> {
                 fn from(n: $ty) -> Self {
@@ -1101,24 +931,67 @@ mod impl_from {
         };
     }
 
-    impl_from!(i8, f32);
-    impl_from!(i16, f32);
-    impl_from!(u8, f32);
-    impl_from!(u16, f32);
-
-    impl_from!(i8, f64);
-    impl_from!(i16, f64);
-    impl_from!(i32, f64);
-    impl_from!(u8, f64);
-    impl_from!(u16, f64);
-    impl_from!(u32, f64);
-    impl_from!(f32, f64);
-}
-
-impl From<i64> for OrderedFloat<f64> {
-    fn from(n: i64) -> Self {
-        AsPrimitive::<OrderedFloat<f64>>::as_(n)
+    macro_rules! impl_from_approx {
+        ($ty:ty, $f:ty) => {
+            impl From<$ty> for OrderedFloat<$f> {
+                fn from(n: $ty) -> Self {
+                    let inner: $f = n as _;
+                    Self(inner)
+                }
+            }
+        };
     }
+
+    impl_from_lossless!(i16, f32);
+    impl_from_approx!(i32, f32);
+    impl_from_approx!(i64, f32);
+    impl_from_approx!(u64, f32);
+
+    impl_from_lossless!(i16, f64);
+    impl_from_lossless!(i32, f64);
+    impl_from_approx!(i64, f64);
+    impl_from_approx!(u64, f64);
+
+    impl TryFrom<OrderedFloat<f64>> for OrderedFloat<f32> {
+        type Error = &'static str;
+
+        fn try_from(s: OrderedFloat<f64>) -> Result<Self, Self::Error> {
+            let inner = s.0 as f32;
+            if inner.is_infinite() && s.0.is_finite() {
+                Err("double precision to real out of range: overflow")
+            } else if inner == 0.0 && s.0 != 0.0 {
+                Err("double precision to real out of range: underflow")
+            } else {
+                Ok(Self(inner))
+            }
+        }
+    }
+
+    macro_rules! impl_try_from_even {
+        ($f:ty, $ty:ty) => {
+            impl TryFrom<OrderedFloat<$f>> for $ty {
+                type Error = &'static str;
+
+                fn try_from(n: OrderedFloat<$f>) -> Result<Self, Self::Error> {
+                    let n = n.0.round_ties_even();
+                    // `-MIN` can be represented exactly but `MAX` cannot.
+                    // So we test `>= -MIN` rather than `> MAX`.
+                    if n.is_nan() || n < (<$ty>::MIN as $f) || n >= -(<$ty>::MIN as $f) {
+                        Err("float to integral out of range")
+                    } else {
+                        Ok(n as _)
+                    }
+                }
+            }
+        };
+    }
+
+    impl_try_from_even!(f32, i16);
+    impl_try_from_even!(f32, i32);
+    impl_try_from_even!(f32, i64);
+    impl_try_from_even!(f64, i16);
+    impl_try_from_even!(f64, i32);
+    impl_try_from_even!(f64, i64);
 }
 
 mod impl_into_ordered {
@@ -1147,6 +1020,7 @@ use crate::estimate_size::EstimateSize;
 mod tests {
     use crate::estimate_size::EstimateSize;
     use crate::types::ordered_float::OrderedFloat;
+    use crate::types::IntoOrdered;
 
     #[test]
     fn test_cast_to_f64() {
@@ -1155,7 +1029,8 @@ mod tests {
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
 
         // decimal -> f64.
-        let ret: OrderedFloat<f64> = OrderedFloat::<f64>::from(crate::types::Decimal::from(5));
+        let ret: OrderedFloat<f64> =
+            OrderedFloat::<f64>::try_from(crate::types::Decimal::from(5)).unwrap();
         assert_eq!(ret, OrderedFloat::<f64>::from(5_f64));
     }
 
@@ -1169,6 +1044,69 @@ mod tests {
 
         use num_traits::Signed as _;
         assert_eq!(nan.abs(), nan.abs());
+    }
+
+    fn test_into_f32(expected: [u8; 4], v: impl Into<OrderedFloat<f32>>) {
+        assert_eq!(expected, v.into().0.to_be_bytes());
+    }
+
+    fn test_into_f64(expected: [u8; 8], v: impl Into<OrderedFloat<f64>>) {
+        assert_eq!(expected, v.into().0.to_be_bytes());
+    }
+
+    fn test_from_f32<T>(float_bytes: [u8; 4], expected: Option<T>)
+    where
+        T: TryFrom<OrderedFloat<f32>> + Eq + std::fmt::Debug,
+    {
+        let v = f32::from_be_bytes(float_bytes).into_ordered();
+        assert_eq!(v.try_into().ok(), expected);
+    }
+
+    #[test]
+    fn test_ordered_float_cast() {
+        // Expectations obtained from PostgreSQL: select float4send('-32768'::int2::float4);
+        test_into_f32([0xc7, 0x00, 0x00, 0x00], i16::MIN);
+        test_into_f32([0xc6, 0xff, 0xfe, 0x00], -i16::MAX);
+        test_into_f32([0x46, 0xff, 0xfe, 0x00], i16::MAX);
+        test_into_f32([0xcf, 0x00, 0x00, 0x00], i32::MIN);
+        test_into_f32([0xcf, 0x00, 0x00, 0x00], -i32::MAX); // approx, so same as above
+        test_into_f32([0x4f, 0x00, 0x00, 0x00], i32::MAX);
+        test_into_f32([0xdf, 0x00, 0x00, 0x00], i64::MIN);
+        test_into_f32([0xdf, 0x00, 0x00, 0x00], -i64::MAX); // approx
+        test_into_f32([0x5f, 0x00, 0x00, 0x00], i64::MAX);
+
+        test_into_f64([0xc0, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i16::MIN);
+        test_into_f64([0xc0, 0xdf, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00], -i16::MAX);
+        test_into_f64([0x40, 0xdf, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00], i16::MAX);
+        test_into_f64([0xc1, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i32::MIN);
+        test_into_f64([0xc1, 0xdf, 0xff, 0xff, 0xff, 0xc0, 0x00, 0x00], -i32::MAX);
+        test_into_f64([0x41, 0xdf, 0xff, 0xff, 0xff, 0xc0, 0x00, 0x00], i32::MAX);
+        test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MIN);
+        test_into_f64([0xc3, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], -i64::MAX); // approx
+        test_into_f64([0x43, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], i64::MAX);
+
+        // neg i16
+        test_from_f32([0xc7, 0x00, 0x00, 0x81], None::<i16>);
+        test_from_f32([0xc7, 0x00, 0x00, 0x80], Some(i16::MIN)); // -32768.5
+        test_from_f32([0xc7, 0x00, 0x00, 0x00], Some(i16::MIN));
+        // pos i16
+        test_from_f32([0x46, 0xff, 0xfe, 0x00], Some(i16::MAX));
+        test_from_f32([0x46, 0xff, 0xfe, 0xff], Some(i16::MAX));
+        test_from_f32([0x46, 0xff, 0xff, 0x00], None::<i16>); // 32767.5
+
+        // neg i32
+        test_from_f32([0xcf, 0x00, 0x00, 0x01], None::<i32>);
+        test_from_f32([0xcf, 0x00, 0x00, 0x00], Some(i32::MIN));
+        // pos i32
+        test_from_f32([0x4e, 0xff, 0xff, 0xff], Some(0x7fff_ff80_i32));
+        test_from_f32([0x4f, 0x00, 0x00, 0x00], None::<i32>);
+
+        // neg i64
+        test_from_f32([0xdf, 0x00, 0x00, 0x01], None::<i64>);
+        test_from_f32([0xdf, 0x00, 0x00, 0x00], Some(i64::MIN));
+        // pos i64
+        test_from_f32([0x5e, 0xff, 0xff, 0xff], Some(0x7fff_ff80_0000_0000_i64));
+        test_from_f32([0x5f, 0x00, 0x00, 0x00], None::<i64>);
     }
 
     #[test]

@@ -127,14 +127,14 @@ impl FunctionAttr {
         } else if self.args.iter().all(|t| t == "boolean")
             && self.ret == "boolean"
             && !self.user_fn.return_type.contains_result()
-            && self.batch.is_some()
+            && self.batch_fn.is_some()
         {
             let template_struct = match num_args {
                 1 => format_ident!("BooleanUnaryExpression"),
                 2 => format_ident!("BooleanBinaryExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let batch = format_ident!("{}", self.batch.as_ref().unwrap());
+            let batch_fn = format_ident!("{}", self.batch_fn.as_ref().unwrap());
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
             let func = if self.user_fn.arg_option && self.user_fn.return_type == ReturnType::Option
@@ -155,7 +155,7 @@ impl FunctionAttr {
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::new(
                     #(#exprs,)*
-                    #batch,
+                    #batch_fn,
                     |#(#args),*| #func,
                 )))
             }
@@ -330,12 +330,16 @@ impl FunctionAttr {
             quote! { let #v = #a.value_at(row_id); }
         });
         let let_state = match &self.state {
-            Some(_) => quote! { let mut state = self.state.take(); },
-            None => quote! { let mut state = self.state.as_ref().map(|x| x.as_scalar_ref()); },
+            Some(_) => quote! { self.state.take() },
+            None => quote! { self.state.as_ref().map(|x| x.as_scalar_ref()) },
         };
         let assign_state = match &self.state {
-            Some(_) => quote! { self.state = state; },
-            None => quote! { self.state = state.map(|x| x.to_owned_scalar()); },
+            Some(_) => quote! { state },
+            None => quote! { state.map(|x| x.to_owned_scalar()) },
+        };
+        let init_state = match &self.init_state {
+            Some(s) => s.parse().unwrap(),
+            _ => quote! { None },
         };
         let fn_name = format_ident!("{}", self.user_fn.name);
         let mut next_state = quote! { #fn_name(state, #args) };
@@ -347,10 +351,10 @@ impl FunctionAttr {
         };
         if !self.user_fn.arg_option {
             if self.args.len() > 1 {
-                todo!("support multiple arguments for non-option functions");
+                todo!("multiple arguments are not supported for non-option function");
             }
-            let first_state = match self.name.as_str() {
-                "count" => quote! { unreachable!() }, // XXX: special hack for `count`
+            let first_state = match &self.init_state {
+                Some(_) => quote! { unreachable!() },
                 _ => quote! { Some(v0.into()) },
             };
             next_state = quote! {
@@ -361,10 +365,6 @@ impl FunctionAttr {
                 }
             };
         }
-        let init_state = match self.name.as_str() {
-            "count" => quote! { Some(0) }, // XXX: special hack for `count`
-            _ => quote! { None },
-        };
 
         Ok(quote! {
             |agg| {
@@ -393,7 +393,7 @@ impl FunctionAttr {
                         end_row_id: usize,
                     ) -> Result<()> {
                         #(#let_arrays)*
-                        #let_state
+                        let mut state = #let_state;
                         for row_id in start_row_id..end_row_id {
                             if !input.vis().is_set(row_id) {
                                 continue;
@@ -401,14 +401,14 @@ impl FunctionAttr {
                             #(#let_values)*
                             state = #next_state;
                         }
-                        #assign_state
+                        self.state = #assign_state;
                         Ok(())
                     }
                     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                         let ArrayBuilderImpl::#ret_variant(builder) = builder else {
                             bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
                         };
-                        match self.state.take() {
+                        match std::mem::replace(&mut self.state, #init_state) {
                             Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
                             None => builder.append_null(),
                         }
