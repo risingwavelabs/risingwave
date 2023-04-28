@@ -75,6 +75,9 @@ impl StreamSort {
             tbl_builder.add_column(field);
         }
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
+        for &pk_idx in self.input.logical_pk() {
+            tbl_builder.add_order_column(pk_idx, OrderType::ascending());
+        }
 
         let in_dist_key = self.input.distribution().dist_column_indices();
         let read_prefix_len_hint = 0;
