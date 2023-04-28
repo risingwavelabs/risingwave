@@ -73,6 +73,7 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
+use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
@@ -223,6 +224,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
+            // Follow NodeBody only used for test
+            NodeBody::BlockExecutor => BlockExecutorBuidler,
+            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
