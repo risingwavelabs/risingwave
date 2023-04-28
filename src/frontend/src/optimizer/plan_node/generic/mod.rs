@@ -48,8 +48,6 @@ mod dedup;
 pub use dedup::*;
 mod over_window;
 pub use over_window::*;
-mod sort;
-pub use sort::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;

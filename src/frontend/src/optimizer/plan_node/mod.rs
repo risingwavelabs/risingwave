@@ -649,7 +649,6 @@ mod logical_project;
 mod logical_project_set;
 mod logical_scan;
 mod logical_share;
-mod logical_sort;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
@@ -730,7 +729,6 @@ pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
-pub use logical_sort::LogicalSort;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -812,8 +810,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
-            , { Logical, Sort }
-            // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -899,9 +895,6 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
-            , { Logical, Sort }
-            // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
     };
 }

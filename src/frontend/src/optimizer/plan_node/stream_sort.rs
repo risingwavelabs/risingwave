@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Sort;
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -27,41 +26,57 @@ use crate::TableCatalog;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSort {
     pub base: PlanBase,
-    logical: Sort<PlanRef>,
+
+    input: PlanRef,
+    sort_column_index: usize,
 }
 
 impl fmt::Display for StreamSort {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamSort")
+        f.debug_struct("StreamSort")
+            .field("sort_column_index", &self.sort_column_index)
+            .finish()
     }
 }
 
 impl StreamSort {
-    pub fn new(logical: Sort<PlanRef>) -> Self {
-        assert!(logical
-            .input
-            .watermark_columns()
-            .contains(logical.sort_column_index));
+    pub fn new(input: PlanRef, sort_column_index: usize) -> Self {
+        assert!(input.watermark_columns().contains(sort_column_index));
 
-        let dist = logical.input.distribution().clone();
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.input.schema().len());
-        watermark_columns.insert(logical.sort_column_index);
-        let base = PlanBase::new_stream_with_logical(&logical, dist, true, watermark_columns);
-        Self { base, logical }
+        let schema = input.schema().clone();
+        let logical_pk = input.logical_pk().to_vec();
+        let fd_set = input.functional_dependency().clone();
+        let dist = input.distribution().clone();
+        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
+        watermark_columns.insert(sort_column_index);
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            schema,
+            logical_pk,
+            fd_set,
+            dist,
+            true,
+            watermark_columns,
+        );
+        Self {
+            base,
+            input,
+            sort_column_index,
+        }
     }
 
     fn infer_state_table(&self) -> TableCatalog {
         // The sort state table has the same schema as the input.
 
-        let in_fields = self.logical.input.schema().fields();
+        let in_fields = self.input.schema().fields();
         let mut tbl_builder =
             TableCatalogBuilder::new(self.ctx().with_options().internal_table_subset());
         for field in in_fields {
             tbl_builder.add_column(field);
         }
-        tbl_builder.add_order_column(self.logical.sort_column_index, OrderType::ascending());
+        tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
 
-        let in_dist_key = self.logical.input.distribution().dist_column_indices();
+        let in_dist_key = self.input.distribution().dist_column_indices();
         let read_prefix_len_hint = 0;
         tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
@@ -69,13 +84,11 @@ impl StreamSort {
 
 impl PlanTreeNodeUnary for StreamSort {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        Self::new(input, self.sort_column_index)
     }
 }
 
@@ -90,7 +103,7 @@ impl StreamNode for StreamSort {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            sort_column_index: self.logical.sort_column_index as _,
+            sort_column_index: self.sort_column_index as _,
         })
     }
 }
