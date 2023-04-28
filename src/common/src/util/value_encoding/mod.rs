@@ -280,10 +280,9 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
 
 fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
     value
-        .fields_ref()
-        .iter()
+        .iter_fields_ref()
         .map(|field_value| {
-            serialize_datum_into(*field_value, buf);
+            serialize_datum_into(field_value, buf);
         })
         .collect_vec();
 }

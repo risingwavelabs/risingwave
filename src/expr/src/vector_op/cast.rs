@@ -613,7 +613,7 @@ fn struct_cast(
     source_elem_type: &StructType,
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
-    let fields = (input.fields_ref().into_iter())
+    let fields = (input.iter_fields_ref())
         .zip_eq_fast(source_elem_type.fields.iter())
         .zip_eq_fast(target_elem_type.fields.iter())
         .map(|((datum_ref, source_field_type), target_field_type)| {
