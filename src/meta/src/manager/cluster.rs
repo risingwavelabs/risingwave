@@ -91,7 +91,6 @@ where
         self.core.read().await.count_worker_node()
     }
 
-    // TODO: Who is calling this function. Who is consuming the worker-node state?
     /// A worker node will immediately register itself to meta when it bootstraps.
     /// The meta will assign it with a unique ID and set its state as `Starting`.
     /// When the worker node is fully ready to serve, it will request meta again
@@ -217,8 +216,6 @@ where
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
-                // TODO: remove
-                // if worker.worker_node.state != State::Deleting as i32 {
                 worker.update_ttl(self.max_heartbeat_interval);
                 worker.update_info(info);
                 return Ok(());
@@ -440,8 +437,6 @@ impl ClusterManagerCore {
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
     }
 
-    // This seems to be the only place where we filter by state
-    // maybe change this logic here to only give you nodes that are not deleting
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
@@ -679,7 +674,7 @@ async fn delete_worker_node_cleanup(
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
             .as_secs();
-        let mut first_log_tick = true; 
+        let mut first_log_tick = true;
         loop {
             tokio::select! {
                 _ = log_ticker.tick() => {
@@ -695,7 +690,7 @@ async fn delete_worker_node_cleanup(
                             (now - start_time) / 60
                         );
                     }
-                    first_log_tick = true; 
+                    first_log_tick = true;
                 }
                 _ = ticker.tick() => {
                     let mut core = shared_core.write().await;
@@ -740,5 +735,5 @@ async fn delete_worker_node_cleanup(
         }
     })
     .await
-    .unwrap(); // TODO: Do I have to await unwrap here?
+    .unwrap();
 }

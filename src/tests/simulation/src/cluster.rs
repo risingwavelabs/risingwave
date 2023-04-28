@@ -615,8 +615,7 @@ impl Cluster {
     pub fn cn_host_addr_to_task(&self, addr: &HostAddr) -> String {
         // host like 192.168.3.1:5688
         let host = addr.host.clone();
-        let x = host.split('.').collect::<Vec<&str>>();
-        format!("compute-{}", x[3])
+        format!("compute-{}", host.split('.').collect::<Vec<&str>>()[3])
     }
 
     /// remove node from cluster gracefully by informing meta that node is no longer available.
