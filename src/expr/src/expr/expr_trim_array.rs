@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ ToOwnedDatum};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
 use crate::error::ExprError;

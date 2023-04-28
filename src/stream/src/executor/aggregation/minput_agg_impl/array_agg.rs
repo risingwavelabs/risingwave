@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{Datum, DatumRef,  ToOwnedDatum};
+use risingwave_common::types::{Datum, DatumRef, ToOwnedDatum};
 use smallvec::SmallVec;
 
 use super::MInputAggregator;

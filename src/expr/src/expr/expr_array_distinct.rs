@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::array::*;
-use risingwave_common::types::{ ToOwnedDatum};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
 /// Returns a new array removing all the duplicates from the input array

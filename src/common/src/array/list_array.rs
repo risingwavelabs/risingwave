@@ -1006,7 +1006,7 @@ mod tests {
         );
 
         // Get 2nd value from ListRef
-        let scalar = list_ref.elem_at(2).unwrap();
+        let scalar = list_ref.elem_at(1).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
     }
 }

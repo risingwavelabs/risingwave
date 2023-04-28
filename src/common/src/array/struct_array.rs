@@ -119,7 +119,7 @@ impl ArrayBuilder for StructArrayBuilder {
     fn append_array(&mut self, other: &StructArray) {
         self.bitmap.append_bitmap(&other.bitmap);
         for (a, o) in self.children_array.iter_mut().zip_eq_fast(&other.children) {
-            a.append_array(&o);
+            a.append_array(o);
         }
         self.len += other.len();
     }
