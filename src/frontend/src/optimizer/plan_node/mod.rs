@@ -659,6 +659,7 @@ mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
 mod stream_dynamic_filter;
+mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
@@ -722,7 +723,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
-pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
+pub use logical_over_agg::LogicalOverAgg;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -737,6 +738,7 @@ pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
+pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
@@ -858,6 +860,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TemporalJoin }
             , { Stream, Values }
             , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
         }
     };
 }
@@ -961,6 +964,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TemporalJoin }
             , { Stream, Values }
             , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
         }
     };
 }
