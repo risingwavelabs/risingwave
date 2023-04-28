@@ -23,6 +23,7 @@
 #![feature(try_blocks)]
 #![feature(round_ties_even)]
 
+pub mod agg;
 mod error;
 pub mod expr;
 pub mod function;

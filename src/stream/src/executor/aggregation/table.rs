@@ -18,7 +18,7 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::aggregate::{AggCall, AggKind};
+use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
 use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
