@@ -115,9 +115,11 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
         let max_depth = std::cmp::max(
-            (self.config.max_compaction_bytes / self.config.sub_level_max_compaction_bytes)
-                as usize,
+            (self.config.max_compaction_bytes as f64
+                / self.config.sub_level_max_compaction_bytes as f64
+                * 1.5) as usize,
             self.config.level0_sub_level_compact_level_count as usize + 1,
         );
 

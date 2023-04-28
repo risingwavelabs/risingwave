@@ -66,9 +66,12 @@ impl TierCompactionPicker {
                 self.config.max_compaction_bytes,
                 self.config.sub_level_max_compaction_bytes,
             );
+
+            // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
             let max_depth = std::cmp::max(
-                (self.config.max_compaction_bytes / self.config.sub_level_max_compaction_bytes)
-                    as usize,
+                (self.config.max_compaction_bytes as f64
+                    / self.config.sub_level_max_compaction_bytes as f64
+                    * 1.5) as usize,
                 self.config.level0_sub_level_compact_level_count as usize + 1,
             );
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
@@ -112,8 +115,8 @@ impl TierCompactionPicker {
 
                 // This limitation would keep our write-amplification no more than
                 // ln(max_compaction_bytes/flush_level_bytes) /
-                // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
-                // of level0_tier_compact_file_number just for convenient.
+                // ln(self.config.level0_sub_level_compact_level_count/2) Here we only use half
+                // of level0_sub_level_compact_level_count just for convenient.
                 let is_write_amp_large =
                     max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
                         >= compaction_bytes;
