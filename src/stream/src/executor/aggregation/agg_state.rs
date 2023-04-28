@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;

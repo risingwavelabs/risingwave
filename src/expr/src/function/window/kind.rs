@@ -14,7 +14,7 @@
 
 use parse_display::{Display, FromStr};
 
-use crate::function::aggregate::AggKind;
+use crate::agg::AggKind;
 
 /// Kind of window functions.
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
