@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
-
-# NOTE(kwannoel): The benchmarks here will run **per PR**, and daily in main cron.
+# The benchmarks here will run **per PR**, and daily in main cron.
 # only add top-level microbench here. For example, executor micro-benchmarks.
+
+set -euo pipefail
 
 # Space delimited micro-benchmarks to run.
 # Each micro-benchmark added here should return a singular result indicative of performance.
+# Make sure the added benchmark has a unique name.
 BENCHMARKS="stream_hash_agg json_parser"
 
 # cargo criterion --bench stream_hash_agg --message-format=json
