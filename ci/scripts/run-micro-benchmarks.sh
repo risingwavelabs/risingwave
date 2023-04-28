@@ -48,7 +48,7 @@ main() {
   NO_TRAILING_COMMA=$(sed -E '$ s/(.*),$/\1/' ./results.json)
   echo "$NO_TRAILING_COMMA" > ./results.json
   echo ']' >> results.json
-  # buildkite-agent artifact upload ./results.json
+  buildkite-agent artifact upload "./results.json"
 }
 
 main
