@@ -704,21 +704,11 @@ macro_rules! impl_convert {
                 }
 
                 impl <'scalar> ScalarRefImpl<'scalar> {
+                    // Note that this conversion consume self.
                     pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
                         match self {
                             Self::$variant_name(inner) => inner,
                             other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
-                        }
-                    }
-
-                    pub unsafe fn [<into_ $suffix_name _unchecked>](self) -> $scalar_ref {
-                        if cfg!(debug_assertions) {
-                            self.[<into_ $suffix_name>]()
-                        } else {
-                            match self {
-                                Self::$variant_name(inner) => inner,
-                                _ => std::hint::unreachable_unchecked(),
-                            }
                         }
                     }
                 }

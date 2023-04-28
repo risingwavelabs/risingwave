@@ -18,9 +18,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::num256::Int256;
-use risingwave_common::types::{
-    literal_type_match, DataType, Date, Datum, Decimal, ScalarImpl, Time,
-};
+use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
@@ -160,15 +158,6 @@ fn do_parse_simd_json_value(
         }
         DataType::Interval => unimplemented!(),
     };
-
-    // Assert that the value matches the type.
-    debug_assert!(
-        literal_type_match(dtype, Some(&v)),
-        "type mismatch: {} {:?}",
-        dtype,
-        v
-    );
-
     Ok(v)
 }
 

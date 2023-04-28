@@ -125,8 +125,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        // SAFETY: TODO
-        unsafe { builder.append_datum_unchecked(&output) }
+        builder.append_datum(&output)
     }
 
     #[inline(always)]
@@ -149,8 +148,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        // SAFETY: TODO
-        unsafe { builder.append_datum_unchecked(&output) }
+        builder.append_datum(&output)
     }
 
     #[inline(always)]
@@ -173,11 +171,8 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        // SAFETY: TODO
-        unsafe {
-            builder.append_datum_unchecked(&output.0);
-            builder.append_datum_unchecked(&output.1)
-        }
+        builder.append_datum(&output.0);
+        builder.append_datum(&output.1);
     }
 
     #[inline(always)]
