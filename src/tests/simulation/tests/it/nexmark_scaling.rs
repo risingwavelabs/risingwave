@@ -77,10 +77,16 @@ async fn nexmark_scaling_down_common(
 
     cluster.run(create).await?;
 
+    let mut unregistered_nodes: Vec<String> = vec![];
     for _ in 0..number_of_nodes {
-        cluster.remove_rand_compute_node().await;
+        let node_host_addr = cluster
+            .unregister_compute_node()
+            .await
+            .expect("unregistering node failed");
+        unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
         sleep(Duration::from_secs(60)).await;
     }
+    cluster.kill_nodes(&unregistered_nodes).await;
 
     cluster.run(select).await?.assert_result_eq(&expected);
 
@@ -111,12 +117,16 @@ async fn nexmark_scaling_up_down_common(
     cluster.add_compute_node(number_of_nodes);
     sleep(Duration::from_secs(60)).await; // TODO: 60 sec sleep seems like to much
 
+    let mut unregistered_nodes: Vec<String> = vec![];
     for _ in 0..number_of_nodes {
-        cluster.remove_rand_compute_node().await;
+        let node_host_addr = cluster
+            .unregister_compute_node()
+            .await
+            .expect("unregistering node failed");
+        unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
         sleep(Duration::from_secs(60)).await;
     }
-
-    // TODO: actually kill the node at the end of the test
+    cluster.kill_nodes(&unregistered_nodes).await;
 
     cluster.run(select).await?.assert_result_eq(&expected);
 

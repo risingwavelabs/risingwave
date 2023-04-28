@@ -23,6 +23,7 @@ use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
@@ -277,6 +278,33 @@ impl Cluster {
     /// Locate a fragment with the given id.
     pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
         self.locate_one_fragment([predicate::id(id)]).await
+    }
+
+    /// retrieve cluster info from meta node.
+    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+        self.ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await
+            })
+            .await?
+    }
+
+    /// retrieve cluster info from meta node running at addr
+    pub async fn unregister_worker_node(&self, addr: HostAddr) -> Result<()> {
+        let _ = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::unregister_worker_node(
+                    &risingwave_ctl::common::CtlContext::default(),
+                    addr,
+                )
+                .await
+            })
+            .await?;
+        Ok(())
     }
 
     /// Reschedule with the given `plan`. Check the document of

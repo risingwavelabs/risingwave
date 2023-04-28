@@ -170,7 +170,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 Some(tokio::spawn(async move {
                     let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
                     tokio::time::sleep(t).await;
-                    cluster.kill_node(&opts).await;
+                    cluster.restart_rand_nodes(&opts).await;
                     tokio::time::sleep(Duration::from_secs(15)).await;
                 }))
             } else {

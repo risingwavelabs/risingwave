@@ -31,6 +31,7 @@ use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::{DeleteWorkerNodeRequest, ListAllNodesRequest};
@@ -458,7 +459,7 @@ impl Cluster {
     }
 
     /// Kill some nodes and restart them in 2s.
-    pub async fn kill_node(&self, opts: &KillOpts) {
+    pub async fn restart_rand_nodes(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
             let rand = rand::thread_rng().gen_range(0..3);
@@ -512,30 +513,25 @@ impl Cluster {
                 nodes.push(format!("compactor-{}", i));
             }
         }
-        // TODO: use kill_or_restart_nodes below
-        join_all(nodes.iter().map(|name| async move {
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            tokio::time::sleep(t).await;
-            tracing::info!("kill {name}");
-            madsim::runtime::Handle::current().kill(name);
 
-            let mut t =
-                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // has a small chance to restart after a long time
-            // so that the node is expired and removed from the cluster
-            if rand::thread_rng().gen_bool(0.1) {
-                // max_heartbeat_interval_secs = 60
-                t += Duration::from_secs(opts.restart_delay_secs as u64);
-            }
-            tokio::time::sleep(t).await;
-            tracing::info!("restart {name}");
-            madsim::runtime::Handle::current().restart(name);
-        }))
-        .await;
+        self.restart_nodes(&nodes, opts.restart_delay_secs as u64)
+            .await;
+    }
+
+    /// Kills specified nodes and does not restart them
+    pub async fn kill_nodes(&self, nodes: &Vec<String>) {
+        self.kill_or_restart_nodes(nodes, false, None).await;
+    }
+
+    /// Restarts specified nodes
+    pub async fn restart_nodes(&self, nodes: &Vec<String>, restart_delay_secs: u64) {
+        self.kill_or_restart_nodes(nodes, true, Some(restart_delay_secs))
+            .await;
     }
 
     /// Kills and optionally restarts nodes. Restart delay only relevant if restart is true
     async fn kill_or_restart_nodes(
+        &self,
         nodes: &Vec<String>,
         restart: bool,
         restart_delay_secs: Option<u64>,
@@ -615,51 +611,29 @@ impl Cluster {
         }
     }
 
-    // TODO: Does not remove it. Marks it for deletion. Rename function
-    /// TODO: return a result here
+    /// simple mapping between compute node HostAddr and its task name
+    pub fn cn_host_addr_to_task(&self, addr: &HostAddr) -> String {
+        // host like 192.168.3.1:5688
+        let host = addr.host.clone();
+        let x = host.split('.').collect::<Vec<&str>>();
+        format!("compute-{}", x[3])
+    }
+
     /// remove node from cluster gracefully by informing meta that node is no longer available.
-    pub async fn remove_rand_compute_node(&self) {
-        // where do I get the  client from?
-        // ClusterServiceClient.DeleteWorkerNode
-
-        // TODO: Unable to remove node: Failed to connect to meta server
-        // cannot use advertising meta addr?
-        // How do we resolve the address?
-        // 192, 168, 1, i as u8
-
-        let meta_addrs = (1..self.config.meta_nodes)
-            .map(|i| format!("meta-{i}:5690"))
-            .collect::<Vec<String>>();
-
-        // Which node?
-        let (channel, _) = Self::try_build_rpc_channel(meta_addrs)
-            .await
-            .expect("Unable to remove node");
-
-        let mut cluster_client = ClusterServiceClient::new(channel);
-        let nodes = cluster_client
-            .list_all_nodes(ListAllNodesRequest {
-                worker_type: WorkerType::ComputeNode as i32,
-                include_starting_nodes: true,
-            })
-            .await
-            .expect("Unable to retrieve nodes")
-            .into_inner()
-            .nodes;
-        let rand_node = nodes.choose(&mut rand::thread_rng()).unwrap();
-        let host = rand_node.host.clone().expect("expected node to have host");
-        let req = DeleteWorkerNodeRequest {
-            host: rand_node.host.clone(),
+    pub async fn unregister_compute_node(&self) -> Result<HostAddr> {
+        let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
+        let rand_node = worker_nodes
+            .choose(&mut rand::thread_rng())
+            .unwrap()
+            .clone();
+        let addr = rand_node.host.expect("node does not have host");
+        let addr = HostAddr {
+            host: addr.host,
+            port: addr.port as u16,
         };
+        self.unregister_worker_node(addr.clone()).await?;
 
-        cluster_client
-            .delete_worker_node(req)
-            .await
-            .expect(format!("Deleting node {:?} failed", host).as_str());
-
-        // TODO: Do I have to shut down the worker node after this or does delete_worker_node do it
-        // all?
-        // NO. Deleting this in the test itself
+        Ok(addr)
     }
 
     /// Create a node for kafka producer and prepare data.
