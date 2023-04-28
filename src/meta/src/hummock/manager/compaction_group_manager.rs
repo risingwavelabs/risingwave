@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt,
+    HummockVersionUpdateExt, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -631,6 +631,14 @@ impl<S: MetaStore> HummockManager<S> {
             );
         }
         Ok(target_compaction_group_id)
+    }
+
+    #[named]
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
+        let versioning_guard = read_lock!(self, versioning).await;
+        versioning_guard
+            .current_version
+            .calculate_compaction_group_statistic()
     }
 }
 
