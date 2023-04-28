@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -84,14 +85,28 @@ impl StreamEowcOverWindow {
             tbl_builder.add_column(field);
         }
 
+        let mut order_cols = HashSet::new();
         let partition_key_indices = self.partition_key_indices();
-        for &idx in &partition_key_indices {
-            tbl_builder.add_order_column(idx, OrderType::ascending());
+        for idx in &partition_key_indices {
+            if !order_cols.contains(idx) {
+                tbl_builder.add_order_column(*idx, OrderType::ascending());
+                order_cols.insert(*idx);
+            }
         }
-        tbl_builder.add_order_column(self.order_key_index(), OrderType::ascending());
+        let read_prefix_len_hint = tbl_builder.get_current_pk_len();
+        let order_key_index = self.order_key_index();
+        if !order_cols.contains(&order_key_index) {
+            tbl_builder.add_order_column(order_key_index, OrderType::ascending());
+            order_cols.insert(order_key_index);
+        }
+        for idx in self.logical.input.logical_pk() {
+            if !order_cols.contains(idx) {
+                tbl_builder.add_order_column(*idx, OrderType::ascending());
+                order_cols.insert(*idx);
+            }
+        }
 
         let in_dist_key = self.logical.input.distribution().dist_column_indices();
-        let read_prefix_len_hint = partition_key_indices.len();
         tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
 }
