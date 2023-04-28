@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -74,9 +75,15 @@ impl StreamSort {
         for field in in_fields {
             tbl_builder.add_column(field);
         }
+
+        let mut order_cols = HashSet::new();
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
-        for &pk_idx in self.input.logical_pk() {
-            tbl_builder.add_order_column(pk_idx, OrderType::ascending());
+        order_cols.insert(self.sort_column_index);
+        for idx in self.input.logical_pk() {
+            if !order_cols.contains(idx) {
+                tbl_builder.add_order_column(*idx, OrderType::ascending());
+                order_cols.insert(*idx);
+            }
         }
 
         let in_dist_key = self.input.distribution().dist_column_indices();
