@@ -13,9 +13,6 @@ type myClient struct {
 }
 
 func (c *myClient) DeleteWorkerNode(ctx context.Context, host string, port int32) {
-
-	// this gets stuck
-	// I assume it gets stuck, because meta marks the node as deleted, but does not delete it
 	err := c.inner.DeleteWorkerNode(ctx, host, port)
 	if err != nil {
 		fmt.Printf("DeleteWorkerNode Error: %s", err.Error())
@@ -55,7 +52,8 @@ func main() {
 	worker := schedule.Workers[0]
 
 	fmt.Printf("Clear Worker %s:%d\n", worker.Host, worker.Port)
-	client.ClearWorkerNode(context.TODO(), worker.Host, worker.Port)
+	ok, err := client.ClearWorkerNode(context.TODO(), worker.Host, worker.Port)
+	fmt.Println("ClearWorkerResponse: ok:", ok, "err:", err)
 
 	fmt.Printf("\n----------\n\n")
 
