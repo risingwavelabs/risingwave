@@ -14,11 +14,12 @@
 
 use std::sync::Arc;
 
-use risingwave_batch::executor::BatchTaskMetricsWithTaskLabels;
-use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
+use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
+use risingwave_batch::task::{BatchTaskContext, StopFlag, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
+use risingwave_common::memory::MemoryContextRef;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -31,11 +32,16 @@ use crate::session::{AuthContext, FrontendEnv};
 pub struct FrontendBatchTaskContext {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
+    stop_flag: Arc<StopFlag>,
 }
 
 impl FrontendBatchTaskContext {
     pub fn new(env: FrontendEnv, auth_context: Arc<AuthContext>) -> Self {
-        Self { env, auth_context }
+        Self {
+            env,
+            auth_context,
+            stop_flag: Arc::new(StopFlag::new()),
+        }
     }
 }
 
@@ -62,7 +68,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         unimplemented!("not supported in local mode")
     }
 
-    fn task_metrics(&self) -> Option<BatchTaskMetricsWithTaskLabels> {
+    fn batch_metrics(&self) -> Option<BatchMetricsWithTaskLabels> {
         None
     }
 
@@ -88,5 +94,17 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn mem_usage(&self) -> usize {
         todo!()
+    }
+
+    fn create_executor_mem_context(&self, _executor_id: &str) -> Option<MemoryContextRef> {
+        None
+    }
+
+    fn get_stop_flag(&self) -> Arc<risingwave_batch::task::StopFlag> {
+        self.stop_flag.clone()
+    }
+
+    fn get_stop_flag_ref(&self) -> &risingwave_batch::task::StopFlag {
+        &self.stop_flag
     }
 }

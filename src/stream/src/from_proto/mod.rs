@@ -34,6 +34,7 @@ mod lookup;
 mod lookup_union;
 mod merge;
 mod mview;
+mod no_op;
 mod now;
 mod project;
 mod project_set;
@@ -73,6 +74,7 @@ use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
 use self::mview::*;
+use self::no_op::*;
 use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
@@ -161,5 +163,6 @@ pub async fn create_executor(
         NodeBody::Values => ValuesExecutorBuilder,
         NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
         NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
+        NodeBody::NoOp => NoOpExecutorBuilder,
     }
 }

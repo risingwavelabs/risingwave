@@ -126,6 +126,12 @@ insert into t values ('{"k": "abc" }'::jsonb);
 statement ok
 create index idx on t(j->'k');
 
+statement ok
+create index idx2 on t(j->'k', j) distributed by (j->'k');
+
+statement error
+create index idx3 on t(j->'k', j) distributed by (j);
+
 # query functional indexes
 query II
 select * from idx;

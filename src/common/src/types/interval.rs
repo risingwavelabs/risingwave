@@ -23,12 +23,14 @@ use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
 /// Note that the difference between Interval and Instant.
@@ -38,7 +40,7 @@ use crate::error::{ErrorCode, Result, RwError};
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, EstimateSize)]
 pub struct Interval {
     months: i32,
     days: i32,
@@ -252,12 +254,12 @@ impl Interval {
     fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
         // TSROUND in include/datatype/timestamp.h
         // round eagerly at usecs precision because floats are imprecise
-        // should round to even #5576
-        let months_round_usecs =
-            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+        let months_round_usecs = |months: f64| {
+            (months * (USECS_PER_MONTH as f64)).round_ties_even() / (USECS_PER_MONTH as f64)
+        };
 
         let days_round_usecs =
-            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+            |days: f64| (days * (USECS_PER_DAY as f64)).round_ties_even() / (USECS_PER_DAY as f64);
 
         let trunc_fract = |num: f64| (num.trunc(), num.fract());
 
@@ -291,7 +293,7 @@ impl Interval {
 
         // Handle usecs
         let result_usecs = usecs + leftover_usecs;
-        let usecs = result_usecs.round();
+        let usecs = result_usecs.round_ties_even();
         if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
             return None;
         }
@@ -1360,7 +1362,7 @@ impl Interval {
                     result = match interval_unit {
                         Second => {
                             // If unsatisfied precision is passed as input, we should not return None (Error).
-                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
+                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round_ties_even() as i64;
                             Some(Interval::from_month_day_usec(0, 0, usecs))
                         }
                         _ => None,
@@ -1684,5 +1686,11 @@ mod tests {
             <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
         })
         .unwrap_err();
+    }
+
+    #[test]
+    fn test_interval_estimate_size() {
+        let interval = Interval::MIN;
+        assert_eq!(interval.estimated_size(), 16);
     }
 }

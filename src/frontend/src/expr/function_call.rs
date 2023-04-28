@@ -227,7 +227,7 @@ impl FunctionCall {
 
                 if return_type != DataType::Boolean {
                     return Err(ErrorCode::BindError(format!(
-                        "op ANY/ALL (array) requires operator to yield boolean, but got {:?}",
+                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
                         return_type
                     ))
                     .into());

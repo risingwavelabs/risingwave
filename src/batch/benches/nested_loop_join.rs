@@ -13,8 +13,11 @@
 // limitations under the License.
 pub mod utils;
 
+use std::sync::Arc;
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
+use risingwave_batch::task::StopFlag;
 use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::build_from_pretty;
@@ -52,6 +55,8 @@ fn create_nested_loop_join_executor(
         right_input,
         "NestedLoopJoinExecutor".into(),
         CHUNK_SIZE,
+        None,
+        Arc::new(StopFlag::new()),
     ))
 }
 

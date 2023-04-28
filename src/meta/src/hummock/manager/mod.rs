@@ -17,7 +17,7 @@ use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
 use fail::fail_point;
@@ -49,6 +49,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::hummock::compaction::{
     CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
@@ -59,7 +60,7 @@ use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
 };
-use crate::hummock::CompactorManagerRef;
+use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
@@ -110,7 +111,6 @@ pub struct HummockManager<S: MetaStore> {
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
-    compaction_tasks_to_cancel: parking_lot::Mutex<Vec<HummockCompactionTaskId>>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
@@ -168,6 +168,7 @@ use risingwave_hummock_sdk::table_stats::{
 };
 use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
+use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -312,7 +313,6 @@ where
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
             compaction_resume_notifier: parking_lot::RwLock::new(None),
-            compaction_tasks_to_cancel: parking_lot::Mutex::new(vec![]),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
@@ -350,14 +350,8 @@ where
                         return;
                     }
                 }
-                let mut split_cancel = {
-                    let mut manager_cancel = hummock_manager.compaction_tasks_to_cancel.lock();
-                    manager_cancel.drain(..).collect_vec()
-                };
-                split_cancel.sort();
-                split_cancel.dedup();
                 // TODO: add metrics to track expired tasks
-                for (context_id, mut task) in compactor_manager.get_expired_tasks(split_cancel) {
+                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
                     tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
                     if let Some(compactor) = compactor_manager.get_compactor(context_id) {
                         // Forcefully cancel the task so that it terminates early on the compactor
@@ -877,14 +871,46 @@ where
                 compaction_group_id,
             );
 
-            tracing::trace!(
-                "For compaction group {}: pick up {} tables in level {} to compact.  cost time: {:?}",
-                compaction_group_id,
-                compact_task.input_ssts[0].table_infos.len(),
-                compact_task.input_ssts[0].level_idx,
-                start_time.elapsed()
-            );
             drop(compaction_guard);
+
+            let (file_count, file_size) = {
+                let mut count = 0;
+                let mut size = 0;
+                for select_level in &compact_task.input_ssts {
+                    count += select_level.table_infos.len();
+
+                    for sst in &select_level.table_infos {
+                        size += sst.get_file_size();
+                    }
+                }
+
+                (count, size)
+            };
+
+            if compact_task.input_ssts[0].level_idx == 0 {
+                tracing::trace!(
+                    "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
+                    compaction_group_id,
+                    compact_task.input_ssts.len(),
+                    compact_task.input_ssts[0].level_type().as_str_name(),
+                    compact_task.input_ssts[0].level_idx,
+                    file_count,
+                    file_size,
+                    compact_task.target_level,
+                    start_time.elapsed()
+                );
+            } else {
+                tracing::trace!(
+                    "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
+                    compaction_group_id,
+                    compact_task.input_ssts[0].table_infos.len(),
+                    compact_task.input_ssts[0].level_idx,
+                    file_count,
+                    file_size,
+                    compact_task.target_level,
+                    start_time.elapsed()
+                );
+            }
         }
         #[cfg(test)]
         {
@@ -1124,19 +1150,6 @@ where
             }
         }
 
-        match compact_statuses.get_mut(compact_task.compaction_group_id) {
-            Some(mut compact_status) => {
-                compact_status.report_compact_task(compact_task);
-            }
-            None => {
-                compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
-            }
-        }
-
-        debug_assert!(
-            compact_task.task_status() != TaskStatus::Pending,
-            "report pending compaction task"
-        );
         {
             // The compaction task is finished.
             let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1148,18 +1161,31 @@ where
                     compact_statuses.remove(group_id);
                 }
             }
+
+            match compact_statuses.get_mut(compact_task.compaction_group_id) {
+                Some(mut compact_status) => {
+                    compact_status.report_compact_task(compact_task);
+                }
+                None => {
+                    compact_task.set_task_status(TaskStatus::InvalidGroupCanceled);
+                }
+            }
+
+            debug_assert!(
+                compact_task.task_status() != TaskStatus::Pending,
+                "report pending compaction task"
+            );
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
                 // if member_table_ids changes, the data of sstable may stale.
-                let is_expired = current_version
-                    .levels
-                    .get(&compact_task.compaction_group_id)
-                    .map(|group| group.member_table_ids != compact_task.existing_table_ids)
-                    .unwrap_or(true)
-                    || Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
+                let is_expired =
+                    Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
+                    assert!(current_version
+                        .levels
+                        .contains_key(&compact_task.compaction_group_id));
                     true
                 }
             } else {
@@ -1684,7 +1710,7 @@ where
             assert!(
                 group.id == StaticCompactionGroupId::NewCompactionGroup as u64
                     || (group.id >= StaticCompactionGroupId::StateDefault as u64
-                        && group.id <= StaticCompactionGroupId::MaterializedView as u64),
+                    && group.id <= StaticCompactionGroupId::MaterializedView as u64),
                 "compaction group id should be either NewCompactionGroup to create new one, or predefined static ones."
             );
         }
@@ -2070,6 +2096,80 @@ where
             }
         });
         (join_handle, shutdown_tx)
+    }
+
+    #[named]
+    pub async fn check_dead_task(&self) {
+        const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
+        const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
+        let groups = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            versioning_guard
+                .current_version
+                .levels
+                .iter()
+                .map(|(id, group)| {
+                    (
+                        *id,
+                        group
+                            .l0
+                            .as_ref()
+                            .unwrap()
+                            .sub_levels
+                            .iter()
+                            .map(|level| level.total_file_size)
+                            .sum::<u64>(),
+                    )
+                })
+                .collect_vec()
+        };
+        let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
+        {
+            let manager = self.compaction_group_manager.read().await;
+            for (group_id, l0_file_size) in groups {
+                let group = manager.get_compaction_group_config(group_id);
+                if l0_file_size
+                    > MAX_COMPACTION_L0_MULTIPLIER
+                        * group.compaction_config.max_bytes_for_level_base
+                {
+                    slowdown_groups.insert(group_id, l0_file_size);
+                }
+            }
+        }
+        if slowdown_groups.is_empty() {
+            return;
+        }
+        let mut pending_tasks: HashMap<u64, (u64, usize, RunningCompactTask)> = HashMap::default();
+        {
+            let compaction_guard = read_lock!(self, compaction).await;
+            for group_id in slowdown_groups.keys() {
+                if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
+                    for (idx, level_handler) in status.level_handlers.iter().enumerate() {
+                        let tasks = level_handler.get_pending_tasks();
+                        if tasks.is_empty() {
+                            continue;
+                        }
+                        for task in tasks {
+                            pending_tasks.insert(task.task_id, (*group_id, idx, task));
+                        }
+                    }
+                }
+            }
+        }
+        let task_ids = pending_tasks.keys().cloned().collect_vec();
+        let task_infos = self
+            .compactor_manager
+            .check_tasks_status(&task_ids, Duration::from_secs(MAX_COMPACTION_DURATION_SEC));
+        for (task_id, (compact_time, status)) in task_infos {
+            if status == TASK_NORMAL {
+                continue;
+            }
+            if let Some((group_id, level_id, task)) = pending_tasks.get(&task_id) {
+                let group_size = *slowdown_groups.get(group_id).unwrap();
+                warn!("COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
+                    task_id, *group_id,group_size / 1024 / 1024,*level_id, compact_time, status, task.ssts);
+            }
+        }
     }
 }
 

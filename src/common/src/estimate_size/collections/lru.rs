@@ -51,6 +51,10 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         self.inner.update_epoch(epoch);
     }
 
+    pub fn current_epoch(&mut self) -> u64 {
+        self.inner.current_epoch()
+    }
+
     /// An iterator visiting all values in most-recently used order. The iterator element type is
     /// &V.
     pub fn values(&self) -> impl Iterator<Item = &V> {

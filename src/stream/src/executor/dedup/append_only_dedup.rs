@@ -79,6 +79,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
 
         #[for_await]
         for msg in input {
+            self.cache.evict();
+
             match msg? {
                 Message::Chunk(chunk) => {
                     // Append-only dedup executor only receives INSERT messages.
@@ -147,7 +149,7 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         }
                     }
 
-                    self.cache.evict();
+                    self.cache.update_epoch(barrier.epoch.curr);
 
                     yield Message::Barrier(barrier);
                 }
