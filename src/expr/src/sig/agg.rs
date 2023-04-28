@@ -13,197 +13,96 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::LazyLock;
 
-use risingwave_common::types::{DataType, DataTypeName};
+use itertools::Itertools;
+use risingwave_common::types::DataTypeName;
 
-use crate::function::aggregate::AggKind;
+use crate::agg::{AggCall, AggKind, BoxedAggState};
+use crate::Result;
+
+pub static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| unsafe {
+    let mut map = AggFuncSigMap::default();
+    tracing::info!("{} aggregations loaded.", AGG_FUNC_SIG_MAP_INIT.len());
+    for desc in AGG_FUNC_SIG_MAP_INIT.drain(..) {
+        map.insert(desc);
+    }
+    map
+});
 
 // Same as FuncSign in func.rs except this is for aggregate function
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub struct AggFuncSig {
     pub func: AggKind,
-    pub inputs_type: Vec<DataTypeName>,
+    pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
+    pub build: fn(agg: AggCall) -> Result<BoxedAggState>,
 }
 
-impl AggFuncSig {
-    /// Returns a string describing the aggregation without return type.
-    pub fn to_string_no_return(&self) -> String {
-        format!(
-            "{}({})",
+impl fmt::Debug for AggFuncSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = format!(
+            "{}({})->{:?}",
             self.func,
-            self.inputs_type
-                .iter()
-                .map(|t| format!("{t:?}"))
-                .collect::<Vec<_>>()
-                .join(",")
+            self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
+            self.ret_type
         )
-        .to_lowercase()
+        .to_lowercase();
+        f.write_str(&s)
     }
 }
 
 // Same as FuncSigMap in func.rs except this is for aggregate function
 #[derive(Default)]
 pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);
+
 impl AggFuncSigMap {
-    fn insert(&mut self, func: AggKind, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
-        let arity = param_types.len();
-        let inputs_type = param_types.into_iter().map(Into::into).collect();
-        let sig = AggFuncSig {
-            func,
-            inputs_type,
-            ret_type,
-        };
-        self.0.entry((func, arity)).or_default().push(sig)
+    fn insert(&mut self, sig: AggFuncSig) {
+        let arity = sig.inputs_type.len();
+        self.0.entry((sig.func, arity)).or_default().push(sig);
+    }
+
+    /// Returns a function signature with the given type, argument types and return type.
+    pub fn get(
+        &self,
+        ty: AggKind,
+        args: &[DataTypeName],
+        ret: DataTypeName,
+    ) -> Option<&AggFuncSig> {
+        let v = self.0.get(&(ty, args.len()))?;
+        v.iter()
+            .find(|d| d.inputs_type == args && d.ret_type == ret)
+    }
+
+    /// Returns the return type for the given function and arguments.
+    pub fn get_return_type(&self, ty: AggKind, args: &[DataTypeName]) -> Option<DataTypeName> {
+        let v = self.0.get(&(ty, args.len()))?;
+        v.iter().find(|d| d.inputs_type == args).map(|d| d.ret_type)
     }
 }
-
-/// This function builds type derived map for all built-in aggregate functions that take a fixed
-/// number of arguments (In fact mostly is one).
-static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
-    use {AggKind as A, DataTypeName as T};
-    let mut map = AggFuncSigMap::default();
-
-    let all_types = [
-        T::Boolean,
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-        T::Varchar,
-        T::Date,
-        T::Timestamp,
-        T::Timestamptz,
-        T::Time,
-        T::Interval,
-    ];
-
-    // Call infer_return_type to check the return type. If it throw error shows that the type is not
-    // inferred.
-    for agg in [
-        A::BitAnd,
-        A::BitOr,
-        A::BitXor,
-        A::Sum,
-        A::Min,
-        A::Max,
-        A::Count,
-        A::Avg,
-        A::ApproxCountDistinct,
-    ] {
-        for input in all_types {
-            if let Some(v) = infer_return_type(agg, &[DataType::from(input)]) {
-                map.insert(agg, vec![input], DataTypeName::from(v));
-            }
-        }
-    }
-    // Handle special case for `string_agg`, for it accepts two input arguments.
-    map.insert(
-        AggKind::StringAgg,
-        vec![DataTypeName::Varchar, DataTypeName::Varchar],
-        DataTypeName::Varchar,
-    );
-    map
-});
 
 /// The table of function signatures.
 pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSig> {
     AGG_FUNC_SIG_MAP.0.values().flatten()
 }
 
-/// Infer the return type for the given agg call.
-/// Returns `None` if not supported or the arguments are invalid.
-pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Option<DataType> {
-    // The function signatures are aligned with postgres, see
-    // https://www.postgresql.org/docs/current/functions-aggregate.html.
-    let return_type = match (agg_kind, inputs) {
-        // Min, Max, FirstValue, BitAnd, BitOr, BitXor
-        (
-            AggKind::Min
-            | AggKind::Max
-            | AggKind::FirstValue
-            | AggKind::BitAnd
-            | AggKind::BitOr
-            | AggKind::BitXor,
-            [input],
-        ) => input.clone(),
-        (
-            AggKind::Min
-            | AggKind::Max
-            | AggKind::FirstValue
-            | AggKind::BitAnd
-            | AggKind::BitOr
-            | AggKind::BitXor,
-            _,
-        ) => return None,
-        // Avg
-        (AggKind::Avg, [input]) => match input {
-            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
-                DataType::Decimal
-            }
-            DataType::Float32 | DataType::Float64 => DataType::Float64,
-            DataType::Int256 => DataType::Float64,
-            DataType::Interval => DataType::Interval,
-            _ => return None,
-        },
-        (AggKind::Avg, _) => return None,
-
-        // Sum
-        (AggKind::Sum, [input]) => match input {
-            DataType::Int16 => DataType::Int64,
-            DataType::Int32 => DataType::Int64,
-            DataType::Int64 => DataType::Decimal,
-            DataType::Int256 => DataType::Int256,
-            DataType::Decimal => DataType::Decimal,
-            DataType::Float32 => DataType::Float32,
-            DataType::Float64 => DataType::Float64,
-            DataType::Interval => DataType::Interval,
-            _ => return None,
-        },
-
-        (AggKind::Sum, _) => return None,
-
-        // StdDev/Var, stddev_pop, stddev_samp, var_pop, var_samp
-        (
-            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp,
-            [input],
-        ) => match input {
-            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
-                DataType::Decimal
-            }
-            DataType::Float32 | DataType::Float64 => DataType::Float64,
-            DataType::Int256 => DataType::Float64,
-            _ => return None,
-        },
-
-        (AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp, _) => {
-            return None
-        }
-
-        (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
-        (AggKind::Sum0, _) => return None,
-
-        // ApproxCountDistinct
-        (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
-        (AggKind::ApproxCountDistinct, _) => return None,
-
-        // Count
-        (AggKind::Count, [] | [_]) => DataType::Int64,
-        (AggKind::Count, _) => return None,
-
-        // StringAgg
-        (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
-        (AggKind::StringAgg, _) => return None,
-
-        // ArrayAgg
-        (AggKind::ArrayAgg, [input]) => DataType::List {
-            datatype: Box::new(input.clone()),
-        },
-        (AggKind::ArrayAgg, _) => return None,
-    };
-
-    Some(return_type)
+/// Register a function into global registry.
+///
+/// # Safety
+///
+/// This function must be called sequentially.
+///
+/// It is designed to be used by `#[aggregate]` macro.
+/// Users SHOULD NOT call this function.
+#[doc(hidden)]
+pub unsafe fn _register(desc: AggFuncSig) {
+    AGG_FUNC_SIG_MAP_INIT.push(desc);
 }
+
+/// The global registry of function signatures on initialization.
+///
+/// `#[aggregate]` macro will generate a `#[ctor]` function to register the signature into this
+/// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
+/// `AGG_FUNC_SIG_MAP` on the first access of `AGG_FUNC_SIG_MAP`.
+static mut AGG_FUNC_SIG_MAP_INIT: Vec<AggFuncSig> = Vec::new();

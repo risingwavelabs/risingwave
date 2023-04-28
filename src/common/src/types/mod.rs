@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// NOTE: When adding or modifying data types, remember to update the type matrix in
+// src/expr/macro/src/types.rs
+
 use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -71,7 +74,7 @@ use crate::array::{
     StructValue,
 };
 use crate::error::Result as RwResult;
-use crate::types::num256::{Int256, Int256Ref};
+pub use crate::types::num256::{Int256, Int256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;

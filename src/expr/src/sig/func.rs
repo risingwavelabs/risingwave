@@ -68,7 +68,6 @@ impl FuncSigMap {
 /// A function signature.
 #[derive(Clone)]
 pub struct FuncSign {
-    pub name: &'static str,
     pub func: PbType,
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,

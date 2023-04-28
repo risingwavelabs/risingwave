@@ -19,7 +19,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
 use risingwave_common_proc_macro::EstimateSize;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use crate::executor::error::StreamExecutorResult;
@@ -84,7 +84,7 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
+    use risingwave_expr::agg::{AggArgs, AggKind};
 
     use super::*;
 
