@@ -42,9 +42,7 @@ macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($l_body:tt)* }, { $($r_body:tt)* }) => {
         match $self {
             StructRef::Indexed { arr, idx } => {
-                // SAFETY: the validity of `idx` is guaranteed by `value_at` as it's the only way to
-                // construct `StructRef::Indexed` now.
-                let $it = arr.children.iter().map(move |a| unsafe { a.value_at_unchecked(idx) });
+                let $it = arr.children.iter().map(move |a| a.value_at(idx));
                 $($l_body)*
             }
             StructRef::ValueRef { val } => {
