@@ -488,11 +488,7 @@ macro_rules! impl_array_builder {
                     }
                     Some(scalar_ref) => match (self, scalar_ref) {
                         $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
-                        (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar type: {}",
-                            this_builder.get_ident(),
-                            this_scalar_ref.get_ident()
-                        ),
+                        (this_builder, this_scalar_ref) => unreachable!(),
                     },
                 }
             }
