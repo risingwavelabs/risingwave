@@ -804,10 +804,12 @@ mod tests {
         ] {
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
-                    columns,
-                    constraints,
-                    ..
-                } = ast.remove(0) else { panic!("test case should be create table") };
+                columns,
+                constraints,
+                ..
+            } = ast.remove(0) else {
+                panic!("test case should be create table")
+            };
             let actual: Result<_> = (|| {
                 let column_descs =
                     bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;
