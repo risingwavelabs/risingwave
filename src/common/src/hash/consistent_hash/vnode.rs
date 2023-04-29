@@ -113,11 +113,12 @@ impl VirtualNode {
     // be the one that contains RowId, and use a special method to skip the calculation of Hash
     // and directly extract the `VirtualNode` from `RowId`.
     pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
-        if let Ok(idx) = keys.iter().exactly_one() &&
-            let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
-
-            return serial_array.iter()
-                .map(|serial|extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
+        if let Ok(idx) = keys.iter().exactly_one()
+            && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref()
+        {
+            return serial_array
+                .iter()
+                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
                 .collect();
         }
 

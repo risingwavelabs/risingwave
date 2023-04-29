@@ -81,8 +81,15 @@ impl PlanVisitor<Cardinality> for CardinalityVisitor {
 
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.
-        if let Some(scan) = input.as_logical_scan() && scan.is_sys_table() && scan.table_name() == PG_NAMESPACE_TABLE_NAME {
-            let nspname = scan.output_col_idx().iter().find(|i| scan.table_desc().columns[**i].name == "nspname").unwrap();
+        if let Some(scan) = input.as_logical_scan()
+            && scan.is_sys_table()
+            && scan.table_name() == PG_NAMESPACE_TABLE_NAME
+        {
+            let nspname = scan
+                .output_col_idx()
+                .iter()
+                .find(|i| scan.table_desc().columns[**i].name == "nspname")
+                .unwrap();
             unique_keys.push([*nspname].into_iter().collect());
         }
 
