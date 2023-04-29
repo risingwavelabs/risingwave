@@ -331,7 +331,7 @@ where
                     let stream_node = actor.nodes.as_mut().unwrap();
                     visit_stream_node(stream_node, |body| {
                         if let NodeBody::Merge(m) = body
-                           && m.upstream_fragment_id == merge_update.upstream_fragment_id
+                            && m.upstream_fragment_id == merge_update.upstream_fragment_id
                         {
                             m.upstream_fragment_id = merge_update.new_upstream_fragment_id.unwrap();
                             m.upstream_actor_id = merge_update.added_upstream_actor_id.clone();

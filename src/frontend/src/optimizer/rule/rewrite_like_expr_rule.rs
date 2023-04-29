@@ -56,7 +56,9 @@ impl ExprVisitor<bool> for HasLikeExprVisitor {
 
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> bool {
         if func_call.get_expr_type() == ExprType::Like
-            && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) = func_call.clone().decompose_as_binary() {
+            && let (_, ExprImpl::InputRef(_), ExprImpl::Literal(_)) =
+                func_call.clone().decompose_as_binary()
+        {
             true
         } else {
             func_call
