@@ -44,10 +44,10 @@ use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
-use crate::common::StreamChunkBuilder;
 use crate::error::StreamResult;
 use crate::executor::aggregation::ChunkBuilder;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::sort_buffer::SortBuffer;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, Message, PkIndices,
     PkIndicesRef, StreamExecutorError, Watermark,
@@ -76,7 +76,7 @@ pub struct Inner<S: StateStore, const WITH_TIES: bool> {
 
     /// which column we used to group the data.
     group_by: Vec<usize>,
-    order_by: Vec<ColumnOrder>,
+    order_by: Vec<usize>,
 
     chunk_size: usize,
 
@@ -122,7 +122,7 @@ impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
                 state_table,
                 storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
                 group_by,
-                order_by,
+                order_by: order_by.into_iter().map(|op| op.column_index).collect(),
                 window_watermark: None,
                 chunk_size,
                 group_keys,
@@ -138,57 +138,66 @@ impl<S: StateStore, const WITH_TIES: bool> Inner<S, WITH_TIES> {
             let mut chunk_builder =
                 ChunkBuilder::new(self.chunk_size, &self.info.schema.data_types());
 
-            // iterate over the state table
-            {
+            // For each group_key, call iter_with_pk_prefix with it to get N rows.
+            // TODO: can we consume group keys concurrently?
+            #[for_await]
+            for group_key in self.group_keys.consume(watermark.val.clone()) {
+                let group_key = group_key?;
+
                 let state_table_iter = self
                     .state_table
-                    .iter(PrefetchOptions {
-                        exhaust_iter: false,
-                    })
+                    .iter_with_pk_prefix(group_key, PrefetchOptions::default())
                     .await?;
                 pin_mut!(state_table_iter);
 
-                let mut current_group_key: Option<OwnedRow> = None;
-                'outer: loop {
-                    let mut cnt = 0;
-                    while let Some(item) = state_table_iter.next().await {
-                        let item: OwnedRow = item?;
-                        let group_key = item.as_ref().project(&self.group_by);
-
-                        if current_group_key.is_none()
-                            || current_group_key.as_ref().is_some_and(|current_group_key| {
-                                !Row::eq(current_group_key, group_key)
-                            })
-                        {
-                            // new group key found.
-                            let timestamp_val = group_key
-                                .datum_at(0)
-                                .expect("watermark column is expected to be non-null");
-                            if timestamp_val > watermark.val.as_scalar_ref_impl() {
-                                break 'outer;
-                            }
-                            current_group_key = Some(group_key.into_owned_row());
-                            cnt = 0;
-                        }
-
-                        // check whether to insert the row.
-                        let insert = if WITH_TIES {
-                            assert!(self.offset == 0, "offset is not supported with ties yet");
-                            todo!()
-                        } else {
-                            self.offset <= cnt && cnt <= self.limit
-                        };
-
-                        if insert {
-                            cnt += 1;
-                            if let Some(chunk) = chunk_builder.append_row(Op::Insert, item) {
+                if !WITH_TIES {
+                    let mut idx = 0;
+                    while let Some(row) = state_table_iter.next().await {
+                        let row: OwnedRow = row?;
+                        if idx >= self.offset {
+                            if let Some(chunk) = chunk_builder.append_row(Op::Insert, row) {
                                 yield chunk;
                             }
-                        } else {
-                            // TODO: should we create a new state_table_iter to skip to the next
-                            // group key?
-                            // And how? iter_with_pk_range requires a vnode.
                         }
+                        idx += 1;
+                        if idx >= self.offset + self.limit {
+                            break;
+                        }
+                    }
+                } else {
+                    assert!(self.offset == 0, "offset is not supported with ties yet");
+                    assert!(self.limit > 0, "limit must be positive");
+
+                    let row = state_table_iter.next().await;
+                    let row: OwnedRow = row.unwrap()?;
+                    if let Some(chunk) = chunk_builder.append_row(Op::Insert, row.clone()) {
+                        yield chunk;
+                    }
+
+                    // rank, idx both start from 0
+                    let mut rank;
+                    let mut idx = 1;
+                    let mut prev_row = row;
+
+                    while let Some(row) = state_table_iter.next().await {
+                        let row: OwnedRow = row?;
+
+                        // get the rank of the current row. If ties, rank unchanged.
+                        if row.as_ref().project(&self.order_by)
+                            != prev_row.as_ref().project(&self.order_by)
+                        {
+                            rank = idx;
+                            if rank >= self.limit {
+                                break;
+                            }
+                        }
+
+                        if let Some(chunk) = chunk_builder.append_row(Op::Insert, row.clone()) {
+                            yield chunk;
+                        }
+
+                        prev_row = row;
+                        idx += 1;
                     }
                 }
             }
@@ -293,19 +302,22 @@ impl<S: StateStore, const WITH_TIES: bool> Executor for EowcGroupTopNExecutor<S,
 /// distinct columns in each group.
 struct GroupKeys<S: StateStore> {
     cache: ManagedLruCache<CompactedRow, i64>,
-    state_table: StateTable<S>,
+    group_key_table: StateTable<S>,
     group_key: Vec<usize>,
+    /// XXX: Does this sort_buffer make sense? It's only used in `consume`.
+    sort_buffer: SortBuffer<S>,
 }
 
 impl<S: StateStore> GroupKeys<S> {
     fn new(
         watermark_epoch: &Arc<AtomicU64>,
-        state_table: StateTable<S>,
+        group_key_table: StateTable<S>,
         group_key: Vec<usize>,
     ) -> Self {
         Self {
+            sort_buffer: SortBuffer::new(0, &group_key_table),
             cache: new_unbounded(watermark_epoch.clone()),
-            state_table,
+            group_key_table,
             group_key,
         }
     }
@@ -324,7 +336,7 @@ impl<S: StateStore> GroupKeys<S> {
             } else {
                 // load from table into the cache
                 let count = if let Some(counts_row) =
-                    self.state_table.get_row(&group_key).await? as Option<OwnedRow>
+                    self.group_key_table.get_row(&group_key).await? as Option<OwnedRow>
                 {
                     let counts: Vec<i64> = counts_row
                         .iter()
@@ -334,7 +346,7 @@ impl<S: StateStore> GroupKeys<S> {
                     counts[0]
                 } else {
                     // ensure there is a row in the table for this group key
-                    self.state_table
+                    self.group_key_table
                         .insert((&group_key).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), 1)));
                     0
                 };
@@ -368,7 +380,7 @@ impl<S: StateStore> GroupKeys<S> {
                     .expect("group key in `prev_counts_map` must also exist in `self.cache`");
                 let new_count = OwnedRow::new(vec![Some(new_count.into())]);
                 let old_count = OwnedRow::new(vec![Some(prev_count.into())]);
-                self.state_table.update(
+                self.group_key_table.update(
                     group_key.clone().chain(old_count),
                     group_key.chain(new_count),
                 );
@@ -387,6 +399,18 @@ impl<S: StateStore> GroupKeys<S> {
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
         self.cache.evict();
+    }
+
+    /// Consume all group keys under `watermark`.
+    #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
+    pub async fn consume<'a>(&'a mut self, watermark: ScalarImpl) {
+        #[for_await]
+        for row in self
+            .sort_buffer
+            .consume(watermark, &mut self.group_key_table)
+        {
+            yield row?;
+        }
     }
 }
 
