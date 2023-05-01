@@ -106,7 +106,7 @@ To learn about how to use RisingWave, refer to [RisingWave docs](https://www.ris
 
 ## License
 
-RisingWave is under the Apache License 2.0. Please refer to [LICENSE](LICENSE) for more information.
+RisingWave is distributed under the Apache License (Version 2.0). Please refer to [LICENSE](LICENSE) for more information.
 
 ## Contributing
 
