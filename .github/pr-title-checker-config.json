@@ -6,5 +6,8 @@
   "CHECKS": {
     "regexp": "^(feat|fix|test|refactor|chore|style|doc|perf|build|ci|revert|deprecate)(\\(.*\\))?:.*",
     "ignoreLabels" : ["ignore-title"]
+  },
+  "MESSAGES": {
+    "failure": "::error::The PR title is invalid. Please refer to https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md#pull-request-title for the convention."
   }
 }
