@@ -20,7 +20,9 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use super::{DeleteRangeTombstone, MonotonicDeleteEvent};
+#[cfg(any(test, feature = "test"))]
+use super::DeleteRangeTombstone;
+use super::MonotonicDeleteEvent;
 use crate::hummock::iterator::DeleteRangeIterator;
 use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::Sstable;
@@ -127,6 +129,7 @@ impl CompactionDeleteRangesBuilder {
     /// can be transformed into events below:
     /// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
     /// -epoch3> }`
+    #[cfg(any(test, feature = "test"))]
     pub(crate) fn build_events(
         delete_tombstones: &Vec<DeleteRangeTombstone>,
     ) -> Vec<CompactionDeleteRangeEvent> {
@@ -308,7 +311,9 @@ impl CompactionDeleteRangeIterator {
         epoch: HummockEpoch,
     ) -> HummockEpoch {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx) && extended_user_key.as_ref().le(&target_extended_user_key) {
+        while let Some((extended_user_key, ..)) = self.events.events.get(self.seek_idx)
+            && extended_user_key.as_ref().le(&target_extended_user_key)
+        {
             self.apply(self.seek_idx);
             self.seek_idx += 1;
         }

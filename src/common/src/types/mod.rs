@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// NOTE: When adding or modifying data types, remember to update the type matrix in
+// src/expr/macro/src/types.rs
+
 use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
-use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
 use risingwave_common_proc_macro::EstimateSize;
@@ -58,7 +60,7 @@ pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
 pub use ops::{CheckedAdd, IsNegative};
-pub use ordered_float::IntoOrdered;
+pub use ordered_float::{FloatExt, IntoOrdered};
 use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
@@ -72,7 +74,7 @@ use crate::array::{
     StructValue,
 };
 use crate::error::Result as RwResult;
-use crate::types::num256::{Int256, Int256Ref};
+pub use crate::types::num256::{Int256, Int256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;

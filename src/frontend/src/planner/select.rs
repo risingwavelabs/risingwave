@@ -184,10 +184,10 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id"  {
+            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
-            }else {
+            } else {
                 (0..fields.len()).collect()
             };
             root = Agg::new(vec![], group_key, root).into();

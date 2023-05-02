@@ -116,10 +116,13 @@ impl SourceContext {
             return Err(e);
         }
         let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor &&
-            suppressor.lock().suppress_error(&err_str)
+        if let Some(suppressor) = &self.error_suppressor
+            && suppressor.lock().suppress_error(&err_str)
         {
-            err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                suppressor.lock().max()
+            );
         }
         self.metrics
             .user_source_error_count

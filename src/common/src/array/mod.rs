@@ -168,7 +168,10 @@ pub trait Array:
         Self: 'a;
 
     /// Owned type of item in array, which is reciprocal to `Self::RefItem`.
-    type OwnedItem: Clone + std::fmt::Debug + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
+    type OwnedItem: Clone
+        + std::fmt::Debug
+        + EstimateSize
+        + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
@@ -740,7 +743,6 @@ mod tests {
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
     }
 
-    use num_traits::cast::AsPrimitive;
     use num_traits::ops::checked::CheckedAdd;
 
     fn vec_add<T1, T2, T3>(
@@ -748,14 +750,14 @@ mod tests {
         b: &PrimitiveArray<T2>,
     ) -> ArrayResult<PrimitiveArray<T3>>
     where
-        T1: PrimitiveArrayItemType + AsPrimitive<T3>,
-        T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-        T3: PrimitiveArrayItemType + CheckedAdd,
+        T1: PrimitiveArrayItemType,
+        T2: PrimitiveArrayItemType,
+        T3: PrimitiveArrayItemType + CheckedAdd + From<T1> + From<T2>,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
         for (a, b) in a.iter().zip_eq_fast(b.iter()) {
             let item = match (a, b) {
-                (Some(a), Some(b)) => Some(a.as_() + b.as_()),
+                (Some(a), Some(b)) => Some(T3::from(a) + T3::from(b)),
                 _ => None,
             };
             builder.append(item);

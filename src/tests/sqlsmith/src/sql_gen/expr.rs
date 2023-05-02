@@ -19,7 +19,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
@@ -350,9 +350,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .iter()
             .map(|t| {
                 if let Some(from_tys) = IMPLICIT_CAST_TABLE.get(t)
-                        && can_implicit_cast && self.flip_coin() {
+                    && can_implicit_cast
+                    && self.flip_coin()
+                {
                     let from_ty = &from_tys.choose(&mut self.rng).unwrap().from_type;
-                        self.gen_implicit_cast(from_ty, context)
+                    self.gen_implicit_cast(from_ty, context)
                 } else {
                     self.gen_expr(t, context)
                 }

@@ -423,6 +423,13 @@ impl SpecificParserConfig {
         }
     }
 
+    pub fn is_upsert(&self) -> bool {
+        matches!(
+            self,
+            SpecificParserConfig::UpsertJson | SpecificParserConfig::UpsertAvro(_)
+        )
+    }
+
     pub async fn new(
         format: SourceFormat,
         info: &StreamSourceInfo,

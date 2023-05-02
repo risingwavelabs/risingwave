@@ -120,10 +120,13 @@ pub async fn compute_node_serve(
 
     let (reserved_memory_bytes, non_reserved_memory_bytes) =
         reserve_memory_bytes(opts.total_memory_bytes);
-    let storage_memory_config = storage_memory_config(non_reserved_memory_bytes, &config.storage);
+    let storage_memory_config = storage_memory_config(
+        non_reserved_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
+    );
 
-    let storage_memory_bytes =
-        total_storage_memory_limit_bytes(&storage_memory_config, embedded_compactor_enabled);
+    let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
     let compute_memory_bytes = validate_compute_node_memory_config(
         opts.total_memory_bytes,
         reserved_memory_bytes,
@@ -469,19 +472,13 @@ fn validate_compute_node_memory_config(
 
 /// The maximal memory that storage components may use based on the configurations in bytes. Note
 /// that this is the total storage memory for one compute node instead of the whole cluster.
-fn total_storage_memory_limit_bytes(
-    storage_memory_config: &StorageMemoryConfig,
-    embedded_compactor_enabled: bool,
-) -> usize {
+fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig) -> usize {
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_total_buffer_capacity_mb;
-    if embedded_compactor_enabled {
-        (storage_memory_config.compactor_memory_limit_mb + total_storage_memory_mb) << 20
-    } else {
-        total_storage_memory_mb << 20
-    }
+        + storage_memory_config.file_cache_total_buffer_capacity_mb
+        + storage_memory_config.compactor_memory_limit_mb;
+    total_storage_memory_mb << 20
 }
 
 /// Checks whether an embedded compactor starts with a compute node.

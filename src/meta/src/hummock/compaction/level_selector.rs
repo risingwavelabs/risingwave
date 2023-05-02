@@ -694,6 +694,38 @@ pub mod tests {
         }
     }
 
+    pub fn generate_l0_nonoverlapping_multi_sublevels(
+        table_infos: Vec<Vec<SstableInfo>>,
+    ) -> OverlappingLevel {
+        let mut l0 = OverlappingLevel {
+            sub_levels: table_infos
+                .into_iter()
+                .enumerate()
+                .map(|(idx, table)| Level {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    total_file_size: table.iter().map(|table| table.file_size).sum::<u64>(),
+                    uncompressed_file_size: table
+                        .iter()
+                        .map(|sst| sst.uncompressed_file_size)
+                        .sum::<u64>(),
+                    sub_level_id: idx as u64,
+                    table_infos: table,
+                })
+                .collect_vec(),
+            total_file_size: 0,
+            uncompressed_file_size: 0,
+        };
+
+        l0.total_file_size = l0.sub_levels.iter().map(|l| l.total_file_size).sum::<u64>();
+        l0.uncompressed_file_size = l0
+            .sub_levels
+            .iter()
+            .map(|l| l.uncompressed_file_size)
+            .sum::<u64>();
+        l0
+    }
+
     /// Returns a `OverlappingLevel`, with each `table_infos`'s element placed in a overlapping
     /// sub-level.
     pub fn generate_l0_overlapping_sublevels(
@@ -820,6 +852,7 @@ pub mod tests {
             .max_compaction_bytes(10000)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
+            .level0_sub_level_compact_level_count(1)
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
         let levels = vec![

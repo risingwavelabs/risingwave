@@ -35,7 +35,11 @@ impl ComputeNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compute-node")))
+            Ok(Command::new(
+                Path::new(&prefix_bin)
+                    .join("risingwave")
+                    .join("compute-node"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("compute-node")))
         }

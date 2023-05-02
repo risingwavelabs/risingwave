@@ -710,3 +710,11 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }
+- name: test distributed by columns for functional indexes
+  sql: |
+    create table people (first_name varchar, last_name varchar, info varchar);
+    create index people_names ON people ((first_name || ' ' || last_name), info) distributed by ((first_name || ' ' || last_name));
+    select * from people where (first_name || ' ' || last_name) = 'John Smith';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }

@@ -242,7 +242,9 @@ impl Planner {
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
-        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
+            args.next_tuple()
+        else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 

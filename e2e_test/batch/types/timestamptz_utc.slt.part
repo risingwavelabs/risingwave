@@ -107,7 +107,12 @@ select to_timestamp(extract(epoch from '2010-01-01 12:34:56.789012Z'::timestamp 
 2010-01-01 12:34:56.789012+00:00
 
 query R
-select extract(epoch from to_timestamp(1262349296.7890123));
+select extract(epoch from to_timestamp(1262349296.7890125));
+----
+1262349296.789012
+
+query R
+select extract(epoch from to_timestamp(1262349296.7890115));
 ----
 1262349296.789012
 

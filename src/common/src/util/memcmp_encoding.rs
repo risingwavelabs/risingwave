@@ -259,7 +259,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, ScalarImpl, F32};
+    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]

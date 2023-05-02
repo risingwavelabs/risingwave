@@ -1,0 +1,65 @@
+cargo-cache: &cargo-cache
+  id: cache
+  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+  restore-keys:
+    - "v1-cache-{{ id }}-{{ runner.os }}-"
+    - "v1-cache-{{ id }}-"
+  backend: s3
+  s3:
+    bucket: ci-cache-bucket
+    args: '--no-progress'
+  paths:
+    - ".cargo/registry/index"
+    - ".cargo/registry/cache"
+    - ".cargo/git/db"
+    - ".cargo/advisory-db"
+
+steps:
+  - label: "check ci image rebuild"
+    plugins:
+      - chronotc/monorepo-diff#v2.3.0:
+          diff: "git diff --name-only origin/main"
+          watch:
+            - path: "ci/build-ci-image.sh"
+              config:
+                command: "ci/build-ci-image.sh"
+                label: "ci build images"
+  - wait
+  # Generates cpu flamegraph env
+  - label: "cpu-flamegraph-env-build"
+    key: "cpu-flamegraph-env-build"
+    command: "ci/scripts/flamegraph-env-build.sh"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+    timeout_in_minutes: 20
+
+  # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
+  - label: "Generate CPU flamegraph"
+    command: "ci/scripts/gen-flamegraph.sh"
+    depends_on: "cpu-flamegraph-env-build"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
+            - NEXMARK_QUERIES
+    # TODO(kwannoel): Here are the areas that can be further optimized:
+    # - Nexmark event generation: ~3min for 100mil records.
+    # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
+    # - Building RW artifacts: ~8min
+    timeout_in_minutes: 360

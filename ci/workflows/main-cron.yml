@@ -290,7 +290,7 @@ steps:
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
-    command: "ci/scripts/gen-flamegraph.sh"
+    command: "NEXMARK_QUERIES=all ci/scripts/gen-flamegraph.sh"
     depends_on: "cpu-flamegraph-env-build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -307,4 +307,14 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 50
+    timeout_in_minutes: 360
+
+  - label: "micro benchmark"
+    command: "ci/scripts/run-micro-benchmarks.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 35

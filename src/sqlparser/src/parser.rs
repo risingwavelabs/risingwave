@@ -1600,7 +1600,9 @@ impl Parser {
         loop {
             assert!(self.index > 0);
             self.index -= 1;
-            if let Some(token) = self.tokens.get(self.index) && let Token::Whitespace(_) = token.token {
+            if let Some(token) = self.tokens.get(self.index)
+                && let Token::Whitespace(_) = token.token
+            {
                 continue;
             }
             return;
@@ -1986,7 +1988,9 @@ impl Parser {
         // parse: [ argname ] argtype
         let mut name = None;
         let mut data_type = self.parse_data_type()?;
-        if let DataType::Custom(n) = &data_type && !matches!(self.peek_token().token, Token::Comma | Token::RParen) {
+        if let DataType::Custom(n) = &data_type
+            && !matches!(self.peek_token().token, Token::Comma | Token::RParen)
+        {
             // the first token is actually a name
             name = Some(n.0[0].clone());
             data_type = self.parse_data_type()?;
@@ -2134,7 +2138,7 @@ impl Parser {
         let mut distributed_by = vec![];
         if self.parse_keywords(&[Keyword::DISTRIBUTED, Keyword::BY]) {
             self.expect_token(&Token::LParen)?;
-            distributed_by = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
+            distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
         Ok(Statement::CreateIndex {

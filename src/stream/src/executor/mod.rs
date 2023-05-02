@@ -128,6 +128,7 @@ pub use merge::MergeExecutor;
 pub use mview::*;
 pub use no_op::NoOpExecutor;
 pub use now::NowExecutor;
+pub use over_window::*;
 pub use project::ProjectExecutor;
 pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
@@ -150,6 +151,8 @@ use self::barrier_align::AlignedMessageStream;
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
+
+pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
