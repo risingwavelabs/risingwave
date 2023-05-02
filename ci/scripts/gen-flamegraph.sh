@@ -221,6 +221,7 @@ gen_heap_flamegraph() {
   COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
   $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
   ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
+  mv perf.svg ..
   popd
 }
 
