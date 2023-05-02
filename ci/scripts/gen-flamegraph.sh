@@ -69,7 +69,7 @@ install_all() {
 
   # flamegraph.pl used to generate heap flamegraph
   echo ">>> Installing flamegraph.pl"
-  wget https://github.com/brendangregg/FlameGraph/blob/master/flamegraph.pl
+  wget https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl
   chmod +x ./flamegraph.pl
 
   # faster addr2line to speed up heap flamegraph analysis by jeprof
@@ -217,9 +217,10 @@ gen_heap_flamegraph() {
   FIRST_HEAP_PROFILE=$(ls -c | grep "\.heap" | head -1)
   LATEST_HEAP_PROFILE=$(ls -c | grep "\.heap" | tail -1)
   JEPROF=$(find . -name 'jeprof' | head -1)
+  chmod +x "$JEPROF"
   COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
   $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
-  ./flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
+  ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
   popd
 }
 
@@ -277,7 +278,7 @@ run_heap_flamegraph() {
 
   echo "--- Running Benchmarks"
   # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
+  psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
 
   # NOTE(kwannoel): Can stub first if promql gives us issues.
   # Most nexmark queries (q4-q20) will have a runtime of 10+ min.
@@ -327,7 +328,7 @@ run_cpu_flamegraph() {
 
   echo "--- Running Benchmarks"
   # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
+  psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
 
   echo "--- Start Profiling"
   start_nperf
