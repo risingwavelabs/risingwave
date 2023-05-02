@@ -279,12 +279,9 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
 }
 
 fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
-    value
-        .iter_fields_ref()
-        .map(|field_value| {
-            serialize_datum_into(field_value, buf);
-        })
-        .count();
+    value.iter_fields_ref().for_each(|field_value| {
+        serialize_datum_into(field_value, buf);
+    });
 }
 
 fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
@@ -294,11 +291,9 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     let elems = value.iter_elems_ref();
     buf.put_u32_le(elems.len() as u32);
 
-    elems
-        .map(|field_value| {
-            serialize_datum_into(field_value, buf);
-        })
-        .count();
+    elems.for_each(|field_value| {
+        serialize_datum_into(field_value, buf);
+    });
 }
 fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
     4 + list.estimate_serialize_size_inner()
