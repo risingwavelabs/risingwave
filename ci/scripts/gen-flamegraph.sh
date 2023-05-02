@@ -214,14 +214,19 @@ gen_heap_flamegraph() {
   pushd risingwave
   echo ">>> Heap files"
   ls -lac | grep "\.heap"
-  FIRST_HEAP_PROFILE=$(ls -c | grep "\.heap" | head -1)
-  LATEST_HEAP_PROFILE=$(ls -c | grep "\.heap" | tail -1)
-  JEPROF=$(find . -name 'jeprof' | head -1)
-  chmod +x "$JEPROF"
-  COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
-  $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
-  ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
-  mv perf.svg ..
+  set +e
+  LATEST_HEAP_PROFILE="$(ls -c | grep "\.heap" | tail -1)"
+  if [[ -z "$LATEST_HEAP_PROFILE" ]]; then
+    echo "No heap profile generated. Less than 4GB allocated."
+  else
+    JEPROF=$(find . -name 'jeprof' | head -1)
+    chmod +x "$JEPROF"
+    COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
+    $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
+    ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
+    mv perf.svg ..
+  fi
+  set -e
   popd
 }
 
