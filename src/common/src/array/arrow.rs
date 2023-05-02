@@ -22,8 +22,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
-use crate::types::num256::Int256;
-use crate::types::struct_type::StructType;
+use crate::types::{Int256, StructType};
 use crate::util::iter_util::ZipEqFast;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
@@ -124,7 +123,7 @@ impl From<&arrow_schema::DataType> for DataType {
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
+            Struct(field) => Self::Struct(Arc::new(StructType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
             })),

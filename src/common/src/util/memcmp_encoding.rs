@@ -19,9 +19,8 @@ use serde::{Deserialize, Serialize};
 use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::{OwnedRow, Row};
-use crate::types::num256::Int256;
 use crate::types::{
-    DataType, Date, Datum, ScalarImpl, Serial, Time, Timestamp, ToDatumRef, F32, F64,
+    DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, ToDatumRef, F32, F64,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 

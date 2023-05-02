@@ -29,9 +29,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
-use crate::types::struct_type::StructType;
-use crate::types::to_text::ToText;
-use crate::types::{DataType, ToOwnedDatum};
+use crate::types::{DataType, StructType, ToOwnedDatum, ToText};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{

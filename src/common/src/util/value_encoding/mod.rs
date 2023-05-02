@@ -27,17 +27,12 @@ use itertools::Itertools;
 use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
-use crate::types::struct_type::StructType;
-use crate::types::{
-    DataType, Date, Datum, Decimal, Interval, JsonbVal, ScalarImpl, ScalarRefImpl, Serial, Time,
-    Timestamp, ToDatumRef, F32, F64,
-};
+use crate::types::*;
 
 pub mod error;
 use error::ValueEncodingError;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
-use crate::types::num256::Int256;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;

@@ -19,8 +19,7 @@ use serde_json::Value;
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::types::jsonb::{JsonbRef, JsonbVal};
-use crate::types::DataType;
+use crate::types::{DataType, JsonbRef, JsonbVal};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug)]

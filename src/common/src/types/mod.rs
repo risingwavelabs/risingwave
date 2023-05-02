@@ -18,16 +18,22 @@
 // src/expr/macro/src/types.rs
 
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::hash::Hash;
+use std::str::{FromStr, Utf8Error};
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
+use chrono::{Datelike, Timelike};
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
-use postgres_types::FromSql;
+use paste::paste;
+use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::{BoxedError, ErrorCode};
@@ -41,26 +47,17 @@ mod postgres_type;
 mod scalar_impl;
 mod successor;
 
-use std::fmt::Debug;
-use std::str::{FromStr, Utf8Error};
-
-pub mod datetime;
-pub mod decimal;
+mod datetime;
+mod decimal;
 pub mod interval;
-pub mod jsonb;
-pub mod num256;
-pub mod serial;
-pub mod struct_type;
-pub mod to_binary;
-pub mod to_text;
+mod jsonb;
+mod num256;
+mod serial;
+mod struct_type;
+mod to_binary;
+mod to_text;
 
-use chrono::{Datelike, Timelike};
-use itertools::Itertools;
-use paste::paste;
-use postgres_types::{IsNull, ToSql, Type};
-use strum_macros::EnumDiscriminants;
-
-pub use self::datetime::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
+pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::Decimal;
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
@@ -72,14 +69,17 @@ pub use self::scalar_impl::*;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
 pub use self::successor::*;
-use self::to_binary::ToBinary;
-use self::to_text::ToText;
+pub use self::to_binary::ToBinary;
+pub use self::to_text::ToText;
 use crate::array::{
     ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
 };
 use crate::error::Result as RwResult;
 
+/// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
+
+/// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
 /// The set of datatypes that are supported in RisingWave.

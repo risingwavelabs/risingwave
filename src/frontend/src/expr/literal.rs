@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::list_array::display_for_explain;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{literal_type_match, DataType, Datum};
+use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
