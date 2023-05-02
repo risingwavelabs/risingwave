@@ -68,10 +68,12 @@ install_all() {
   mv jq-linux64 /usr/local/bin/jq
 
   # flamegraph.pl used to generate heap flamegraph
+  echo ">>> Installing flamegraph.pl"
   wget https://github.com/brendangregg/FlameGraph/blob/master/flamegraph.pl
   chmod +x ./flamegraph.pl
 
-  # faster addr2line to speed up flamegraph analysis by jeprof
+  # faster addr2line to speed up heap flamegraph analysis by jeprof
+  echo ">>> Installing addr2line"
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
   cargo b --examples -r
