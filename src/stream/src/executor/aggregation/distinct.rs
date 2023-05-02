@@ -19,11 +19,11 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Vis, VisRef};
+use risingwave_common::array::{DataChunk, Op, Vis, VisRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
@@ -34,45 +34,80 @@ use crate::executor::StreamExecutorResult;
 type DedupCache = ManagedLruCache<CompactedRow, Box<[i64]>>;
 
 /// Deduplicater for one distinct column.
-struct ColumnDeduplicater<S: StateStore> {
+pub struct ColumnDeduplicater<S: StateStore> {
     cache: DedupCache,
     _phantom: PhantomData<S>,
 }
 
 impl<S: StateStore> ColumnDeduplicater<S> {
-    fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
+    pub fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
         Self {
             cache: new_unbounded(watermark_epoch.clone()),
             _phantom: PhantomData,
         }
     }
 
-    async fn dedup(
+    /// Distinct key is `prefix + distinct_columns`
+    /// - For distinct agg, it's `group_key + one distinct column`.
+    /// - For group TopN (dedup all group keys), it's `None + group_key`.
+    ///
+    /// Each `Vis` in `visibilities` corresponds to a distinct count. It will be updated in-place
+    /// to reflect the dedup result.
+    /// - For distinct agg, it's generated after the `filter` clause and one for each agg call.
+    /// - For group TopN, it's input chunk's vis and only one.
+    pub async fn dedup(
         &mut self,
         ops: &[Op],
-        column: &Column,
+        distinct_columns: &[Column],
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        prefix: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
-        let column = column.array_ref();
+        let n_rows = ops.len();
+
+        // row number sanity check
+        #[cfg(debug_assertions)]
+        {
+            for (i, col) in distinct_columns.iter().enumerate() {
+                assert_eq!(
+                    col.len(),
+                    n_rows,
+                    "distinct_columns[{}].len() = {}, while n_rows = {}",
+                    i,
+                    col.len(),
+                    n_rows
+                );
+            }
+            for (i, vis) in visibilities.iter().enumerate() {
+                assert_eq!(
+                    vis.len(),
+                    n_rows,
+                    "visibilities[{}].len() = {}, while n_rows = {}",
+                    i,
+                    vis.len(),
+                    n_rows
+                );
+            }
+        }
+        let chunk = DataChunk::new(distinct_columns.to_vec(), n_rows);
+
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
 
         // inverted masks for visibilities, 1 means hidden, 0 means visible
         let mut vis_masks_inv = (0..visibilities.len())
-            .map(|_| BitmapBuilder::zeroed(column.len()))
+            .map(|_| BitmapBuilder::zeroed(n_rows))
             .collect_vec();
 
-        for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
+        for (datum_idx, (op, row)) in ops.iter().zip_eq_debug(chunk.rows()).enumerate() {
             // skip if this item is hidden to all agg calls (this is likely to happen)
             if !visibilities.iter().any(|vis| vis.is_set(datum_idx)) {
                 continue;
             }
 
             // get counts of the distinct key of all agg calls that distinct on this column
-            let key = group_key.chain(row::once(datum));
+            let key = prefix.chain(row);
             let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
 
             // TODO(yuhao): avoid this `contains`.
@@ -101,7 +136,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
 
             // snapshot the counts as prev counts when first time seeing this distinct key
             prev_counts_map
-                .entry(datum)
+                .entry(row.to_owned_row())
                 .or_insert_with(|| counts.to_owned());
 
             match op {
@@ -134,22 +169,19 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         }
 
         // flush changes to dedup table
-        prev_counts_map
-            .into_iter()
-            .for_each(|(datum, prev_counts)| {
-                let key = group_key.chain(row::once(datum));
-                let new_counts = OwnedRow::new(
-                    self.cache
-                        .get(&CompactedRow::from(&key)) // TODO(rc): is it necessary to avoid recomputing here?
-                        .expect("distinct key in `prev_counts_map` must also exist in `self.cache`")
-                        .iter()
-                        .map(|&v| Some(v.into()))
-                        .collect(),
-                );
-                let old_counts =
-                    OwnedRow::new(prev_counts.iter().map(|&v| Some(v.into())).collect());
-                dedup_table.update(key.chain(old_counts), key.chain(new_counts));
-            });
+        prev_counts_map.into_iter().for_each(|(row, prev_counts)| {
+            let key = prefix.chain(row);
+            let new_counts = OwnedRow::new(
+                self.cache
+                    .get(&CompactedRow::from(&key)) // TODO(rc): is it necessary to avoid recomputing here?
+                    .expect("distinct key in `prev_counts_map` must also exist in `self.cache`")
+                    .iter()
+                    .map(|&v| Some(v.into()))
+                    .collect(),
+            );
+            let old_counts = OwnedRow::new(prev_counts.iter().map(|&v| Some(v.into())).collect());
+            dedup_table.update((&key).chain(old_counts), (&key).chain(new_counts));
+        });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
             let mask = !vis_mask_inv.finish();
@@ -167,7 +199,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
+    pub fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
         // TODO(rc): now we flush the table in `dedup` method.
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
@@ -242,7 +274,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             // SAFETY: all items in `agg_call_indices` are unique by nature, see `new`.
             let visibilities = unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
             deduplicater
-                .dedup(ops, column, visibilities, dedup_table, group_key)
+                .dedup(ops, &[column.clone()], visibilities, dedup_table, group_key)
                 .await?;
         }
         Ok(visibilities

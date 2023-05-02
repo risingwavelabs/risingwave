@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Group;
+use itertools::{Group, Itertools};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
@@ -45,7 +45,7 @@ use risingwave_storage::StateStore;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::ChunkBuilder;
+use crate::executor::aggregation::{ChunkBuilder, ColumnDeduplicater};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::sort_buffer::SortBuffer;
 use crate::executor::{
@@ -297,11 +297,10 @@ impl<S: StateStore, const WITH_TIES: bool> Executor for EowcGroupTopNExecutor<S,
     }
 }
 
-/// This is similar to `ColumnDeduplicater` for distinct aggregation, but simpler.
-/// It is for getting all the group keys, while `ColumnDeduplicater` deduplicates the
-/// distinct columns in each group.
+/// Maintains a state table for getting all the group keys
 struct GroupKeys<S: StateStore> {
-    cache: ManagedLruCache<CompactedRow, i64>,
+    dedup: ColumnDeduplicater<S>,
+
     group_key_table: StateTable<S>,
     group_key: Vec<usize>,
     /// XXX: Does this sort_buffer make sense? It's only used in `consume`.
@@ -315,90 +314,34 @@ impl<S: StateStore> GroupKeys<S> {
         group_key: Vec<usize>,
     ) -> Self {
         Self {
+            dedup: ColumnDeduplicater::new(watermark_epoch),
             sort_buffer: SortBuffer::new(0, &group_key_table),
-            cache: new_unbounded(watermark_epoch.clone()),
             group_key_table,
             group_key,
         }
     }
 
     async fn apply_chunk(&mut self, chunk: &StreamChunk) -> StreamExecutorResult<()> {
-        let mut prev_count_map = HashMap::new(); // also serves as changeset
-
-        for (op, row) in chunk.rows() {
-            let group_key = row.project(&self.group_key);
-            let compacted_key = CompactedRow::from(group_key);
-
-            // TODO(yuhao): avoid this `contains`.
-            // https://github.com/risingwavelabs/risingwave/issues/9233
-            let mut count = if self.cache.contains(&compacted_key) {
-                self.cache.get_mut(&compacted_key).unwrap()
-            } else {
-                // load from table into the cache
-                let count = if let Some(counts_row) =
-                    self.group_key_table.get_row(&group_key).await? as Option<OwnedRow>
-                {
-                    let counts: Vec<i64> = counts_row
-                        .iter()
-                        .map(|v| v.map_or(0, ScalarRefImpl::into_int64))
-                        .collect();
-                    debug_assert_eq!(counts.len(), 1);
-                    counts[0]
-                } else {
-                    // ensure there is a row in the table for this group key
-                    self.group_key_table
-                        .insert((&group_key).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), 1)));
-                    0
-                };
-                self.cache.put(compacted_key.clone(), count); // TODO(rc): can we avoid this clone?
-                self.cache.get_mut(&compacted_key).unwrap()
-            };
-
-            // snapshot the counts as prev counts when first time seeing this group key
-            prev_count_map
-                .entry(group_key.to_owned_row())
-                .or_insert_with(|| count.to_owned());
-
-            match op {
-                Op::Insert | Op::UpdateInsert => {
-                    *count += 1;
-                }
-                Op::Delete | Op::UpdateDelete => {
-                    *count -= 1;
-                    debug_assert!(*count >= 0);
-                }
-            }
-        }
-
-        // flush changes to state table
-        prev_count_map
-            .into_iter()
-            .for_each(|(group_key, prev_count)| {
-                let new_count = *self
-                    .cache
-                    .get(&CompactedRow::from(&group_key)) // TODO(rc): is it necessary to avoid recomputing here?
-                    .expect("group key in `prev_counts_map` must also exist in `self.cache`");
-                let new_count = OwnedRow::new(vec![Some(new_count.into())]);
-                let old_count = OwnedRow::new(vec![Some(prev_count.into())]);
-                self.group_key_table.update(
-                    group_key.clone().chain(old_count),
-                    group_key.chain(new_count),
-                );
-            });
-
-        // if we determine to flush to the table when processing every chunk instead of barrier
-        // coming, we can evict all including current epoch data.
-        self.cache.evict();
-
-        Ok(())
+        let columns = self
+            .group_key
+            .iter()
+            .map(|i| chunk.column_at(*i).clone())
+            .collect_vec();
+        let mut vis = chunk.vis().clone();
+        self.dedup
+            .dedup(
+                chunk.ops(),
+                &columns,
+                vec![&mut vis],
+                &mut self.group_key_table,
+                None,
+            )
+            .await
     }
 
     /// Flush the deduplication table.
     fn flush(&mut self) {
-        // TODO(rc): now we flush the table in `dedup` method.
-        // WARN: if you want to change to batching the write to table. please remember to change
-        // `self.cache.evict()` too.
-        self.cache.evict();
+        self.dedup.flush(&mut self.group_key_table);
     }
 
     /// Consume all group keys under `watermark`.
