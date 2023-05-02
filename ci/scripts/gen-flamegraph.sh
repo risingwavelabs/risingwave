@@ -281,6 +281,10 @@ main() {
   echo "--- Machine Debug Info before Setup"
   print_machine_debug_info
 
+  echo "--- Getting Flamegraph Type (HEAP | CPU)"
+  FL_TYPE="$1"
+  echo "Flamegraph type: $FL_TYPE"
+
   echo "--- Running setup"
   setup
 
