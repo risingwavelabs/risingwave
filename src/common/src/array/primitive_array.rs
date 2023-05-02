@@ -36,6 +36,7 @@ where
     for<'a> Self: Sized
         + Default
         + PartialOrd
+        + EstimateSize
         + Scalar<ScalarRefType<'a> = Self>
         + ScalarRef<'a, ScalarType = Self>,
 {

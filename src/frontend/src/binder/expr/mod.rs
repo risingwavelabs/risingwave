@@ -493,7 +493,9 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(Array {elem: ref expr, ..}) = expr && matches!(&data_type, DataType::List{ .. } ) {
+        if let Expr::Array(Array { elem: ref expr, .. }) = expr
+            && matches!(&data_type, DataType::List { .. })
+        {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr_inner(expr)?;

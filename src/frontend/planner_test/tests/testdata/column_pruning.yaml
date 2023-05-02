@@ -147,12 +147,12 @@
     LogicalProject { exprs: [row_number] }
     └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) AND (row_number <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [row_number] }
     └─LogicalFilter { predicate: (row_number <= 3:Int32) }
-      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC)] }
+      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
         └─LogicalScan { table: t, output_columns: [t.x, t.y], required_columns: [t.x, t.y, t.z], predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
 - name: mixed
   sql: |

@@ -392,9 +392,9 @@ impl IndexSelectionRule {
         let mut result = vec![];
         for expr in conjunctions {
             // it's OR clause!
-            if let ExprImpl::FunctionCall(function_call) = expr &&
-                function_call.get_expr_type() == ExprType::Or {
-
+            if let ExprImpl::FunctionCall(function_call) = expr
+                && function_call.get_expr_type() == ExprType::Or
+            {
                 let mut index_to_be_merged = vec![];
 
                 let disjunctions = to_disjunctions(expr.clone());
@@ -406,10 +406,16 @@ impl IndexSelectionRule {
                 for (column_index, expr) in iter {
                     let mut index_paths = vec![];
                     let conjunctions = to_conjunctions(expr);
-                    index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan).into_iter());
+                    index_paths.extend(
+                        self.gen_index_path(column_index, &conjunctions, logical_scan)
+                            .into_iter(),
+                    );
                     // complex condition, recursively gen paths
                     if conjunctions.len() > 1 {
-                        index_paths.extend(self.gen_paths(&conjunctions, logical_scan, primary_table_row_size).into_iter());
+                        index_paths.extend(
+                            self.gen_paths(&conjunctions, logical_scan, primary_table_row_size)
+                                .into_iter(),
+                        );
                     }
 
                     match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
@@ -417,8 +423,8 @@ impl IndexSelectionRule {
                             // One arm of OR clause can't use index, bail out
                             index_to_be_merged.clear();
                             break;
-                        },
-                        Some((path, _)) => index_to_be_merged.push(path)
+                        }
+                        Some((path, _)) => index_to_be_merged.push(path),
                     }
                 }
 
@@ -812,16 +818,18 @@ impl<'a> TableScanIoEstimator<'a> {
         // Equal
         for (i, expr) in conjunctions.iter().enumerate() {
             if let Some((input_ref, _const_expr)) = expr.as_eq_const()
-                && input_ref.index == column_idx {
-                    conjunctions.remove(i);
-                    return MatchItem::Equal;
+                && input_ref.index == column_idx
+            {
+                conjunctions.remove(i);
+                return MatchItem::Equal;
             }
         }
 
         // In
         for (i, expr) in conjunctions.iter().enumerate() {
             if let Some((input_ref, in_const_list)) = expr.as_in_const_list()
-                && input_ref.index == column_idx {
+                && input_ref.index == column_idx
+            {
                 conjunctions.remove(i);
                 return MatchItem::In(in_const_list.len());
             }
@@ -834,12 +842,13 @@ impl<'a> TableScanIoEstimator<'a> {
         while i < conjunctions.len() {
             let expr = &conjunctions[i];
             if let Some((input_ref, op, _const_expr)) = expr.as_comparison_const()
-                && input_ref.index == column_idx {
+                && input_ref.index == column_idx
+            {
                 conjunctions.remove(i);
                 match op {
                     ExprType::LessThan | ExprType::LessThanOrEqual => right_side_bound = true,
                     ExprType::GreaterThan | ExprType::GreaterThanOrEqual => left_side_bound = true,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
             } else {
                 i += 1;

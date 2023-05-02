@@ -21,7 +21,7 @@ echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
 echo "--- Run clippy check (release)"
-cargo clippy --release  --all-targets --features "static-link static-log-level" --locked -- -D warnings
+cargo clippy --release  --all-targets --features "rw-static-link" --locked -- -D warnings
 
 echo "--- Build documentation"
 cargo doc --document-private-items --no-deps

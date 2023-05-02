@@ -21,7 +21,7 @@ use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::expr::agg_call::PbType;
-use risingwave_pb::expr::PbAggCall;
+use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
 use crate::expr::{build_from_prost, ExpressionRef};
 use crate::Result;
@@ -49,18 +49,7 @@ pub struct AggCall {
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
-        let args = match &agg_call.get_args()[..] {
-            [] => AggArgs::None,
-            [arg] => AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize),
-            [agg_arg, extra_arg] => AggArgs::Binary(
-                [
-                    DataType::from(agg_arg.get_type()?),
-                    DataType::from(extra_arg.get_type()?),
-                ],
-                [agg_arg.get_index() as usize, extra_arg.get_index() as usize],
-            ),
-            _ => bail!("Too many arguments for {:?}", agg_kind),
-        };
+        let args = AggArgs::from_protobuf(agg_call.get_args())?;
         let column_orders = agg_call
             .get_order_by()
             .iter()
@@ -176,6 +165,24 @@ pub enum AggArgs {
     Unary(DataType, usize),
     /// `Binary` is used for function calls that accept 2 arguments, e.g. `string_agg(x, delim)`.
     Binary([DataType; 2], [usize; 2]),
+}
+
+impl AggArgs {
+    pub fn from_protobuf(args: &[PbInputRef]) -> Result<Self> {
+        let args = match args {
+            [] => Self::None,
+            [arg] => Self::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize),
+            [arg1, arg2] => Self::Binary(
+                [
+                    DataType::from(arg1.get_type()?),
+                    DataType::from(arg2.get_type()?),
+                ],
+                [arg1.get_index() as usize, arg2.get_index() as usize],
+            ),
+            _ => bail!("too many arguments for agg call"),
+        };
+        Ok(args)
+    }
 }
 
 impl AggArgs {

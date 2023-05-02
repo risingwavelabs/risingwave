@@ -26,18 +26,22 @@ use super::{MemoryControl, MemoryControlStats};
 /// based on jemalloc statistics.
 #[derive(Debug)]
 pub struct JemallocMemoryControl {
+    threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
 }
 
 impl JemallocMemoryControl {
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const THRESHOLD_GRACEFUL: f64 = 0.7;
+    const THRESHOLD_GRACEFUL: f64 = 0.8;
+    const THRESHOLD_STABLE: f64 = 0.7;
 
     pub fn new(total_memory: usize) -> Self {
+        let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
         Self {
+            threshold_stable,
             threshold_graceful,
             threshold_aggressive,
         }
@@ -65,6 +69,7 @@ impl MemoryControl for JemallocMemoryControl {
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
             jemalloc_allocated_mib,
+            self.threshold_stable,
             self.threshold_graceful,
             self.threshold_aggressive,
             interval_ms,
@@ -110,6 +115,7 @@ fn advance_jemalloc_epoch(
 
 fn calculate_lru_watermark(
     cur_used_memory_bytes: usize,
+    threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
     interval_ms: u32,
@@ -134,9 +140,12 @@ fn calculate_lru_watermark(
     //     last_step.
     //   - Otherwise, we set the step to last_step * 2.
 
-    let mut step = if cur_used_memory_bytes < threshold_graceful {
-        // Do not evict if the memory usage is lower than `threshold_graceful`
+    let mut step = if cur_used_memory_bytes < threshold_stable {
+        // Do not evict if the memory usage is lower than `threshold_stable`
         0
+    } else if cur_used_memory_bytes < threshold_graceful {
+        // Evict in equal speed of time before `threshold_graceful`
+        1
     } else if cur_used_memory_bytes < threshold_aggressive {
         // Gracefully evict
         if last_used_memory_bytes > cur_used_memory_bytes {

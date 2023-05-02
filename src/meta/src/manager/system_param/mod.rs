@@ -147,7 +147,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
 // params are not set. Use init value.
 // 4. None, None: Impossible.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {

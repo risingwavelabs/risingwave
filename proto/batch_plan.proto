@@ -309,6 +309,9 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
+    // The following nodes are used for testing.
+    bool block_executor = 35;
+    bool busy_loop_executor = 36;
   }
   string identity = 24;
 }

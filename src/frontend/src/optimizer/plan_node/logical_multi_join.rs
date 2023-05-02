@@ -583,7 +583,11 @@ impl LogicalMultiJoin {
                 let r_tree = std::mem::take(&mut merge_node.join_tree);
                 let new_height = usize::max(l_tree.height, r_tree.height) + 1;
 
-                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|(t, _)| t.join_tree.height) && min_height < new_height {
+                if let Some(min_height) = optimized_bushy_tree
+                    .as_ref()
+                    .map(|(t, _)| t.join_tree.height)
+                    && min_height < new_height
+                {
                     continue;
                 }
 

@@ -21,10 +21,12 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -43,6 +45,7 @@ use crate::executor::{PkIndices, StreamExecutorResult};
 /// For example, in `string_agg`, several useful columns are picked from input chunks and
 /// stored in the state table when applying chunks, and the aggregation result is calculated
 /// when need to get output.
+#[derive(EstimateSize)]
 pub struct MaterializedInputState<S: StateStore> {
     /// Argument column indices in input chunks.
     arg_col_indices: Vec<usize>,
@@ -60,6 +63,7 @@ pub struct MaterializedInputState<S: StateStore> {
     cache: Box<dyn AggStateCache + Send + Sync>,
 
     /// Serializer for cache key.
+    #[estimate_size(ignore)]
     cache_key_serializer: OrderedRowSerde,
 
     _phantom_data: PhantomData<S>,

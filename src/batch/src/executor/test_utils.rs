@@ -16,6 +16,7 @@ use std::collections::VecDeque;
 use std::future::Future;
 
 use assert_matches::assert_matches;
+use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -29,6 +30,7 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
+use super::{BoxedExecutorBuilder, ExecutorBuilder};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
@@ -337,5 +339,80 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
 
     fn reset(&mut self) {
         self.datums = vec![];
+    }
+}
+
+pub struct BlockExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BlockExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BlockExecutor {}))
+    }
+}
+
+pub struct BlockExecutor {}
+
+impl Executor for BlockExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BlockExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BlockExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to block
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
+}
+
+pub struct BusyLoopExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BusyLoopExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BusyLoopExecutor {}))
+    }
+}
+
+pub struct BusyLoopExecutor {}
+
+impl Executor for BusyLoopExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BusyLoopExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BusyLoopExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to generate data
+        loop {
+            yield DataChunk::new_dummy(1);
+        }
     }
 }

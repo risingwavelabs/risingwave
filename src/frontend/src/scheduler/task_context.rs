@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_batch::monitor::BatchMetricsWithTaskLabels;
-use risingwave_batch::task::{BatchTaskContext, StopFlag, TaskOutput, TaskOutputId};
+use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
@@ -32,16 +32,11 @@ use crate::session::{AuthContext, FrontendEnv};
 pub struct FrontendBatchTaskContext {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
-    stop_flag: Arc<StopFlag>,
 }
 
 impl FrontendBatchTaskContext {
     pub fn new(env: FrontendEnv, auth_context: Arc<AuthContext>) -> Self {
-        Self {
-            env,
-            auth_context,
-            stop_flag: Arc::new(StopFlag::new()),
-        }
+        Self { env, auth_context }
     }
 }
 
@@ -98,13 +93,5 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn create_executor_mem_context(&self, _executor_id: &str) -> Option<MemoryContextRef> {
         None
-    }
-
-    fn get_stop_flag(&self) -> Arc<risingwave_batch::task::StopFlag> {
-        self.stop_flag.clone()
-    }
-
-    fn get_stop_flag_ref(&self) -> &risingwave_batch::task::StopFlag {
-        &self.stop_flag
     }
 }
