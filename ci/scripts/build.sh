@@ -45,7 +45,8 @@ cargo build \
     -p risingwave_java_binding \
     -p risingwave_e2e_extended_mode_test \
     --features "rw-static-link" \
-    --profile "$profile"
+    --profile "$profile" \
+    --timings
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
@@ -55,6 +56,8 @@ ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+
+buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
 echo "--- Show sccache stats"
 sccache --show-stats
