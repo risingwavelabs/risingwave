@@ -280,7 +280,6 @@ run_heap_flamegraph() {
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # TODO(kwannoel): Allow users to configure which query they want to run.
   psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
 
   # NOTE(kwannoel): Can stub first if promql gives us issues.
@@ -336,7 +335,6 @@ run_cpu_flamegraph() {
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # TODO(kwannoel): Allow users to configure which query they want to run.
   psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
 
   echo "--- Start Profiling"
