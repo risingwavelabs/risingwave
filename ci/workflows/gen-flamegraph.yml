@@ -46,7 +46,8 @@ steps:
 
   # Generates cpu flamegraph if label `CPU_FLAMEGRAPH=true` is added to env var.
   - label: "Generate CPU flamegraph"
-    command: "ci/scripts/gen-flamegraph.sh cpu"
+    command: |
+      NEXMARK_QUERIES="$NEXMARK_QUERIES" ci/scripts/gen-flamegraph.sh cpu
     depends_on: "cpu-flamegraph-env-build"
     if: build.env("CPU_FLAMEGRAPH") == "true"
     plugins:
@@ -60,7 +61,6 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-            - NEXMARK_QUERIES
     # TODO(kwannoel): Here are the areas that can be further optimized:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
@@ -69,7 +69,8 @@ steps:
 
   # Generates Heap flamegraph if label `HEAP_FLAMEGRAPH=true` is added to env var.
   - label: "Generate Heap flamegraph"
-    command: "ci/scripts/gen-flamegraph.sh heap"
+    command: |
+      NEXMARK_QUERIES="$NEXMARK_QUERIES" ci/scripts/gen-flamegraph.sh heap
     depends_on: "cpu-flamegraph-env-build"
     if: build.env("HEAP_FLAMEGRAPH") == "true"
     plugins:
@@ -83,5 +84,4 @@ steps:
           mount-buildkite-agent: true
           environment:
             - GITHUB_TOKEN
-            - NEXMARK_QUERIES
     timeout_in_minutes: 360
