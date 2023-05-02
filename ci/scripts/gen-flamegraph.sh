@@ -218,6 +218,7 @@ gen_heap_flamegraph() {
   LATEST_HEAP_PROFILE="$(ls -c | grep "\.heap" | tail -1)"
   if [[ -z "$LATEST_HEAP_PROFILE" ]]; then
     echo "No heap profile generated. Less than 4GB allocated."
+    return 1
   else
     JEPROF=$(find . -name 'jeprof' | head -1)
     chmod +x "$JEPROF"
@@ -225,6 +226,7 @@ gen_heap_flamegraph() {
     $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
     ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
     mv perf.svg ..
+    return 0
   fi
   set -e
   popd
@@ -292,18 +294,21 @@ run_heap_flamegraph() {
   echo "--- Benchmark finished, stopping processes"
   stop_processes
 
-  echo "--- Generate flamegraph"
-  gen_heap_flamegraph
-  mv perf.svg $FLAMEGRAPH_PATH
+  if [[ $(gen_heap_flamegraph) ]]; then
+    echo "--- Generate flamegraph"
+    mv perf.svg "$FLAMEGRAPH_PATH"
 
-  echo "--- Uploading flamegraph"
-  buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+    echo "--- Uploading flamegraph"
+    buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
 
-  echo "--- Cleaning up heap artifacts"
-  pushd risingwave
-  rm *.heap
-  rm heap.collapsed
-  popd
+    echo "--- Cleaning up heap artifacts"
+    pushd risingwave
+    rm *.heap
+    rm heap.collapsed
+    popd
+  else
+    echo "--- No flamegraph for $QUERY"
+  fi
 
   echo "--- Machine Debug Info After running $QUERY"
   print_machine_debug_info
