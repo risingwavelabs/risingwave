@@ -168,7 +168,10 @@ pub trait Array:
         Self: 'a;
 
     /// Owned type of item in array, which is reciprocal to `Self::RefItem`.
-    type OwnedItem: Clone + std::fmt::Debug + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
+    type OwnedItem: Clone
+        + std::fmt::Debug
+        + EstimateSize
+        + for<'a> Scalar<ScalarRefType<'a> = Self::RefItem<'a>>;
 
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;

@@ -422,9 +422,7 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
         Ok(_) => Ok(0),
         Err(e) => {
             // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error()
-                && is_permissible_error(&e.to_string())
-            {
+            if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok(1);
             }

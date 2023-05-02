@@ -441,7 +441,8 @@ fn infer_type_for_special(
                                 let ScalarImpl::Utf8(flag) = flag else {
                                     return Err(ErrorCode::BindError(
                                         "flag in regexp_match must be a literal string".to_string(),
-                                    ).into());
+                                    )
+                                    .into());
                                 };
                                 for c in flag.chars() {
                                     if c == 'g' {
@@ -839,39 +840,46 @@ fn narrow_category<'a>(
     inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     const BIASED_TYPE: DataTypeName = DataTypeName::Varchar;
-    let Ok(categories) = inputs.iter().enumerate().map(|(i, actual)| {
-        // This closure returns
-        // * Err(()) when a category cannot be selected
-        // * Ok(None) when actual argument is non-null and can skip selection
-        // * Ok(Some(t)) when the selected category is `t`
-        //
-        // Here `t` is actually just one type within that selected category, rather than the
-        // category itself. It is selected to be the [`super::least_restrictive`] over all
-        // candidates. This makes sure that `t` is the preferred type if any candidate accept it.
-        if actual.is_some() {
-            return Ok(None);
-        }
-        let mut category = Ok(candidates[0].inputs_type[i]);
-        for sig in &candidates[1..] {
-            let formal = sig.inputs_type[i];
-            if formal == BIASED_TYPE || category == Ok(BIASED_TYPE) {
-                category = Ok(BIASED_TYPE);
-                break;
+    let Ok(categories) = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, actual)| {
+            // This closure returns
+            // * Err(()) when a category cannot be selected
+            // * Ok(None) when actual argument is non-null and can skip selection
+            // * Ok(Some(t)) when the selected category is `t`
+            //
+            // Here `t` is actually just one type within that selected category, rather than the
+            // category itself. It is selected to be the [`super::least_restrictive`] over all
+            // candidates. This makes sure that `t` is the preferred type if any candidate accept
+            // it.
+            if actual.is_some() {
+                return Ok(None);
             }
-            // formal != BIASED_TYPE && category.is_err():
-            // - Category conflict err can only be solved by a later varchar. Skip this candidate.
-            let Ok(selected) = category else { continue };
-            // least_restrictive or mark temporary conflict err
-            if implicit_ok(formal, selected, true) {
-                // noop
-            } else if implicit_ok(selected, formal, false) {
-                category = Ok(formal);
-            } else {
-                category = Err(());
+            let mut category = Ok(candidates[0].inputs_type[i]);
+            for sig in &candidates[1..] {
+                let formal = sig.inputs_type[i];
+                if formal == BIASED_TYPE || category == Ok(BIASED_TYPE) {
+                    category = Ok(BIASED_TYPE);
+                    break;
+                }
+                // formal != BIASED_TYPE && category.is_err():
+                // - Category conflict err can only be solved by a later varchar. Skip this
+                //   candidate.
+                let Ok(selected) = category else { continue };
+                // least_restrictive or mark temporary conflict err
+                if implicit_ok(formal, selected, true) {
+                    // noop
+                } else if implicit_ok(selected, formal, false) {
+                    category = Ok(formal);
+                } else {
+                    category = Err(());
+                }
             }
-        }
-        category.map(Some)
-    }).try_collect::<_, Vec<_>, _>() else {
+            category.map(Some)
+        })
+        .try_collect::<_, Vec<_>, _>()
+    else {
         // First phase failed.
         return candidates;
     };
@@ -924,7 +932,7 @@ fn narrow_same_type<'a>(
         (None, t) => Ok(*t),
         (t, None) => Ok(t),
         (Some(l), Some(r)) if l == *r => Ok(Some(l)),
-        _ => Err(())
+        _ => Err(()),
     }) else {
         return candidates;
     };

@@ -14,7 +14,6 @@
 
 use std::marker::PhantomData;
 use std::mem::swap;
-use std::sync::Arc;
 
 use futures::pin_mut;
 use itertools::Itertools;
@@ -34,13 +33,14 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
+use tokio::sync::watch::Receiver;
 
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, StopFlag};
+use crate::task::{BatchTaskContext, ShutdownMsg};
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -258,7 +258,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: source.plan_node().get_identity().clone(),
-                stop_flag: source.context.get_stop_flag(),
+                shutdown_rx: source.shutdown_rx.clone(),
             }
             .dispatch())
         })
@@ -281,7 +281,7 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    stop_flag: Arc<StopFlag>,
+    shutdown_rx: Receiver<ShutdownMsg>,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -306,7 +306,6 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 chunk_size: self.chunk_size,
                 identity: self.identity,
                 _phantom: PhantomData,
-                stop_flag: self.stop_flag,
             },
         ))
     }

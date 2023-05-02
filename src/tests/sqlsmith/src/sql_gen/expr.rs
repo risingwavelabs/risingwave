@@ -350,9 +350,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .iter()
             .map(|t| {
                 if let Some(from_tys) = IMPLICIT_CAST_TABLE.get(t)
-                        && can_implicit_cast && self.flip_coin() {
+                    && can_implicit_cast
+                    && self.flip_coin()
+                {
                     let from_ty = &from_tys.choose(&mut self.rng).unwrap().from_type;
-                        self.gen_implicit_cast(from_ty, context)
+                    self.gen_implicit_cast(from_ty, context)
                 } else {
                     self.gen_expr(t, context)
                 }

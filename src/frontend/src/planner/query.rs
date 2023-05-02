@@ -56,7 +56,7 @@ impl Planner {
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id"  {
+        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id" {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }

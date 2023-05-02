@@ -51,56 +51,85 @@ impl Rule for PullUpHopRule {
         let mut pull_up_left = false;
         let mut pull_up_right = false;
 
-        let (new_left,
-            left_time_col,
-            left_window_slide,
-            left_window_size,
-            left_window_offset,
-        ) =  if let Some(hop) = left.as_logical_hop_window() && left_input_index_on_condition.iter().all(|&index| hop.output_window_start_col_idx().map_or(true, |v|index!=v) && hop.output_window_end_col_idx().map_or(true, |v|index!=v)) && join_type != JoinType::RightAnti && join_type != JoinType::RightSemi && join_type != JoinType::RightOuter && join_type != JoinType::FullOuter {
-            let (input,
-                time_col,
-                window_slide,
-                window_size,
-                window_offset,
-                _) = hop.clone().into_parts();
+        let (new_left, left_time_col, left_window_slide, left_window_size, left_window_offset) =
+            if let Some(hop) = left.as_logical_hop_window()
+                && left_input_index_on_condition.iter().all(|&index| {
+                    hop.output_window_start_col_idx()
+                        .map_or(true, |v| index != v)
+                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                })
+                && join_type != JoinType::RightAnti
+                && join_type != JoinType::RightSemi
+                && join_type != JoinType::RightOuter
+                && join_type != JoinType::FullOuter
+            {
+                let (input, time_col, window_slide, window_size, window_offset, _) =
+                    hop.clone().into_parts();
 
-            old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type().composite(&hop.o2i_col_mapping()));
-            left_output_pos.iter().for_each(|&pos| {
-                output_index[pos] = hop.output2internal_col_mapping().map(output_index[pos]);
-            });
-            pull_up_left = true;
-            (input,Some(time_col),Some(window_slide),Some(window_size),Some(window_offset))
-        } else {
-            old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type());
+                old_i2new_i = old_i2new_i.union(
+                    &join
+                        .i2l_col_mapping_ignore_join_type()
+                        .composite(&hop.o2i_col_mapping()),
+                );
+                left_output_pos.iter().for_each(|&pos| {
+                    output_index[pos] = hop.output2internal_col_mapping().map(output_index[pos]);
+                });
+                pull_up_left = true;
+                (
+                    input,
+                    Some(time_col),
+                    Some(window_slide),
+                    Some(window_size),
+                    Some(window_offset),
+                )
+            } else {
+                old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type());
 
-            (left,None,None,None,None)
-        };
+                (left, None, None, None, None)
+            };
 
-        let (new_right,
-            right_time_col,
-            right_window_slide,
-            right_window_size,
-            right_window_offset
-        ) = if let Some(hop) = right.as_logical_hop_window() && right_input_index_on_condition.iter().all(|&index| hop.output_window_start_col_idx().map_or(true, |v|index!=v) && hop.output_window_end_col_idx().map_or(true, |v|index!=v)) && join_type != JoinType::LeftAnti && join_type != JoinType::LeftSemi && join_type != JoinType::LeftOuter && join_type != JoinType::FullOuter {
-            let (input,
-                time_col,
-                window_slide,
-                window_size,
-                window_offset,
-                _) = hop.clone().into_parts();
+        let (new_right, right_time_col, right_window_slide, right_window_size, right_window_offset) =
+            if let Some(hop) = right.as_logical_hop_window()
+                && right_input_index_on_condition.iter().all(|&index| {
+                    hop.output_window_start_col_idx()
+                        .map_or(true, |v| index != v)
+                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                })
+                && join_type != JoinType::LeftAnti
+                && join_type != JoinType::LeftSemi
+                && join_type != JoinType::LeftOuter
+                && join_type != JoinType::FullOuter
+            {
+                let (input, time_col, window_slide, window_size, window_offset, _) =
+                    hop.clone().into_parts();
 
-            old_i2new_i = old_i2new_i.union(&join.i2r_col_mapping_ignore_join_type().composite(&hop.o2i_col_mapping()).clone_with_offset(new_left.schema().len()));
+                old_i2new_i = old_i2new_i.union(
+                    &join
+                        .i2r_col_mapping_ignore_join_type()
+                        .composite(&hop.o2i_col_mapping())
+                        .clone_with_offset(new_left.schema().len()),
+                );
 
-            right_output_pos.iter().for_each(|&pos| {
-                output_index[pos] = hop.output2internal_col_mapping().map(output_index[pos]);
-            });
-            pull_up_right = true;
-            (input,Some(time_col),Some(window_slide),Some(window_size),Some(window_offset))
-        } else {
-            old_i2new_i = old_i2new_i.union(&join.i2r_col_mapping_ignore_join_type().clone_with_offset(new_left.schema().len()));
+                right_output_pos.iter().for_each(|&pos| {
+                    output_index[pos] = hop.output2internal_col_mapping().map(output_index[pos]);
+                });
+                pull_up_right = true;
+                (
+                    input,
+                    Some(time_col),
+                    Some(window_slide),
+                    Some(window_size),
+                    Some(window_offset),
+                )
+            } else {
+                old_i2new_i = old_i2new_i.union(
+                    &join
+                        .i2r_col_mapping_ignore_join_type()
+                        .clone_with_offset(new_left.schema().len()),
+                );
 
-            (right,None,None,None,None)
-        };
+                (right, None, None, None, None)
+            };
 
         if !pull_up_left && !pull_up_right {
             return None;

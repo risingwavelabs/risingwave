@@ -264,8 +264,7 @@ impl TopNCacheTrait for TopNCache<false> {
             return;
         }
         let elem_to_compare_with_middle =
-            if let Some(low_last) = self.low.last_entry()
-                && cache_key <= *low_last.key() {
+            if let Some(low_last) = self.low.last_entry() && cache_key <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
                 self.low.insert(cache_key, (&row).into());
@@ -434,7 +433,8 @@ impl TopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,0,0]
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && middle_last.key().0 == middle_last_order_by.clone() {
+                        && middle_last.key().0 == middle_last_order_by.clone()
+                    {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
@@ -591,8 +591,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         }
 
         let elem_to_insert_into_middle =
-            if let Some(low_last) = self.low.last_entry()
-                && &cache_key <= low_last.key() {
+            if let Some(low_last) = self.low.last_entry() && &cache_key <= low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
                 self.low.insert(cache_key, row_ref.into());
@@ -678,11 +677,13 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,0,0]
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && &middle_last.key().0 == middle_last_order_by {
+                        && &middle_last.key().0 == middle_last_order_by
+                    {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
-                        managed_state.delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+                        managed_state
+                            .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
                     }
                 }
 

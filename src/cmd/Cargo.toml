@@ -8,8 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-static-link = ["workspace-config/enable-static-link"]
-static-log-level = ["workspace-config/enable-static-log-level"]
+rw-static-link = ["workspace-config/rw-static-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -38,7 +37,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "tracing",
 ] }
 
-workspace-config = { path = "../utils/workspace-config", optional = true }
+workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
