@@ -67,6 +67,18 @@ install_all() {
   chmod +x jq-linux64
   mv jq-linux64 /usr/local/bin/jq
 
+  # flamegraph.pl used to generate heap flamegraph
+  wget https://github.com/brendangregg/FlameGraph/blob/master/flamegraph.pl
+  chmod +x ./flamegraph.pl
+
+  # faster addr2line to speed up flamegraph analysis by jeprof
+  git clone https://github.com/gimli-rs/addr2line
+  pushd addr2line
+  cargo b --examples -r
+  cp ./target/release/examples/addr2line $(whereis addr2line)
+  popd
+  rm -rf addr2line
+
   echo ">>> Installing PromQL cli client"
   # Download promql
   wget https://github.com/nalbury/promql-cli/releases/download/v0.3.0/promql-v0.3.0-linux-amd64.tar.gz
@@ -196,6 +208,19 @@ gen_cpu_flamegraph() {
   ./nperf flamegraph --merge-threads perf.data > perf.svg
 }
 
+gen_heap_flamegraph() {
+  pushd risingwave
+  echo ">>> Heap files"
+  ls -lac | grep "\.heap"
+  FIRST_HEAP_PROFILE=$(ls -c | grep "\.heap" | head -1)
+  LATEST_HEAP_PROFILE=$(ls -c | grep "\.heap" | tail -1)
+  JEPROF=$(find . -name 'jeprof' | head -1)
+  COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
+  $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
+  ./flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
+  popd
+}
+
 ############## MONITORING
 
 # TODO: promql
@@ -223,7 +248,59 @@ setup() {
 }
 
 # Run benchmark for a query
-run() {
+run_heap_flamegraph() {
+  echo "--- Running benchmark for $QUERY"
+  echo "--- Setting variables"
+  QUERY_LABEL="$1"
+  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+  FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
+  echo "QUERY_LABEL: $QUERY_LABEL"
+  echo "QUERY_FILE_NAME: $QUERY_FILE_NAME"
+  echo "QUERY_PATH: $QUERY_PATH"
+  echo "FLAMEGRAPH_PATH: $FLAMEGRAPH_PATH"
+
+  # NOTE(kwannoel): This step should output profile result on every 4GB memory allocation.
+  # No need for an extra profiling step.
+  echo "--- Starting up RW"
+  pushd risingwave
+  RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d ci-gen-cpu-flamegraph
+  popd
+
+  echo "--- Machine Debug Info After RW Start"
+  print_machine_debug_info
+
+  echo "--- Running ddl"
+  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
+
+  echo "--- Running Benchmarks"
+  # TODO(kwannoel): Allow users to configure which query they want to run.
+  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
+
+  # NOTE(kwannoel): Can stub first if promql gives us issues.
+  # Most nexmark queries (q4-q20) will have a runtime of 10+ min.
+  # We can just let flamegraph profile 5min slice.
+  # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
+  echo "--- Monitoring Benchmark for 5 minutes"
+  monitor
+
+  echo "--- Benchmark finished, stopping processes"
+  stop_processes
+
+  echo "--- Generate flamegraph"
+  gen_cpu_flamegraph
+  mv perf.svg $FLAMEGRAPH_PATH
+
+  echo "--- Uploading flamegraph"
+  buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+
+  echo "--- Machine Debug Info After running $QUERY"
+  print_machine_debug_info
+
+}
+
+# Run benchmark for a query
+run_cpu_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
@@ -264,7 +341,7 @@ run() {
   stop_processes
 
   echo "--- Generate flamegraph"
-  gen_cpu_flamegraph
+  gen_heap_flamegraph
   mv perf.svg $FLAMEGRAPH_PATH
 
   echo "--- Uploading flamegraph"
@@ -306,7 +383,14 @@ main() {
 
   for QUERY in $NEXMARK_QUERIES
   do
-    run "$QUERY"
+    if [[ $FL_TYPE == "cpu" ]]; then
+      run_cpu_flamegraph "$QUERY"
+    elif [[ $FL_TYPE == "heap" ]]; then
+      run_heap_flamegraph "$QUERY"
+    else
+      echo "ERROR, Invalid flamegraph type: $FL_TYPE, it should be (cpu|heap)"
+      exit 1
+    fi
   done
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
