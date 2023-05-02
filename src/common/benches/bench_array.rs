@@ -13,10 +13,7 @@
 // limitations under the License.
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
-use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
-use risingwave_common::test_utils::rand_chunk;
+use risingwave_common::array::ArrayBuilderImpl;
 use risingwave_common::types::{DataType, Datum};
 
 pub fn bench_bigint(c: &mut Criterion) {
@@ -27,7 +24,8 @@ pub fn bench_bigint(c: &mut Criterion) {
                 for _i in 0..black_box(100) {
                     let datum: i64 = black_box(3);
                     let datum: Datum = Some(datum.into());
-                    black_box(builder.append_datum_n(10, datum));
+                    builder.append_datum_n(10, datum);
+                    black_box(());
                 }
             },
             BatchSize::SmallInput,
