@@ -75,7 +75,7 @@ install_all() {
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
   cargo b --examples -r
-  cp ./target/release/examples/addr2line $(whereis addr2line)
+  mv ./target/release/examples/addr2line $(which addr2line)
   popd
   rm -rf addr2line
 
