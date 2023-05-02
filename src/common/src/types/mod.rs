@@ -42,7 +42,7 @@ mod successor;
 use std::fmt::Debug;
 use std::str::{FromStr, Utf8Error};
 
-pub mod chrono_wrapper;
+pub mod datetime;
 pub mod decimal;
 pub mod interval;
 pub mod jsonb;
@@ -58,7 +58,7 @@ use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
-pub use self::chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
+pub use self::datetime::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use self::decimal::Decimal;
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};

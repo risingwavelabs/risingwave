@@ -113,7 +113,7 @@ mod tests {
 
     use super::*;
     use crate::types::ScalarImpl::*;
-    use crate::types::{chrono_wrapper, interval};
+    use crate::types::{datetime, interval};
 
     #[test]
     fn test_ordered_row_serializer() {
@@ -301,7 +301,7 @@ mod tests {
                     &row_bytes[..],
                 )
                 .unwrap();
-                let data_size = size_of::<chrono_wrapper::Timestamp>();
+                let data_size = size_of::<datetime::Timestamp>();
                 assert_eq!(12, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
             }
