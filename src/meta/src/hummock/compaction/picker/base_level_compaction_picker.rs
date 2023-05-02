@@ -118,8 +118,7 @@ impl LevelCompactionPicker {
         // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
         let max_depth = std::cmp::max(
             (self.config.max_compaction_bytes as f64
-                / self.config.sub_level_max_compaction_bytes as f64
-                * 1.5) as usize,
+                / self.config.sub_level_max_compaction_bytes as f64) as usize,
             self.config.level0_sub_level_compact_level_count as usize + 1,
         );
 

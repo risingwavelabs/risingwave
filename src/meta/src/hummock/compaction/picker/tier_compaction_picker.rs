@@ -72,8 +72,7 @@ impl TierCompactionPicker {
             // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
             let max_depth = std::cmp::max(
                 (self.config.max_compaction_bytes as f64
-                    / self.config.sub_level_max_compaction_bytes as f64
-                    * 1.5) as usize,
+                    / self.config.sub_level_max_compaction_bytes as f64) as usize,
                 tier_sub_level_compact_level_count + 1,
             );
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
@@ -363,7 +362,7 @@ impl TierCompactionPicker {
             let max_compaction_bytes = std::cmp::min(
                 self.config.max_compaction_bytes,
                 self.config.sub_level_max_compaction_bytes
-                    * self.config.level0_sub_level_compact_level_count as u64,
+                    * self.config.level0_overlapping_sub_level_compact_level_count as u64,
             );
 
             let mut compaction_bytes = level.total_file_size;
@@ -408,7 +407,7 @@ impl TierCompactionPicker {
             // If waiting_enough_files is not satisfied, we will raise the priority of the number of
             // levels to ensure that we can merge as many sub_levels as possible
             let tier_sub_level_compact_level_count =
-                (self.config.level0_sub_level_compact_level_count * 2) as usize;
+                self.config.level0_overlapping_sub_level_compact_level_count as usize;
             if select_level_inputs.len() < tier_sub_level_compact_level_count
                 && waiting_enough_files
             {
@@ -504,6 +503,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .target_file_size_base(30)
                 .level0_sub_level_compact_level_count(2)
+                .level0_overlapping_sub_level_compact_level_count(4)
                 .build(),
         );
         let mut picker =
@@ -531,6 +531,8 @@ pub mod tests {
                 generate_table(2, 1, 150, 250, 1),
             ],
             vec![generate_table(3, 1, 10, 90, 1)],
+            vec![generate_table(4, 1, 10, 90, 1)],
+            vec![generate_table(5, 1, 10, 90, 1)],
         ]);
         let mut levels = Levels {
             l0: Some(l0),
@@ -579,6 +581,10 @@ pub mod tests {
                 generate_table(4, 1, 100, 200, 1),
                 generate_table(5, 1, 50, 150, 1),
             ],
+            vec![
+                generate_table(6, 1, 100, 200, 1),
+                generate_table(7, 1, 50, 150, 1),
+            ],
         ]);
         let levels = Levels {
             l0: Some(l0),
@@ -590,6 +596,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
                 .level0_sub_level_compact_level_count(2)
+                .level0_overlapping_sub_level_compact_level_count(4)
                 .build(),
         );
         let mut picker =
@@ -598,13 +605,13 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels.len(), 3);
+        assert_eq!(ret.input_levels.len(), 4);
         assert_eq!(
             ret.input_levels
                 .iter()
                 .map(|i| i.table_infos.len())
                 .sum::<usize>(),
-            5
+            7
         );
 
         let empty_level = Levels {
@@ -645,6 +652,7 @@ pub mod tests {
             let config = Arc::new(
                 CompactionConfigBuilder::new()
                     .level0_sub_level_compact_level_count(1)
+                    .level0_overlapping_sub_level_compact_level_count(4)
                     .build(),
             );
             let mut picker =
@@ -807,6 +815,8 @@ pub mod tests {
             ],
             vec![generate_table(6, 1, 1, 100, 1)],
             vec![generate_table(7, 1, 1, 100, 1)],
+            vec![generate_table(8, 1, 1, 100, 1)],
+            vec![generate_table(9, 1, 1, 100, 1)],
         ]);
 
         let mut levels = Levels {
@@ -819,9 +829,10 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .level0_tier_compact_file_number(2)
-                .sub_level_max_compaction_bytes(100)
+                .sub_level_max_compaction_bytes(500)
                 .max_compaction_bytes(500000)
                 .level0_sub_level_compact_level_count(2)
+                .level0_overlapping_sub_level_compact_level_count(4)
                 .build(),
         );
 
@@ -833,7 +844,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels.len(), 2);
+        assert_eq!(ret.input_levels.len(), 4);
         assert_eq!(ret.target_level, 0);
         assert_eq!(ret.target_sub_level_id, 1);
     }
