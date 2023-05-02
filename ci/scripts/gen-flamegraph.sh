@@ -294,7 +294,7 @@ run_heap_flamegraph() {
   echo "--- Benchmark finished, stopping processes"
   stop_processes
 
-  if [[ $(gen_heap_flamegraph) ]]; then
+  if gen_heap_flamegraph; then
     echo "--- Generate flamegraph"
     mv perf.svg "$FLAMEGRAPH_PATH"
 
