@@ -288,7 +288,7 @@ run_heap_flamegraph() {
   stop_processes
 
   echo "--- Generate flamegraph"
-  gen_cpu_flamegraph
+  gen_heap_flamegraph
   mv perf.svg $FLAMEGRAPH_PATH
 
   echo "--- Uploading flamegraph"
