@@ -40,23 +40,22 @@ use crate::util::value_encoding::{
 /// [`DataChunk`] is a collection of Columns,
 /// a with visibility mask for each row.
 /// For instance, we could have a [`DataChunk`] of this format.
-/// ```text
+///
 /// | v1 | v2 | v3 |
 /// |----|----|----|
 /// | 1  | a  | t  |
 /// | 2  | b  | f  |
 /// | 3  | c  | t  |
 /// | 4  | d  | f  |
-/// ```
+///
 /// Our columns are v1, v2, v3.
 /// Then, if the Visibility Mask hides rows 2 and 4,
 /// We will only have these rows visible:
-/// ```text
+///
 /// | v1 | v2 | v3 |
 /// |----|----|----|
 /// | 1  | a  | t  |
 /// | 3  | c  | t  |
-/// ```
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {

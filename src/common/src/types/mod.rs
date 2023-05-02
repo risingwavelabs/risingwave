@@ -59,6 +59,7 @@ mod successor;
 mod to_binary;
 mod to_text;
 
+// export data types
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::Decimal;
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
@@ -70,6 +71,7 @@ pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
+// export traits
 pub use self::successor::Successor;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
