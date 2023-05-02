@@ -112,17 +112,16 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::types::ScalarImpl::*;
-    use crate::types::{datetime, interval};
+    use crate::types::{ScalarImpl as S, Timestamp};
 
     #[test]
     fn test_ordered_row_serializer() {
         let orders = vec![OrderType::descending(), OrderType::ascending()];
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let serializer = OrderedRowSerde::new(data_types, orders);
-        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let row2 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
-        let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
+        let row1 = OwnedRow::new(vec![Some(S::Int16(5)), Some(S::Utf8("abc".into()))]);
+        let row2 = OwnedRow::new(vec![Some(S::Int16(5)), Some(S::Utf8("abd".into()))]);
+        let row3 = OwnedRow::new(vec![Some(S::Int16(6)), Some(S::Utf8("abc".into()))]);
         let rows = vec![row1, row2, row3];
         let mut array = vec![];
         for row in &rows {
@@ -139,7 +138,6 @@ mod tests {
 
     #[test]
     fn test_ordered_row_deserializer() {
-        pub use crate::types::decimal::Decimal;
         use crate::types::*;
         {
             // basic
@@ -147,9 +145,9 @@ mod tests {
 
             let schema = vec![DataType::Varchar, DataType::Int16];
             let serde = OrderedRowSerde::new(schema, order_types);
-            let row1 = OwnedRow::new(vec![Some(Utf8("abc".into())), Some(Int16(5))]);
-            let row2 = OwnedRow::new(vec![Some(Utf8("abd".into())), Some(Int16(5))]);
-            let row3 = OwnedRow::new(vec![Some(Utf8("abc".into())), Some(Int16(6))]);
+            let row1 = OwnedRow::new(vec![Some(S::Utf8("abc".into())), Some(S::Int16(5))]);
+            let row2 = OwnedRow::new(vec![Some(S::Utf8("abd".into())), Some(S::Int16(5))]);
+            let row3 = OwnedRow::new(vec![Some(S::Utf8("abc".into())), Some(S::Int16(6))]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
             let mut array = vec![];
             for row in &rows {
@@ -169,14 +167,17 @@ mod tests {
 
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
-            let row1 = OwnedRow::new(vec![Some(Utf8("abc".into())), Some(Decimal(Decimal::NaN))]);
+            let row1 = OwnedRow::new(vec![
+                Some(S::Utf8("abc".into())),
+                Some(S::Decimal(Decimal::NaN)),
+            ]);
             let row2 = OwnedRow::new(vec![
-                Some(Utf8("abd".into())),
-                Some(Decimal(Decimal::PositiveInf)),
+                Some(S::Utf8("abd".into())),
+                Some(S::Decimal(Decimal::PositiveInf)),
             ]);
             let row3 = OwnedRow::new(vec![
-                Some(Utf8("abc".into())),
-                Some(Decimal(Decimal::NegativeInf)),
+                Some(S::Utf8("abc".into())),
+                Some(S::Decimal(Decimal::NegativeInf)),
             ]);
             let rows = vec![row1.clone(), row2.clone(), row3.clone()];
             let mut array = vec![];
@@ -197,7 +198,7 @@ mod tests {
 
         let schema = vec![DataType::Varchar, DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
-        let row1 = OwnedRow::new(vec![Some(Utf8("abc".into())), Some(Int16(5))]);
+        let row1 = OwnedRow::new(vec![Some(S::Utf8("abc".into())), Some(S::Int16(5))]);
         let rows = vec![row1.clone()];
         let mut array = vec![];
         for row in &rows {
@@ -215,7 +216,7 @@ mod tests {
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
                 deserde.deserialize(prefix_slice).unwrap(),
-                OwnedRow::new(vec![Some(Utf8("abc".into()))])
+                OwnedRow::new(vec![Some(S::Utf8("abc".into()))])
             );
         }
 
@@ -259,7 +260,7 @@ mod tests {
 
             {
                 // float64
-                let row = OwnedRow::new(vec![Some(Float64(6.4.into()))]);
+                let row = OwnedRow::new(vec![Some(S::Float64(6.4.into()))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -275,7 +276,7 @@ mod tests {
 
             {
                 // bool
-                let row = OwnedRow::new(vec![Some(Bool(false))]);
+                let row = OwnedRow::new(vec![Some(S::Bool(false))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -292,7 +293,7 @@ mod tests {
 
             {
                 // ts
-                let row = OwnedRow::new(vec![Some(Timestamp(Default::default()))]);
+                let row = OwnedRow::new(vec![Some(S::Timestamp(Default::default()))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -301,14 +302,14 @@ mod tests {
                     &row_bytes[..],
                 )
                 .unwrap();
-                let data_size = size_of::<datetime::Timestamp>();
+                let data_size = size_of::<Timestamp>();
                 assert_eq!(12, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
             }
 
             {
                 // tz
-                let row = OwnedRow::new(vec![Some(Int64(1111111111))]);
+                let row = OwnedRow::new(vec![Some(S::Int64(1111111111))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -324,7 +325,7 @@ mod tests {
 
             {
                 // interval
-                let row = OwnedRow::new(vec![Some(Interval(interval::Interval::default()))]);
+                let row = OwnedRow::new(vec![Some(S::Interval(Interval::default()))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -343,11 +344,11 @@ mod tests {
             // test dynamic_size
             {
                 // test decimal
-                pub use crate::types::decimal::Decimal;
+                pub use crate::types::Decimal;
 
                 {
                     let d = Decimal::from_str("41721.900909090909090909090909").unwrap();
-                    let row = OwnedRow::new(vec![Some(Decimal(d))]);
+                    let row = OwnedRow::new(vec![Some(S::Decimal(d))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -362,7 +363,7 @@ mod tests {
 
                 {
                     let d = Decimal::from_str("1").unwrap();
-                    let row = OwnedRow::new(vec![Some(Decimal(d))]);
+                    let row = OwnedRow::new(vec![Some(S::Decimal(d))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -377,7 +378,7 @@ mod tests {
 
                 {
                     let d = Decimal::from_str("inf").unwrap();
-                    let row = OwnedRow::new(vec![Some(Decimal(d))]);
+                    let row = OwnedRow::new(vec![Some(S::Decimal(d))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -392,7 +393,7 @@ mod tests {
 
                 {
                     let d = Decimal::from_str("nan").unwrap();
-                    let row = OwnedRow::new(vec![Some(Decimal(d))]);
+                    let row = OwnedRow::new(vec![Some(S::Decimal(d))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -411,7 +412,7 @@ mod tests {
                 {
                     // test varchar
                     let varchar = "abcdefghijklmn";
-                    let row = OwnedRow::new(vec![Some(Utf8(varchar.into()))]);
+                    let row = OwnedRow::new(vec![Some(S::Utf8(varchar.into()))]);
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let encoding_data_size = memcmp_encoding::calculate_encoded_size(
@@ -432,7 +433,7 @@ mod tests {
                         let schema = vec![DataType::Varchar];
                         let serde = OrderedRowSerde::new(schema, order_types.clone());
                         let varchar = "abcdefghijklmnopq";
-                        let row = OwnedRow::new(vec![Some(Utf8(varchar.into()))]);
+                        let row = OwnedRow::new(vec![Some(S::Utf8(varchar.into()))]);
                         let mut row_bytes = vec![];
                         serde.serialize(&row, &mut row_bytes);
                         let encoding_data_size = memcmp_encoding::calculate_encoded_size(
