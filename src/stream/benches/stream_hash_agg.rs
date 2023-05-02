@@ -180,7 +180,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         num_of_chunks,
         chunk_size,
         &input_data_types,
-        &VarcharProperty::RandomFixedLength(None),
+        &VarcharProperty::Constant,
     );
 
     // ---- Create MockSourceExecutor ----

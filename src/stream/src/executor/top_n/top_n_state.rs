@@ -221,7 +221,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?, group_key.len());
-            topn_cache.high.insert(topn_row.cache_key, (&topn_row.row).into());
+            topn_cache
+                .high
+                .insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();

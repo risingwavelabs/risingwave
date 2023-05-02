@@ -550,7 +550,8 @@ impl ExprImpl {
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.get_expr_type() == ExprType::Equal
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {
                 Some((*x, *y))
@@ -565,7 +566,8 @@ impl ExprImpl {
     pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
             && function_call.get_expr_type() == ExprType::IsNotDistinctFrom
-            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) = function_call.clone().decompose_as_binary()
+            && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                function_call.clone().decompose_as_binary()
         {
             if x.index() < y.index() {
                 Some((*x, *y))
@@ -740,8 +742,9 @@ impl ExprImpl {
     }
 
     pub fn as_eq_const(&self) -> Option<(InputRef, ExprImpl)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-        function_call.get_expr_type() == ExprType::Equal{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::Equal
+        {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
                 (_, x, ExprImpl::InputRef(y)) if x.is_const() => Some((*y, x)),
@@ -753,8 +756,9 @@ impl ExprImpl {
     }
 
     pub fn as_eq_correlated_input_ref(&self) -> Option<(InputRef, CorrelatedInputRef)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::Equal{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::Equal
+        {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), ExprImpl::CorrelatedInputRef(y)) => Some((*x, *y)),
                 (_, ExprImpl::CorrelatedInputRef(x), ExprImpl::InputRef(y)) => Some((*y, *x)),
@@ -766,8 +770,9 @@ impl ExprImpl {
     }
 
     pub fn as_is_null(&self) -> Option<InputRef> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::IsNull{
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::IsNull
+        {
             match function_call.clone().decompose_as_unary() {
                 (_, ExprImpl::InputRef(x)) => Some(*x),
                 _ => None,
@@ -811,28 +816,32 @@ impl ExprImpl {
     }
 
     pub fn as_in_const_list(&self) -> Option<(InputRef, Vec<ExprImpl>)> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-        function_call.get_expr_type() == ExprType::In {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::In
+        {
             let mut inputs = function_call.inputs().iter().cloned();
-            let input_ref= match inputs.next().unwrap() {
+            let input_ref = match inputs.next().unwrap() {
                 ExprImpl::InputRef(i) => *i,
-                _ => { return None }
+                _ => return None,
             };
-            let list: Vec<_> = inputs.map(|expr|{
-                // Non constant IN will be bound to OR
-                assert!(expr.is_const());
-                expr
-            }).collect();
+            let list: Vec<_> = inputs
+                .map(|expr| {
+                    // Non constant IN will be bound to OR
+                    assert!(expr.is_const());
+                    expr
+                })
+                .collect();
 
-           Some((input_ref, list))
+            Some((input_ref, list))
         } else {
             None
         }
     }
 
     pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
-        if let ExprImpl::FunctionCall(function_call) = self &&
-            function_call.get_expr_type() == ExprType::Or {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.get_expr_type() == ExprType::Or
+        {
             Some(to_disjunctions(self.clone()))
         } else {
             None
