@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Data types in RisingWave.
+
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
@@ -80,8 +82,9 @@ use crate::error::Result as RwResult;
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
-/// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
-/// but without data fields.
+/// The set of datatypes that are supported in RisingWave.
+// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
+// but without data fields.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]

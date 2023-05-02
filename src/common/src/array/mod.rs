@@ -48,7 +48,6 @@ pub use bytes_array::*;
 pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
 };
-pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
