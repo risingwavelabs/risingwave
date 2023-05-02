@@ -149,6 +149,9 @@ where
         if worker.worker_node.state == State::Running as i32 {
             return Ok(());
         }
+        if worker.worker_node.state == State::Deleting as i32 {
+            // TODO: return some error here
+        }
         worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
 
@@ -434,6 +437,7 @@ impl ClusterManagerCore {
             .for_each(|parallel_unit| {
                 self.parallel_units.retain(|p| p.id != parallel_unit.id);
             });
+        // TODO: Do I persist this in the meta store?
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
     }
 
@@ -661,6 +665,7 @@ mod tests {
 
 // TODO: Right now we are cleaning up each worker one by one. Do we want this or do we want a
 // garbage collector instead that just iterates over all workers?
+// TODO: what do we do during meta node failover? This should also start on the new leader node
 async fn delete_worker_node_cleanup(
     shared_core: Arc<RwLock<ClusterManagerCore>>,
     node_id: u32,
