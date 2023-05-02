@@ -212,9 +212,9 @@ gen_cpu_flamegraph() {
 
 gen_heap_flamegraph() {
   pushd risingwave
+  set +e
   echo ">>> Heap files"
   ls -lac | grep "\.heap"
-  set +e
   LATEST_HEAP_PROFILE="$(ls -c | grep "\.heap" | tail -1)"
   if [[ -z "$LATEST_HEAP_PROFILE" ]]; then
     echo "No heap profile generated. Less than 4GB allocated."
