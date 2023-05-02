@@ -232,9 +232,6 @@ monitor() {
 }
 
 stop_processes() {
-  # stop profiler
-  pkill nperf
-
   # stop rw
   pushd risingwave
   ./risedev k
@@ -341,6 +338,8 @@ run_cpu_flamegraph() {
   monitor
 
   echo "--- Benchmark finished, stopping processes"
+  # stop profiler
+  pkill nperf
   stop_processes
 
   echo "--- Generate flamegraph"
