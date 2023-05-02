@@ -35,31 +35,33 @@ use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 use strum_macros::EnumDiscriminants;
 
-use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
-use crate::error::{BoxedError, ErrorCode};
+use crate::array::{
+    ArrayBuilderImpl, ArrayError, ArrayResult, ListRef, ListValue, PrimitiveArrayItemType,
+    StructRef, StructValue, NULL_VAL_FOR_HASH,
+};
+use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
+mod datetime;
+mod decimal;
+mod interval;
+mod jsonb;
 mod native_type;
+mod num256;
 mod ops;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
-mod successor;
-
-mod datetime;
-mod decimal;
-pub mod interval;
-mod jsonb;
-mod num256;
 mod serial;
 mod struct_type;
+mod successor;
 mod to_binary;
 mod to_text;
 
 pub use self::datetime::{Date, Time, Timestamp};
 pub use self::decimal::Decimal;
-pub use self::interval::{DateTimeField, Interval, IntervalDisplay};
+pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
@@ -68,13 +70,9 @@ pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
 pub use self::struct_type::StructType;
-pub use self::successor::*;
+pub use self::successor::Successor;
 pub use self::to_binary::ToBinary;
 pub use self::to_text::ToText;
-use crate::array::{
-    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
-};
-use crate::error::Result as RwResult;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;

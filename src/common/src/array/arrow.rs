@@ -652,7 +652,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::interval::test_utils::IntervalTestExt;
+    use crate::types::test_utils::IntervalTestExt;
     use crate::{array, empty_array};
 
     #[test]

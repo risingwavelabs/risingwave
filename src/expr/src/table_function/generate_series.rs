@@ -179,7 +179,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::interval::test_utils::IntervalTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamp};
 
     use super::*;

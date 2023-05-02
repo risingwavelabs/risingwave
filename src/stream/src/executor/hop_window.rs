@@ -199,7 +199,7 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::interval::test_utils::IntervalTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Interval};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 

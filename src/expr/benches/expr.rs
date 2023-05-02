@@ -24,7 +24,7 @@ use std::cell::RefCell;
 use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
-use risingwave_common::types::interval::test_utils::IntervalTestExt;
+use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::*;
 use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
 use risingwave_expr::expr::*;

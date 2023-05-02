@@ -108,7 +108,7 @@ pub fn tumble_start_offset_timestamptz(
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Timelike};
-    use risingwave_common::types::interval::test_utils::IntervalTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{Date, Interval};
 
     use super::tumble_start_offset_date_time;
