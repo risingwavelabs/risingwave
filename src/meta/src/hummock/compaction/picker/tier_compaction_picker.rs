@@ -68,7 +68,7 @@ impl TierCompactionPicker {
             );
 
             let tier_sub_level_compact_level_count =
-                (self.config.level0_sub_level_compact_level_count * 2) as usize;
+                self.config.level0_sub_level_compact_level_count as usize;
             // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
             let max_depth = std::cmp::max(
                 (self.config.max_compaction_bytes as f64
@@ -94,11 +94,8 @@ impl TierCompactionPicker {
 
             let mut skip_by_write_amp = false;
             let mut level_select_tables: Vec<Vec<SstableInfo>> = vec![];
-            // Limit the number of selection levels for the tier_compaction sub_level
-            // 1. at least level0_sub_level_compact_level_count
-            // 2. When write_amp is too large, select at least 2 *
-            // level0_sub_level_compact_level_count to reduce sub_level by compact_task as much as
-            // possible
+            // Limit the number of selection levels for the non-overlapping
+            // sub_level at least level0_sub_level_compact_level_count
             for (plan_index, (compaction_bytes, all_file_count, level_select_sst)) in
                 l0_select_tables_vec.into_iter().enumerate()
             {
@@ -129,7 +126,7 @@ impl TierCompactionPicker {
                         >= compaction_bytes;
 
                 if is_write_amp_large
-                    && level_select_sst.len() < tier_sub_level_compact_level_count as usize
+                    && level_select_sst.len() < tier_sub_level_compact_level_count
                     && all_file_count < self.config.level0_max_compact_file_number as usize
                 {
                     skip_by_write_amp = true;
@@ -410,7 +407,9 @@ impl TierCompactionPicker {
 
             // If waiting_enough_files is not satisfied, we will raise the priority of the number of
             // levels to ensure that we can merge as many sub_levels as possible
-            if select_level_inputs.len() < self.config.level0_sub_level_compact_level_count as usize
+            let tier_sub_level_compact_level_count =
+                (self.config.level0_sub_level_compact_level_count * 2) as usize;
+            if select_level_inputs.len() < tier_sub_level_compact_level_count
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
