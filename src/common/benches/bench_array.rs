@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion, BatchSize, black_box};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
@@ -29,9 +29,8 @@ pub fn bench_bigint(c: &mut Criterion) {
                     let datum: Datum = Some(datum.into());
                     black_box(builder.append_datum_n(10, datum));
                 }
-                // black_box(builder.finish())
             },
-            BatchSize::SmallInput
+            BatchSize::SmallInput,
         )
     });
 }
