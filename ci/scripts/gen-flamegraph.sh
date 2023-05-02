@@ -400,4 +400,4 @@ main() {
   #  popd
 }
 
-main
+main "$@"

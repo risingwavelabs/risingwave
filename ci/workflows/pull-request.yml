@@ -316,7 +316,7 @@ steps:
   - label: "flamegraph-env-build"
     key: "flamegraph-env-build"
     command: "ci/scripts/flamegraph-env-build.sh"
-    if: build.pull_request.labels includes "cpu_flamegraph"
+    if: build.pull_request.labels includes "cpu_flamegraph" || build.pull_request.labels includes "heap_flamegraph"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
