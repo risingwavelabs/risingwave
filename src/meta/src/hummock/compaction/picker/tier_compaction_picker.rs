@@ -621,7 +621,10 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 1),
                     generate_table(2, 1, 250, 300, 1),
                 ],
-                vec![generate_table(3, 1, 10, 90, 1)],
+                vec![
+                    generate_table(3, 1, 10, 90, 1),
+                    generate_table(6, 1, 100, 110, 1),
+                ],
                 vec![
                     generate_table(4, 1, 50, 99, 1),
                     generate_table(5, 1, 100, 200, 1),
@@ -663,7 +666,10 @@ pub mod tests {
                     generate_table(1, 1, 100, 200, 1),
                     generate_table(2, 1, 300, 400, 1),
                 ],
-                vec![generate_table(3, 1, 100, 200, 1)],
+                vec![
+                    generate_table(3, 1, 100, 200, 1),
+                    generate_table(6, 1, 300, 500, 1),
+                ],
                 vec![
                     generate_table(4, 1, 100, 200, 1),
                     generate_table(5, 1, 300, 400, 1),
@@ -700,7 +706,7 @@ pub mod tests {
             assert_eq!(3, ret.input_levels[1].table_infos[0].get_sst_id());
             assert_eq!(1, ret.input_levels[2].table_infos[0].get_sst_id());
 
-            // will pick sst [2, 5]
+            // will pick sst [2, 6, 5]
             let ret2 = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
                 .unwrap();
@@ -710,11 +716,12 @@ pub mod tests {
                     .iter()
                     .map(|i| i.table_infos.len())
                     .sum::<usize>(),
-                2
+                3
             );
 
             assert_eq!(5, ret2.input_levels[0].table_infos[0].get_sst_id());
-            assert_eq!(2, ret2.input_levels[1].table_infos[0].get_sst_id());
+            assert_eq!(6, ret2.input_levels[1].table_infos[0].get_sst_id());
+            assert_eq!(2, ret2.input_levels[2].table_infos[0].get_sst_id());
         }
 
         {
