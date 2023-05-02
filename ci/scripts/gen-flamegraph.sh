@@ -10,6 +10,7 @@ QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 # Perhaps we should have a new docker container just for benchmarking?
 pushd ..
 
+############## JOB METADATA
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
@@ -40,12 +41,6 @@ parse_labels() {
   | xargs echo -n
 }
 
-install_aws_cli() {
-  echo ">>> Install aws cli"
-  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
-}
-
 ############## DEBUG INFO
 
 print_machine_debug_info() {
@@ -56,6 +51,13 @@ print_machine_debug_info() {
 }
 
 ############## INSTALL
+
+# NOTE(kwannoel): Unused for now, maybe used if we use s3 as storage backend.
+install_aws_cli() {
+  echo ">>> Install aws cli"
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+}
 
 # NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
