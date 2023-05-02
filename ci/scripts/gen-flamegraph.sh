@@ -295,6 +295,12 @@ run_heap_flamegraph() {
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
 
+  echo "--- Cleaning up heap artifacts"
+  pushd risingwave
+  rm *.heap
+  rm heap.collapsed
+  popd
+
   echo "--- Machine Debug Info After running $QUERY"
   print_machine_debug_info
 
@@ -344,17 +350,11 @@ run_cpu_flamegraph() {
   stop_processes
 
   echo "--- Generate flamegraph"
-  gen_heap_flamegraph
+  gen_cpu_flamegraph
   mv perf.svg $FLAMEGRAPH_PATH
 
   echo "--- Uploading flamegraph"
   buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
-
-  echo "--- Cleaning up heap artifacts"
-  pushd risingwave
-  rm *.heap
-  rm heap.collapsed
-  popd
 
   echo "--- Machine Debug Info After running $QUERY"
   print_machine_debug_info
