@@ -571,6 +571,22 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
+    /// Gets all functions with the given name.
+    pub fn get_functions_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+    ) -> CatalogResult<(Vec<&Arc<FunctionCatalog>>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_functions_by_name(function_name))
+            })?
+            .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
+    }
+
     /// Check if the name duplicates with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,

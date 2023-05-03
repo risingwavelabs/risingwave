@@ -165,20 +165,18 @@ drop materialized view mv;
 statement ok
 drop table t;
 
-# TODO: drop function without arguments
-
-# # Drop a function but ambiguous.
-# statement error is not unique
-# drop function gcd;
-
 # Drop a function
 statement ok
 drop function int_42();
 
-# Drop a function
+# Drop a function without arguments, but the function name is not unique.
+statement error is not unique
+drop function gcd;
+
+# Drop a function with arguments.
 statement ok
 drop function gcd(int, int);
 
-# Drop a function
+# Drop a function without arguments. Now the function name is unique.
 statement ok
-drop function gcd(int, int, int);
+drop function gcd;
