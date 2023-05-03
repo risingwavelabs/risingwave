@@ -52,10 +52,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::array::serial_array::Serial;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::num256::Int256;
-use risingwave_common::types::{DataType, Date, Decimal, Interval, Time, Timestamp};
+use risingwave_common::types::{
+    DataType, Date, Decimal, Int256, Interval, Serial, Time, Timestamp,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 

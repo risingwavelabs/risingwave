@@ -15,8 +15,7 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 

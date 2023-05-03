@@ -21,6 +21,7 @@ use std::ops::{Add, Neg, Sub};
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_common_proc_macro::EstimateSize;
@@ -33,6 +34,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
+///
 /// Note that the difference between Interval and Instant.
 /// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
 /// with months = 61, days = 25, usecs = (57 + 23 * 3600 + 22 * 60) * 1000000),
@@ -47,9 +49,9 @@ pub struct Interval {
     usecs: i64,
 }
 
-pub const USECS_PER_SEC: i64 = 1_000_000;
-pub const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
-pub const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+const USECS_PER_SEC: i64 = 1_000_000;
+const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl Interval {
     /// Smallest interval value.
@@ -58,6 +60,9 @@ impl Interval {
         days: i32::MIN,
         usecs: i64::MIN,
     };
+    pub const USECS_PER_DAY: i64 = USECS_PER_DAY;
+    pub const USECS_PER_MONTH: i64 = USECS_PER_MONTH;
+    pub const USECS_PER_SEC: i64 = USECS_PER_SEC;
 
     /// Creates a new `Interval` from the given number of months, days, and microseconds.
     pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {

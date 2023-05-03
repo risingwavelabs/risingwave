@@ -313,8 +313,7 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
-    use risingwave_common::types::struct_type::StructType;
-    use risingwave_common::types::{ScalarImpl, ToDatumRef};
+    use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
 
