@@ -568,7 +568,16 @@ impl Catalog {
                     .get_schema_by_name(db_name, schema_name)?
                     .get_function_by_name_args(function_name, args))
             })?
-            .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
+            .ok_or_else(|| {
+                CatalogError::NotFound(
+                    "function",
+                    format!(
+                        "{}({})",
+                        function_name,
+                        args.iter().map(|a| a.to_string()).join(", ")
+                    ),
+                )
+            })
     }
 
     /// Gets all functions with the given name.
