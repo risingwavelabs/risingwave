@@ -202,7 +202,6 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::compaction::{LevelSelector, ManualCompactionSelector};
 use super::Compactor;
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -425,7 +424,12 @@ where
                 checkpoint
             } else {
                 // As no record found in stores, create a initial version.
-                let checkpoint = create_init_version();
+                let default_compaction_config = self
+                    .compaction_group_manager
+                    .read()
+                    .await
+                    .default_compaction_config();
+                let checkpoint = create_init_version(default_compaction_config);
                 tracing::info!("init hummock version checkpoint");
                 HummockVersionStats::default()
                     .insert(self.env.meta_store())
@@ -487,9 +491,10 @@ where
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
         let configs = self
             .compaction_group_manager
-            .read()
+            .write()
             .await
-            .get_compaction_group_configs(&all_group_ids);
+            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
@@ -2045,7 +2050,6 @@ where
 
     #[named]
     pub async fn start_lsm_stat_report(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
-        use crate::hummock::model::CompactionGroup;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -2071,14 +2075,12 @@ where
 
                     let compaction_group_ids_from_version =
                         get_compaction_group_ids(&current_version);
-                    let default_config = CompactionConfigBuilder::new().build();
                     for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = id_to_config
-                            .get(compaction_group_id)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                CompactionGroup::new(*compaction_group_id, default_config.clone())
-                            });
+                        let compaction_group_config =
+                            match id_to_config.get(compaction_group_id).cloned() {
+                                None => continue,
+                                Some(config) => config,
+                            };
 
                         trigger_lsm_stat(
                             &hummock_manager.metrics,

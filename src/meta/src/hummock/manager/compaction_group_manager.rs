@@ -215,13 +215,12 @@ impl<S: MetaStore> HummockManager<S> {
                         .entry(group_id)
                         .or_default()
                         .group_deltas;
-                    // The config for inexistent group may have been created in
-                    // compaction test.
                     let config = self
                         .compaction_group_manager
-                        .read()
+                        .write()
                         .await
-                        .get_compaction_group_config(group_id)
+                        .get_or_insert_compaction_group_config(group_id, self.env.meta_store())
+                        .await?
                         .compaction_config
                         .as_ref()
                         .clone();
@@ -541,9 +540,16 @@ impl<S: MetaStore> HummockManager<S> {
                     .await?;
                 let mut config = self
                     .compaction_group_manager
-                    .read()
+                    .write()
                     .await
-                    .get_default_compaction_group_config();
+                    .get_or_insert_compaction_group_config(
+                        new_compaction_group_id,
+                        self.env.meta_store(),
+                    )
+                    .await?
+                    .compaction_config
+                    .as_ref()
+                    .clone();
                 config.split_by_state_table = allow_split_by_table;
 
                 new_version_delta.group_deltas.insert(
@@ -642,6 +648,13 @@ impl<S: MetaStore> HummockManager<S> {
     }
 }
 
+/// We muse ensure there is an entry exists in [`CompactionGroupManager`] for any
+/// compaction group found in current hummock version. That's done by invoking
+/// `get_or_insert_compaction_group_config` or `get_or_insert_compaction_group_configs` before
+/// adding any group in current hummock version:
+/// 1. initialize default static compaction group.
+/// 2. register new table to new compaction group.
+/// 3. move existent table to new compaction group.
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
@@ -662,7 +675,44 @@ impl CompactionGroupManager {
         Ok(())
     }
 
-    /// Gets compaction group config for `compaction_group_id` if exists, or returns default.
+    /// Gets compaction group config for `compaction_group_id`, inserts default one if missing.
+    pub(super) async fn get_or_insert_compaction_group_config<S: MetaStore>(
+        &mut self,
+        compaction_group_id: CompactionGroupId,
+        meta_store: &S,
+    ) -> Result<CompactionGroup> {
+        let r = self
+            .get_or_insert_compaction_group_configs(&[compaction_group_id], meta_store)
+            .await?;
+        Ok(r.into_values().next().unwrap())
+    }
+
+    /// Gets compaction group configs for `compaction_group_ids`, inserts default one if missing.
+    pub(super) async fn get_or_insert_compaction_group_configs<S: MetaStore>(
+        &mut self,
+        compaction_group_ids: &[CompactionGroupId],
+        meta_store: &S,
+    ) -> Result<HashMap<CompactionGroupId, CompactionGroup>> {
+        let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        for id in compaction_group_ids {
+            if compaction_groups.contains_key(id) {
+                continue;
+            }
+            let new_entry = CompactionGroup::new(*id, self.default_config.clone());
+            compaction_groups.insert(*id, new_entry);
+        }
+        let mut trx = Transaction::default();
+        compaction_groups.apply_to_txn(&mut trx)?;
+        meta_store.txn(trx).await?;
+        compaction_groups.commit();
+        Ok(self.get_compaction_group_configs(compaction_group_ids))
+    }
+
+    /// Gets compaction group config for `compaction_group_id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `compaction_group_id` doesn't exist.
     pub(super) fn get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -670,10 +720,17 @@ impl CompactionGroupManager {
         self.get_compaction_group_configs(&[compaction_group_id])
             .into_values()
             .next()
-            .unwrap()
+            .expect(&format!(
+                "config of compaction group {} exists",
+                compaction_group_id
+            ))
     }
 
-    /// Gets compaction group configs for `compaction_group_ids` if exists, or returns default.
+    /// Gets compaction group configs for `compaction_group_ids`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any of `compaction_group_ids` doesn't exist.
     pub(super) fn get_compaction_group_configs(
         &self,
         compaction_group_ids: &[CompactionGroupId],
@@ -685,13 +742,13 @@ impl CompactionGroupManager {
                     .compaction_groups
                     .get(id)
                     .cloned()
-                    .unwrap_or_else(|| CompactionGroup::new(*id, self.default_config.clone()));
+                    .expect(&format!("config of compaction group {} exists", *id));
                 (*id, group)
             })
             .collect()
     }
 
-    fn get_default_compaction_group_config(&self) -> CompactionConfig {
+    pub(super) fn default_compaction_config(&self) -> CompactionConfig {
         self.default_config.clone()
     }
 
@@ -703,13 +760,9 @@ impl CompactionGroupManager {
     ) -> Result<()> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
         for compaction_group_id in compaction_group_ids.iter().unique() {
-            if !compaction_groups.contains_key(compaction_group_id) {
-                compaction_groups.insert(
-                    *compaction_group_id,
-                    CompactionGroup::new(*compaction_group_id, self.default_config.clone()),
-                );
-            }
-            let group = compaction_groups.get(compaction_group_id).unwrap();
+            let group = compaction_groups.get(compaction_group_id).ok_or_else(|| {
+                Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
+            })?;
             let mut config = group.compaction_config.as_ref().clone();
             update_compaction_config(&mut config, config_to_update);
             if let Err(reason) = validate_compaction_config(&config) {
@@ -837,32 +890,35 @@ mod tests {
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-        assert!(inner.read().await.compaction_groups.is_empty());
+        assert_eq!(inner.read().await.compaction_groups.len(), 2);
         inner
             .write()
             .await
             .update_compaction_config(&[100, 200], &[], env.meta_store())
             .await
+            .unwrap_err();
+        inner
+            .write()
+            .await
+            .get_or_insert_compaction_group_configs(&[100, 200], env.meta_store())
+            .await
             .unwrap();
-        assert_eq!(inner.read().await.compaction_groups.len(), 2);
-
-        // Test init
+        assert_eq!(inner.read().await.compaction_groups.len(), 4);
         let inner = HummockManager::build_compaction_group_manager(&env)
             .await
             .unwrap();
-        assert_eq!(inner.read().await.compaction_groups.len(), 2);
-
+        assert_eq!(inner.read().await.compaction_groups.len(), 4);
         inner
             .write()
             .await
             .update_compaction_config(
-                &[100, 300],
+                &[100, 200],
                 &[MutableConfig::MaxSubCompaction(123)],
                 env.meta_store(),
             )
             .await
             .unwrap();
-        assert_eq!(inner.read().await.compaction_groups.len(), 3);
+        assert_eq!(inner.read().await.compaction_groups.len(), 4);
         assert_eq!(
             inner
                 .read()
@@ -872,20 +928,11 @@ mod tests {
                 .max_sub_compaction,
             123
         );
-        assert_ne!(
-            inner
-                .read()
-                .await
-                .get_compaction_group_config(200)
-                .compaction_config
-                .max_sub_compaction,
-            123
-        );
         assert_eq!(
             inner
                 .read()
                 .await
-                .get_compaction_group_config(300)
+                .get_compaction_group_config(200)
                 .compaction_config
                 .max_sub_compaction,
             123

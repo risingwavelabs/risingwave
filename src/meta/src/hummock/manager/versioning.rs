@@ -29,12 +29,11 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionCheckpoint,
-    HummockVersionDelta, HummockVersionStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::trigger_safepoint_stat;
@@ -309,15 +308,13 @@ pub(super) fn calc_new_write_limits(
     new_write_limits
 }
 
-pub(super) fn create_init_version() -> HummockVersion {
+pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
     let mut init_version = HummockVersion {
         id: FIRST_VERSION_ID,
         levels: Default::default(),
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
     };
-    // Initialize independent levels via corresponding compaction groups' config.
-    let default_compaction_config = CompactionConfigBuilder::new().build();
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
         StaticCompactionGroupId::MaterializedView as CompactionGroupId,
