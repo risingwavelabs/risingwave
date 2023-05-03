@@ -483,6 +483,14 @@ impl SchemaCatalog {
         self.function_by_name.get(name)?.get(args)
     }
 
+    pub fn get_functions_by_name(&self, name: &str) -> Option<Vec<&Arc<FunctionCatalog>>> {
+        let functions = self.function_by_name.get(name)?;
+        if functions.is_empty() {
+            return None;
+        }
+        Some(functions.values().collect())
+    }
+
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
         self.connection_by_name.get(connection_name)
     }
