@@ -21,6 +21,7 @@ mod batch_query;
 mod chain;
 mod dml;
 mod dynamic_filter;
+mod eowc_over_window;
 mod expand;
 mod filter;
 mod global_simple_agg;
@@ -61,6 +62,7 @@ use self::batch_query::*;
 use self::chain::*;
 use self::dml::*;
 use self::dynamic_filter::*;
+use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
@@ -164,5 +166,6 @@ pub async fn create_executor(
         NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
         NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
         NodeBody::NoOp => NoOpExecutorBuilder,
+        NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
     }
 }

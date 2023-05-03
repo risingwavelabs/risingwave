@@ -165,6 +165,11 @@ where
                 always!(node.state_table, "AppendOnlyDedup");
             }
 
+            // EOWC over window
+            NodeBody::EowcOverWindow(node) => {
+                always!(node.state_table, "EowcOverWindow");
+            }
+
             // Note: add internal tables for new nodes here.
             _ => {}
         }

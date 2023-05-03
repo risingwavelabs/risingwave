@@ -190,6 +190,7 @@ impl ArrayConcatExpression {
     /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
+    /// ```
     fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
@@ -236,6 +237,7 @@ impl ArrayConcatExpression {
     /// select array_cat(null::int[], null::int[][]);
     /// ----
     /// NULL
+    /// ```
     fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
@@ -281,6 +283,7 @@ impl ArrayConcatExpression {
     /// select array_prepend(null::int, null::int[]);
     /// ----
     /// {NULL}
+    /// ```
     fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (left, None) => Some(ListValue::new(vec![left.to_owned_datum()]).into()),

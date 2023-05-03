@@ -202,7 +202,8 @@ impl TestCaseResult {
         if original_test_case.planner_error.is_none() && let Some(ref err) = self.planner_error {
             return Err(anyhow!("unexpected planner error: {}", err));
         }
-        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error {
+        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error
+        {
             return Err(anyhow!("unexpected optimizer error: {}", err));
         }
 

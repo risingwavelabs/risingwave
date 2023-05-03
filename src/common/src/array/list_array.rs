@@ -28,8 +28,9 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, RowRe
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
-use crate::types::to_text::ToText;
-use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
+use crate::types::{
+    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef, ToText,
+};
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
 
@@ -338,6 +339,12 @@ pub fn display_for_explain(list: &ListValue) -> String {
             .collect::<Vec<String>>()
             .join(", ")
     )
+}
+
+impl From<Vec<Datum>> for ListValue {
+    fn from(data: Vec<Datum>) -> Self {
+        ListValue::new(data)
+    }
 }
 
 impl EstimateSize for ListValue {

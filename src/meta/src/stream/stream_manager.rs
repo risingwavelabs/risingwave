@@ -114,10 +114,15 @@ impl CreatingStreamingJobInfo {
     async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         for job_id in job_ids {
-            if let Some(job) = jobs.get_mut(&job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
-                let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
-                    tracing::warn!("failed to send canceling state");
-                });
+            if let Some(job) = jobs.get_mut(&job_id)
+                && let Some(shutdown_tx) = job.shutdown_tx.take()
+            {
+                let _ = shutdown_tx
+                    .send(CreatingState::Canceling)
+                    .await
+                    .inspect_err(|_| {
+                        tracing::warn!("failed to send canceling state");
+                    });
             }
         }
     }

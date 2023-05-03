@@ -252,7 +252,10 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
     fn next(&mut self) {
         self.tmp_buffer
             .push(self.heap.pop().expect("no inner iter"));
-        while let Some(node) = self.heap.peek() && node.is_valid() && node.next_extended_user_key() == self.tmp_buffer[0].next_extended_user_key() {
+        while let Some(node) = self.heap.peek()
+            && node.is_valid()
+            && node.next_extended_user_key() == self.tmp_buffer[0].next_extended_user_key()
+        {
             self.tmp_buffer.push(self.heap.pop().unwrap());
         }
         for node in &self.tmp_buffer {

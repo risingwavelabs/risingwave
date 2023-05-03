@@ -29,9 +29,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
-use crate::types::struct_type::StructType;
-use crate::types::to_text::ToText;
-use crate::types::{DataType, ToOwnedDatum};
+use crate::types::{DataType, StructType, ToOwnedDatum, ToText};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{
@@ -42,6 +40,7 @@ use crate::util::value_encoding::{
 /// [`DataChunk`] is a collection of Columns,
 /// a with visibility mask for each row.
 /// For instance, we could have a [`DataChunk`] of this format.
+///
 /// | v1 | v2 | v3 |
 /// |----|----|----|
 /// | 1  | a  | t  |
@@ -52,6 +51,7 @@ use crate::util::value_encoding::{
 /// Our columns are v1, v2, v3.
 /// Then, if the Visibility Mask hides rows 2 and 4,
 /// We will only have these rows visible:
+///
 /// | v1 | v2 | v3 |
 /// |----|----|----|
 /// | 1  | a  | t  |

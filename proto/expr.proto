@@ -281,6 +281,60 @@ message AggCall {
   ExprNode filter = 6;
 }
 
+message WindowFrame {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    // RANGE = 1;
+    ROWS = 2;
+    // GROUPS = 3;
+  }
+  enum BoundType {
+    BOUND_TYPE_UNSPECIFIED = 0;
+    UNBOUNDED_PRECEDING = 1;
+    PRECEDING = 2;
+    CURRENT_ROW = 3;
+    FOLLOWING = 4;
+    UNBOUNDED_FOLLOWING = 5;
+  }
+  message Bound {
+    BoundType type = 1;
+    oneof offset {
+      uint64 integer = 2;
+      data.Datum datum = 3;
+    }
+  }
+
+  Type type = 1;
+  Bound start = 2;
+  Bound end = 3;
+  // Xxx exclusion = 4;
+}
+
+message WindowFunction {
+  enum GeneralType {
+    UNSPECIFIED = 0;
+    ROW_NUMBER = 1;
+    RANK = 2;
+    DENSE_RANK = 3;
+    // PERCENT_RANK = 4;
+    // CUME_DIST = 5;
+    // NTILE = 6;
+    LAG = 7;
+    LEAD = 8;
+    // FIRST_VALUE = 9;
+    // LAST_VALUE = 10;
+    // NTH_VALUE = 11;
+  }
+
+  oneof type {
+    GeneralType general = 1;
+    AggCall.Type aggregate = 2;
+  }
+  repeated InputRef args = 3;
+  data.DataType return_type = 4;
+  WindowFrame frame = 5;
+}
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;

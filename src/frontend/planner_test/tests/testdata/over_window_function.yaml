@@ -53,7 +53,7 @@
     select sum(x) over() from t;
   logical_plan: |
     LogicalProject { exprs: [sum] }
-    └─LogicalOverAgg { window_functions: [sum() OVER()] }
+    └─LogicalOverAgg { window_functions: [sum() OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -116,7 +116,7 @@
     select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [row_number, rank] }
-    └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC), rank() OVER(ORDER BY t.x ASC)] }
+    └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -134,7 +134,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.x] }
     └─LogicalProject { exprs: [t.x, row_number] }
-      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC)] }
+      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -178,7 +178,7 @@
     LogicalProject { exprs: [t.x, row_number] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) }
       └─LogicalProject { exprs: [t.x, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - name: TopN without rank output
   sql: |
@@ -190,7 +190,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) AND (t.x > t.y) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
@@ -242,7 +242,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, rank] }
-        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC)] }
+        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -332,7 +332,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -421,7 +421,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number = 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }

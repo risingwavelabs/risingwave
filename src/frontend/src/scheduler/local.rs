@@ -23,7 +23,7 @@ use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
-use risingwave_batch::task::TaskId;
+use risingwave_batch::task::{ShutdownMsg, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
@@ -101,11 +101,16 @@ impl LocalQueryExecution {
 
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
+
+        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // Refactor later to make use it.
+        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             context,
             self.snapshot.get_batch_query_epoch(),
+            rx,
         );
         let executor = executor.build().await?;
 
@@ -229,13 +234,18 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone()
+                    && let Some(vnode_bitmaps) = table_scan_info.partitions()
+                {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.clone().into_iter().unzip();
-                    let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    let workers = self
+                        .front_env
+                        .worker_node_manager()
+                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
@@ -271,7 +281,7 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else if let Some(source_info) = &second_stage.source_info {
-                    for (id,split) in source_info.split_info().unwrap().iter().enumerate() {
+                    for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
@@ -304,8 +314,7 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
-                }
-                else {
+                } else {
                     let second_stage_plan_node =
                         self.convert_plan_node(&second_stage.root, &mut None, None)?;
                     let second_stage_plan_fragment = PlanFragment {

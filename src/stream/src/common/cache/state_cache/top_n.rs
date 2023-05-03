@@ -13,19 +13,22 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common_proc_macro::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 use crate::common::cache::TopNCache;
 
 /// An implementation of [`StateCache`] that uses a [`TopNCache`] as the underlying cache, with
 /// limited capacity.
-pub struct TopNStateCache<K: Ord, V> {
+#[derive(EstimateSize)]
+pub struct TopNStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     table_row_count: Option<usize>,
     cache: TopNCache<K, V>,
     synced: bool,
 }
 
-impl<K: Ord, V> TopNStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> TopNStateCache<K, V> {
     pub fn new(capacity: usize) -> Self {
         Self {
             table_row_count: None,
@@ -81,7 +84,7 @@ impl<K: Ord, V> TopNStateCache<K, V> {
     }
 }
 
-impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for TopNStateCache<K, V> {
     type Filler<'a> = &'a mut Self where Self: 'a;
     type Key = K;
     type Value = V;
@@ -146,7 +149,7 @@ impl<K: Ord, V> StateCache for TopNStateCache<K, V> {
     }
 }
 
-impl<K: Ord, V> StateCacheFiller for &mut TopNStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> StateCacheFiller for &mut TopNStateCache<K, V> {
     type Key = K;
     type Value = V;
 

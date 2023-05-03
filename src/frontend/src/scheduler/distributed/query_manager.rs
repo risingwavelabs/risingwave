@@ -158,11 +158,14 @@ impl QueryManager {
         query: Query,
         pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
-        if let Some(query_limit) = self.disrtibuted_query_limit && self.query_metrics.running_query_num.get() as u64 == query_limit {
+        if let Some(query_limit) = self.disrtibuted_query_limit
+            && self.query_metrics.running_query_num.get() as u64 == query_limit
+        {
             self.query_metrics.rejected_query_counter.inc();
-            return Err(
-                crate::scheduler::SchedulerError::QueryReachLimit(QueryMode::Distributed, query_limit)
-            )
+            return Err(crate::scheduler::SchedulerError::QueryReachLimit(
+                QueryMode::Distributed,
+                query_limit,
+            ));
         }
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));

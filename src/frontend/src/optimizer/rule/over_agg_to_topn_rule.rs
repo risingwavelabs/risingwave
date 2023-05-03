@@ -47,12 +47,12 @@ impl Rule for OverAggToTopNRule {
         // The filter is directly on top of the over agg after predicate pushdown.
         let over_agg = plan.as_logical_over_agg()?;
 
-        if over_agg.window_functions.len() != 1 {
+        if over_agg.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
             return None;
         }
 
-        let f = &over_agg.window_functions[0];
+        let f = &over_agg.window_functions()[0];
         if !f.kind.is_rank() {
             // Only rank functions can be converted to TopN.
             return None;

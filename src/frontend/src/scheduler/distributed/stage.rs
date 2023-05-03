@@ -27,7 +27,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_batch::task::TaskId as TaskIdBatch;
+use risingwave_batch::task::{ShutdownMsg, TaskId as TaskIdBatch};
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -326,14 +326,18 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
+            && let Some(vnode_bitmaps) = table_scan_info.partitions()
+        {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            let workers = self
+                .worker_node_manager
+                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
@@ -346,7 +350,8 @@ impl StageRunner {
                     task_id: i as u32,
                 };
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
-                let plan_fragment = self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
+                let plan_fragment =
+                    self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
@@ -356,12 +361,13 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
-                let plan_fragment = self.create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
-                let worker = self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                let plan_fragment = self
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                let worker =
+                    self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
-        }
-        else {
+        } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
@@ -561,11 +567,15 @@ impl StageRunner {
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
+        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // Refactor later to make use it.
+        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
             self.epoch.clone(),
+            rx,
         );
 
         let executor = executor.build().await?;
