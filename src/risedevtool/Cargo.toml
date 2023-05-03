@@ -22,7 +22,7 @@ dialoguer = "0.10"
 enum-iterator = "1"
 fs-err = "2.9.0"
 glob = "0.3"
-google-cloud-pubsub = "0.7.0"
+google-cloud-pubsub = "0.14"
 indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
