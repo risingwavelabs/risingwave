@@ -912,13 +912,7 @@ impl<B: NullBitmap> HashKey for SerializedKey<B> {
         hash_codes: Vec<XxHash64HashCode>,
     ) -> Vec<Self> {
         let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
-        // for column_idx in column_idxes {
-        //     data_chunk
-        //         .column_at(*column_idx)
-        //         .array_ref()
-        //         .(&mut serializers[..]);
-        // }
-        //
+
         // Construct serializers for each row.
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
