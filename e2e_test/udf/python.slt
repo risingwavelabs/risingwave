@@ -177,6 +177,10 @@ drop function gcd;
 statement ok
 drop function gcd(int, int);
 
+# foo() is different from foo.
+statement error function not found
+drop function gcd();
+
 # Drop a function without arguments. Now the function name is unique.
 statement ok
 drop function gcd;
