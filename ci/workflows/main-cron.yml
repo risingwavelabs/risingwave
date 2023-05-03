@@ -290,7 +290,7 @@ steps:
 
   # Generates cpu flamegraph if label `cpu_flamegraph` is added to PR.
   - label: "Generate CPU flamegraph"
-    command: "NEXMARK_QUERIES=all ci/scripts/gen-flamegraph.sh"
+    command: "NEXMARK_QUERIES=all ci/scripts/gen-flamegraph.sh cpu"
     depends_on: "cpu-flamegraph-env-build"
     plugins:
       - seek-oss/aws-sm#v2.3.1:

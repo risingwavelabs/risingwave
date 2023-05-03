@@ -10,6 +10,7 @@ QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 # Perhaps we should have a new docker container just for benchmarking?
 pushd ..
 
+############## JOB METADATA
 
 # Buildkite does not support labels at the moment. Have to get via github api.
 get_nexmark_queries_to_run() {
@@ -40,12 +41,6 @@ parse_labels() {
   | xargs echo -n
 }
 
-install_aws_cli() {
-  echo ">>> Install aws cli"
-  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-  unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
-}
-
 ############## DEBUG INFO
 
 print_machine_debug_info() {
@@ -57,6 +52,13 @@ print_machine_debug_info() {
 
 ############## INSTALL
 
+# NOTE(kwannoel): Unused for now, maybe used if we use s3 as storage backend.
+install_aws_cli() {
+  echo ">>> Install aws cli"
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
+}
+
 # NOTE(kwannoel) we can mirror the artifacts here in an s3 bucket if there are errors with access.
 install_all() {
   # jq used to parse nexmark labels.
@@ -64,6 +66,20 @@ install_all() {
   wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
   chmod +x jq-linux64
   mv jq-linux64 /usr/local/bin/jq
+
+  # flamegraph.pl used to generate heap flamegraph
+  echo ">>> Installing flamegraph.pl"
+  wget https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl
+  chmod +x ./flamegraph.pl
+
+  # faster addr2line to speed up heap flamegraph analysis by jeprof
+  echo ">>> Installing addr2line"
+  git clone https://github.com/gimli-rs/addr2line
+  pushd addr2line
+  cargo b --examples -r
+  mv ./target/release/examples/addr2line $(which addr2line)
+  popd
+  rm -rf addr2line
 
   echo ">>> Installing PromQL cli client"
   # Download promql
@@ -194,6 +210,30 @@ gen_cpu_flamegraph() {
   ./nperf flamegraph --merge-threads perf.data > perf.svg
 }
 
+gen_heap_flamegraph() {
+  pushd risingwave
+  set +e
+  echo ">>> Heap files"
+  ls -lac | grep "\.heap"
+  LATEST_HEAP_PROFILE="$(ls -c | grep "\.heap" | tail -1)"
+  if [[ -z "$LATEST_HEAP_PROFILE" ]]; then
+    echo "No heap profile generated. Less than 4GB allocated."
+    popd
+    set -e
+    return 1
+  else
+    JEPROF=$(find . -name 'jeprof' | head -1)
+    chmod +x "$JEPROF"
+    COMPUTE_NODE=".risingwave/bin/risingwave/compute-node"
+    $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
+    ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
+    mv perf.svg ..
+    popd
+    set -e
+    return 0
+  fi
+}
+
 ############## MONITORING
 
 # TODO: promql
@@ -202,9 +242,6 @@ monitor() {
 }
 
 stop_processes() {
-  # stop profiler
-  pkill nperf
-
   # stop rw
   pushd risingwave
   ./risedev k
@@ -221,7 +258,67 @@ setup() {
 }
 
 # Run benchmark for a query
-run() {
+run_heap_flamegraph() {
+  echo "--- Running benchmark for $QUERY"
+  echo "--- Setting variables"
+  QUERY_LABEL="$1"
+  QUERY_FILE_NAME="$(echo $QUERY_LABEL | sed 's/nexmark\-\(.*\)/\1.sql/')"
+  QUERY_PATH="$QUERY_DIR/$QUERY_FILE_NAME"
+  FLAMEGRAPH_PATH="perf-$QUERY_LABEL.svg"
+  echo "QUERY_LABEL: $QUERY_LABEL"
+  echo "QUERY_FILE_NAME: $QUERY_FILE_NAME"
+  echo "QUERY_PATH: $QUERY_PATH"
+  echo "FLAMEGRAPH_PATH: $FLAMEGRAPH_PATH"
+
+  # NOTE(kwannoel): This step should output profile result on every 4GB memory allocation.
+  # No need for an extra profiling step.
+  echo "--- Starting up RW"
+  pushd risingwave
+  RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d ci-gen-cpu-flamegraph
+  popd
+
+  echo "--- Machine Debug Info After RW Start"
+  print_machine_debug_info
+
+  echo "--- Running ddl"
+  psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
+
+  echo "--- Running Benchmarks"
+  psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
+
+  # NOTE(kwannoel): Can stub first if promql gives us issues.
+  # Most nexmark queries (q4-q20) will have a runtime of 10+ min.
+  # We can just let flamegraph profile 5min slice.
+  # TODO(kwannoel): Use promql to monitor when throughput hits 0 with 1-minute intervals.
+  echo "--- Monitoring Benchmark for 5 minutes"
+  monitor
+
+  echo "--- Benchmark finished, stopping processes"
+  stop_processes
+
+  echo "--- Generate flamegraph"
+  if gen_heap_flamegraph; then
+    mv perf.svg "$FLAMEGRAPH_PATH"
+
+    echo "--- Uploading flamegraph"
+    buildkite-agent artifact upload "./$FLAMEGRAPH_PATH"
+
+    echo "--- Cleaning up heap artifacts"
+    pushd risingwave
+    rm *.heap
+    rm heap.collapsed
+    popd
+  else
+    echo "--- No flamegraph for $QUERY"
+  fi
+
+  echo "--- Machine Debug Info After running $QUERY"
+  print_machine_debug_info
+
+}
+
+# Run benchmark for a query
+run_cpu_flamegraph() {
   echo "--- Running benchmark for $QUERY"
   echo "--- Setting variables"
   QUERY_LABEL="$1"
@@ -245,8 +342,7 @@ run() {
   psql -h localhost -p 4566 -d dev -U root -f risingwave/ci/scripts/sql/nexmark/ddl.sql
 
   echo "--- Running Benchmarks"
-  # TODO(kwannoel): Allow users to configure which query they want to run.
-  psql -h localhost -p 4566 -d dev -U root -f $QUERY_PATH
+  psql -h localhost -p 4566 -d dev -U root -f "$QUERY_PATH"
 
   echo "--- Start Profiling"
   start_nperf
@@ -259,6 +355,8 @@ run() {
   monitor
 
   echo "--- Benchmark finished, stopping processes"
+  # stop profiler
+  pkill nperf
   stop_processes
 
   echo "--- Generate flamegraph"
@@ -278,6 +376,10 @@ run() {
 main() {
   echo "--- Machine Debug Info before Setup"
   print_machine_debug_info
+
+  echo "--- Getting Flamegraph Type (HEAP | CPU)"
+  FL_TYPE="$1"
+  echo "Flamegraph type: $FL_TYPE"
 
   echo "--- Running setup"
   setup
@@ -300,7 +402,14 @@ main() {
 
   for QUERY in $NEXMARK_QUERIES
   do
-    run "$QUERY"
+    if [[ $FL_TYPE == "cpu" ]]; then
+      run_cpu_flamegraph "$QUERY"
+    elif [[ $FL_TYPE == "heap" ]]; then
+      run_heap_flamegraph "$QUERY"
+    else
+      echo "ERROR, Invalid flamegraph type: $FL_TYPE, it should be (cpu|heap)"
+      exit 1
+    fi
   done
 
   # TODO(kwannoel): `trap ERR` and upload these logs.
@@ -310,4 +419,4 @@ main() {
   #  popd
 }
 
-main
+main "$@"
