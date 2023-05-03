@@ -192,6 +192,7 @@ impl ArrayConcatExpression {
     /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
+    /// ```
     fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, right) => {
@@ -241,6 +242,7 @@ impl ArrayConcatExpression {
     /// select array_cat(null::int[], null::int[][]);
     /// ----
     /// NULL
+    /// ```
     fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
@@ -288,6 +290,7 @@ impl ArrayConcatExpression {
     /// select array_prepend(null::int, null::int[]);
     /// ----
     /// {NULL}
+    /// ```
     fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (left, None) => {

@@ -12,75 +12,79 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Data types in RisingWave.
+
 // NOTE: When adding or modifying data types, remember to update the type matrix in
 // src/expr/macro/src/types.rs
 
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::hash::Hash;
+use std::str::{FromStr, Utf8Error};
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
+use chrono::{Datelike, Timelike};
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
-use postgres_types::FromSql;
+use paste::paste;
+use postgres_types::{FromSql, IsNull, ToSql, Type};
 use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
 
-use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
-use crate::error::{BoxedError, ErrorCode};
+use crate::array::{
+    ArrayBuilderImpl, ArrayError, ArrayResult, ListRef, ListValue, PrimitiveArrayItemType,
+    StructRef, StructValue, NULL_VAL_FOR_HASH,
+};
+use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
+mod datetime;
+mod decimal;
+mod interval;
+mod jsonb;
 mod native_type;
+mod num256;
 mod ops;
-mod scalar_impl;
-mod successor;
-
-use std::fmt::Debug;
-use std::str::{FromStr, Utf8Error};
-
-pub use native_type::*;
-pub use scalar_impl::*;
-pub use successor::*;
-pub mod chrono_wrapper;
-pub mod decimal;
-pub mod interval;
-mod postgres_type;
-pub mod struct_type;
-pub mod to_binary;
-pub mod to_text;
-
-pub mod num256;
 mod ordered_float;
+mod postgres_type;
+mod scalar_impl;
+mod serial;
+mod struct_type;
+mod successor;
+mod to_binary;
+mod to_text;
 
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
-pub use decimal::Decimal;
-pub use interval::*;
-use itertools::Itertools;
-pub use ops::{CheckedAdd, IsNegative};
-pub use ordered_float::{FloatExt, IntoOrdered};
-use paste::paste;
-use postgres_types::{IsNull, ToSql, Type};
-use strum_macros::EnumDiscriminants;
-
+// export data types
+pub use self::datetime::{Date, Time, Timestamp};
+pub use self::decimal::Decimal;
+pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
+pub use self::jsonb::{JsonbRef, JsonbVal};
+pub use self::native_type::*;
+pub use self::num256::{Int256, Int256Ref};
+pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered_float::{FloatExt, IntoOrdered};
+pub use self::scalar_impl::*;
+pub use self::serial::Serial;
 pub use self::struct_type::StructType;
-use self::to_binary::ToBinary;
-use self::to_text::ToText;
-use crate::array::serial_array::Serial;
-use crate::array::{
-    ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
-    StructValue,
-};
-use crate::error::Result as RwResult;
-pub use crate::types::num256::{Int256, Int256Ref};
+// export traits
+pub use self::successor::Successor;
+pub use self::to_binary::ToBinary;
+pub use self::to_text::ToText;
 
+/// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
+
+/// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
-/// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
-/// but without data fields.
+/// The set of datatypes that are supported in RisingWave.
+// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
+// but without data fields.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
@@ -408,9 +412,9 @@ impl DataType {
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
             DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
-            DataType::Date => ScalarImpl::Date(Date(NaiveDate::MIN)),
+            DataType::Date => ScalarImpl::Date(Date::MIN),
             DataType::Time => ScalarImpl::Time(Time::from_hms_uncheck(0, 0, 0)),
-            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp(NaiveDateTime::MIN)),
+            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp::MIN),
             // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),

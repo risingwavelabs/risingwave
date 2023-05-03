@@ -17,8 +17,7 @@
 use std::fmt::Write;
 
 use risingwave_common::array::*;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ToText};
 use risingwave_expr_macro::build_function;
 
 use super::template::{BinaryBytesExpression, TernaryBytesExpression};

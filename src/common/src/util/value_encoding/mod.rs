@@ -24,21 +24,15 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{serial_array, ArrayImpl, JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
-use crate::types::struct_type::StructType;
-use crate::types::{
-    DataType, Date, Datum, Decimal, Interval, ScalarImpl, ScalarRefImpl, Time, Timestamp,
-    ToDatumRef, F32, F64,
-};
+use crate::types::*;
 
 pub mod error;
 use error::ValueEncodingError;
-use serial_array::Serial;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
-use crate::types::num256::Int256;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
@@ -471,10 +465,11 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::serial_array::Serial;
     use crate::array::{ArrayImpl, ListValue, StructValue};
     use crate::test_utils::rand_chunk;
-    use crate::types::{DataType, Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
+    use crate::types::{
+        DataType, Date, Datum, Decimal, Interval, ScalarImpl, Serial, Time, Timestamp,
+    };
     use crate::util::value_encoding::{
         estimate_serialize_datum_size, serialize_datum, try_get_exact_serialize_datum_size,
     };

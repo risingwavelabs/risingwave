@@ -810,6 +810,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0SubLevelCompactLevelCount(c) => {
                 target.level0_sub_level_compact_level_count = *c;
             }
+            MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c) => {
+                target.level0_overlapping_sub_level_compact_level_count = *c;
+            }
         }
     }
 }
