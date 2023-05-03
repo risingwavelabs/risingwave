@@ -767,11 +767,15 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
 
-        let group_config = self
+        let group_config = match self
             .compaction_group_manager
             .read()
             .await
-            .get_compaction_group_config(compaction_group_id);
+            .try_get_compaction_group_config(compaction_group_id)
+        {
+            Some(config) => config,
+            None => return Ok(None),
+        };
         self.precheck_compaction_group(
             compaction_group_id,
             compaction_statuses,
@@ -2006,9 +2010,10 @@ where
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
         let total_cpu_core = self.compactor_manager.total_cpu_core_num();
         let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
-        let version = {
+        let (version, configs) = {
             let guard = read_lock!(self, versioning).await;
-            guard.current_version.clone()
+            let c = self.get_compaction_group_map().await;
+            (guard.current_version.clone(), c)
         };
         let mut global_info = ScaleCompactorInfo {
             total_cores: total_cpu_core as u64,
@@ -2019,11 +2024,7 @@ where
         let compaction = read_lock!(self, compaction).await;
         for (group_id, status) in &compaction.compaction_statuses {
             if let Some(levels) = version.levels.get(group_id) {
-                let cg = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .get_compaction_group_config(*group_id);
+                let cg = configs.get(group_id).unwrap();
                 let info = status.get_compaction_info(levels, cg.compaction_config());
                 global_info.add(&info);
                 tracing::debug!("cg {} info {:?}", group_id, info);
@@ -2066,22 +2067,21 @@ where
                 }
 
                 {
-                    let id_to_config = hummock_manager.get_compaction_group_map().await;
-                    let current_version = {
+                    let (current_version, id_to_config) = {
                         let mut versioning_guard =
                             write_lock!(hummock_manager.as_ref(), versioning).await;
-                        versioning_guard.deref_mut().current_version.clone()
+                        let configs = hummock_manager.get_compaction_group_map().await;
+                        (
+                            versioning_guard.deref_mut().current_version.clone(),
+                            configs,
+                        )
                     };
 
                     let compaction_group_ids_from_version =
                         get_compaction_group_ids(&current_version);
                     for compaction_group_id in &compaction_group_ids_from_version {
                         let compaction_group_config =
-                            match id_to_config.get(compaction_group_id).cloned() {
-                                None => continue,
-                                Some(config) => config,
-                            };
-
+                            id_to_config.get(compaction_group_id).cloned().unwrap();
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),
@@ -2104,9 +2104,9 @@ where
     pub async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
-        let groups = {
+        let (groups, configs) = {
             let versioning_guard = read_lock!(self, versioning).await;
-            versioning_guard
+            let g = versioning_guard
                 .current_version
                 .levels
                 .iter()
@@ -2123,13 +2123,14 @@ where
                             .sum::<u64>(),
                     )
                 })
-                .collect_vec()
+                .collect_vec();
+            let c = self.get_compaction_group_map().await;
+            (g, c)
         };
         let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
         {
-            let manager = self.compaction_group_manager.read().await;
             for (group_id, l0_file_size) in groups {
-                let group = manager.get_compaction_group_config(group_id);
+                let group = configs.get(&group_id).unwrap();
                 if l0_file_size
                     > MAX_COMPACTION_L0_MULTIPLIER
                         * group.compaction_config.max_bytes_for_level_base

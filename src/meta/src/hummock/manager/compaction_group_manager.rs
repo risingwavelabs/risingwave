@@ -407,7 +407,8 @@ impl<S: MetaStore> HummockManager<S> {
                 .compaction_group_manager
                 .read()
                 .await
-                .get_compaction_group_config(levels.group_id)
+                .try_get_compaction_group_config(levels.group_id)
+                .unwrap()
                 .compaction_config;
             let group = CompactionGroupInfo {
                 id: levels.group_id,
@@ -705,47 +706,22 @@ impl CompactionGroupManager {
         compaction_groups.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
-        Ok(self.get_compaction_group_configs(compaction_group_ids))
-    }
-
-    /// Gets compaction group config for `compaction_group_id`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `compaction_group_id` doesn't exist.
-    pub(super) fn get_compaction_group_config(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> CompactionGroup {
-        self.get_compaction_group_configs(&[compaction_group_id])
-            .into_values()
-            .next()
-            .expect(&format!(
-                "config of compaction group {} exists",
-                compaction_group_id
-            ))
-    }
-
-    /// Gets compaction group configs for `compaction_group_ids`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any of `compaction_group_ids` doesn't exist.
-    pub(super) fn get_compaction_group_configs(
-        &self,
-        compaction_group_ids: &[CompactionGroupId],
-    ) -> HashMap<CompactionGroupId, CompactionGroup> {
-        compaction_group_ids
+        let r = compaction_group_ids
             .iter()
             .map(|id| {
-                let group = self
-                    .compaction_groups
-                    .get(id)
-                    .cloned()
-                    .expect(&format!("config of compaction group {} exists", *id));
+                let group = self.compaction_groups.get(id).cloned().unwrap();
                 (*id, group)
             })
-            .collect()
+            .collect();
+        Ok(r)
+    }
+
+    /// Tries to get compaction group config for `compaction_group_id`.
+    pub(super) fn try_get_compaction_group_config(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Option<CompactionGroup> {
+        self.compaction_groups.get(&compaction_group_id).cloned()
     }
 
     pub(super) fn default_compaction_config(&self) -> CompactionConfig {
@@ -923,7 +899,8 @@ mod tests {
             inner
                 .read()
                 .await
-                .get_compaction_group_config(100)
+                .try_get_compaction_group_config(100)
+                .unwrap()
                 .compaction_config
                 .max_sub_compaction,
             123
@@ -932,7 +909,8 @@ mod tests {
             inner
                 .read()
                 .await
-                .get_compaction_group_config(200)
+                .try_get_compaction_group_config(200)
+                .unwrap()
                 .compaction_config
                 .max_sub_compaction,
             123

@@ -234,13 +234,20 @@ where
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
         let mut guard = write_lock!(self, versioning).await;
-        let configs = self
-            .compaction_group_manager
-            .read()
-            .await
-            .get_compaction_group_configs(target_group_ids);
-        let mut new_write_limits =
-            calc_new_write_limits(configs, guard.write_limit.clone(), &guard.current_version);
+        let config_mgr = self.compaction_group_manager.read().await;
+        let target_group_configs = target_group_ids
+            .iter()
+            .filter_map(|id| {
+                config_mgr
+                    .try_get_compaction_group_config(*id)
+                    .map(|config| (*id, config))
+            })
+            .collect();
+        let mut new_write_limits = calc_new_write_limits(
+            target_group_configs,
+            guard.write_limit.clone(),
+            &guard.current_version,
+        );
         let all_group_ids = get_compaction_group_ids(&guard.current_version);
         new_write_limits.drain_filter(|group_id, _| !all_group_ids.contains(group_id));
         if new_write_limits == guard.write_limit {
