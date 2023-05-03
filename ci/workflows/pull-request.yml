@@ -352,7 +352,7 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 60 # ~3-4 queries can run
+    timeout_in_minutes: 90 # ~3-4 queries can run
 
   # Generates heap flamegraph if label `heap_flamegraph` is added to PR.
   - label: "Generate Heap flamegraph"
