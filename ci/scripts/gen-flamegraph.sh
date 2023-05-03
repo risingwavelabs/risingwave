@@ -218,6 +218,8 @@ gen_heap_flamegraph() {
   LATEST_HEAP_PROFILE="$(ls -c | grep "\.heap" | tail -1)"
   if [[ -z "$LATEST_HEAP_PROFILE" ]]; then
     echo "No heap profile generated. Less than 4GB allocated."
+    popd
+    set -e
     return 1
   else
     JEPROF=$(find . -name 'jeprof' | head -1)
@@ -226,10 +228,10 @@ gen_heap_flamegraph() {
     $JEPROF --collapsed $COMPUTE_NODE $LATEST_HEAP_PROFILE > heap.collapsed
     ../flamegraph.pl --color=mem --countname=bytes heap.collapsed > perf.svg
     mv perf.svg ..
+    popd
+    set -e
     return 0
   fi
-  set -e
-  popd
 }
 
 ############## MONITORING
