@@ -572,7 +572,7 @@ fn list_cast(
         vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
     )
     .unwrap();
-    let elements = input.values_ref();
+    let elements = input.iter_elems_ref();
     let mut values = Vec::with_capacity(elements.len());
     for item in elements {
         let v = cast
@@ -611,7 +611,7 @@ fn struct_cast(
     source_elem_type: &StructType,
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
-    let fields = (input.fields_ref().into_iter())
+    let fields = (input.iter_fields_ref())
         .zip_eq_fast(source_elem_type.fields.iter())
         .zip_eq_fast(target_elem_type.fields.iter())
         .map(|((datum_ref, source_field_type), target_field_type)| {

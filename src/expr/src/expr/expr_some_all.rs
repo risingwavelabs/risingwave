@@ -110,10 +110,10 @@ impl Expression for SomeAllExpression {
                 let datum_right = right.unwrap();
                 match datum_right {
                     ScalarRefImpl::List(array) => {
-                        let len = array.values_ref().len();
+                        let len = array.iter_elems_ref().len();
                         num_array.push(Some(len));
                         unfolded_arr_left_builder.append_datum_n(len, left);
-                        for item in array.values_ref() {
+                        for item in array.iter_elems_ref() {
                             unfolded_arr_right_builder.append_datum(item);
                         }
                     }
