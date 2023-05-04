@@ -38,7 +38,7 @@ use risingwave_connector::source::{
     PULSAR_CONNECTOR,
 };
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr, RowFormatType};
+use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
     SourceWatermark,

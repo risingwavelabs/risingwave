@@ -22,8 +22,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
-use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{

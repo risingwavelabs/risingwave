@@ -101,7 +101,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(true))),
+                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(
+                                    true
+                                ))),
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -116,7 +118,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::DefaultColumns(verified_expr("CAST(now() AS TEXT)"))
+                                option: ColumnOption::DefaultColumns(verified_expr(
+                                    "CAST(now() AS TEXT)"
+                                ))
                             },
                             ColumnOptionDef {
                                 name: None,

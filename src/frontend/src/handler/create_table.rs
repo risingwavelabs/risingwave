@@ -25,8 +25,8 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::{GeneratedColumnDesc, DefaultColumnDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
@@ -199,9 +199,10 @@ fn check_default_column_constraints(
 ) -> Result<()> {
     let input_refs = expr.collect_input_refs(column_catalogs.len());
     if input_refs.count_ones(..) > 0 {
-        return Err(ErrorCode::BindError(format!(
+        return Err(ErrorCode::BindError(
             "Default can not reference another column, and you should try Generate column instead."
-        ))
+                .to_string(),
+        )
         .into());
     }
     Ok(())

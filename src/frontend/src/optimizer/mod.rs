@@ -53,7 +53,7 @@ use self::plan_visitor::InputRefValidator;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };

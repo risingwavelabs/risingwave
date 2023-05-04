@@ -209,25 +209,17 @@ impl ColumnDesc {
     }
 
     pub fn is_generated(&self) -> bool {
-        if let Some(generated_or_default) = self.generated_or_default_column.clone() {
-            match generated_or_default {
-                GeneratedOrDefaultColumn::GeneratedColumn(_) => true,
-                _ => false,
-            }
-        } else {
-            false
-        }
+        matches!(
+            self.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+        )
     }
 
     pub fn is_default(&self) -> bool {
-        if let Some(generated_or_default) = self.generated_or_default_column.clone() {
-            match generated_or_default {
-                GeneratedOrDefaultColumn::DefaultColumn(_) => true,
-                _ => false,
-            }
-        } else {
-            false
-        }
+        matches!(
+            self.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::DefaultColumn(_))
+        )
     }
 }
 
