@@ -76,7 +76,10 @@ enum ComputeCommands {
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
-    ListVersion,
+    ListVersion {
+        #[clap(short, long = "full-print", default_value_t = false)]
+        full_print: bool,
+    },
 
     /// list hummock version deltas in the meta store
     ListVersionDeltas {
@@ -234,8 +237,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch(context).await?
         }
-        Commands::Hummock(HummockCommands::ListVersion) => {
-            cmd_impl::hummock::list_version(context).await?;
+        Commands::Hummock(HummockCommands::ListVersion { full_print }) => {
+            cmd_impl::hummock::list_version(context, full_print).await?;
         }
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,

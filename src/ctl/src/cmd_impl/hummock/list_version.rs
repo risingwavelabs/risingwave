@@ -17,10 +17,46 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
 
-pub async fn list_version(context: &CtlContext) -> anyhow::Result<()> {
+pub async fn list_version(context: &CtlContext, full_print: bool) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
-    println!("{:#?}", version);
+
+    if full_print {
+        println!("{:#?}", version);
+    } else {
+        println!(
+            "Version {} max_committed_epoch {}",
+            version.id, version.max_committed_epoch
+        );
+
+        for (cg, levels) in &version.levels {
+            println!("CompactionGroup {}", cg);
+
+            // l0
+            if levels.l0.is_some() {
+                for sub_level in levels.l0.as_ref().unwrap().sub_levels.iter().rev() {
+                    println!(
+                        "sub_level_id {} type {} sst_num {} size {}",
+                        sub_level.sub_level_id,
+                        sub_level.level_type().as_str_name(),
+                        sub_level.table_infos.len(),
+                        sub_level.total_file_size
+                    )
+                }
+            }
+
+            for level in levels.get_levels().iter() {
+                println!(
+                    "level_idx {} type {} sst_num {} size {}",
+                    level.level_idx,
+                    level.level_type().as_str_name(),
+                    level.table_infos.len(),
+                    level.total_file_size
+                )
+            }
+        }
+    }
+
     Ok(())
 }
 
