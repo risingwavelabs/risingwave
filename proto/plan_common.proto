@@ -27,6 +27,11 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+
+  // deprecated
+  // GeneratedColumnDesc generated_column = 6 [deprecated = true];
+  reserved 6;
+
   // Optional description for the generated column or default value.
   oneof generated_or_default_column {
     GeneratedColumnDesc generated_column = 7;
@@ -96,4 +101,6 @@ message IndexAndExpr {
   expr.ExprNode expr = 2;
 }
 
-message DefaultColumns { repeated IndexAndExpr default_columns = 1; }
+message DefaultColumns {
+  repeated IndexAndExpr default_columns = 1;
+}
