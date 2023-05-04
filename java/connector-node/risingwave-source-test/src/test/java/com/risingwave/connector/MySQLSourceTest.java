@@ -149,14 +149,14 @@ public class MySQLSourceTest {
     // test whether validation catches permission errors
     @Test
     public void testPermissionCheck() throws SQLException {
-        // user Postgres creates a superuser debezium
+        // user Root creates a superuser debezium
         Connection connRoot = SourceTestClient.connect(mysqlDataSource);
         String query = "CREATE USER debezium IDENTIFIED BY '" + mysql.getPassword() + "'";
         SourceTestClient.performQuery(connRoot, query);
         query =
                 "GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'";
         SourceTestClient.performQuery(connRoot, query);
-        // user debezium connects to Postgres
+        // user debezium connects to Mysql
         DataSource dbzDataSource =
                 SourceTestClient.getDataSource(
                         mysql.getJdbcUrl(),
