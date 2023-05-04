@@ -11,7 +11,7 @@ repository = { workspace = true }
 [features]
 # Use a feature flag to control enable or not, otherwise `cargo test` will compile all dependencies.
 rw-static-link = ["isahc", "openssl", "rdkafka"]
-rw-dynamic-link = ["zstd/pkg-config"]
+rw-dynamic-link = ["zstd-sys/pkg-config"]
 
 [dependencies]
 isahc = { version = "1", optional = true, default-features = false, features = ["static-ssl", "static-curl"] }
@@ -19,5 +19,6 @@ log = { version = "0.4", features = ["release_max_level_debug"] }
 openssl = { version = "0.10", optional = true, features = ["vendored"] }
 rdkafka = { workspace = true, optional = true, features = ["cmake-build", "ssl-vendored", "gssapi-vendored"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
+zstd-sys = { version = "2", default-features = false, optional = true }
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
