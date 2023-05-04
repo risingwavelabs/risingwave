@@ -743,7 +743,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     use anyhow::anyhow;
-    use risingwave_common::array::JsonbVal;
+    use risingwave_common::types::JsonbVal;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 

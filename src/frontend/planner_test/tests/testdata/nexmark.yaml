@@ -678,46 +678,42 @@
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
               └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
-    └─LogicalTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
-      └─LogicalJoin { type: Inner, on: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
-        ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
-        └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+    LogicalTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
+    └─LogicalJoin { type: Inner, on: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
+      ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
+      └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
-      └─BatchGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
-        └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
-          ├─BatchExchange { order: [], dist: HashShard(auction.id) }
-          | └─BatchScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
-          └─BatchExchange { order: [], dist: HashShard(bid.auction) }
-            └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+    └─BatchGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
+      └─BatchHashJoin { type: Inner, predicate: auction.id = bid.auction AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
+        ├─BatchExchange { order: [], dist: HashShard(auction.id) }
+        | └─BatchScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
+        └─BatchExchange { order: [], dist: HashShard(bid.auction) }
+          └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, bid._row_id(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id] }
-      └─StreamGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
-        └─StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-          └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
-            ├─StreamExchange { dist: HashShard(auction.id) }
-            | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-            └─StreamExchange { dist: HashShard(bid.auction) }
-              └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └─StreamGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
+      └─StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+        └─StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
+          ├─StreamExchange { dist: HashShard(auction.id) }
+          | └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+          └─StreamExchange { dist: HashShard(bid.auction) }
+            └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, bid._row_id(hidden)], stream_key: [id], pk_columns: [id], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id] }
-        └── StreamGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] } { state table: 0 }
-            └── StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-                └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
-                    ├──  StreamExchange Hash([0]) from 1
-                    └──  StreamExchange Hash([0]) from 2
+    └── StreamGroupTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] } { state table: 0 }
+        └── StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+            └── StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+                ├──  StreamExchange Hash([0]) from 1
+                └──  StreamExchange Hash([0]) from 2
 
     Fragment 1
     Chain { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
@@ -725,31 +721,14 @@
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Table 0
-    ├── columns:
-    │   ┌── auction_id
-    │   ├── auction_item_name
-    │   ├── auction_description
-    │   ├── auction_initial_bid
-    │   ├── auction_reserve
-    │   ├── auction_date_time
-    │   ├── auction_expires
-    │   ├── auction_seller
-    │   ├── auction_category
-    │   ├── bid_auction
-    │   ├── bid_bidder
-    │   ├── bid_price
-    │   ├── bid_channel
-    │   ├── bid_url
-    │   ├── bid_date_time
-    │   ├── bid_extra
-    │   └── bid__row_id
-    ├── primary key: [ $0 ASC, $11 DESC, $14 ASC, $16 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+    ├── columns: [ auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id ]
+    ├── primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
@@ -762,7 +741,7 @@
 
     Table 2 { columns: [ auction_id, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id ], primary key: [ $0 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ bid_auction, bid__row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1106,27 +1085,24 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
-      └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
-        └─BatchExchange { order: [], dist: HashShard(bid.bidder, bid.auction) }
-          └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+    └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
+      └─BatchExchange { order: [], dist: HashShard(bid.bidder, bid.auction) }
+        └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-      └─StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
-        └─StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
-          └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └─StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
+      └─StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
+        └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-        └── StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] } { state table: 0 }
-            └──  StreamExchange Hash([1, 0]) from 1
+    └── StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] } { state table: 0 }
+        └──  StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
     Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
@@ -1159,21 +1135,19 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, rank] }
-        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC)] }
+        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
-      └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
-        └─BatchExchange { order: [], dist: HashShard(bid.bidder, bid.auction) }
-          └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], distribution: UpstreamHashShard(bid._row_id) }
+    └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
+      └─BatchExchange { order: [], dist: HashShard(bid.bidder, bid.auction) }
+        └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: "NoCheck" }
     └─StreamExchange { dist: HashShard(bid._row_id) }
-      └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-        └─StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0], with_ties: true }
-          └─StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
-            └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+      └─StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0], with_ties: true }
+        └─StreamExchange { dist: HashShard(bid.bidder, bid.auction) }
+          └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: "NoCheck" }
@@ -1181,9 +1155,8 @@
     └──  StreamExchange Hash([7]) from 1
 
     Fragment 1
-    StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
-    └── StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0], with_ties: true } { state table: 0 }
-        └──  StreamExchange Hash([1, 0]) from 2
+    StreamAppendOnlyGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0], with_ties: true } { state table: 0 }
+    └──  StreamExchange Hash([1, 0]) from 2
 
     Fragment 2
     Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
@@ -1215,7 +1188,7 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC)] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:

@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use parking_lot::RwLock;
 use prometheus::IntGauge;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
@@ -68,52 +67,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn mem_usage(&self) -> usize;
 
     fn create_executor_mem_context(&self, executor_id: &str) -> Option<MemoryContextRef>;
-    fn get_stop_flag(&self) -> Arc<StopFlag>;
-
-    fn get_stop_flag_ref(&self) -> &StopFlag;
-}
-
-/// We already have `shut_down` sender to stop execution.
-/// `StopFlag` used in executor to let it stop execute more timely when it can't receive message
-/// timely.
-#[derive(Clone)]
-pub struct StopFlag {
-    stop_flag: Arc<AtomicBool>,
-    stop_reason: Arc<RwLock<Option<String>>>,
-}
-
-impl StopFlag {
-    pub fn new() -> Self {
-        Self {
-            stop_flag: Arc::new(AtomicBool::new(false)),
-            stop_reason: Arc::new(RwLock::new(None)),
-        }
-    }
-
-    pub fn set_stop(&self, reason: Option<String>) {
-        if let Some(reason) = reason {
-            self.stop_reason.write().replace(reason);
-        }
-        // NOTE: Used `store(Ordering::Release),load(Ordering::Acquire)` to guarantee that the stop
-        // reason can be viewed if the stop flag is visible.
-        self.stop_flag.store(true, Ordering::Release);
-    }
-
-    pub fn check_stop(&self) -> bool {
-        // NOTE: Used `store(Ordering::Release),load(Ordering::Acquire)` to guarantee that the stop
-        // reason can be viewed if the stop flag is visible.
-        self.stop_flag.load(Ordering::Acquire)
-    }
-
-    pub fn get_stop_reason(&self) -> Option<String> {
-        self.stop_reason.read().clone()
-    }
-}
-
-impl Default for StopFlag {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// Batch task context on compute node.
@@ -130,8 +83,6 @@ pub struct ComputeNodeContext {
     // How many memory bytes have been used in this task for the latest report value. Will be moved
     // to `last_mem_val` if new value comes in.
     cur_mem_val: Arc<AtomicUsize>,
-
-    stop_flag: Arc<StopFlag>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -203,14 +154,6 @@ impl BatchTaskContext for ComputeNodeContext {
             None
         }
     }
-
-    fn get_stop_flag(&self) -> Arc<StopFlag> {
-        self.stop_flag.clone()
-    }
-
-    fn get_stop_flag_ref(&self) -> &StopFlag {
-        &self.stop_flag
-    }
 }
 
 impl ComputeNodeContext {
@@ -222,7 +165,6 @@ impl ComputeNodeContext {
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             mem_context: Arc::new(MemoryContext::for_test()),
-            stop_flag: Arc::new(StopFlag::new()),
         }
     }
 
@@ -246,7 +188,6 @@ impl ComputeNodeContext {
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             mem_context,
-            stop_flag: Arc::new(StopFlag::new()),
         }
     }
 
@@ -261,7 +202,6 @@ impl ComputeNodeContext {
                 None,
                 IntGauge::new("test", "test").unwrap(),
             )),
-            stop_flag: Arc::new(StopFlag::new()),
         }
     }
 

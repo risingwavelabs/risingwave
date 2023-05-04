@@ -252,17 +252,15 @@ impl ToBatchPb for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist =
-        if self.logical.is_sys_table() {
+        let dist = if self.logical.is_sys_table() {
             Distribution::Single
         } else if let Some(distribution_key) = self.logical.distribution_key()
-        && !distribution_key.is_empty() {
-            Distribution::UpstreamHashShard(
-                distribution_key,
-                self.logical.table_desc().table_id,
-            )
+            && !distribution_key.is_empty()
+        {
+            Distribution::UpstreamHashShard(distribution_key, self.logical.table_desc().table_id)
         } else {
-            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before scan.
+            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
+            // scan.
             Distribution::SomeShard
         };
         Ok(Self::new_inner(self.logical.clone(), dist, self.scan_ranges.clone()).into())

@@ -28,7 +28,7 @@ use crate::estimate_size::EstimateSize;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
-pub const UNIX_EPOCH_DAYS: i32 = 719_163;
+const UNIX_EPOCH_DAYS: i32 = 719_163;
 const LEAP_DAYS: &[i32] = &[0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
@@ -50,6 +50,8 @@ macro_rules! impl_chrono_wrapper {
         pub struct $variant_name(pub $chrono);
 
         impl $variant_name {
+            pub const MIN: Self = Self(<$chrono>::MIN);
+
             pub fn new(data: $chrono) -> Self {
                 $variant_name(data)
             }

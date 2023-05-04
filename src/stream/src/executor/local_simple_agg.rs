@@ -19,7 +19,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 
 use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use super::aggregation::{agg_call_filter_res, generate_agg_schema};
@@ -186,7 +186,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::types::DataType;
-    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
+    use risingwave_expr::agg::{AggArgs, AggKind};
 
     use super::*;
     use crate::executor::test_utils::MockSource;

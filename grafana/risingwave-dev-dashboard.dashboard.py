@@ -302,62 +302,39 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "KBs Read from Next Level",
+                    "KBs Read/Write by Level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Read from Current Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Current Level",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Written to Next Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Count of SSTs Written to Next Level",
+                    "Count of SSTs Read/Write by level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Next Level",
-                    "num of SSTs read from next level during history compactions to next level",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
+                        ),
+
+                        panels.target(
+                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
                     ],
                 ),
@@ -397,6 +374,21 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
                             "avg_epoch_count - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compact Task Size Distribution",
+                    "the size of each compact task",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_compact_task_size_bucket')}[$__rate_interval])) by (le, job, group, level))",
+                                f"p{legend}" +
+                                " - {{group}} @ {{level}}",
+                                ),
+                            [90, "max"],
                         ),
                     ],
                 ),
@@ -2359,11 +2351,21 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
-                    "The memory allocated by jemalloc",
+                    "The allocated memory of jemalloc",
                     "",
                     [
                         panels.target(
                             f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_active_bytes')}",
                             "",
                         ),
                     ],

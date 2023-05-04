@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::array::*;
-use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr_macro::function;
 
 /// Returns a new array removing all the duplicates from the input array
@@ -53,10 +53,9 @@ use risingwave_expr_macro::function;
 #[function("array_distinct(list) -> list")]
 pub fn array_distinct(list: ListRef<'_>) -> ListValue {
     ListValue::new(
-        list.values_ref()
-            .into_iter()
-            .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+        list.iter_elems_ref()
             .unique()
+            .map(|x| x.to_owned_datum())
             .collect(),
     )
 }

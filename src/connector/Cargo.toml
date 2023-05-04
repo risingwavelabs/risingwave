@@ -41,7 +41,7 @@ enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 globset = "0.4.8"
-google-cloud-pubsub = "0.7.0"
+google-cloud-pubsub = "0.14"
 hex = "0.4"
 http = "0.2"
 http-serde = "1.1.0"
@@ -104,7 +104,6 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
-wiremock = "0.5"
 
 [[bench]]
 name = "parser"

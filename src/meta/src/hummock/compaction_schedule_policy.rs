@@ -556,6 +556,7 @@ mod tests {
             .level0_tier_compact_file_number(1)
             .max_bytes_for_level_base(1)
             .level0_sub_level_compact_level_count(1)
+            .level0_overlapping_sub_level_compact_level_count(1)
             .build();
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;

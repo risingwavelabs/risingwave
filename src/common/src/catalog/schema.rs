@@ -19,8 +19,7 @@ use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
-use crate::types::struct_type::StructType;
-use crate::types::DataType;
+use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
 
 /// The field in the schema of the executor's return data

@@ -21,8 +21,7 @@ use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::to_text::ToText;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 

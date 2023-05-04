@@ -17,8 +17,7 @@
 use std::fmt::Write;
 
 use risingwave_common::array::*;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ToText};
 use risingwave_expr_macro::build_function;
 
 use super::template::{BinaryBytesExpression, TernaryBytesExpression};
@@ -101,7 +100,7 @@ fn array_to_string(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.values_ref().iter().flat_map(|f| f.iter()) {
+    for element in array.iter_elems_ref().flatten() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {
@@ -144,7 +143,7 @@ fn array_to_string_with_null(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.values_ref() {
+    for element in array.iter_elems_ref() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {

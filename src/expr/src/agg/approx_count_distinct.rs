@@ -18,8 +18,10 @@ use std::hash::{Hash, Hasher};
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
+use risingwave_expr_macro::build_aggregate;
 
-use crate::vector_op::agg::aggregator::Aggregator;
+use super::Aggregator;
+use crate::agg::AggCall;
 use crate::Result;
 
 const INDEX_BITS: u8 = 14; // number of bits used for finding the index of each 64-bit hash
@@ -30,21 +32,24 @@ const COUNT_BITS: u8 = 64 - INDEX_BITS; // number of non-index bits in each 64-b
 // near-optimal cardinality estimation algorithm" by Philippe Flajolet et al.
 const BIAS_CORRECTION: f64 = 0.7213 / (1. + (1.079 / NUM_OF_REGISTERS as f64));
 
+#[build_aggregate("approx_count_distinct(*) -> int64")]
+fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
+    Ok(Box::new(ApproxCountDistinct::new(agg.return_type)))
+}
+
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
 /// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
 /// is ~1/128.
 #[derive(Clone)]
 pub struct ApproxCountDistinct {
     return_type: DataType,
-    input_col_idx: usize,
     registers: [u8; NUM_OF_REGISTERS],
 }
 
 impl ApproxCountDistinct {
-    pub fn new(return_type: DataType, input_col_idx: usize) -> Self {
+    pub fn new(return_type: DataType) -> Self {
         Self {
             return_type,
-            input_col_idx,
             registers: [0; NUM_OF_REGISTERS],
         }
     }
@@ -124,19 +129,13 @@ impl Aggregator for ApproxCountDistinct {
         self.return_type.clone()
     }
 
-    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
-        let array = input.column_at(self.input_col_idx).array_ref();
-        self.add_datum(array.value_at(row_id));
-        Ok(())
-    }
-
     async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let array = input.column_at(self.input_col_idx).array_ref();
+        let array = input.column_at(0).array_ref();
         for row_id in start_row_id..end_row_id {
             self.add_datum(array.value_at(row_id));
         }
@@ -164,8 +163,7 @@ mod tests {
     };
     use risingwave_common::types::DataType;
 
-    use crate::vector_op::agg::aggregator::Aggregator;
-    use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
+    use super::*;
 
     fn generate_data_chunk(size: usize, start: i32) -> DataChunk {
         let mut lhs = vec![];
@@ -182,7 +180,7 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
+        let mut agg = ApproxCountDistinct::new(DataType::Int64);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {
@@ -202,7 +200,7 @@ mod tests {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
-        let mut agg = ApproxCountDistinct::new(DataType::Int64, 0);
+        let mut agg = ApproxCountDistinct::new(DataType::Int64);
         let mut builder = ArrayBuilderImpl::Int64(I64ArrayBuilder::new(3));
 
         for i in 0..3 {

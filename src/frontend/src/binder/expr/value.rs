@@ -241,7 +241,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..len {
             if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -285,7 +285,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..2 {
             if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
