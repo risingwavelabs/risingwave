@@ -5938,6 +5938,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "async-trait",
+ "auto_enums",
  "chrono",
  "chrono-tz",
  "criterion",
