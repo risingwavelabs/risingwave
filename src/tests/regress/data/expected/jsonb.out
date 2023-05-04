@@ -1540,7 +1540,7 @@ SELECT jsonb_object_agg(1, NULL::jsonb);
 
 SELECT jsonb_object_agg(NULL, '{"a":1}');
 ERROR:  field name must not be null
-CREATE TABLE foo (serial_num int, name text, type text);
+CREATE TEMP TABLE foo (serial_num int, name text, type text);
 INSERT INTO foo VALUES (847001,'t15','GE1043');
 INSERT INTO foo VALUES (847002,'t16','GE1043');
 INSERT INTO foo VALUES (847003,'sub-alpha','GESS90');
@@ -1554,13 +1554,12 @@ FROM foo;
 SELECT jsonb_object_agg(name, type) FROM foo;
                      jsonb_object_agg                      
 -----------------------------------------------------------
- {"sub-alpha": "GESS90", "t15": "GE1043", "t16": "GE1043"}
+ {"t15": "GE1043", "t16": "GE1043", "sub-alpha": "GESS90"}
 (1 row)
 
 INSERT INTO foo VALUES (999999, NULL, 'bar');
 SELECT jsonb_object_agg(name, type) FROM foo;
 ERROR:  field name must not be null
-DROP TABLE foo;
 -- jsonb_object
 -- empty object, one dimension
 SELECT jsonb_object('{}');

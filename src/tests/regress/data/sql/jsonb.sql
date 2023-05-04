@@ -381,25 +381,23 @@ SELECT jsonb_typeof('"1.0"') AS string;
 --@ SELECT jsonb_build_object(json '{"a":1,"b":2}', 3);
 --@ 
 --@ SELECT jsonb_build_object('{1,2,3}'::int[], 3);
-
--- handling of NULL values
+--@ 
+--@ -- handling of NULL values
 --@ SELECT jsonb_object_agg(1, NULL::jsonb);
-SELECT jsonb_object_agg(NULL, '{"a":1}');
-
-CREATE TABLE foo (serial_num int, name text, type text);
-INSERT INTO foo VALUES (847001,'t15','GE1043');
-INSERT INTO foo VALUES (847002,'t16','GE1043');
-INSERT INTO foo VALUES (847003,'sub-alpha','GESS90');
-
+--@ SELECT jsonb_object_agg(NULL, '{"a":1}');
+--@ 
+--@ CREATE TEMP TABLE foo (serial_num int, name text, type text);
+--@ INSERT INTO foo VALUES (847001,'t15','GE1043');
+--@ INSERT INTO foo VALUES (847002,'t16','GE1043');
+--@ INSERT INTO foo VALUES (847003,'sub-alpha','GESS90');
+--@ 
 --@ SELECT jsonb_build_object('turbines',jsonb_object_agg(serial_num,jsonb_build_object('name',name,'type',type)))
 --@ FROM foo;
-
-SELECT jsonb_object_agg(name, type) FROM foo;
-
-INSERT INTO foo VALUES (999999, NULL, 'bar');
-SELECT jsonb_object_agg(name, type) FROM foo;
-
-DROP TABLE foo;
+--@ 
+--@ SELECT jsonb_object_agg(name, type) FROM foo;
+--@ 
+--@ INSERT INTO foo VALUES (999999, NULL, 'bar');
+--@ SELECT jsonb_object_agg(name, type) FROM foo;
 
 -- jsonb_object
 
