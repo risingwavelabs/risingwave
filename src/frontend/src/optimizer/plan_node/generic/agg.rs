@@ -389,6 +389,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 | AggKind::Max
                 | AggKind::StringAgg
                 | AggKind::ArrayAgg
+                | AggKind::JsonbAgg
+                | AggKind::JsonbObjectAgg
                 | AggKind::FirstValue => {
                     if !in_append_only {
                         // columns with order requirement in state table
@@ -400,7 +402,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                 AggKind::Max => {
                                     vec![(OrderType::descending(), agg_call.inputs[0].index)]
                                 }
-                                AggKind::StringAgg | AggKind::ArrayAgg => agg_call
+                                AggKind::StringAgg
+                                | AggKind::ArrayAgg
+                                | AggKind::JsonbAgg
+                                | AggKind::JsonbObjectAgg => agg_call
                                     .order_by
                                     .iter()
                                     .map(|o| (o.order_type, o.column_index))
@@ -410,7 +415,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         };
                         // other columns that should be contained in state table
                         let include_keys = match agg_call.agg_kind {
-                            AggKind::StringAgg | AggKind::ArrayAgg => {
+                            AggKind::StringAgg
+                            | AggKind::ArrayAgg
+                            | AggKind::JsonbAgg
+                            | AggKind::JsonbObjectAgg => {
                                 agg_call.inputs.iter().map(|i| i.index).collect()
                             }
                             _ => vec![],
@@ -441,7 +449,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 }
                 // TODO: is its state a Table?
-                AggKind::BitAnd | AggKind::BitOr => {
+                AggKind::BitAnd | AggKind::BitOr | AggKind::BoolAnd | AggKind::BoolOr => {
                     unimplemented!()
                 }
             })
@@ -668,6 +676,8 @@ impl PlanAggCall {
             AggKind::BitAnd
             | AggKind::BitOr
             | AggKind::BitXor
+            | AggKind::BoolAnd
+            | AggKind::BoolOr
             | AggKind::Min
             | AggKind::Max
             | AggKind::StringAgg
@@ -677,8 +687,8 @@ impl PlanAggCall {
             AggKind::Avg => {
                 panic!("Avg aggregation should have been rewritten to Sum+Count")
             }
-            AggKind::ArrayAgg => {
-                panic!("2-phase ArrayAgg is not supported yet")
+            AggKind::ArrayAgg | AggKind::JsonbAgg | AggKind::JsonbObjectAgg => {
+                panic!("2-phase {} is not supported yet", self.agg_kind)
             }
             AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                 panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
