@@ -168,7 +168,8 @@ impl BitmapBuilder {
         }
     }
 
-    fn len(&self) -> usize {
+    /// Returns the number of bits in the bitmap.
+    pub fn len(&self) -> usize {
         self.len
     }
 }

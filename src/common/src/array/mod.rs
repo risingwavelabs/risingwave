@@ -138,6 +138,9 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append(other.value_at(idx));
     }
 
+    /// Return the number of elements in the builder.
+    fn len(&self) -> usize;
+
     /// Finish build and return a new array.
     fn finish(self) -> Self::ArrayType;
 }
@@ -522,6 +525,12 @@ macro_rules! impl_array_builder {
             pub fn get_ident(&self) -> &'static str {
                 match self {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
+                }
+            }
+
+            pub fn len(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.len(), )*
                 }
             }
         }

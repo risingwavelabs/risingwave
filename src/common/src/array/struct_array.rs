@@ -135,6 +135,10 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> StructArray {
         let children = self
             .children_array

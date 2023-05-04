@@ -140,6 +140,10 @@ impl ArrayBuilder for ListArrayBuilder {
         Some(())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> ListArray {
         ListArray {
             bitmap: self.bitmap.finish(),
