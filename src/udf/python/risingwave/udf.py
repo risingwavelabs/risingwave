@@ -11,6 +11,7 @@ class UserDefinedFunction:
     """
     Base interface for user-defined function.
     """
+
     _name: str
     _input_schema: pa.Schema
     _result_schema: pa.Schema
@@ -39,28 +40,27 @@ class ScalarFunction(UserDefinedFunction):
         inputs = [[v.as_py() for v in array] for array in batch]
         inputs = [
             _process_input_array(array, type)
-            for array, type in zip(inputs, self._input_schema.types)]
+            for array, type in zip(inputs, self._input_schema.types)
+        ]
 
         # evaluate the function for each row
-        column = [self.eval(*[col[i] for col in inputs])
-                  for i in range(batch.num_rows)]
+        column = [self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)]
 
         # convert value to json for jsonb columns
         if self._result_schema.types[0] == pa.large_string():
-            column = [(json.dumps(v) if v is not None else None)
-                      for v in column]
+            column = [(json.dumps(v) if v is not None else None) for v in column]
         array = pa.array(column, type=self._result_schema.types[0])
         return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 def _process_input_array(array: list, type: pa.DataType) -> list:
     if pa.types.is_list(type):
-        return [(_process_input_array(v, type.value_type)
-                if v is not None else None)
-                for v in array]
+        return [
+            (_process_input_array(v, type.value_type) if v is not None else None)
+            for v in array
+        ]
     if pa.types.is_large_string(type):
-        return [(json.loads(v) if v is not None else None)
-                for v in array]
+        return [(json.loads(v) if v is not None else None) for v in array]
     return array
 
 
@@ -83,12 +83,14 @@ class TableFunction(UserDefinedFunction):
             row = tuple(column[row_index].as_py() for column in batch)
             result_rows.extend(self.eval(*row))
 
-        result_columns = zip(
-            *result_rows) if len(self._result_schema) > 1 else [result_rows]
+        result_columns = (
+            zip(*result_rows) if len(self._result_schema) > 1 else [result_rows]
+        )
 
         # Convert the result columns to arrow arrays
         arrays = [
-            pa.array(col, type) for col, type in zip(result_columns, self._result_schema.types)
+            pa.array(col, type)
+            for col, type in zip(result_columns, self._result_schema.types)
         ]
         return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
 
@@ -97,18 +99,21 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
     """
     Base Wrapper for Python user-defined scalar function.
     """
+
     _func: Callable
 
     def __init__(self, func, input_types, result_type, name=None):
         self._func = func
-        self._input_schema = pa.schema(zip(
-            inspect.getfullargspec(func)[0],
-            [_to_data_type(t) for t in _to_list(input_types)]
-        ))
-        self._result_schema = pa.schema(
-            [('output', _to_data_type(result_type))])
+        self._input_schema = pa.schema(
+            zip(
+                inspect.getfullargspec(func)[0],
+                [_to_data_type(t) for t in _to_list(input_types)],
+            )
+        )
+        self._result_schema = pa.schema([("output", _to_data_type(result_type))])
         self._name = name or (
-            func.__name__ if hasattr(func, '__name__') else func.__class__.__name__)
+            func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
+        )
 
     def __call__(self, *args):
         return self._func(*args)
@@ -121,18 +126,23 @@ class UserDefinedTableFunctionWrapper(TableFunction):
     """
     Base Wrapper for Python user-defined table function.
     """
+
     _func: Callable
 
     def __init__(self, func, input_types, result_types, name=None):
         self._func = func
-        self._input_schema = pa.schema(zip(
-            inspect.getfullargspec(func)[0],
-            [_to_data_type(t) for t in _to_list(input_types)]
-        ))
+        self._input_schema = pa.schema(
+            zip(
+                inspect.getfullargspec(func)[0],
+                [_to_data_type(t) for t in _to_list(input_types)],
+            )
+        )
         self._result_schema = pa.schema(
-            [('', _to_data_type(t)) for t in _to_list(result_types)])
+            [("", _to_data_type(t)) for t in _to_list(result_types)]
+        )
         self._name = name or (
-            func.__name__ if hasattr(func, '__name__') else func.__class__.__name__)
+            func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
+        )
 
     def __call__(self, *args):
         return self._func(*args)
@@ -148,9 +158,11 @@ def _to_list(x):
         return [x]
 
 
-def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
-        result_type: Union[str, pa.DataType],
-        name: Optional[str] = None,) -> Callable:
+def udf(
+    input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+    result_type: Union[str, pa.DataType],
+    name: Optional[str] = None,
+) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
 
@@ -172,9 +184,11 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
     return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
 
 
-def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
-         result_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
-         name: Optional[str] = None,) -> Callable:
+def udtf(
+    input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+    result_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+    name: Optional[str] = None,
+) -> Callable:
     """
     Annotation for creating a user-defined table function.
 
@@ -206,35 +220,41 @@ class UdfServer(pa.flight.FlightServerBase):
     server.serve()
     ```
     """
+
     # UDF server based on Apache Arrow Flight protocol.
     # Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
 
     _functions: Dict[str, UserDefinedFunction]
 
     def __init__(self, location="0.0.0.0:8815", **kwargs):
-        super(UdfServer, self).__init__('grpc://' + location, **kwargs)
+        super(UdfServer, self).__init__("grpc://" + location, **kwargs)
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
         """Return the result schema of a function."""
-        udf = self._functions[descriptor.path[0].decode('utf-8')]
+        udf = self._functions[descriptor.path[0].decode("utf-8")]
         # return the concatenation of input and output schema
-        full_schema = pa.schema(
-            list(udf._input_schema) + list(udf._result_schema))
+        full_schema = pa.schema(list(udf._input_schema) + list(udf._result_schema))
         # we use `total_records` to indicate the number of input arguments
-        return pa.flight.FlightInfo(schema=full_schema, descriptor=descriptor, endpoints=[], total_records=len(udf._input_schema), total_bytes=0)
+        return pa.flight.FlightInfo(
+            schema=full_schema,
+            descriptor=descriptor,
+            endpoints=[],
+            total_records=len(udf._input_schema),
+            total_bytes=0,
+        )
 
     def add_function(self, udf: UserDefinedFunction):
         """Add a function to the server."""
         name = udf._name
         if name in self._functions:
-            raise ValueError('Function already exists: ' + name)
-        print('added function:', name)
+            raise ValueError("Function already exists: " + name)
+        print("added function:", name)
         self._functions[name] = udf
 
     def do_exchange(self, context, descriptor, reader, writer):
         """Call a function from the client."""
-        udf = self._functions[descriptor.path[0].decode('utf-8')]
+        udf = self._functions[descriptor.path[0].decode("utf-8")]
         writer.begin(udf._result_schema)
         for chunk in reader:
             # print(pa.Table.from_batches([chunk.data]))
@@ -262,43 +282,43 @@ def _to_data_type(t: Union[str, pa.DataType]) -> pa.DataType:
 
 def _string_to_data_type(type_str: str):
     type_str = type_str.upper()
-    if type_str in ('BOOLEAN', 'BOOL'):
+    if type_str in ("BOOLEAN", "BOOL"):
         return pa.bool_()
-    elif type_str in ('SMALLINT', 'INT2'):
+    elif type_str in ("SMALLINT", "INT2"):
         return pa.int16()
-    elif type_str in ('INT', 'INTEGER', 'INT4'):
+    elif type_str in ("INT", "INTEGER", "INT4"):
         return pa.int32()
-    elif type_str in ('BIGINT', 'INT8'):
+    elif type_str in ("BIGINT", "INT8"):
         return pa.int64()
-    elif type_str in ('FLOAT4', 'REAL'):
+    elif type_str in ("FLOAT4", "REAL"):
         return pa.float32()
-    elif type_str in ('FLOAT8', 'DOUBLE PRECISION'):
+    elif type_str in ("FLOAT8", "DOUBLE PRECISION"):
         return pa.float64()
-    elif type_str.startswith('DECIMAL') or type_str.startswith('NUMERIC'):
+    elif type_str.startswith("DECIMAL") or type_str.startswith("NUMERIC"):
         return pa.decimal128(28)
-    elif type_str in ('DATE'):
+    elif type_str in ("DATE"):
         return pa.date32()
-    elif type_str in ('TIME', 'TIME WITHOUT TIME ZONE'):
-        return pa.time32('ms')
-    elif type_str in ('TIMESTAMP', 'TIMESTAMP WITHOUT TIME ZONE'):
-        return pa.timestamp('ms')
-    elif type_str.startswith('INTERVAL'):
-        return pa.duration('us')
-    elif type_str in ('VARCHAR'):
+    elif type_str in ("TIME", "TIME WITHOUT TIME ZONE"):
+        return pa.time32("ms")
+    elif type_str in ("TIMESTAMP", "TIMESTAMP WITHOUT TIME ZONE"):
+        return pa.timestamp("ms")
+    elif type_str.startswith("INTERVAL"):
+        return pa.duration("us")
+    elif type_str in ("VARCHAR"):
         return pa.string()
-    elif type_str in ('JSONB'):
+    elif type_str in ("JSONB"):
         return pa.large_string()
-    elif type_str in ('BYTEA'):
+    elif type_str in ("BYTEA"):
         return pa.binary()
-    elif type_str.endswith('[]'):
+    elif type_str.endswith("[]"):
         return pa.list_(_string_to_data_type(type_str[:-2]))
-    elif type_str.startswith('STRUCT'):
+    elif type_str.startswith("STRUCT"):
         # extract 'STRUCT<INT, VARCHAR, ...>'
-        type_list = type_str[6:].strip('<>')
+        type_list = type_str[6:].strip("<>")
         fields = []
-        for type_str in type_list.split(','):
+        for type_str in type_list.split(","):
             type_str = type_str.strip()
-            fields.append(pa.field('', _string_to_data_type(type_str)))
+            fields.append(pa.field("", _string_to_data_type(type_str)))
         return pa.struct(fields)
 
-    raise ValueError(f'Unsupported type: {type_str}')
+    raise ValueError(f"Unsupported type: {type_str}")
