@@ -6051,6 +6051,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-types",
  "pretty-xmlish",
+ "pretty_assertions",
  "prometheus",
  "rand",
  "risingwave_batch",
