@@ -529,7 +529,7 @@
           |     └─StreamRowIdGen { row_id_index: 7 }
           |       └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
           └─StreamExchange { dist: HashShard(max(price)) }
-            └─StreamProject { exprs: [max(price), $expr1, ($expr1 - '00:00:10':Interval) as $expr2] }
+            └─StreamProject { exprs: [$expr1, max(price), ($expr1 - '00:00:10':Interval) as $expr2] }
               └─StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [max(price), count] }
                 └─StreamExchange { dist: HashShard($expr1) }
                   └─StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price, _row_id] }
@@ -545,7 +545,7 @@
         └── StreamFilter { predicate: (date_time >= $expr2) AND (date_time <= $expr1) }
             └── StreamHashJoin { type: Inner, predicate: price = max(price), output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
                 ├──  StreamExchange Hash([2]) from 1
-                └──  StreamExchange Hash([0]) from 3
+                └──  StreamExchange Hash([1]) from 3
 
     Fragment 1
     StreamNoOp
@@ -557,7 +557,7 @@
         └──  StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] } { source state table: 4 }
 
     Fragment 3
-    StreamProject { exprs: [max(price), $expr1, ($expr1 - '00:00:10':Interval) as $expr2] }
+    StreamProject { exprs: [$expr1, max(price), ($expr1 - '00:00:10':Interval) as $expr2] }
     └── StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [max(price), count] } { result table: 5, state tables: [], distinct tables: [] }
         └──  StreamExchange Hash([0]) from 4
 
@@ -569,7 +569,7 @@
 
     Table 1 { columns: [ price, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ max(price), $expr1, $expr2 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr1, max(price), $expr2 ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 3 { columns: [ max(price), $expr1, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
