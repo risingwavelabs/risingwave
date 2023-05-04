@@ -25,6 +25,7 @@ pub enum Controller {
 // Default constant Cgroup paths and hierarchy.
 const DEFAULT_CGROUP_ROOT_HIERARCYHY: &str = "/sys/fs/cgroup";
 const DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH: &str = "/sys/fs/cgroup/cgroup.controllers";
+const DEFAULT_CGROUP_MAX_INDICATOR: &str = "max";
 
 mod runtime {
     use std::env;
@@ -260,6 +261,16 @@ pub mod cpu {
 
     // Returns the CPU limit when cgroup_V1 is utilised.
     fn get_cpu_limit_v1() -> Result<f32, std::io::Error> {
+        let is_max = super::util::is_max_in_file_path(&format!(
+            "{}{}",
+            super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
+            V1_CPU_QUOTA_HIERARCHY
+        ))?;
+        if is_max {
+            let max_cpu = thread::available_parallelism()?;
+            return Ok(max_cpu.get() as f32);
+        }
+
         let cpu_quota = super::util::read_integer_from_file_path(&format!(
             "{}{}",
             super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
@@ -285,8 +296,8 @@ pub mod cpu {
 }
 
 mod util {
-    use std::fs;
     use std::path::Path;
+    use std::{fs, thread};
 
     // If cgroup exists or is enabled in kernel, returnb true, else false.
     pub fn cgroup_exists() -> bool {
@@ -311,6 +322,11 @@ mod util {
             .parse::<usize>()
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
         Ok(limit_val)
+    }
+
+    pub fn is_max_in_file_path(file_path: &str) -> Result<bool, std::io::Error> {
+        let limit_str = std::fs::read_to_string(file_path)?;
+        Ok(limit_str.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR)
     }
 
     // Parses the filepath and checks for the existence of controller_name in the file.
@@ -366,6 +382,10 @@ mod util {
         let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
         match cpu_data.get(0..2) {
             Some(cpu_data_values) => {
+                if cpu_data_values[0] == super::DEFAULT_CGROUP_MAX_INDICATOR {
+                    let max_cpu = thread::available_parallelism()?;
+                    return Ok(max_cpu.get() as f32);
+                }
                 let cpu_quota = cpu_data_values[0].parse::<usize>().map_err(|_| {
                     std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
                 })?;
@@ -385,11 +405,12 @@ mod util {
     mod tests {
         use std::collections::HashMap;
         use std::io::prelude::*;
+        use std::thread;
 
         use tempfile;
 
         use super::*;
-        use crate::util::resource_util::Controller;
+        use crate::util::resource_util::{Controller, DEFAULT_CGROUP_MAX_INDICATOR};
         const DEFAULT_NON_EXISTENT_PATH: &str = "default-non-existent-path";
 
         #[test]
@@ -451,7 +472,7 @@ mod util {
                     "max-value-in-file",
                     TestCase {
                         file_exists: true,
-                        value_in_file: String::from("max"),
+                        value_in_file: String::from(DEFAULT_CGROUP_MAX_INDICATOR),
                         expected: Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
                             "not a number",
@@ -526,10 +547,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("max 20000"),
-                        expected: Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            "not a number",
-                        )),
+                        expected: Ok(thread::available_parallelism().unwrap().get() as f32),
                     },
                 ),
                 (
