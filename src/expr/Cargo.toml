@@ -39,6 +39,7 @@ risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+serde_json = "1"
 speedate = "0.7.0"
 static_assertions = "1"
 thiserror = "1"

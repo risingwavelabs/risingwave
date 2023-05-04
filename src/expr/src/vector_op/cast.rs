@@ -510,7 +510,7 @@ fn build_cast_str_to_list(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     let elem_type = match &return_type {
-        DataType::List { datatype } => (**datatype).clone(),
+        DataType::List(datatype) => (**datatype).clone(),
         _ => panic!("expected list type"),
     };
     let child = children.into_iter().next().unwrap();
@@ -546,11 +546,11 @@ fn build_cast_list_to_list(
 ) -> Result<BoxedExpression> {
     let child = children.into_iter().next().unwrap();
     let source_elem_type = match child.return_type() {
-        DataType::List { datatype } => (*datatype).clone(),
+        DataType::List(datatype) => (*datatype).clone(),
         _ => panic!("expected list type"),
     };
     let target_elem_type = match &return_type {
-        DataType::List { datatype } => (**datatype).clone(),
+        DataType::List(datatype) => (**datatype).clone(),
         _ => panic!("expected list type"),
     };
     Ok(Box::new(UnaryExpression::<ListArray, ListArray, _>::new(
@@ -792,13 +792,7 @@ mod tests {
         // Nested List
         let nested_list123 = ListValue::new(vec![Some(ScalarImpl::List(list123))]);
         assert_eq!(
-            str_to_list(
-                "{{1, 2, 3}}",
-                &DataType::List {
-                    datatype: Box::new(DataType::Int32)
-                }
-            )
-            .unwrap(),
+            str_to_list("{{1, 2, 3}}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
             nested_list123
         );
 
@@ -817,11 +811,7 @@ mod tests {
         assert_eq!(
             str_to_list(
                 "{{{1, 2, 3}}, {{44, 55, 66}}}",
-                &DataType::List {
-                    datatype: Box::new(DataType::List {
-                        datatype: Box::new(DataType::Int32)
-                    })
-                }
+                &DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))))
             )
             .unwrap(),
             double_nested_list123_445566
@@ -834,12 +824,8 @@ mod tests {
                     ListRef::ValueRef {
                         val: &nested_list123,
                     },
-                    &DataType::List {
-                        datatype: Box::new(DataType::Int32),
-                    },
-                    &DataType::List {
-                        datatype: Box::new(DataType::Varchar),
-                    },
+                    &DataType::List(Box::new(DataType::Int32)),
+                    &DataType::List(Box::new(DataType::Varchar)),
                 )
                 .unwrap(),
             )),
@@ -848,12 +834,8 @@ mod tests {
                     ListRef::ValueRef {
                         val: &nested_list445566,
                     },
-                    &DataType::List {
-                        datatype: Box::new(DataType::Int32),
-                    },
-                    &DataType::List {
-                        datatype: Box::new(DataType::Varchar),
-                    },
+                    &DataType::List(Box::new(DataType::Int32)),
+                    &DataType::List(Box::new(DataType::Varchar)),
                 )
                 .unwrap(),
             )),
@@ -863,11 +845,7 @@ mod tests {
         assert_eq!(
             str_to_list(
                 "{{{1, 2, 3}}, {{44, 55, 66}}}",
-                &DataType::List {
-                    datatype: Box::new(DataType::List {
-                        datatype: Box::new(DataType::Varchar)
-                    })
-                }
+                &DataType::List(Box::new(DataType::List(Box::new(DataType::Varchar))))
             )
             .unwrap(),
             double_nested_varchar_list123_445566
