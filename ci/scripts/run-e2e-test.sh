@@ -33,7 +33,8 @@ echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3streaming-2serving-3fe
 # Please make sure the regression is expected before increasing the timeout.
-sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_barrier/streaming.slt' --junit "streaming-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/streaming.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
@@ -41,8 +42,10 @@ cargo make ci-kill
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_barrier/ddl.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/ddl.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_barrier/batch.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/batch.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 

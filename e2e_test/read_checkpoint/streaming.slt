@@ -1,4 +1,4 @@
 statement ok
-SET VISIBILITY_MODE TO all;
+SET VISIBILITY_MODE TO checkpoint;
 
 include ../streaming/**/*.slt
