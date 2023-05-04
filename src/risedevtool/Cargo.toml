@@ -26,7 +26,7 @@ google-cloud-pubsub = "0.14"
 indicatif = "0.17"
 isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
-kafka = { version = "0.9", default-features = false }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha" }
 redis = "0.22"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
