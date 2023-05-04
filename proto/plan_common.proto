@@ -45,11 +45,11 @@ message ColumnCatalog {
 }
 
 message GeneratedColumnDesc {
-  expr.ExprNode expr = 1; 
+  expr.ExprNode expr = 1;
 }
 
 message DefaultColumnDesc {
-  expr.ExprNode expr = 1; 
+  expr.ExprNode expr = 1;
 }
 
 message StorageTableDesc {
