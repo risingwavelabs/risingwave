@@ -51,13 +51,27 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
             f.debug_struct("WindowFunction")
                 .field("kind", &window_function.kind)
                 .field("return_type", &window_function.return_type)
+                .field("args", &window_function.args)
                 .field("partition_by", &window_function.partition_by)
                 .field("order_by", &window_function.order_by)
                 .field("frame", &window_function.frame)
                 .finish()
         } else {
-            write!(f, "{}() OVER(", window_function.kind)?;
-
+            write!(f, "{}(", window_function.kind)?;
+            let mut delim = "";
+            for arg in &window_function.args {
+                write!(f, "{}", delim)?;
+                delim = ", ";
+                write!(
+                    f,
+                    "{}",
+                    InputRefDisplay {
+                        input_ref: arg,
+                        input_schema: self.input_schema
+                    }
+                )?;
+            }
+            write!(f, ") OVER(")?;
             let mut delim = "";
             if !window_function.partition_by.is_empty() {
                 delim = " ";
