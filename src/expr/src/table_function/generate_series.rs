@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use itertools::multizip;
 use num_traits::Zero;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray, TimestampArray,
+    Array, ArrayBuilder, ArrayImpl, DataChunk, I32Array, IntervalArray, ListArrayBuilder,
+    TimestampArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -61,7 +60,7 @@ where
         start: T::RefItem<'_>,
         stop: T::RefItem<'_>,
         step: S::RefItem<'_>,
-    ) -> Result<ArrayRef> {
+    ) -> Result<T> {
         if step.is_zero() {
             return Err(ExprError::InvalidParam {
                 name: "step",
@@ -88,7 +87,7 @@ where
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
 
-        Ok(Arc::new(builder.finish().into()))
+        Ok(builder.finish())
     }
 }
 
@@ -106,7 +105,7 @@ where
         self.start.return_type()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
         let ret_start = self.start.eval_checked(input).await?;
         let arr_start: &T = ret_start.as_ref().into();
         let ret_stop = self.stop.eval_checked(input).await?;
@@ -116,7 +115,10 @@ where
         let arr_step: &S = ret_step.as_ref().into();
 
         let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
+        let mut builder = ListArrayBuilder::with_type(
+            self.chunk_size,
+            DataType::List(Box::new(self.return_type())),
+        );
 
         match bitmap {
             Some(bitmap) => {
@@ -124,31 +126,35 @@ where
                     multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
                         .zip_eq_debug(bitmap.iter())
                 {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
+                    if let (Some(start), Some(stop), Some(step)) = (start, stop, step) && visible {
+                        let array = self.eval_row(start, stop, step)?;
+                        for value in array.iter() {
+                            builder.append_sub(value.map(|v| v.into()));
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
             None => {
                 for (start, stop, step) in
                     multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
                 {
-                    let array = if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
+                    if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
+                        let array = self.eval_row(start, stop, step)?;
+                        for value in array.iter() {
+                            builder.append_sub(value.map(|v| v.into()));
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
         }
 
-        Ok(output_arrays)
+        Ok(builder.finish())
     }
 }
 
@@ -211,10 +217,9 @@ mod tests {
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
+        let array = function.eval(&dummy_chunk).await.unwrap();
 
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        assert_eq!(array.flatten_len(), expect_cnt);
     }
 
     #[tokio::test]
@@ -249,10 +254,9 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
+        let array = function.eval(&dummy_chunk).await.unwrap();
 
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        assert_eq!(array.flatten_len(), expect_cnt);
     }
 
     #[tokio::test]
@@ -278,10 +282,9 @@ mod tests {
         let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
+        let array = function.eval(&dummy_chunk).await.unwrap();
 
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        assert_eq!(array.flatten_len(), expect_cnt);
     }
 
     #[tokio::test]
@@ -315,9 +318,8 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
+        let array = function.eval(&dummy_chunk).await.unwrap();
 
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        assert_eq!(array.flatten_len(), expect_cnt);
     }
 }

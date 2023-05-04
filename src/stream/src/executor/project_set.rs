@@ -19,7 +19,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -144,7 +144,7 @@ impl ProjectSetExecutor {
                         let items = results
                             .iter()
                             .map(|result| match result {
-                                Either::Left(arrays) => Either::Left(arrays[row_idx].clone()),
+                                Either::Left(arrays) => Either::Left(arrays.value_at(row_idx)),
                                 Either::Right(array) => Either::Right(array.value_at(row_idx)),
                             })
                             .collect_vec();
@@ -153,7 +153,11 @@ impl ProjectSetExecutor {
                         // length.
                         let max_tf_len = items
                             .iter()
-                            .map(|i| i.as_ref().map_left(|arr| arr.len()).left_or(0))
+                            .map(|i| {
+                                i.as_ref()
+                                    .map_left(|arr| arr.map_or(0, |arr| arr.len()))
+                                    .left_or(0)
+                            })
                             .max()
                             .unwrap();
 
@@ -170,9 +174,16 @@ impl ProjectSetExecutor {
 
                         for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                             match item {
-                                Either::Left(array_ref) => {
-                                    builder.append_array(&array_ref);
+                                Either::Left(Some(array_ref)) => {
+                                    for value in array_ref.iter() {
+                                        builder.append_datum(value);
+                                    }
                                     for _ in 0..(max_tf_len - array_ref.len()) {
+                                        builder.append_null();
+                                    }
+                                }
+                                Either::Left(None) => {
+                                    for _ in 0..max_tf_len {
                                         builder.append_null();
                                     }
                                 }

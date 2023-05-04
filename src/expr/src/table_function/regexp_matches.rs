@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
@@ -38,7 +36,7 @@ pub struct RegexpMatches {
 impl RegexpMatches {
     /// Match one row and return the result.
     // TODO: The optimization can be allocated.
-    fn eval_row(&self, text: &str) -> Result<ArrayRef> {
+    fn eval_row(&self, text: &str) -> Result<ArrayImpl> {
         let mut builder = self.return_type().create_array_builder(self.chunk_size);
 
         for capture in self.ctx.0.captures_iter(text) {
@@ -54,7 +52,7 @@ impl RegexpMatches {
             builder.append_datum(&Some(list.into()));
         }
 
-        Ok(Arc::new(builder.finish()))
+        Ok(builder.finish())
     }
 }
 
@@ -64,39 +62,45 @@ impl TableFunction for RegexpMatches {
         DataType::List(Box::new(DataType::Varchar))
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
         let text_arr = self.text.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
 
         let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
+        let mut builder = ListArrayBuilder::with_type(
+            self.chunk_size,
+            DataType::List(Box::new(self.return_type())),
+        );
 
         match bitmap {
             Some(bitmap) => {
                 for (text, visible) in text_arr.iter().zip_eq_fast(bitmap.iter()) {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let Some(text) = text {
-                        self.eval_row(text)?
+                    if let Some(text) = text && visible {
+                        let array = self.eval_row(text)?;
+                        for value in array.iter() {
+                            builder.append_sub(value);
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
             None => {
                 for text in text_arr.iter() {
-                    let array = if let Some(text) = text {
-                        self.eval_row(text)?
+                    if let Some(text) = text {
+                        let array = self.eval_row(text)?;
+                        for value in array.iter() {
+                            builder.append_sub(value);
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
         }
-
-        Ok(output_arrays)
+        Ok(builder.finish())
     }
 }
 

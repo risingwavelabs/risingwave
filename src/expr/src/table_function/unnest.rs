@@ -42,39 +42,45 @@ impl TableFunction for Unnest {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
         let ret_list = self.list.eval_checked(input).await?;
         let arr_list: &ListArray = ret_list.as_ref().into();
 
         let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
+        let mut builder = ListArrayBuilder::with_type(
+            self.chunk_size,
+            DataType::List(Box::new(self.return_type())),
+        );
 
         match bitmap {
             Some(bitmap) => {
                 for (list, visible) in arr_list.iter().zip_eq_fast(bitmap.iter()) {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let Some(list) = list {
-                        self.eval_row(list)?
+                    if let Some(list) = list && visible {
+                        let array = self.eval_row(list)?;
+                        for value in array.iter() {
+                            builder.append_sub(value);
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
             None => {
                 for list in arr_list.iter() {
-                    let array = if let Some(list) = list {
-                        self.eval_row(list)?
+                    if let Some(list) = list {
+                        let array = self.eval_row(list)?;
+                        for value in array.iter() {
+                            builder.append_sub(value);
+                        }
+                        builder.finish_sub(true);
                     } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
+                        builder.append_null();
+                    }
                 }
             }
         }
-
-        Ok(output_arrays)
+        Ok(builder.finish())
     }
 }
 

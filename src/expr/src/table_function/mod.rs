@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use either::Either;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, ListArray, ListArrayBuilder};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::{ProjectSetSelectItem as SelectItemPb, TableFunction as TableFunctionPb};
@@ -42,7 +40,7 @@ use self::user_defined::*;
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>>;
+    async fn eval(&self, input: &DataChunk) -> Result<ListArray>;
 
     fn boxed(self) -> BoxedTableFunction
     where
@@ -67,11 +65,6 @@ pub fn build_from_prost(prost: &TableFunctionPb, chunk_size: usize) -> Result<Bo
     }
 }
 
-/// Helper function to create an empty array.
-fn empty_array(data_type: DataType) -> ArrayRef {
-    Arc::new(data_type.create_array_builder(0).finish())
-}
-
 /// Used for tests. Repeat an expression n times
 pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
     #[derive(Debug)]
@@ -86,19 +79,20 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
             self.expr.return_type()
         }
 
-        async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
             let array = self.expr.eval(input).await?;
 
-            let mut res = vec![];
+            let mut builder = ListArrayBuilder::with_type(
+                array.len(),
+                DataType::List(Box::new(self.return_type())),
+            );
             for datum_ref in array.iter() {
-                let mut builder = self.return_type().create_array_builder(self.n);
                 for _ in 0..self.n {
-                    builder.append_datum(datum_ref);
+                    builder.append_sub(datum_ref);
                 }
-                res.push(Arc::new(builder.finish()));
+                builder.finish_sub(true);
             }
-
-            Ok(res)
+            Ok(builder.finish())
         }
     }
 
@@ -139,7 +133,7 @@ impl ProjectSetSelectItem {
         }
     }
 
-    pub async fn eval(&self, input: &DataChunk) -> Result<Either<Vec<ArrayRef>, ArrayRef>> {
+    pub async fn eval(&self, input: &DataChunk) -> Result<Either<ListArray, ArrayRef>> {
         match self {
             ProjectSetSelectItem::TableFunction(tf) => tf.eval(input).await.map(Either::Left),
             ProjectSetSelectItem::Expr(expr) => expr.eval(input).await.map(Either::Right),

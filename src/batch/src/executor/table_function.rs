@@ -50,16 +50,11 @@ impl TableFunctionExecutor {
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
-        let mut builder = self
-            .table_function
-            .return_type()
-            .create_array_builder(self.chunk_size);
-        let mut len = 0;
-        for array in self.table_function.eval(&dummy_chunk).await? {
-            len += array.len();
-            builder.append_array(&array);
-        }
-        yield match builder.finish() {
+        let list_array = self.table_function.eval(&dummy_chunk).await?;
+        let flatten_array = list_array.flatten();
+        let len = flatten_array.len();
+
+        yield match flatten_array {
             ArrayImpl::Struct(s) => DataChunk::from(s),
             array => DataChunk::new(vec![array.into()], len),
         };

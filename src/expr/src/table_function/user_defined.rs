@@ -39,7 +39,7 @@ impl TableFunction for UserDefinedTableFunction {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
             let val = c.eval_checked(input).await?.as_ref().into();
@@ -58,7 +58,8 @@ impl TableFunction for UserDefinedTableFunction {
             Arc::new(arrow_array::StructArray::from(output))
         };
         // TODO: split by chunk_size
-        Ok(vec![Arc::new(ArrayImpl::try_from(&array)?)])
+        // Ok(vec![Arc::new(ArrayImpl::try_from(&array)?)])
+        todo!()
     }
 }
 
