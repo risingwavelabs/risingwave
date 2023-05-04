@@ -74,14 +74,12 @@ phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
-prost-types = { version = "0.11" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
-ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
@@ -91,7 +89,7 @@ smallvec = { version = "1", default-features = false, features = ["serde"] }
 strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
@@ -167,14 +165,12 @@ postgres-types = { version = "0.2", default-features = false, features = ["deriv
 proc-macro2 = { version = "1", features = ["span-locations"] }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
-prost-types = { version = "0.11" }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
-ring = { version = "0.16", features = ["std"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
@@ -185,7 +181,8 @@ strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
+time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing"] }
+tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
