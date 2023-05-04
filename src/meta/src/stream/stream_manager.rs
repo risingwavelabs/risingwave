@@ -547,6 +547,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -714,7 +715,15 @@ mod tests {
             };
             let fake_parallelism = 4;
             cluster_manager
-                .add_worker_node(WorkerType::ComputeNode, host.clone(), fake_parallelism)
+                .add_worker_node(
+                    WorkerType::ComputeNode,
+                    host.clone(),
+                    Property {
+                        worker_node_parallelism: fake_parallelism,
+                        is_streaming: true,
+                        is_serving: true,
+                    },
+                )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
 

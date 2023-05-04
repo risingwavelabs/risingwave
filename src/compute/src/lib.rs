@@ -30,11 +30,12 @@ pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use risingwave_common_proc_macro::OverrideConfig;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
@@ -84,6 +85,10 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
+    /// Decides whether the compute node can be used for streaming and serving.
+    #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
+    pub role: Role,
+
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
 }
@@ -113,6 +118,32 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+pub enum Role {
+    Serving,
+    Streaming,
+    #[default]
+    Both,
+}
+
+impl Role {
+    pub fn for_streaming(&self) -> bool {
+        match self {
+            Role::Serving => false,
+            Role::Streaming => true,
+            Role::Both => true,
+        }
+    }
+
+    pub fn for_serving(&self) -> bool {
+        match self {
+            Role::Serving => true,
+            Role::Streaming => false,
+            Role::Both => true,
+        }
+    }
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
@@ -179,4 +210,8 @@ fn default_total_memory_bytes() -> usize {
 
 fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+fn default_role() -> Role {
+    Role::Both
 }
