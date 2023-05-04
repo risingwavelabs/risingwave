@@ -29,8 +29,8 @@ message ColumnDesc {
   string type_name = 5;
   // Optional description for the generated column or default value.
   oneof generated_or_default_column {
-    GeneratedColumnDesc generated_column = 6;
-    DefaultColumnDesc default_column = 7;
+    GeneratedColumnDesc generated_column = 7;
+    DefaultColumnDesc default_column = 8;
   }
 }
 
