@@ -307,7 +307,7 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 360
+    timeout_in_minutes: 480
 
   - label: "micro benchmark"
     command: "ci/scripts/run-micro-benchmarks.sh"
