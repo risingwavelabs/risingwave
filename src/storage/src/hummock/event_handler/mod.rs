@@ -152,19 +152,19 @@ pub struct LocalInstanceGuard {
 
 impl Drop for LocalInstanceGuard {
     fn drop(&mut self) {
-        // If sending fails, it means that event_handler and event_channel have been destroyed.
-        // Although the current assumption is that `LocalHummockStorage` is always Destroyed before
-        // `EventHandler`, so the send operation cannot fail. But when the assumptions are broken,
-        // this can lead to leaks. So prefer to panic, when it fails.
+        // If sending fails, it means that event_handler and event_channel have been destroyed, no
+        // need to handle failure
         self.event_sender
             .send(HummockEvent::DestroyReadVersion {
                 table_id: self.table_id,
                 instance_id: self.instance_id,
             })
             .unwrap_or_else(|err| {
-                panic!(
+                tracing::error!(
                     "LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
-                    self.table_id, self.instance_id, err
+                    self.table_id,
+                    self.instance_id,
+                    err
                 )
             })
     }
