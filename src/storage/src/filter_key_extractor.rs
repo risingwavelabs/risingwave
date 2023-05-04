@@ -467,7 +467,6 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            default_columns: None,
             pk: vec![
                 PbColumnOrder {
                     column_index: 1,

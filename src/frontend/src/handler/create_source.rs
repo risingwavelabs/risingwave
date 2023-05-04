@@ -354,7 +354,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "_id".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -365,7 +365,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "payload".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -532,7 +532,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -758,8 +758,7 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    let default_columns =
-        bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
@@ -801,20 +800,6 @@ pub async fn handle_create_source(
         name,
         row_id_index,
         columns,
-        default_columns: if default_columns.is_empty() {
-            None
-        } else {
-            Some(DefaultColumns {
-                default_columns: default_columns
-                    .iter()
-                    .cloned()
-                    .map(|(i, expr)| IndexAndExpr {
-                        index: i as u32,
-                        expr: Some(expr.to_expr_proto()),
-                    })
-                    .collect_vec(),
-            })
-        },
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
