@@ -166,13 +166,9 @@ impl OptimizerContext {
     }
 
     pub fn warn(&self, str: impl Into<String>) {
-        // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
-            return;
-        }
         let mut warnings = self.warning_messages.borrow_mut();
         let string = str.into();
-        tracing::trace!("{}", string);
+        tracing::trace!("warn to user:{}", string);
         warnings.push(string);
     }
 
