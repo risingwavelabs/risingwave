@@ -17,12 +17,13 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
 
 use super::generic::Limit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::{BatchLimit, LogicalLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -50,15 +51,23 @@ impl BatchTopN {
             self.logical.limit_attr.with_ties(),
         );
         let new_offset = 0;
-        let logical_partial_topn =
-            generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
-        let batch_partial_topn = Self::new(logical_partial_topn);
+        let partial_input: PlanRef = if input.order().satisfies(&self.logical.order) {
+            let logical_partial_limit = LogicalLimit::new(input, new_limit.limit(), new_offset);
+            let batch_partial_limit = BatchLimit::new(logical_partial_limit);
+            batch_partial_limit.into()
+        } else {
+            let logical_partial_topn =
+                generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
+            let batch_partial_topn = Self::new(logical_partial_topn);
+            batch_partial_topn.into()
+        };
+
         let single_dist = RequiredDist::single();
-        let ensure_single_dist = if !batch_partial_topn.distribution().satisfies(&single_dist) {
-            single_dist.enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?
+        let ensure_single_dist = if !partial_input.distribution().satisfies(&single_dist) {
+            single_dist.enforce_if_not_satisfies(partial_input.into(), &Order::any())?
         } else {
             // The input's distribution is singleton, so use one phase topn is enough.
-            return Ok(batch_partial_topn.into());
+            return Ok(partial_input.into());
         };
 
         let batch_global_topn = self.clone_with_input(ensure_single_dist);

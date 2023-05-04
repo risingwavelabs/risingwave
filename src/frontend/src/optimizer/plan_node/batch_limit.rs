@@ -55,11 +55,7 @@ impl BatchLimit {
         let ensure_single_dist = if !batch_partial_limit.distribution().satisfies(&single_dist) {
             single_dist.enforce_if_not_satisfies(
                 batch_partial_limit.into(),
-                if self.order().column_orders.is_empty() {
-                    &any_order
-                } else {
-                    self.order()
-                },
+                    &any_order,
             )?
         } else {
             // The input's distribution is singleton, so use one phase limit is enough.
