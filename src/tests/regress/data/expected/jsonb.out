@@ -1554,7 +1554,7 @@ FROM foo;
 SELECT jsonb_object_agg(name, type) FROM foo;
                      jsonb_object_agg                      
 -----------------------------------------------------------
- {"t15": "GE1043", "t16": "GE1043", "sub-alpha": "GESS90"}
+ {"sub-alpha": "GESS90", "t15": "GE1043", "t16": "GE1043"}
 (1 row)
 
 INSERT INTO foo VALUES (999999, NULL, 'bar');
