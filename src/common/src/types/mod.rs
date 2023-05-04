@@ -132,9 +132,9 @@ pub enum DataType {
     #[display("{0}")]
     #[from_str(ignore)]
     Struct(Arc<StructType>),
-    #[display("{datatype}[]")]
-    #[from_str(regex = r"(?i)^(?P<datatype>.+)\[\]$")]
-    List { datatype: Box<DataType> },
+    #[display("{0}[]")]
+    #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
+    List(Box<DataType>),
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
@@ -217,7 +217,7 @@ impl From<DataTypeName> for DataType {
 
 pub fn unnested_list_type(datatype: DataType) -> DataType {
     match datatype {
-        DataType::List { datatype } => unnested_list_type(*datatype),
+        DataType::List(datatype) => unnested_list_type(*datatype),
         _ => datatype,
     }
 }
@@ -246,10 +246,10 @@ impl From<&PbDataType> for DataType {
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
                 DataType::new_struct(fields, field_names)
             }
-            PbTypeName::List => DataType::List {
+            PbTypeName::List => DataType::List(
                 // The first (and only) item is the list element type.
-                datatype: Box::new((&proto.field_type[0]).into()),
-            },
+                Box::new((&proto.field_type[0]).into()),
+            ),
             PbTypeName::TypeUnspecified => unreachable!(),
             PbTypeName::Int256 => DataType::Int256,
         }
@@ -343,7 +343,7 @@ impl DataType {
                 pb.field_type = t.fields.iter().map(|f| f.to_protobuf()).collect_vec();
                 pb.field_names = t.field_names.clone();
             }
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
             }
             _ => {}
@@ -924,7 +924,7 @@ impl ScalarImpl {
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 // TODO: support nested list
                 if !(str.starts_with('{') && str.ends_with('}')) {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -1123,7 +1123,7 @@ impl ScalarImpl {
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
-            Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
+            Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
         })
     }
 
@@ -1329,9 +1329,7 @@ mod tests {
                         ScalarImpl::Int64(233).into(),
                         ScalarImpl::Int64(2333).into(),
                     ])),
-                    DataType::List {
-                        datatype: Box::new(DataType::Int64),
-                    },
+                    DataType::List(Box::new(DataType::Int64)),
                 ),
             };
 
@@ -1444,75 +1442,51 @@ mod tests {
 
         assert_eq!(
             DataType::from_str("int2[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Int16)
-            }
+            DataType::List(Box::new(DataType::Int16))
         );
         assert_eq!(
             DataType::from_str("int[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Int32)
-            }
+            DataType::List(Box::new(DataType::Int32))
         );
         assert_eq!(
             DataType::from_str("int8[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Int64)
-            }
+            DataType::List(Box::new(DataType::Int64))
         );
         assert_eq!(
             DataType::from_str("float4[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Float32)
-            }
+            DataType::List(Box::new(DataType::Float32))
         );
         assert_eq!(
             DataType::from_str("float8[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Float64)
-            }
+            DataType::List(Box::new(DataType::Float64))
         );
         assert_eq!(
             DataType::from_str("decimal[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Decimal)
-            }
+            DataType::List(Box::new(DataType::Decimal))
         );
         assert_eq!(
             DataType::from_str("varchar[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Varchar)
-            }
+            DataType::List(Box::new(DataType::Varchar))
         );
         assert_eq!(
             DataType::from_str("date[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Date)
-            }
+            DataType::List(Box::new(DataType::Date))
         );
         assert_eq!(
             DataType::from_str("time[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Time)
-            }
+            DataType::List(Box::new(DataType::Time))
         );
         assert_eq!(
             DataType::from_str("timestamp[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Timestamp)
-            }
+            DataType::List(Box::new(DataType::Timestamp))
         );
         assert_eq!(
             DataType::from_str("timestamptz[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Timestamptz)
-            }
+            DataType::List(Box::new(DataType::Timestamptz))
         );
         assert_eq!(
             DataType::from_str("interval[]").unwrap(),
-            DataType::List {
-                datatype: Box::new(DataType::Interval)
-            }
+            DataType::List(Box::new(DataType::Interval))
         );
     }
 }
