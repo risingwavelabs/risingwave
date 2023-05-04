@@ -146,6 +146,10 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
         }
     }
 
+    pub fn input_len(&self) -> usize {
+        self.input.schema().len()
+    }
+
     pub fn output_len(&self) -> usize {
         self.input.schema().len() + self.window_functions.len()
     }
