@@ -106,7 +106,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 self.bitmap.append_n(n, true);
                 for _ in 0..n {
                     let last = *self.offsets.last().unwrap();
-                    let elems = v.iter_elems_ref();
+                    let elems = v.iter();
                     self.offsets.push(
                         last.checked_add(elems.len() as u32)
                             .expect("offset overflow"),
@@ -427,7 +427,7 @@ impl<'a> ListRef<'a> {
     /// Iterates over the elements of the list.
     ///
     /// Prefer using the macro `iter_elems_ref!` if possible to avoid the cost of enum dispatching.
-    pub fn iter_elems_ref(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
+    pub fn iter(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         iter_elems_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 

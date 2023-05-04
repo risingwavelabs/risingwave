@@ -572,7 +572,7 @@ fn list_cast(
         vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
     )
     .unwrap();
-    let elements = input.iter_elems_ref();
+    let elements = input.iter();
     let mut values = Vec::with_capacity(elements.len());
     for item in elements {
         let v = cast
