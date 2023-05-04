@@ -227,7 +227,7 @@ impl LogicalOverAgg {
                 window_function
             })
             .collect();
-        LogicalOverAgg::new(window_functions, input)
+        Self::new(window_functions, input)
     }
 }
 
@@ -246,11 +246,20 @@ impl PlanTreeNodeUnary for LogicalOverAgg {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let over_agg =
+        let input_len = self.core.input_len();
+        let new_input_len = input.schema().len();
+        let output_len = self.core.output_len();
+        let new_output_len = new_input_len + self.window_functions().len();
+        let output_col_change = {
+            let mut mapping = ColIndexMapping::empty(output_len, new_output_len);
+            for win_func_idx in 0..self.window_functions().len() {
+                mapping.put(input_len + win_func_idx, Some(new_input_len + win_func_idx));
+            }
+            mapping.union(&input_col_change)
+        };
+        let new_self =
             self.rewrite_with_input_and_window(input, self.window_functions(), input_col_change);
-        // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identity(over_agg.schema().len());
-        (over_agg, out_col_change)
+        (new_self, output_col_change)
     }
 }
 
@@ -354,8 +363,10 @@ impl ToStream for LogicalOverAgg {
 
     fn logical_rewrite_for_stream(
         &self,
-        _ctx: &mut RewriteStreamContext,
+        ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
+        let (input, input_col_change) = self.core.input.logical_rewrite_for_stream(ctx)?;
+        let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);
+        Ok((new_self.into(), output_col_change))
     }
 }
