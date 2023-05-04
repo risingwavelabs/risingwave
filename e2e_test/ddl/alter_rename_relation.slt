@@ -184,6 +184,10 @@ SHOW CREATE TABLE msrc1;
 ----
 public.msrc1 CREATE TABLE msrc1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '10', datagen.rows.per.second = '15', datagen.split.num = '1') ROW FORMAT JSON
 
+# the underlying source cannot have the same name with other sources
+statement error source .+ exists
+ALTER TABLE msrc1 RENAME TO src1;
+
 statement ok
 DROP SINK sink1;
 
