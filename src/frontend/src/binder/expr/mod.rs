@@ -554,9 +554,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List {
-            datatype: Box::new(bind_data_type(datatype)?),
-        },
+        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),

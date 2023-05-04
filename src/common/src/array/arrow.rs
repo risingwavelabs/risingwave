@@ -127,9 +127,7 @@ impl From<&arrow_schema::DataType> for DataType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
             })),
-            List(field) => Self::List {
-                datatype: Box::new(field.data_type().into()),
-            },
+            List(field) => Self::List(Box::new(field.data_type().into())),
             Decimal128(_, _) => Self::Decimal,
             Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
@@ -164,7 +162,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),

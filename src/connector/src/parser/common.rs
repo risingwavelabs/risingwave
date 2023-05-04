@@ -138,9 +138,7 @@ fn do_parse_simd_json_value(
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }
-        DataType::List {
-            datatype: item_type,
-        } => {
+        DataType::List(item_type) => {
             if let BorrowedValue::Array(values) = v {
                 let values = values
                     .iter()

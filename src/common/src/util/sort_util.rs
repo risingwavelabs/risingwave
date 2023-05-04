@@ -558,9 +558,7 @@ mod tests {
                 DataType::Timestamp,
                 DataType::Time,
                 DataType::new_struct(vec![DataType::Int32, DataType::Float32], vec![]),
-                DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                },
+                DataType::List(Box::new(DataType::Int32)),
             ],
         );
         assert_eq!(

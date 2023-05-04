@@ -8,14 +8,14 @@
 - sql: |
     select unnest(Array[1,2,3]);
   batch_plan: |
-    BatchProject { exprs: [Unnest(ARRAY[1, 2, 3]:List { datatype: Int32 })] }
-    └─BatchProjectSet { select_list: [Unnest(ARRAY[1, 2, 3]:List { datatype: Int32 })] }
+    BatchProject { exprs: [Unnest(ARRAY[1, 2, 3]:List(Int32))] }
+    └─BatchProjectSet { select_list: [Unnest(ARRAY[1, 2, 3]:List(Int32))] }
       └─BatchValues { rows: [[]] }
 - sql: |
     select unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
-    BatchProject { exprs: [Unnest(ARRAY[{1,2,3}, {4,5,6}]:List { datatype: List { datatype: Int32 } })] }
-    └─BatchProjectSet { select_list: [Unnest(ARRAY[{1,2,3}, {4,5,6}]:List { datatype: List { datatype: Int32 } })] }
+    BatchProject { exprs: [Unnest(ARRAY[{1,2,3}, {4,5,6}]:List(List(Int32)))] }
+    └─BatchProjectSet { select_list: [Unnest(ARRAY[{1,2,3}, {4,5,6}]:List(List(Int32)))] }
       └─BatchValues { rows: [[]] }
 - sql: |
     create table t(x int[]);
@@ -43,9 +43,9 @@
     create table t(x int[]);
     select unnest(x), unnest(Array[1,2]) from t;
   batch_plan: |
-    BatchProject { exprs: [Unnest($0), Unnest(ARRAY[1, 2]:List { datatype: Int32 })] }
+    BatchProject { exprs: [Unnest($0), Unnest(ARRAY[1, 2]:List(Int32))] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchProjectSet { select_list: [Unnest($0), Unnest(ARRAY[1, 2]:List { datatype: Int32 })] }
+      └─BatchProjectSet { select_list: [Unnest($0), Unnest(ARRAY[1, 2]:List(Int32))] }
         └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
 - name: table functions as parameters of usual functions
   sql: |
