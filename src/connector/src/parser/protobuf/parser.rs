@@ -316,9 +316,7 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         }
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
-        t = DataType::List {
-            datatype: Box::new(t),
-        }
+        t = DataType::List(Box::new(t))
     }
     Ok(t)
 }

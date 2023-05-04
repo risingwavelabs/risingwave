@@ -132,11 +132,11 @@
 - sql: |
     select * from unnest(Array[1,2,3]);
   batch_plan: |
-    BatchTableFunction { Unnest(ARRAY[1, 2, 3]:List { datatype: Int32 }) }
+    BatchTableFunction { Unnest(ARRAY[1, 2, 3]:List(Int32)) }
 - sql: |
     select * from unnest(Array[Array[1,2,3], Array[4,5,6]]);
   batch_plan: |
-    BatchTableFunction { Unnest(ARRAY[{1,2,3}, {4,5,6}]:List { datatype: List { datatype: Int32 } }) }
+    BatchTableFunction { Unnest(ARRAY[{1,2,3}, {4,5,6}]:List(List(Int32))) }
 - sql: |
     create table t1 (x int);
     select * from t1 where EXISTS(select * where t1.x=1);

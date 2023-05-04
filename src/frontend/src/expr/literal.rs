@@ -174,9 +174,7 @@ mod tests {
         if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
-                &DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                &DataType::List(Box::new(DataType::Varchar)),
             )
             .unwrap()
             .unwrap();

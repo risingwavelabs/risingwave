@@ -257,7 +257,7 @@ struct BatchPlanFragmenterResult {
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
     pub(crate) _dependent_relations: Vec<TableId>,
-    pub(crate) notice: String,
+    pub(crate) warnings: Vec<String>,
 }
 
 fn gen_batch_plan_fragmenter(
@@ -288,8 +288,7 @@ fn gen_batch_plan_fragmenter(
         session.config().get_batch_parallelism(),
         plan,
     )?;
-    let mut notice = String::new();
-    context.append_notice(&mut notice);
+    let warnings = context.take_warnings();
 
     Ok(BatchPlanFragmenterResult {
         plan_fragmenter,
@@ -297,7 +296,7 @@ fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         _dependent_relations: dependent_relations,
-        notice,
+        warnings,
     })
 }
 
@@ -311,7 +310,7 @@ async fn execute(
         query_mode,
         schema,
         stmt_type,
-        notice,
+        warnings,
         ..
     } = plan_fragmenter_result;
 
@@ -447,7 +446,7 @@ async fn execute(
     };
 
     Ok(PgResponse::new_for_stream_extra(
-        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
+        stmt_type, rows_count, row_stream, pg_descs, warnings, callback,
     ))
 }
 

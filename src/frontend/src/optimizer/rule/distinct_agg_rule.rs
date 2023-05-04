@@ -281,6 +281,8 @@ impl DistinctAggRule {
                     AggKind::BitAnd
                     | AggKind::BitOr
                     | AggKind::BitXor
+                    | AggKind::BoolAnd
+                    | AggKind::BoolOr
                     | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
@@ -288,6 +290,8 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
+                    | AggKind::JsonbAgg
+                    | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp

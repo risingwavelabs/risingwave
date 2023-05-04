@@ -142,9 +142,7 @@ impl ExprImpl {
     pub fn literal_list(v: ListValue, element_type: DataType) -> Self {
         Literal::new(
             Some(v.to_scalar_value()),
-            DataType::List {
-                datatype: Box::new(element_type),
-            },
+            DataType::List(Box::new(element_type)),
         )
         .into()
     }
