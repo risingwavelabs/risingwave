@@ -62,51 +62,21 @@ impl DataType {
             1184 => Ok(DataType::Timestamptz),
             1186 => Ok(DataType::Interval),
             3802 => Ok(DataType::Jsonb),
-            1000 => Ok(DataType::List {
-                datatype: Box::new(DataType::Boolean),
-            }),
-            1005 => Ok(DataType::List {
-                datatype: Box::new(DataType::Int16),
-            }),
-            1007 => Ok(DataType::List {
-                datatype: Box::new(DataType::Int32),
-            }),
-            1016 => Ok(DataType::List {
-                datatype: Box::new(DataType::Int64),
-            }),
-            1021 => Ok(DataType::List {
-                datatype: Box::new(DataType::Float32),
-            }),
-            1022 => Ok(DataType::List {
-                datatype: Box::new(DataType::Float64),
-            }),
-            1231 => Ok(DataType::List {
-                datatype: Box::new(DataType::Decimal),
-            }),
-            1182 => Ok(DataType::List {
-                datatype: Box::new(DataType::Date),
-            }),
-            1015 => Ok(DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            }),
-            1266 => Ok(DataType::List {
-                datatype: Box::new(DataType::Time),
-            }),
-            1115 => Ok(DataType::List {
-                datatype: Box::new(DataType::Timestamp),
-            }),
-            1185 => Ok(DataType::List {
-                datatype: Box::new(DataType::Timestamptz),
-            }),
-            1001 => Ok(DataType::List {
-                datatype: Box::new(DataType::Bytea),
-            }),
-            1187 => Ok(DataType::List {
-                datatype: Box::new(DataType::Interval),
-            }),
-            3807 => Ok(DataType::List {
-                datatype: Box::new(DataType::Jsonb),
-            }),
+            1000 => Ok(DataType::List(Box::new(DataType::Boolean))),
+            1005 => Ok(DataType::List(Box::new(DataType::Int16))),
+            1007 => Ok(DataType::List(Box::new(DataType::Int32))),
+            1016 => Ok(DataType::List(Box::new(DataType::Int64))),
+            1021 => Ok(DataType::List(Box::new(DataType::Float32))),
+            1022 => Ok(DataType::List(Box::new(DataType::Float64))),
+            1231 => Ok(DataType::List(Box::new(DataType::Decimal))),
+            1182 => Ok(DataType::List(Box::new(DataType::Date))),
+            1015 => Ok(DataType::List(Box::new(DataType::Varchar))),
+            1266 => Ok(DataType::List(Box::new(DataType::Time))),
+            1115 => Ok(DataType::List(Box::new(DataType::Timestamp))),
+            1185 => Ok(DataType::List(Box::new(DataType::Timestamptz))),
+            1001 => Ok(DataType::List(Box::new(DataType::Bytea))),
+            1187 => Ok(DataType::List(Box::new(DataType::Interval))),
+            3807 => Ok(DataType::List(Box::new(DataType::Jsonb))),
             _ => Err(ErrorCode::InternalError(format!("Unsupported oid {}", oid)).into()),
         }
     }
@@ -132,7 +102,7 @@ impl DataType {
             DataType::Struct(_) => 1043,
             DataType::Jsonb => 3802,
             DataType::Bytea => 17,
-            DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {
+            DataType::List(datatype) => match unnested_list_type(datatype.as_ref().clone()) {
                 DataType::Boolean => 1000,
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,

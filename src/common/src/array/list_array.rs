@@ -75,22 +75,20 @@ impl ArrayBuilder for ListArrayBuilder {
     fn new(capacity: usize) -> Self {
         Self::with_type(
             capacity,
-            DataType::List {
-                // Default datatype
-                datatype: Box::new(DataType::Int16),
-            },
+            // Default datatype
+            DataType::List(Box::new(DataType::Int16)),
         )
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        let DataType::List { datatype } = ty else {
+        let DataType::List(value_type) = ty else {
             panic!("data type must be DataType::List");
         };
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             offsets: vec![0],
-            value: Box::new(datatype.create_array_builder(capacity)),
-            value_type: *datatype,
+            value: Box::new(value_type.create_array_builder(capacity)),
+            value_type: *value_type,
             len: 0,
         }
     }
@@ -231,9 +229,7 @@ impl Array for ListArray {
     }
 
     fn data_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(self.value_type.clone()),
-        }
+        DataType::List(Box::new(self.value_type.clone()))
     }
 }
 
@@ -609,12 +605,7 @@ mod tests {
             ]
         );
 
-        let mut builder = ListArrayBuilder::with_type(
-            4,
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
-        );
+        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
         list_values.iter().for_each(|v| {
             builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
         });
@@ -637,12 +628,7 @@ mod tests {
             DataType::Int32,
         );
 
-        let mut builder = ListArrayBuilder::with_type(
-            4,
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
-        );
+        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
         builder.append_array(&part1);
         builder.append_array(&part2);
 
@@ -669,12 +655,8 @@ mod tests {
         use crate::array::*;
 
         {
-            let mut builder = ListArrayBuilder::with_type(
-                1,
-                DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                },
-            );
+            let mut builder =
+                ListArrayBuilder::with_type(1, DataType::List(Box::new(DataType::Int32)));
             let val = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             builder.append(Some(ListRef::ValueRef { val: &val }));
             assert!(builder.pop().is_some());
@@ -684,11 +666,7 @@ mod tests {
         }
 
         {
-            let meta = DataType::List {
-                datatype: Box::new(DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                }),
-            };
+            let meta = DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))));
             let mut builder = ListArrayBuilder::with_type(2, meta);
             let val1 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
             let val2 = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
@@ -748,9 +726,7 @@ mod tests {
                 Some(listarray2.into()),
                 Some(listarray3.into()),
             ],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         );
         let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::List(nestarray), actual);
@@ -792,11 +768,7 @@ mod tests {
 
         let mut builder = ListArrayBuilder::with_type(
             3,
-            DataType::List {
-                datatype: Box::new(DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                }),
-            },
+            DataType::List(Box::new(DataType::List(Box::new(DataType::Int32)))),
         );
         for v in &nested_list_values {
             builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
@@ -872,12 +844,8 @@ mod tests {
             value
         );
 
-        let mut builder = ListArrayBuilder::with_type(
-            0,
-            DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            },
-        );
+        let mut builder =
+            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Varchar)));
         builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
@@ -950,12 +918,7 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
 
-            let mut builder = ListArrayBuilder::with_type(
-                0,
-                DataType::List {
-                    datatype: Box::new(datatype),
-                },
-            );
+            let mut builder = ListArrayBuilder::with_type(0, DataType::List(Box::new(datatype)));
             builder.append(Some(ListRef::ValueRef { val: &lhs }));
             builder.append(Some(ListRef::ValueRef { val: &rhs }));
             let array = builder.finish();

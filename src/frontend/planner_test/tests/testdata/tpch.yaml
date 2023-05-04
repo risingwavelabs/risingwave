@@ -2925,7 +2925,7 @@
     └─StreamProject { exprs: [part.p_brand, part.p_type, part.p_size, count(distinct partsupp.ps_suppkey)] }
       └─StreamHashAgg { group_key: [part.p_brand, part.p_type, part.p_size], aggs: [count(distinct partsupp.ps_suppkey), count] }
         └─StreamExchange { dist: HashShard(part.p_brand, part.p_type, part.p_size) }
-          └─StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
+          └─StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: all }
             ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
             | └─StreamHashJoin { type: Inner, predicate: partsupp.ps_partkey = part.p_partkey, output: [partsupp.ps_suppkey, part.p_brand, part.p_type, part.p_size, partsupp.ps_partkey, part.p_partkey] }
             |   ├─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
@@ -2946,14 +2946,10 @@
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: (distinct key: partsupp.ps_suppkey, table id: 1)
-            └──  StreamExchange Hash([0, 1, 2]) from 1
+            └──  StreamExchange Hash([1, 2, 3]) from 1
 
     Fragment 1
-    StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: [part.p_brand, part.p_type, part.p_size, partsupp.ps_suppkey, partsupp.ps_partkey, part.p_partkey] }
-    ├── left table: 2
-    ├── right table: 4
-    ├── left degree table: 3
-    ├── right degree table: 5
+    StreamHashJoin { type: LeftAnti, predicate: partsupp.ps_suppkey = supplier.s_suppkey, output: all } { left table: 2, right table: 4, left degree table: 3, right degree table: 5 }
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange Hash([0]) from 5
 
@@ -3308,14 +3304,14 @@
                   └─BatchExchange { order: [], dist: HashShard(lineitem.l_orderkey) }
                     └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], pk_columns: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
       └─StreamTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 }
         └─StreamExchange { dist: Single }
           └─StreamGroupTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0, group_key: [6] }
             └─StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as $expr1] }
-              └─StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(lineitem.l_quantity), count] }
-                └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
+              └─StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] }
+                └─StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all }
                   ├─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                   | ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
                   | | └─StreamHashJoin { type: Inner, predicate: customer.c_custkey = orders.o_custkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate] }
@@ -3333,7 +3329,7 @@
                             └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice], pk_columns: [o_totalprice, o_orderdate, c_name, c_custkey, o_orderkey], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity], stream_key: [c_custkey, c_name, o_orderkey, o_totalprice, o_orderdate], pk_columns: [o_totalprice, o_orderdate, c_custkey, c_name, o_orderkey], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity)] }
         └── StreamTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0 } { state table: 0 }
@@ -3342,12 +3338,8 @@
     Fragment 1
     StreamGroupTopN { order: "[orders.o_totalprice DESC, orders.o_orderdate ASC]", limit: 100, offset: 0, group_key: [6] } { state table: 1 }
     └── StreamProject { exprs: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, sum(lineitem.l_quantity), Vnode(orders.o_orderkey) as $expr1] }
-        └── StreamHashAgg { group_key: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice], aggs: [sum(lineitem.l_quantity), count] } { result table: 2, state tables: [], distinct tables: [] }
-            └── StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_name, customer.c_custkey, orders.o_orderkey, orders.o_orderdate, orders.o_totalprice, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                ├── left table: 3
-                ├── right table: 5
-                ├── left degree table: 4
-                ├── right degree table: 6
+        └── StreamHashAgg { group_key: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate], aggs: [sum(lineitem.l_quantity), count] } { result table: 2, state tables: [], distinct tables: [] }
+            └── StreamHashJoin { type: LeftSemi, predicate: orders.o_orderkey = lineitem.l_orderkey, output: all } { left table: 3, right table: 5, left degree table: 4, right degree table: 6 }
                 ├── StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [customer.c_custkey, customer.c_name, orders.o_orderkey, orders.o_totalprice, orders.o_orderdate, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
                 │   ├── left table: 7
                 │   ├── right table: 9
@@ -3392,21 +3384,21 @@
 
     Table 0
     ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), $expr1 ]
-    ├── primary key: [ $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC ]
+    ├── primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 1
     ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), $expr1 ]
-    ├── primary key: [ $6 ASC, $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC ]
+    ├── primary key: [ $6 ASC, $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 6
 
     Table 2
-    ├── columns: [ customer_c_name, customer_c_custkey, orders_o_orderkey, orders_o_orderdate, orders_o_totalprice, sum(lineitem_l_quantity), count ]
+    ├── columns: [ customer_c_custkey, customer_c_name, orders_o_orderkey, orders_o_totalprice, orders_o_orderdate, sum(lineitem_l_quantity), count ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
     ├── value indices: [ 5, 6 ]
     ├── distribution key: [ 2 ]
@@ -3443,7 +3435,7 @@
 
     Table 15 { columns: [ lineitem_l_orderkey, sum(lineitem_l_quantity), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4294967294 { columns: [ c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity ], primary key: [ $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 5 }
+    Table 4294967294 { columns: [ c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity ], primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 5 }
 
 - id: tpch_q19
   before:

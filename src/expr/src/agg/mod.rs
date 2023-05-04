@@ -28,6 +28,7 @@ mod array_agg;
 mod count_star;
 mod general;
 mod general_sorted_grouper;
+mod jsonb_agg;
 mod string_agg;
 
 // wrappers

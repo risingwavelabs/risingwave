@@ -86,9 +86,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         }
         Schema::Array(item_schema) => {
             let item_type = avro_type_mapping(item_schema.as_ref())?;
-            DataType::List {
-                datatype: Box::new(item_type),
-            }
+            DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
             let nested_schema = union_schema

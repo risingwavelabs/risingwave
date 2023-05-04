@@ -19,8 +19,7 @@ use std::time::{Duration, Instant};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
+use risingwave_pb::common::{ActorInfo, WorkerNode};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
@@ -237,7 +236,7 @@ where
         while cur < expired_workers.len() {
             let current_nodes = self
                 .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+                .list_active_streaming_compute_nodes()
                 .await;
             let new_nodes = current_nodes
                 .into_iter()

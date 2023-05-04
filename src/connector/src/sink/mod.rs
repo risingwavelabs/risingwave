@@ -327,7 +327,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter_elems_ref();
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
