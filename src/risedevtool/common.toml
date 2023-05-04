@@ -17,7 +17,7 @@ PREFIX_PROFILING = "${PREFIX}/profiling"
 
 BUILD_MODE_DIR = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "debug", mapping = { true = "release" } }
 RISINGWAVE_BUILD_PROFILE = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "dev", mapping = { true = "release" } }
-RISINGWAVE_FEATURES = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "", mapping = { true = "rw-static-link" } }
+RISINGWAVE_FEATURES = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "rw-dynamic-link", mapping = { true = "rw-static-link" } }
 
 [tasks.prepare-dir]
 private = true
