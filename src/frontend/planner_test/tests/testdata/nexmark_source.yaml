@@ -338,8 +338,8 @@
       FROM
         HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
       GROUP BY
-        bid.auction,
-        window_start
+        window_start,
+        bid.auction
     ) AS AuctionBids
     JOIN (
       SELECT
@@ -362,8 +362,8 @@
     LogicalProject { exprs: [auction, count] }
     └─LogicalJoin { type: Inner, on: (window_start = window_start) AND (count >= max(count)), output: all }
       ├─LogicalProject { exprs: [auction, count, window_start] }
-      | └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
-      |   └─LogicalProject { exprs: [auction, window_start] }
+      | └─LogicalAgg { group_key: [window_start, auction], aggs: [count] }
+      |   └─LogicalProject { exprs: [window_start, auction] }
       |     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       |       └─LogicalFilter { predicate: IsNotNull(date_time) }
       |         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
