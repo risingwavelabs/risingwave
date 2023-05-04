@@ -512,7 +512,7 @@ fn gen_table_plan_inner(
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    let session = context.session_ctx();
+    let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -575,6 +575,7 @@ fn gen_table_plan_inner(
     }
 
     let materialize = plan_root.gen_table_plan(
+        context,
         name,
         columns,
         definition,
