@@ -17,12 +17,12 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
-use crate::optimizer::plan_node::batch::BatchPlanRef;
 
 use super::generic::Limit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::plan_node::{BatchLimit, LogicalLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
@@ -56,8 +56,12 @@ impl BatchTopN {
             let batch_partial_limit = BatchLimit::new(logical_partial_limit);
             batch_partial_limit.into()
         } else {
-            let logical_partial_topn =
-                generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
+            let logical_partial_topn = generic::TopN::without_group(
+                input,
+                new_limit,
+                new_offset,
+                self.logical.order.clone(),
+            );
             let batch_partial_topn = Self::new(logical_partial_topn);
             batch_partial_topn.into()
         };
