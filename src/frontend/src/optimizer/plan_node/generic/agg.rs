@@ -361,9 +361,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 AggKind::ApproxCountDistinct => {
                     // Add register column.
                     internal_table_catalog_builder.add_column(&Field {
-                        data_type: DataType::List {
-                            datatype: Box::new(DataType::Int64),
-                        },
+                        data_type: DataType::List(Box::new(DataType::Int64)),
                         name: String::from("registers"),
                         sub_fields: vec![],
                         type_name: String::default(),

@@ -236,12 +236,8 @@ mod tests {
             DataType::Int32,
         );
         let agg_type = AggKind::Min;
-        let input_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
-        let return_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
+        let input_type = DataType::List(Box::new(DataType::Int32));
+        let return_type = DataType::List(Box::new(DataType::Int32));
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -249,9 +245,7 @@ mod tests {
             return_type,
             ArrayBuilderImpl::List(ListArrayBuilder::with_type(
                 0,
-                DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                },
+                DataType::List(Box::new(DataType::Int32)),
             )),
         )
         .await?;

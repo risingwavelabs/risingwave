@@ -143,7 +143,7 @@ impl TableFunction {
                 }
 
                 let expr = args.into_iter().next().unwrap();
-                if matches!(expr.return_type(), DataType::List { datatype: _ }) {
+                if matches!(expr.return_type(), DataType::List(_)) {
                     let data_type = unnested_list_type(expr.return_type());
 
                     Ok(TableFunction {
@@ -206,9 +206,7 @@ impl TableFunction {
                 }
                 Ok(TableFunction {
                     args,
-                    return_type: DataType::List {
-                        datatype: Box::new(DataType::Varchar),
-                    },
+                    return_type: DataType::List(Box::new(DataType::Varchar)),
                     function_type: TableFunctionType::RegexpMatches,
                     udtf_catalog: None,
                 })
