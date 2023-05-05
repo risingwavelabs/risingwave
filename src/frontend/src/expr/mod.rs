@@ -551,11 +551,11 @@ impl ExprImpl {
     ///
     /// The expression tree should only consist of literals and **pure** function calls.
     pub fn is_const(&self) -> bool {
-        let can_eval_const = {
-            struct Has {
-                has: bool,
+        let only_literal_and_func = {
+            struct HasOthers {
+                has_others: bool,
             }
-            impl ExprVisitor<()> for Has {
+            impl ExprVisitor<()> for HasOthers {
                 fn merge(_: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
@@ -570,19 +570,19 @@ impl ExprImpl {
                         | ExprImpl::WindowFunction(_)
                         | ExprImpl::UserDefinedFunction(_)
                         | ExprImpl::Parameter(_)
-                        | ExprImpl::Now(_) => self.has = true,
+                        | ExprImpl::Now(_) => self.has_others = true,
                     }
                 }
             }
 
-            let mut visitor = Has { has: false };
+            let mut visitor = HasOthers { has_others: false };
             visitor.visit_expr(self);
-            !visitor.has
+            !visitor.has_others
         };
 
         let is_pure = self.is_pure();
 
-        can_eval_const && is_pure
+        only_literal_and_func && is_pure
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches
