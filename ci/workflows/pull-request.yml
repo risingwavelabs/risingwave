@@ -7,7 +7,7 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: ci-cache-bucket
-    args: '--no-progress'
+    # args: '--no-progress'
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
