@@ -30,6 +30,7 @@ use crate::hummock::level_handler::LevelHandler;
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
     overlap_strategy: Arc<dyn OverlapStrategy>,
+    non_overlap_intra: bool,
 }
 
 impl TierCompactionPicker {
@@ -40,6 +41,18 @@ impl TierCompactionPicker {
         TierCompactionPicker {
             config,
             overlap_strategy,
+            non_overlap_intra: false,
+        }
+    }
+
+    pub fn new_non_overlap_intra(
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+    ) -> TierCompactionPicker {
+        TierCompactionPicker {
+            config,
+            overlap_strategy,
+            non_overlap_intra: true,
         }
     }
 }
@@ -340,6 +353,8 @@ impl TierCompactionPicker {
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        const OVERLAPPING_SST_COUNT_TRIGGER: u64 = 32;
+
         // do not pick the first sub-level because we do not want to block the level compaction.
         let overlapping_type = LevelType::Overlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
@@ -371,7 +386,7 @@ impl TierCompactionPicker {
                 if compaction_bytes > max_compaction_bytes {
                     false
                 } else {
-                    compact_file_count <= self.config.level0_max_compact_file_number
+                    compact_file_count <= OVERLAPPING_SST_COUNT_TRIGGER
                 }
             };
 
@@ -381,7 +396,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if compact_file_count > self.config.level0_max_compact_file_number {
+                if compact_file_count > OVERLAPPING_SST_COUNT_TRIGGER {
                     waiting_enough_files = false;
                     break;
                 }
@@ -438,35 +453,39 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
-            return Some(ret);
-        }
-
-        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
-            return Some(ret);
-        }
-
-        if !self.config.split_by_state_table {
-            return self.pick_multi_level(l0, &level_handlers[0], stats);
-        }
-
-        let mut member_table_ids = levels.member_table_ids.clone();
-        for level in &l0.sub_levels {
-            if level.level_type != LevelType::Nonoverlapping as i32 {
-                continue;
+        if !self.non_overlap_intra {
+            if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
+                return Some(ret);
             }
-            for sst in &level.table_infos {
-                if sst.table_ids[0] != *member_table_ids.last().unwrap() {
-                    member_table_ids.push(sst.table_ids[0]);
+
+            if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
+                return Some(ret);
+            }
+
+            None
+        } else {
+            if !self.config.split_by_state_table {
+                return self.pick_multi_level(l0, &level_handlers[0], stats);
+            }
+
+            let mut member_table_ids = levels.member_table_ids.clone();
+            for level in &l0.sub_levels {
+                if level.level_type != LevelType::Nonoverlapping as i32 {
+                    continue;
+                }
+                for sst in &level.table_infos {
+                    if sst.table_ids[0] != *member_table_ids.last().unwrap() {
+                        member_table_ids.push(sst.table_ids[0]);
+                    }
                 }
             }
-        }
 
-        member_table_ids.sort();
-        member_table_ids.dedup();
-        use rand::prelude::SliceRandom;
-        member_table_ids.shuffle(&mut thread_rng());
-        self.pick_table_same_files(l0, &level_handlers[0], member_table_ids, stats)
+            member_table_ids.sort();
+            member_table_ids.dedup();
+            use rand::prelude::SliceRandom;
+            member_table_ids.shuffle(&mut thread_rng());
+            self.pick_table_same_files(l0, &level_handlers[0], member_table_ids, stats)
+        }
     }
 }
 

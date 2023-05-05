@@ -120,6 +120,16 @@ impl DynamicLevelSelectorCore {
         }
     }
 
+    fn create_intra_picker(
+        &self,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+    ) -> Box<dyn CompactionPicker> {
+        Box::new(TierCompactionPicker::new_non_overlap_intra(
+            self.config.clone(),
+            overlap_strategy,
+        ))
+    }
+
     // TODO: calculate this scores in apply compact result.
     /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
     /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
@@ -208,7 +218,7 @@ impl DynamicLevelSelectorCore {
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels
                 .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            let score = total_size * SCORE_BASE
+            let score = total_size * SCORE_BASE * 2
                 / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
             ctx.score_levels.push((score, 0, ctx.base_level));
         }
@@ -355,6 +365,25 @@ impl LevelSelector for DynamicLevelSelector {
             selector_stats
                 .skip_picker
                 .push((select_level, target_level, stats));
+
+            if select_level == 0 && target_level != 0 {
+                // try intra
+                let mut intra_picker =
+                    dynamic_level_core.create_intra_picker(overlap_strategy.clone());
+
+                let mut stats = LocalPickerStatistic::default();
+                if let Some(ret) = intra_picker.pick_compaction(levels, level_handlers, &mut stats)
+                {
+                    ret.add_pending_task(task_id, level_handlers);
+                    return Some(create_compaction_task(
+                        dynamic_level_core.get_config(),
+                        ret,
+                        ctx.base_level,
+                        self.task_type(),
+                    ));
+                }
+                selector_stats.skip_picker.push((0, 0, stats));
+            }
         }
         None
     }
