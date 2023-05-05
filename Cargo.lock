@@ -5464,6 +5464,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risedev-config"
+version = "1.0.0-alpha"
+dependencies = [
+ "anyhow",
+ "clap 4.1.11",
+ "console",
+ "dialoguer",
+ "enum-iterator",
+ "fs-err",
+ "itertools",
+ "tempfile",
+]
+
+[[package]]
 name = "risingwave_backup"
 version = "1.0.0-alpha"
 dependencies = [
@@ -8619,8 +8633,8 @@ name = "workspace-config"
 version = "1.0.0-alpha"
 dependencies = [
  "log",
- "madsim-rdkafka",
- "openssl",
+ "openssl-sys",
+ "sasl2-sys",
  "tracing",
  "zstd-sys",
 ]
