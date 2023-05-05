@@ -137,10 +137,6 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
         self.current.as_ref().unwrap().current_epoch()
     }
 
-    fn next_range_epoch(&self) -> HummockEpoch {
-        self.current.as_ref().unwrap().next_range_epoch()
-    }
-
     fn next(&mut self) -> Self::NextFuture<'_> {
         self.next_inner()
     }

@@ -63,16 +63,6 @@ pub trait DeleteRangeIterator {
     /// This function will panic if the iterator is invalid.
     fn current_epoch(&self) -> HummockEpoch;
 
-    /// Retrieves the epoch of next range
-    ///
-    /// Note:
-    /// - Before calling this function, makes sure the iterator `is_valid`.
-    /// - This function should be straightforward and return immediately.
-    ///
-    /// # Panics
-    /// This function will panic if the iterator is invalid.
-    fn next_range_epoch(&self) -> HummockEpoch;
-
     /// Moves a valid iterator to the next tombstone.
     ///
     /// Note:
@@ -136,14 +126,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
             RangeIteratorTyped::Sst(sst) => sst.current_epoch(),
             RangeIteratorTyped::Batch(batch) => batch.current_epoch(),
             RangeIteratorTyped::Concat(batch) => batch.current_epoch(),
-        }
-    }
-
-    fn next_range_epoch(&self) -> HummockEpoch {
-        match self {
-            RangeIteratorTyped::Sst(sst) => sst.next_range_epoch(),
-            RangeIteratorTyped::Batch(batch) => batch.next_range_epoch(),
-            RangeIteratorTyped::Concat(batch) => batch.next_range_epoch(),
         }
     }
 
@@ -303,10 +285,6 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
             .range(..=self.read_epoch)
             .last()
             .map_or(HummockEpoch::MIN, |epoch| *epoch)
-    }
-
-    fn next_range_epoch(&self) -> HummockEpoch {
-        self.heap.peek().unwrap().next_range_epoch()
     }
 
     fn next(&mut self) -> Self::NextFuture<'_> {

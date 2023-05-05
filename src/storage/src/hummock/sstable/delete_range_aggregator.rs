@@ -356,6 +356,10 @@ impl SstableDeleteRangeIterator {
     pub fn new(table: TableHolder) -> Self {
         Self { table, next_idx: 0 }
     }
+
+    pub fn next_range_epoch(&self) -> HummockEpoch {
+        self.table.value().meta.monotonic_tombstone_events[self.next_idx].new_epoch
+    }
 }
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
@@ -375,10 +379,6 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         } else {
             HummockEpoch::MAX
         }
-    }
-
-    fn next_range_epoch(&self) -> HummockEpoch {
-        self.table.value().meta.monotonic_tombstone_events[self.next_idx].new_epoch
     }
 
     fn next(&mut self) -> Self::NextFuture<'_> {
