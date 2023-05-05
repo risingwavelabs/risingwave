@@ -15,6 +15,7 @@ echo "--- Build and archive deterministic simulation integration tests"
 NEXTEST_PROFILE=ci-sim cargo make sarchive-it-test --cargo-profile ci-sim
 
 echo "--- Upload artifacts"
+ls -l target
 mv target/sim/ci-sim/risingwave_simulation ./risingwave_simulation
 
 artifacts=(risingwave_simulation simulation-it-test.tar.zst)

@@ -749,7 +749,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo build \
+cargo build --timings \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
   --tests "$@"
