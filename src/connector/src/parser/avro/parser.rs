@@ -47,6 +47,7 @@ pub struct AvroParser {
     rw_columns: Vec<SourceColumnDesc>,
     source_ctx: SourceContextRef,
     upsert_primary_key_column_name: Option<String>,
+    key_as_column: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -162,6 +163,7 @@ impl AvroParserConfig {
                 .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
             if let Some(pk_column_desc) = pk_column_desc {
+                // if key.as.column is set, pk will always be the last column
                 fields.push(pk_column_desc);
             }
             Ok(fields)
@@ -185,6 +187,7 @@ impl AvroParser {
             key_schema,
             schema_resolver,
             upsert_primary_key_column_name,
+            key_as_column,
             ..
         } = config;
         Ok(Self {
@@ -194,6 +197,7 @@ impl AvroParser {
             rw_columns,
             source_ctx,
             upsert_primary_key_column_name,
+            key_as_column,
         })
     }
 
@@ -221,8 +225,8 @@ impl AvroParser {
             })?;
             if !msg.record.is_empty() {
                 (msg.record, Op::Insert)
-            } else {
-                (msg.primary_key, Op::Delete)
+            } else if self.key_as_column {
+                (msg.primary_key, Op::)
             }
         } else {
             (Cow::from(&payload), Op::Insert)
