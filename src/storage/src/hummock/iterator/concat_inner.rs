@@ -153,7 +153,8 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                     }
                     DirectionEnum::Backward => {
                         let ord = FullKey::decode(largest_key(table)).cmp(&key);
-                        ord == Greater || ord == Equal
+                        ord == Greater
+                            || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
                     }
                 })
                 .saturating_sub(1); // considering the boundary of 0
