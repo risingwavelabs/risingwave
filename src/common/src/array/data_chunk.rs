@@ -487,7 +487,7 @@ impl DataChunk {
     }
 
     pub fn compute_key_sizes_by_columns(&self, column_indices: &[usize]) -> Vec<usize> {
-        let (row_len_fixed, col_variable) = self.partition_sizes();
+        let (row_len_fixed, col_variable) = self.partition_sizes_for_columns(column_indices);
         let mut sizes: Vec<usize> = vec![];
         match &self.vis2 {
             Vis::Bitmap(vis) => {
