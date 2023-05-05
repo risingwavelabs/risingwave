@@ -138,7 +138,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .sink_output_row_count
             .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
 
-        let sink_metrics = SinkMetrics { sink_commit_duration_metrics, sink_throughput_metrics };
+        let sink_metrics = SinkMetrics {
+            sink_commit_duration_metrics,
+            sink_throughput_metrics,
+        };
 
         let write_log_stream = Self::execute_write_log(
             self.input,
