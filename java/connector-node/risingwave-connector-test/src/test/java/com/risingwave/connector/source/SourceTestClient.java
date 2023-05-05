@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.source;
 
 import static org.assertj.core.api.Assertions.fail;
 
@@ -39,6 +39,9 @@ import org.testcontainers.containers.JdbcDatabaseContainer;
 
 public class SourceTestClient {
     static final Logger LOG = LoggerFactory.getLogger(SourceTestClient.class.getName());
+
+    // default port for connector service
+    static final int DEFAULT_PORT = 50051;
     private final ConnectorServiceGrpc.ConnectorServiceBlockingStub blockingStub;
 
     public Properties sqlStmts = new Properties();

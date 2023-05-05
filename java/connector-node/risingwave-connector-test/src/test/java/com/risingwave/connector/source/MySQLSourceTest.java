@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.source;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.junit.Assert.assertEquals;
 
+import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.*;
 import com.risingwave.proto.Data;
@@ -47,14 +48,14 @@ public class MySQLSourceTest {
                             MountableFile.forClasspathResource("my.cnf"), "/etc/my.cnf");
 
     public static Server connectorServer =
-            ServerBuilder.forPort(ConnectorService.DEFAULT_PORT)
+            ServerBuilder.forPort(SourceTestClient.DEFAULT_PORT)
                     .addService(new ConnectorServiceImpl())
                     .build();
 
     public static SourceTestClient testClient =
             new SourceTestClient(
                     Grpc.newChannelBuilder(
-                                    "localhost:" + ConnectorService.DEFAULT_PORT,
+                                    "localhost:" + SourceTestClient.DEFAULT_PORT,
                                     InsecureChannelCredentials.create())
                             .build());
 

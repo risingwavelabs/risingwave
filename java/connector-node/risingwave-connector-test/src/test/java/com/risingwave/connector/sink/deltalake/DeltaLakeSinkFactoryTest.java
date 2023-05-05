@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.deltalake;
+package com.risingwave.connector.sink.deltalake;
 
 import com.risingwave.connector.DeltaLakeSinkFactory;
 import com.risingwave.connector.api.TableSchema;
