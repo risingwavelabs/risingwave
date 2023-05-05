@@ -274,11 +274,7 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     type ScalarType = StructValue;
 
     fn to_owned_scalar(&self) -> StructValue {
-        let fields = self
-            .fields_ref()
-            .iter()
-            .map(|f| f.map(|s| s.into_scalar_impl()))
-            .collect();
+        let fields = self.iter_fields_ref().map(|f| f.to_owned_datum()).collect();
         StructValue::new(fields)
     }
 
@@ -293,8 +289,7 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
 
     fn to_owned_scalar(&self) -> ListValue {
         let fields = self
-            .values_ref()
-            .iter()
+            .iter_elems_ref()
             .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();
         ListValue::new(fields)

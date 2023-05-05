@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
+use risingwave_common_proc_macro::EstimateSize;
 use smallvec::SmallVec;
 
 use super::MInputAggregator;
 
+#[derive(EstimateSize)]
 pub struct StringAggData {
     delim: String,
     value: String,

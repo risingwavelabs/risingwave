@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{

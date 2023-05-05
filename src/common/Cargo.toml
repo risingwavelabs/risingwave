@@ -133,6 +133,10 @@ harness = false
 name = "bench_data_chunk_compact"
 harness = false
 
+[[bench]]
+name = "bench_array"
+harness = false
+
 [[bin]]
 name = "example-config"
 path = "src/bin/default_config.rs"

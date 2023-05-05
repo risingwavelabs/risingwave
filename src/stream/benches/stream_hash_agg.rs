@@ -20,8 +20,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
+use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
-use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
 use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
@@ -180,7 +180,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
         num_of_chunks,
         chunk_size,
         &input_data_types,
-        &VarcharProperty::RandomFixedLength(None),
+        &VarcharProperty::Constant,
     );
 
     // ---- Create MockSourceExecutor ----

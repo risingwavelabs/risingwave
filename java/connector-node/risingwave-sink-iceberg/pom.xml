@@ -34,18 +34,11 @@
             <groupId>com.risingwave.java</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
-
         <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-client</artifactId>
-            <version>3.3.2</version>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>s3-common</artifactId>
+            <scope>provided</scope>
         </dependency>
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-aws</artifactId>
-            <version>3.3.2</version>
-        </dependency>
-
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-core</artifactId>

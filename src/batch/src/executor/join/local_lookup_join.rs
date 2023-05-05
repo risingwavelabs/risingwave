@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::buffer::BitmapBuilder;
@@ -38,13 +37,14 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
+use tokio::sync::watch::Receiver;
 use uuid::Uuid;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, StopFlag, TaskId};
+use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -61,6 +61,7 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
+    shutdown_rx: Receiver<ShutdownMsg>,
 }
 
 /// Used to build the executor for the inner side
@@ -234,6 +235,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &task_id,
             self.context.clone(),
             self.epoch.clone(),
+            self.shutdown_rx.clone(),
         );
 
         executor_builder.build().await
@@ -384,6 +386,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
             pu_to_scan_range_mapping: HashMap::new(),
             chunk_size,
+            shutdown_rx: source.shutdown_rx.clone(),
         };
 
         Ok(LocalLookupJoinExecutorArgs {
@@ -402,7 +405,6 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             output_indices,
             chunk_size,
             identity: source.plan_node().get_identity().clone(),
-            stop_flag: source.context.get_stop_flag(),
         }
         .dispatch())
     }
@@ -424,7 +426,6 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    stop_flag: Arc<StopFlag>,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -448,7 +449,6 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             chunk_size: self.chunk_size,
             identity: self.identity,
             _phantom: PhantomData,
-            stop_flag: self.stop_flag,
         }))
     }
 
@@ -459,8 +459,6 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
@@ -475,7 +473,6 @@ mod tests {
         diff_executor_output, FakeInnerSideExecutorBuilder, MockExecutor,
     };
     use crate::executor::{BoxedExecutor, SortExecutor};
-    use crate::task::StopFlag;
 
     const CHUNK_SIZE: usize = 1024;
 
@@ -551,7 +548,6 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
-            stop_flag: Arc::new(StopFlag::default()),
         }
         .dispatch()
     }

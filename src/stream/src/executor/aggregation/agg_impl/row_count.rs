@@ -17,7 +17,9 @@
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common_proc_macro::EstimateSize;
 
 use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;
@@ -26,7 +28,7 @@ use crate::executor::error::StreamExecutorResult;
 /// Note that if there are zero rows in aggregator, `0` will be emitted
 /// instead of `None`. Note that if you want to only count non-null value,
 /// use `StreamingCountAgg` instead.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, EstimateSize)]
 pub struct StreamingRowCountAgg {
     row_cnt: i64,
 }

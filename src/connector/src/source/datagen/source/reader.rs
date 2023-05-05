@@ -280,11 +280,12 @@ fn generator_from_data_type(
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
-            if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
+            if let Some(kind) = fields_option_map.get(&kind_key)
+                && kind.as_str() == SEQUENCE_FIELD_KIND
+            {
                 let start_key = format!("fields.{}.start", name);
                 let end_key = format!("fields.{}.end", name);
-                let start_value =
-                    fields_option_map.get(&start_key).map(|s| s.to_string());
+                let start_value = fields_option_map.get(&start_key).map(|s| s.to_string());
                 let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_sequence(
                     data_type,
@@ -299,12 +300,7 @@ fn generator_from_data_type(
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
-                FieldGeneratorImpl::with_number_random(
-                    data_type,
-                    min_value,
-                    max_value,
-                    random_seed
-                )
+                FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
             }
         }
     }
@@ -317,8 +313,7 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
-    use risingwave_common::types::struct_type::StructType;
-    use risingwave_common::types::{ScalarImpl, ToDatumRef};
+    use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
 

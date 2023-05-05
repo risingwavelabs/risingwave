@@ -114,7 +114,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         &self,
         group_key: Option<impl GroupKey>,
         topn_cache: &mut TopNCache<WITH_TIES>,
-        start_key: CacheKey,
+        start_key: Option<CacheKey>,
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
@@ -131,7 +131,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?, group_key.len());
-            if topn_row.cache_key <= start_key {
+            if let Some(start_key) = start_key.as_ref() && &topn_row.cache_key <= start_key {
                 continue;
             }
             // let row= &topn_row.row;
@@ -221,7 +221,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
             let topn_row = self.get_topn_row(item?, group_key.len());
-            topn_cache.high.insert(topn_row.cache_key, (&topn_row.row).into());
+            topn_cache
+                .high
+                .insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
@@ -254,6 +256,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
+    use crate::executor::top_n::top_n_cache::TopNCacheTrait;
     use crate::executor::top_n::{create_cache_key_serde, NO_GROUP_KEY};
     use crate::row_nonnull;
 
@@ -388,11 +391,46 @@ mod tests {
         managed_state.insert(rows[4].clone());
 
         managed_state
-            .fill_high_cache(NO_GROUP_KEY, &mut cache, ordered_rows[3].clone(), 2)
+            .fill_high_cache(NO_GROUP_KEY, &mut cache, Some(ordered_rows[3].clone()), 2)
             .await
             .unwrap();
         assert_eq!(cache.high.len(), 2);
         assert_eq!(cache.high.first_key_value().unwrap().0, &ordered_rows[1]);
         assert_eq!(cache.high.last_key_value().unwrap().0, &ordered_rows[4]);
+    }
+
+    #[tokio::test]
+    async fn test_top_n_cache_limit_1() {
+        let data_types = vec![DataType::Varchar, DataType::Int64];
+        let state_table = {
+            let mut tb = create_in_memory_state_table(
+                &data_types,
+                &[OrderType::ascending(), OrderType::ascending()],
+                &[0, 1],
+            )
+            .await;
+            tb.init_epoch(EpochPair::new_test_epoch(1));
+            tb
+        };
+
+        let cache_key_serde = cache_key_serde();
+        let mut managed_state = ManagedTopNState::new(state_table, cache_key_serde.clone());
+
+        let row1 = row_nonnull!["abc", 2i64];
+        let row1_bytes = serialize_pk_to_cache_key(row1.clone(), &cache_key_serde);
+
+        let mut cache = TopNCache::<true>::new(0, 1, data_types);
+        cache.insert(row1_bytes.clone(), row1.clone(), &mut vec![], &mut vec![]);
+        cache
+            .delete(
+                NO_GROUP_KEY,
+                &mut managed_state,
+                row1_bytes,
+                row1,
+                &mut vec![],
+                &mut vec![],
+            )
+            .await
+            .unwrap();
     }
 }

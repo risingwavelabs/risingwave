@@ -174,8 +174,10 @@ impl TableFunction {
                                 Some(flag) => {
                                     let ScalarImpl::Utf8(flag) = flag else {
                                         return Err(ErrorCode::BindError(
-                                            "flag in regexp_matches must be a literal string".to_string(),
-                                        ).into());
+                                            "flag in regexp_matches must be a literal string"
+                                                .to_string(),
+                                        )
+                                        .into());
                                     };
                                     for c in flag.chars() {
                                         if !"icg".contains(c) {

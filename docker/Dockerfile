@@ -34,7 +34,7 @@ RUN rustup self update \
 
 RUN cargo fetch
 
-RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "static-link static-log-level" && \
+RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
   cargo clean

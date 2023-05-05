@@ -491,7 +491,10 @@ impl ToStream for LogicalSource {
             self.wrap_with_optional_generated_columns_stream_proj()?
         };
 
-        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty() && !self.core.for_table{
+        if let Some(catalog) = self.source_catalog()
+            && !catalog.watermark_descs.is_empty()
+            && !self.core.for_table
+        {
             plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
         }
 

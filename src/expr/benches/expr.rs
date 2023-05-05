@@ -25,13 +25,11 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
-use risingwave_common::types::{
-    DataType, DataTypeName, Date, Decimal, Interval, Time, Timestamp, F32, F64,
-};
+use risingwave_common::types::*;
+use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
-use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 
@@ -281,13 +279,17 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match create_agg_state_unary(
-            sig.inputs_type[0].into(),
-            input_index_for_type(sig.inputs_type[0].into()),
-            sig.func,
-            sig.ret_type.into(),
-            false,
-        ) {
+        let agg = match build_agg(AggCall {
+            kind: sig.func,
+            args: AggArgs::Unary(
+                sig.inputs_type[0].into(),
+                input_index_for_type(sig.inputs_type[0].into()),
+            ),
+            return_type: sig.ret_type.into(),
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        }) {
             Ok(agg) => agg,
             Err(e) => {
                 println!("error: {e}");
@@ -296,7 +298,7 @@ fn bench_expr(c: &mut Criterion) {
         };
         // to workaround the lifetime issue
         let agg = RefCell::new(agg);
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
+        c.bench_function(&format!("{sig:?}"), |bencher| {
             #[allow(clippy::await_holding_refcell_ref)]
             bencher.to_async(FuturesExecutor).iter(|| async {
                 agg.borrow_mut()

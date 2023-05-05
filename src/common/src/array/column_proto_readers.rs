@@ -25,8 +25,7 @@ use crate::array::{
     PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder, TimestampArrayBuilder,
 };
 use crate::buffer::Bitmap;
-use crate::types::interval::Interval;
-use crate::types::{Date, Time, Timestamp};
+use crate::types::{Date, Interval, Time, Timestamp};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
