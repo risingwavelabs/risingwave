@@ -25,7 +25,7 @@
 
     Caused by:
       Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?
-- name: proctime cast to without timezone
+- name: select proctime()
   sql: |
     create source s1 (v1 int as v2-1, v2 int, v3 int as v2+1) with (connector = 'kinesis') ROW FORMAT JSON;
     select v3 from s1
@@ -33,7 +33,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [(v2 + 1:Int32) as $expr1] }
       └─BatchSource { source: "s1", columns: ["v2", "_row_id"], filter: (None, None) }
-- name: select proctime()
+- name: proctime cast to without timezone
   sql: |
     explain create table t1 (proc_time TIMESTAMP AS proctime());
   explain_output: |
