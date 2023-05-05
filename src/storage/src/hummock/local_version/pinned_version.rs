@@ -59,13 +59,26 @@ impl PinnedVersionGuard {
 
 impl Drop for PinnedVersionGuard {
     fn drop(&mut self) {
-        if self
-            .pinned_version_manager_tx
+        #[cfg(madsim)]
+        self.pinned_version_manager_tx
             .send(PinVersionAction::Unpin(self.version_id))
-            .is_err()
-        {
-            tracing::warn!("failed to send req unpin version id: {}", self.version_id);
-        }
+            .unwrap_or_else(|err| {
+                tracing::warn!(
+                    "WARN failed to send req unpin version id: {} err {:?}",
+                    self.version_id,
+                    err
+                )
+            });
+
+        #[cfg(not(madsim))]
+        self.pinned_version_manager_tx
+            .send(PinVersionAction::Unpin(self.version_id))
+            .unwrap_or_else(|err| {
+                panic!(
+                    "ERROR failed to send req unpin version id: {} err {:?}",
+                    self.version_id, err
+                )
+            });
     }
 }
 

@@ -156,6 +156,21 @@ impl Drop for LocalInstanceGuard {
         // Although the current assumption is that `LocalHummockStorage` is always Destroyed before
         // `EventHandler`, so the send operation cannot fail. But when the assumptions are broken,
         // this can lead to leaks. So prefer to panic, when it fails.
+
+        #[cfg(madsim)]
+        self.event_sender
+            .send(HummockEvent::DestroyReadVersion {
+                table_id: self.table_id,
+                instance_id: self.instance_id,
+            })
+            .unwrap_or_else(tracing::warn!(
+                "WARN LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
+                self.table_id,
+                self.instance_id,
+                err
+            ));
+
+        #[cfg(not(madsim))]
         self.event_sender
             .send(HummockEvent::DestroyReadVersion {
                 table_id: self.table_id,
@@ -163,7 +178,7 @@ impl Drop for LocalInstanceGuard {
             })
             .unwrap_or_else(|err| {
                 panic!(
-                    "LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
+                    "ERROR LocalInstanceGuard table_id {:?} instance_id {} Drop SendError {:?}",
                     self.table_id, self.instance_id, err
                 )
             })
