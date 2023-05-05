@@ -13,11 +13,14 @@ ignored = ["workspace-hack"]
 [package.metadata.cargo-udeps.ignore]
 normal = ["workspace-hack"]
 
+[features]
+zstd = ["apache-avro/zstandard", "rdkafka/zstd"]
+ssl = ["rdkafka/ssl"]
+
 [dependencies]
 anyhow = "1"
 apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto/modify-decimal", features = [
     "snappy",
-    "zstandard",
     "bzip",
     "xz",
 ] }
@@ -66,7 +69,6 @@ rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",
     "gssapi",
-    "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }

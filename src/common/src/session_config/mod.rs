@@ -286,8 +286,8 @@ type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 
-#[derive(Derivative)]
-#[derivative(Default)]
+#[derive(Educe)]
+#[educe(Default)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
@@ -335,7 +335,7 @@ pub struct ConfigMap {
     query_epoch: QueryEpoch,
 
     /// Session timezone. Defaults to UTC.
-    #[derivative(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
+    #[educe(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
     timezone: Timezone,
 
     /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as

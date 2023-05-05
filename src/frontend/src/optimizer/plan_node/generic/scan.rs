@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 
 use super::GenericPlanNode;
@@ -27,7 +27,7 @@ use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
     pub is_sys_table: bool,
@@ -44,8 +44,8 @@ pub struct Scan {
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq = "ignore")]
+    #[educe(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
 }
 

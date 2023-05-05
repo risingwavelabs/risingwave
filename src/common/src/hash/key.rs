@@ -29,7 +29,7 @@ use std::io::{Cursor, Read};
 use std::marker::PhantomData;
 
 use chrono::{Datelike, Timelike};
-use derivative::Derivative;
+use educe::Educe;
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
@@ -211,11 +211,11 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
 }
 
 /// A wrapper for u64 hash result. Generic over the hasher.
-#[derive(Derivative)]
-#[derivative(Default, Clone, Copy, Debug, PartialEq)]
+#[derive(Educe)]
+#[educe(Default, Clone, Copy, Debug, PartialEq)]
 pub struct HashCode<T: 'static + BuildHasher> {
     value: u64,
-    #[derivative(Debug = "ignore")]
+    #[educe(Debug = "ignore")]
     _phantom: PhantomData<&'static T>,
 }
 

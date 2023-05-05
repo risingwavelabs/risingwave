@@ -1968,17 +1968,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derivative"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "derive_builder"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5637,8 +5626,8 @@ dependencies = [
  "crc32fast",
  "criterion",
  "darwin-libproc",
- "derivative",
  "easy-ext",
+ "educe",
  "either",
  "enum-as-inner",
  "ethnum",
@@ -5990,10 +5979,10 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap 4.1.11",
- "derivative",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
+ "educe",
  "enum-as-inner",
  "fixedbitset",
  "futures",
@@ -6495,8 +6484,8 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "derivative",
  "dyn-clone",
+ "educe",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -8631,6 +8620,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
+ "apache-avro",
  "arrayvec",
  "auto_enums",
  "aws-sdk-s3",
