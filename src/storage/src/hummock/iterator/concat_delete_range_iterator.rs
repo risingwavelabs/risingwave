@@ -26,7 +26,6 @@ use crate::monitor::StoreLocalStatistic;
 pub struct ConcatDeleteRangeIterator {
     sstables: Vec<SstableInfo>,
     current: Option<SstableDeleteRangeIterator>,
-    current_epoch: HummockEpoch,
     idx: usize,
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -39,7 +38,6 @@ impl ConcatDeleteRangeIterator {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             idx: 0,
-            current_epoch: HummockEpoch::MAX,
             current: None,
         }
     }
@@ -47,15 +45,49 @@ impl ConcatDeleteRangeIterator {
     async fn next_inner(&mut self) -> HummockResult<()> {
         if let Some(iter) = self.current.as_mut() {
             if iter.is_valid() {
-                iter.next().await?;
+                if self.idx + 1 < self.sstables.len()
+                    && self.sstables[self.idx + 1].range_tombstone_count > 0
+                    && iter.next_range_epoch() == HummockEpoch::MAX
+                    && iter
+                        .next_extended_user_key()
+                        .left_user_key
+                        .eq(&FullKey::decode(
+                            &self.sstables[self.idx].key_range.as_ref().unwrap().right,
+                        )
+                        .user_key)
+                {
+                    let last_key_in_sst_start =
+                        iter.next_extended_user_key()
+                            .left_user_key
+                            .eq(&FullKey::decode(
+                                &self.sstables[self.idx + 1].key_range.as_ref().unwrap().left,
+                            )
+                            .user_key);
+                    iter.next().await?;
+                    assert!(!iter.is_valid());
+                    if last_key_in_sst_start {
+                        self.seek_idx(self.idx + 1, None).await?;
+                        if self.is_valid()
+                            && self
+                                .next_extended_user_key()
+                                .left_user_key
+                                .eq(&FullKey::decode(
+                                    &self.sstables[self.idx].key_range.as_ref().unwrap().left,
+                                )
+                                .user_key)
+                        {
+                            self.current.as_mut().unwrap().next().await?;
+                            return Ok(());
+                        }
+                    }
+                } else {
+                    iter.next().await?;
+                }
                 let mut idx = self.idx;
                 while idx + 1 < self.sstables.len() && !self.is_valid() {
                     self.seek_idx(idx + 1, None).await?;
                     idx += 1;
                 }
-            }
-            if self.is_valid() {
-                self.current_epoch = self.current.as_ref().unwrap().current_epoch();
             }
         }
         Ok(())
@@ -83,9 +115,6 @@ impl ConcatDeleteRangeIterator {
             } else {
                 sstable_iter.rewind().await?;
             }
-            if sstable_iter.is_valid() {
-                self.current_epoch = sstable_iter.current_epoch();
-            }
             self.current = Some(sstable_iter);
             self.idx = idx;
         }
@@ -103,7 +132,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.current_epoch
+        self.current.as_ref().unwrap().current_epoch()
     }
 
     fn next_range_epoch(&self) -> HummockEpoch {
@@ -111,44 +140,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
     }
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            self.next_inner().await?;
-            if self.is_valid()
-                && self.next_range_epoch() == HummockEpoch::MAX
-                && self.idx + 1 < self.sstables.len()
-            {
-                let largest_key =
-                    FullKey::decode(&self.sstables[self.idx].key_range.as_ref().unwrap().right);
-                let next_sst_smallest_key =
-                    FullKey::decode(&self.sstables[self.idx + 1].key_range.as_ref().unwrap().left);
-                let current_event_key = self
-                    .current
-                    .as_ref()
-                    .unwrap()
-                    .next_extended_user_key()
-                    .left_user_key;
-                if current_event_key.eq(&largest_key.user_key)
-                    && current_event_key.eq(&next_sst_smallest_key.user_key)
-                {
-                    let table = self
-                        .sstable_store
-                        .sstable(&self.sstables[self.idx + 1], &mut self.stats)
-                        .await?;
-                    let mut next_sstable_iter = SstableDeleteRangeIterator::new(table);
-                    next_sstable_iter.rewind().await?;
-                    if next_sstable_iter.is_valid()
-                        && next_sstable_iter
-                            .next_extended_user_key()
-                            .left_user_key
-                            .eq(&current_event_key)
-                    {
-                        self.current = Some(next_sstable_iter);
-                        self.idx += 1;
-                    }
-                }
-            }
-            Ok(())
-        }
+        self.next_inner()
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
