@@ -24,7 +24,7 @@ use super::{
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{
-    collect_input_ref, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
+    collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -227,7 +227,7 @@ impl ColPrunable for LogicalProjectSet {
         let input_col_num = self.input().schema().len();
 
         let input_required_cols = {
-            collect_input_ref(
+            collect_input_refs(
                 input_col_num,
                 required_cols
                     .iter()

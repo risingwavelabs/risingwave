@@ -22,7 +22,7 @@ use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{collect_input_ref, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -149,7 +149,7 @@ impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num: usize = self.input().schema().len();
         let input_required_cols = {
-            collect_input_ref(
+            collect_input_refs(
                 input_col_num,
                 required_cols.iter().map(|i| &self.exprs()[*i]),
             )

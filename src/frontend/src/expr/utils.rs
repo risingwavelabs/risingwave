@@ -393,7 +393,7 @@ impl Extend<usize> for CollectInputRef {
 ///
 /// # Panics
 /// Panics if `input_ref >= input_col_num`.
-pub fn collect_input_ref<'a>(
+pub fn collect_input_refs<'a>(
     input_col_num: usize,
     exprs: impl Iterator<Item = &'a ExprImpl>,
 ) -> FixedBitSet {
