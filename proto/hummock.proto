@@ -266,6 +266,8 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
+  // Lbase in LSM
+  uint32 base_level = 8;
   TaskStatus task_status = 9;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;

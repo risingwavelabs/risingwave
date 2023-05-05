@@ -495,6 +495,7 @@ mod tests {
             task_id,
             target_level: 0,
             gc_delete_keys: false,
+            base_level: 0,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],

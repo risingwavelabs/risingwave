@@ -431,6 +431,7 @@ impl SharedBufferCompactRunner {
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
+                is_target_l0_or_lbase: true,
                 split_by_table: false,
             },
         );
