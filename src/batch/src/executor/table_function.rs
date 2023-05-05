@@ -56,7 +56,7 @@ impl TableFunctionExecutor {
             DataChunkBuilder::new(vec![self.table_function.return_type()], self.chunk_size);
         for array in self.table_function.eval(&dummy_chunk).await? {
             let len = array.len();
-            if len <= 0 {
+            if len == 0 {
                 continue;
             }
             let data_chunk = match array.as_ref() {
