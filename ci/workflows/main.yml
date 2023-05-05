@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build (dev mode)"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -p ci-dev"
     key: "build-dev"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -25,7 +25,7 @@ steps:
     timeout_in_minutes: 15
 
   - label: "build (release mode)"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
