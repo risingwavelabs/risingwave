@@ -75,5 +75,6 @@ sccache --show-stats
 
 echo "--- This is a dummy echo"
 echo "Hello, what's up?"
+rm -rf ./*
 
 ps
