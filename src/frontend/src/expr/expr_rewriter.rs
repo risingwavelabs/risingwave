@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::expr::Now;
-
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
+use crate::expr::Now;
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular

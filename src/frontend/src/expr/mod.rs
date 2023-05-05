@@ -717,15 +717,13 @@ impl ExprImpl {
 
     /// Checks if expr is of the form `now() [+- const_expr]`
     fn is_now_offset(&self) -> bool {
-        if let ExprImpl::FunctionCall(f) = self {
+        if let ExprImpl::Now(_) = self {
+            true
+        } else if let ExprImpl::FunctionCall(f) = self {
             match f.get_expr_type() {
-                ExprType::Now => true,
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.as_function_call()
-                        .map(|f| f.get_expr_type() == ExprType::Now)
-                        .unwrap_or(false)
-                        && rhs.is_const()
+                    lhs.is_now_offset() && rhs.is_const()
                 }
                 _ => false,
             }

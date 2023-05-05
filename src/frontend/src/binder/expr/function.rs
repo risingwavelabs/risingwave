@@ -34,7 +34,7 @@ use risingwave_sqlparser::ast::{
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
     TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
@@ -343,17 +343,22 @@ impl Binder {
         }
 
         fn now() -> Handle {
-            Box::new(move |binder, mut inputs| {
-                binder.ensure_now_function_allowed()?;
-                // `now()` in batch query will be convert to the binder time.
-                if binder.is_for_batch() {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                raw_call(ExprType::Now)(binder, inputs)
-            })
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_now_function_allowed()?;
+                    // `now()` in batch query will be convert to the binder time.
+                    if binder.is_for_batch() {
+                        Ok(Literal::new(
+                            Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
+                            DataType::Timestamptz,
+                        )
+                        .into())
+                    } else {
+                        Ok(Now.into())
+                    }
+                }),
+            )
         }
 
         fn pi() -> Handle {

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
-    TableFunction, UserDefinedFunction, WindowFunction, Now,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Now, Parameter,
+    Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
