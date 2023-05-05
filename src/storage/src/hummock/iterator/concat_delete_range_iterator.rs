@@ -167,8 +167,6 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
                         .le(&target_user_key)
                 })
                 .saturating_sub(1); // considering the boundary of 0
-            self.current.take();
-            self.seek_idx(idx, Some(target_user_key)).await?;
             while idx + 1 < self.sstables.len() && !self.is_valid() {
                 self.seek_idx(idx + 1, None).await?;
                 idx += 1;
