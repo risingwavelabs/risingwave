@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
@@ -333,12 +334,16 @@ impl HummockVersionUpdateExt for HummockVersion {
                 let target_l0 = cur_levels.l0.as_mut().unwrap();
                 let mut insert_hint = Err(target_l0.sub_levels.len());
                 for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
-                    if other.sub_level_id == sub_level.sub_level_id {
-                        insert_hint = Ok(idx);
-                        break;
-                    } else if other.sub_level_id > sub_level.sub_level_id {
-                        insert_hint = Err(idx);
-                        break;
+                    match other.sub_level_id.cmp(&sub_level.sub_level_id) {
+                        Ordering::Less => {}
+                        Ordering::Equal => {
+                            insert_hint = Ok(idx);
+                            break;
+                        }
+                        Ordering::Greater => {
+                            insert_hint = Err(idx);
+                            break;
+                        }
                     }
                 }
                 // Remove SST from sub level may result in empty sub level. It will be purged
