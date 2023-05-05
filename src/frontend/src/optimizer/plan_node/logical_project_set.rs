@@ -226,17 +226,15 @@ impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num = self.input().schema().len();
 
-        let input_required_cols = {
-            collect_input_refs(
-                input_col_num,
-                required_cols
-                    .iter()
-                    .filter(|&&i| i > 0)
-                    .map(|i| &self.select_list()[*i - 1]),
-            )
-            .ones()
-            .collect_vec()
-        };
+        let input_required_cols = collect_input_refs(
+            input_col_num,
+            required_cols
+                .iter()
+                .filter(|&&i| i > 0)
+                .map(|i| &self.select_list()[*i - 1]),
+        )
+        .ones()
+        .collect_vec();
         let new_input = self.input().prune_col(&input_required_cols, ctx);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,

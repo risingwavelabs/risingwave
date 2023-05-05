@@ -148,14 +148,12 @@ impl fmt::Display for LogicalProject {
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num: usize = self.input().schema().len();
-        let input_required_cols = {
-            collect_input_refs(
-                input_col_num,
-                required_cols.iter().map(|i| &self.exprs()[*i]),
-            )
-            .ones()
-            .collect_vec()
-        };
+        let input_required_cols = collect_input_refs(
+            input_col_num,
+            required_cols.iter().map(|i| &self.exprs()[*i]),
+        )
+        .ones()
+        .collect_vec();
         let new_input = self.input().prune_col(&input_required_cols, ctx);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
