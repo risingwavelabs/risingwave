@@ -35,7 +35,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -437,9 +437,11 @@ impl TestCase {
                     name,
                     query,
                     columns,
+                    emit_mode,
                     ..
                 } => {
-                    create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
+                    create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode)
+                        .await?;
                 }
                 Statement::CreateView {
                     materialized: false,
@@ -641,6 +643,7 @@ impl TestCase {
                     q,
                     ObjectName(vec!["test".into()]),
                     vec![],
+                    Some(EmitMode::Immediately),
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {

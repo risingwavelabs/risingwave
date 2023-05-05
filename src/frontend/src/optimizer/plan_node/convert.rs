@@ -84,12 +84,20 @@ impl RewriteStreamContext {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ToStreamContext {
     share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
+    emit_on_window_close: bool,
 }
 
 impl ToStreamContext {
+    pub fn new(emit_on_window_close: bool) -> Self {
+        Self {
+            share_to_stream_map: HashMap::new(),
+            emit_on_window_close,
+        }
+    }
+
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
         self.share_to_stream_map
             .try_insert(plan_node_id, plan_ref)
@@ -98,6 +106,10 @@ impl ToStreamContext {
 
     pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
         self.share_to_stream_map.get(&plan_node_id)
+    }
+
+    pub fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
     }
 }
 
