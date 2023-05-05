@@ -181,23 +181,19 @@ mod tests {
         str_to_time("04:05:06").unwrap();
 
         assert_eq!(
-            str_with_time_zone_to_timestamptz("1999-01-08 04:05:06")
-                .unwrap_err()
-                .to_string(),
+            str_with_time_zone_to_timestamptz("1999-01-08 04:05:06").unwrap_err(),
             PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ.to_string()
         );
         assert_eq!(
-            str_to_timestamp("1999-01-08 04:05:06AA")
-                .unwrap_err()
-                .to_string(),
+            str_to_timestamp("1999-01-08 04:05:06AA").unwrap_err(),
             PARSE_ERROR_STR_TO_TIMESTAMP.to_string()
         );
         assert_eq!(
-            str_to_date("1999-01-08AA").unwrap_err().to_string(),
+            str_to_date("1999-01-08AA").unwrap_err(),
             PARSE_ERROR_STR_TO_DATE.to_string()
         );
         assert_eq!(
-            str_to_time("AA04:05:06").unwrap_err().to_string(),
+            str_to_time("AA04:05:06").unwrap_err(),
             PARSE_ERROR_STR_TO_TIME.to_string()
         );
     }
