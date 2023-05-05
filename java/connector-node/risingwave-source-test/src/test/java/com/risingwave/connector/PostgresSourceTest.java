@@ -146,7 +146,7 @@ public class PostgresSourceTest {
             Assert.fail("validate rpc fail: " + e.getMessage());
         } finally {
             // cleanup
-            query = "DROP TABLE orders";
+            query = testClient.sqlStmts.getProperty("tpch.drop.orders");
             SourceTestClient.performQuery(connection, query);
             connection.close();
         }
@@ -227,7 +227,7 @@ public class PostgresSourceTest {
             Assert.fail("validate rpc fail: " + e.getMessage());
         } finally {
             // cleanup
-            query = "DROP TABLE orders";
+            query = testClient.sqlStmts.getProperty("tpch.drop.orders");
             SourceTestClient.performQuery(connDbz, query);
             query = "DROP USER debezium";
             SourceTestClient.performQuery(connPg, query);

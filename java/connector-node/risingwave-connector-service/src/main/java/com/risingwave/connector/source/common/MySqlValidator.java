@@ -161,7 +161,33 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     }
 
     private void validatePrivileges() throws SQLException {
-        // TODO: validate MySQL user privileges
+        String[] privilegesRequired = {
+            "SELECT",
+            "RELOAD",
+            "SHOW DATABASES",
+            "REPLICATION SLAVE",
+            "REPLICATION CLIENT",
+            "LOCK TABLES"
+        };
+        try (var stmt = jdbcConnection.createStatement()) {
+            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
+            while (res.next()) {
+                String grants = res.getString(1).toUpperCase();
+                // all privileges granted, check passed
+                if (grants.contains("ALL")) {
+                    break;
+                }
+                // check whether each privilege is granted
+                for (String privilege : privilegesRequired) {
+                    if (!grants.contains(privilege)) {
+                        throw ValidatorUtils.invalidArgument(
+                                String.format(
+                                        "MySQL user does not have privilege %s, which is needed for debezium connector",
+                                        privilege));
+                    }
+                }
+            }
+        }
     }
 
     @Override
