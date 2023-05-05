@@ -500,8 +500,9 @@ impl DataChunk {
                     unsafe {
                         if vis.is_set_unchecked(i) {
                             update_sizes(&col_variable, i);
+                        } else {
+                            sizes.push(0)
                         }
-                        // If invisible, just skip
                     }
                 }
             }
