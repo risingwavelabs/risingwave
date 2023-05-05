@@ -149,7 +149,7 @@ impl Condition {
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        collect_input_refs(input_col_num, self.conjunctions.iter())
+        collect_input_refs(input_col_num, &self.conjunctions)
     }
 
     /// Split the condition expressions into (N choose 2) + 1 groups: those containing two columns

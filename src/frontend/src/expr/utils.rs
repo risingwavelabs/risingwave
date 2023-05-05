@@ -395,7 +395,7 @@ impl Extend<usize> for CollectInputRef {
 /// Panics if `input_ref >= input_col_num`.
 pub fn collect_input_refs<'a>(
     input_col_num: usize,
-    exprs: impl Iterator<Item = &'a ExprImpl>,
+    exprs: impl IntoIterator<Item = &'a ExprImpl>,
 ) -> FixedBitSet {
     let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
     for expr in exprs {
