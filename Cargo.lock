@@ -8622,6 +8622,7 @@ dependencies = [
  "madsim-rdkafka",
  "openssl",
  "tracing",
+ "zstd-sys",
 ]
 
 [[package]]
