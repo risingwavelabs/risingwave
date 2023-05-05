@@ -2722,9 +2722,9 @@ dependencies = [
 
 [[package]]
 name = "halfbrown"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "389d755cc2bcc8cdb7554b89ddaa59d9275a727ec8915b0e2bc4176c33cc39cb"
+checksum = "6d9ab7d9233262d3b74ae4c4a7a090fc4379b07c6eb9b02ecab7cbb12ad67a58"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",

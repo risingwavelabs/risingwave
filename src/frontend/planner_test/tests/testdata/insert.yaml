@@ -323,3 +323,14 @@
     create table t (a int, b int);
     insert into t (a) select * from t;
   binder_error: 'Bind error: INSERT has more expressions than target columns'
+- name: insert to a table with default columns
+  sql: |
+    create table t (a int, b int default 2+3);
+    insert into t values (1);
+  logical_plan: |
+    LogicalInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
+    └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t, mapping: [0:0], default: [1<-(2:Int32 + 3:Int32)] }
+      └─BatchValues { rows: [[1:Int32]] }
