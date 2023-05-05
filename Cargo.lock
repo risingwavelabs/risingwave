@@ -8620,7 +8620,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
- "apache-avro",
  "arrayvec",
  "auto_enums",
  "aws-sdk-s3",
