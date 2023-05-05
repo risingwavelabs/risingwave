@@ -352,7 +352,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
     pub async fn async_execute(self: Arc<Self>, state_tx: Option<StateReporter>) -> Result<()> {
-        let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
@@ -373,25 +372,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
-        // After we init the output receivers, it's must safe to schedule next stage -- able to send
-        // TaskStatus::Running here.
-        // Init the state receivers. Swap out later.
-        self.change_state_notify(TaskStatus::Running, state_tx.as_mut(), None)
-            .await?;
-
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let sender = sender;
-            let mut state_tx = state_tx;
             let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                t_1.run(exec, sender, state_tx.as_mut())
+                t_1.run(exec, sender, state_tx)
                     .in_span({
                         let mut span = Span::enter_with_local_parent("batch_execute");
                         span.add_property(|| ("task_id", task_id.task_id.to_string()));
@@ -496,8 +488,22 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         &self,
         root: BoxedExecutor,
         mut sender: ChanSenderImpl,
-        state_tx: Option<&mut StateReporter>,
+        mut state_tx: Option<StateReporter>,
     ) {
+        // After we init the output receivers, it's must safe to schedule next stage -- able to send
+        // TaskStatus::Running here.
+        // Init the state receivers. Swap out later.
+        if let Err(e) = self
+            .change_state_notify(TaskStatus::Running, state_tx.as_mut(), None)
+            .await
+        {
+            warn!(
+                "The status receiver in FE has closed so the status push is failed {:}",
+                e
+            );
+            return;
+        }
+
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
@@ -568,7 +574,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
+        if let Err(e) = self
+            .change_state_notify(state, state_tx.as_mut(), err_str)
+            .await
+        {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e
@@ -649,6 +658,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         let guard = self.state.lock();
         !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
+
+    pub fn get_state(&self) -> TaskStatus {
+        *self.state.lock()
     }
 }
 

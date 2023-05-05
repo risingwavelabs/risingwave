@@ -278,6 +278,18 @@ message DistributedLookupJoinNode {
 
 message UnionNode {}
 
+message MockAbortableNode {
+  enum MockAbortableNodeKind {
+    UNSPECIFIED = 0;
+    NORMAL = 1;
+    BLOCKING = 2;
+    NON_BLOCKING = 3;
+    BUSY_LOOP = 4;
+  }
+
+  MockAbortableNodeKind kind = 1;
+}
+
 message PlanNode {
   repeated PlanNode children = 1;
   reserved 22;
@@ -309,9 +321,9 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
-    // The following nodes are used for testing.
-    bool block_executor = 35;
-    bool busy_loop_executor = 36;
+
+    // For tests
+    MockAbortableNode mock_abortable = 35;
   }
   string identity = 24;
 }

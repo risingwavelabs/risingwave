@@ -73,8 +73,8 @@ pub use update::*;
 pub use utils::*;
 pub use values::*;
 
-use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
+use crate::executor::test_utils::MockAbortableExecutor;
 use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -225,8 +225,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Union => UnionExecutor,
             NodeBody::Source => SourceExecutor,
             // Follow NodeBody only used for test
-            NodeBody::BlockExecutor => BlockExecutorBuidler,
-            NodeBody::BusyLoopExecutor => BusyLoopExecutorBuidler,
+            NodeBody::MockAbortable => MockAbortableExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();

@@ -30,6 +30,7 @@ num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
+rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
@@ -63,7 +64,6 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
-rand = "0.8"
 tempfile = "3"
 
 [target.'cfg(unix)'.dev-dependencies]

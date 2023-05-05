@@ -14,11 +14,14 @@
 
 use std::collections::VecDeque;
 use std::future::Future;
+use std::time::Duration;
 
 use assert_matches::assert_matches;
+use futures::stream::pending;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
+use rand::random;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
@@ -28,7 +31,10 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_pb::batch_plan::mock_abortable_node::MockAbortableNodeKind;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
+use tokio::time::sleep;
 
 use super::{BoxedExecutorBuilder, ExecutorBuilder};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
@@ -342,77 +348,79 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
     }
 }
 
-pub struct BlockExecutorBuidler {}
-
-#[async_trait::async_trait]
-impl BoxedExecutorBuilder for BlockExecutorBuidler {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        _source: &ExecutorBuilder<'_, C>,
-        _inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor> {
-        Ok(Box::new(BlockExecutor {}))
-    }
+pub struct MockAbortableExecutor {
+    kind: MockAbortableNodeKind,
 }
 
-pub struct BlockExecutor {}
-
-impl Executor for BlockExecutor {
-    fn schema(&self) -> &Schema {
-        unimplemented!("Not used in test")
-    }
-
-    fn identity(&self) -> &str {
-        "BlockExecutor"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute().boxed()
-    }
-}
-
-impl BlockExecutor {
+impl MockAbortableExecutor {
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn do_execute(self) {
-        // infinite loop to block
-        #[allow(clippy::empty_loop)]
-        loop {}
-    }
-}
-
-pub struct BusyLoopExecutorBuidler {}
-
-#[async_trait::async_trait]
-impl BoxedExecutorBuilder for BusyLoopExecutorBuidler {
-    async fn new_boxed_executor<C: BatchTaskContext>(
-        _source: &ExecutorBuilder<'_, C>,
-        _inputs: Vec<BoxedExecutor>,
-    ) -> Result<BoxedExecutor> {
-        Ok(Box::new(BusyLoopExecutor {}))
-    }
-}
-
-pub struct BusyLoopExecutor {}
-
-impl Executor for BusyLoopExecutor {
-    fn schema(&self) -> &Schema {
-        unimplemented!("Not used in test")
+    async fn do_normal(self) {
+        // infinite loop to generate data
+        loop {
+            yield DataChunk::new_dummy(1);
+            sleep(Duration::from_millis(100)).await;
+        }
     }
 
-    fn identity(&self) -> &str {
-        "BusyLoopExecutor"
-    }
-
-    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute().boxed()
-    }
-}
-
-impl BusyLoopExecutor {
     #[try_stream(ok = DataChunk, error = RwError)]
-    async fn do_execute(self) {
+    async fn do_blocking(self) {
+        #[for_await]
+        for _ in pending() {
+            yield DataChunk::new_dummy(1);
+        }
+    }
+
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_busy_loop(self) {
+        loop {
+            for _ in 0..10000000 {
+                let _ = random::<f64>().sqrt();
+            }
+        }
+    }
+
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_non_blocking(self) {
         // infinite loop to generate data
         loop {
             yield DataChunk::new_dummy(1);
         }
+    }
+}
+
+impl Executor for MockAbortableExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "MockAbortableExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        match self.kind {
+            MockAbortableNodeKind::Normal => self.do_normal().boxed(),
+            MockAbortableNodeKind::Blocking => self.do_blocking().boxed(),
+            MockAbortableNodeKind::BusyLoop => self.do_busy_loop().boxed(),
+            MockAbortableNodeKind::NonBlocking => self.do_non_blocking().boxed(),
+            MockAbortableNodeKind::Unspecified => unreachable!(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for MockAbortableExecutor {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        let mock_executor_node = try_match_expand!(
+            source.plan_node().get_node_body().unwrap(),
+            NodeBody::MockAbortable
+        )?;
+
+        Ok(Box::new(Self {
+            kind: mock_executor_node.kind(),
+        }))
     }
 }

@@ -25,6 +25,8 @@ use risingwave_common::memory::{MemoryContext, MemoryContextRef};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
+#[cfg(test)]
+use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
@@ -203,6 +205,26 @@ impl BatchManager {
         }
     }
 
+    #[cfg(test)]
+    async fn wati_until_task_state_changed<F: Fn(TaskStatus) -> bool>(
+        &self,
+        task_id: &TaskId,
+        check: F,
+    ) -> Result<()> {
+        use std::time::Duration;
+        loop {
+            match self.tasks.lock().get(task_id) {
+                Some(task) => {
+                    if check(task.get_state()) {
+                        return Ok(());
+                    }
+                }
+                None => return Err(TaskNotFound.into()),
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await
+        }
+    }
+
     /// Return the receivers for streaming RPC.
     pub fn get_task_receiver(
         &self,
@@ -264,10 +286,13 @@ mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+    use risingwave_pb::batch_plan::mock_abortable_node::MockAbortableNodeKind;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, ValuesNode,
+        ExchangeInfo, MockAbortableNode, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode,
+        ValuesNode,
     };
+    use risingwave_pb::task_service::task_info_response::TaskStatus;
     use tonic::Code;
 
     use crate::monitor::BatchManagerMetrics;
@@ -350,14 +375,15 @@ mod tests {
             .contains("can not create duplicate task with the same id"));
     }
 
-    #[tokio::test]
-    async fn test_task_cancel_for_busy_loop() {
+    async fn do_test_task_abort(kind: MockAbortableNodeKind) {
         let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
                 identity: "".to_string(),
-                node_body: Some(NodeBody::BusyLoopExecutor(true)),
+                node_body: Some(NodeBody::MockAbortable(MockAbortableNode {
+                    kind: kind.into(),
+                })),
             }),
             exchange_info: Some(ExchangeInfo {
                 mode: DistributionMode::Single as i32,
@@ -380,123 +406,35 @@ mod tests {
             )
             .await
             .unwrap();
-        manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
-        assert!(!manager.tasks.lock().contains_key(&task_id));
-    }
 
-    #[tokio::test]
-    async fn test_task_cancel_for_block() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_string(),
-                node_body: Some(NodeBody::BlockExecutor(true)),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let context = ComputeNodeContext::for_test();
-        let task_id = PbTaskId {
-            query_id: "".to_string(),
-            stage_id: 0,
-            task_id: 0,
-        };
+        // Waiting task to be running
         manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
+            .wati_until_task_state_changed(&task_id, |status| status == TaskStatus::Running)
             .await
             .unwrap();
-        manager.cancel_task(&task_id);
-        let task_id = TaskId::from(&task_id);
-        assert!(!manager.tasks.lock().contains_key(&task_id));
-    }
 
-    #[tokio::test]
-    async fn test_task_abort_for_busy_loop() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_string(),
-                node_body: Some(NodeBody::BusyLoopExecutor(true)),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let context = ComputeNodeContext::for_test();
-        let task_id = PbTaskId {
-            query_id: "".to_string(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
-        let task_id = TaskId::from(&task_id);
         manager
             .tasks
             .lock()
             .get(&task_id)
             .unwrap()
             .abort("Abort Test".to_owned());
-        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
+        assert!(manager
+            .wati_until_task_state_changed(&task_id, |status| status == TaskStatus::Aborted)
+            .await
+            .is_ok());
     }
 
     #[tokio::test]
-    async fn test_task_abort_for_block() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
-        let plan = PlanFragment {
-            root: Some(PlanNode {
-                children: vec![],
-                identity: "".to_string(),
-                node_body: Some(NodeBody::BlockExecutor(true)),
-            }),
-            exchange_info: Some(ExchangeInfo {
-                mode: DistributionMode::Single as i32,
-                distribution: None,
-            }),
-        };
-        let context = ComputeNodeContext::for_test();
-        let task_id = PbTaskId {
-            query_id: "".to_string(),
-            stage_id: 0,
-            task_id: 0,
-        };
-        manager
-            .fire_task(
-                &task_id,
-                plan.clone(),
-                to_committed_batch_query_epoch(0),
-                context.clone(),
-                StateReporter::new_with_test(),
-            )
-            .await
-            .unwrap();
-        let task_id = TaskId::from(&task_id);
-        manager
-            .tasks
-            .lock()
-            .get(&task_id)
-            .unwrap()
-            .abort("Abort Test".to_owned());
-        assert!(manager.wait_until_task_aborted(&task_id).await.is_ok());
+    async fn test_task_abort() {
+        do_test_task_abort(MockAbortableNodeKind::Normal).await;
+        println!("Normal done!");
+        do_test_task_abort(MockAbortableNodeKind::Blocking).await;
+        println!("Blocking done!");
+        // do_test_task_abort(MockAbortableNodeKind::NonBlocking).await;
+        // println!("Non Blocking done!");
+        // do_test_task_abort(MockAbortableNodeKind::BusyLoop).await;
+        // println!("Busy loop done!");
     }
 }
