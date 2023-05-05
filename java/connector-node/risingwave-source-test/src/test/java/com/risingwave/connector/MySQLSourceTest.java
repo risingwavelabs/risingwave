@@ -166,7 +166,7 @@ public class MySQLSourceTest {
         Connection connDbz = SourceTestClient.connect(dbzDataSource);
         query =
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
-        SourceTestClient.performQuery(connDbz, query);
+        SourceTestClient.performQuery(connRoot, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
@@ -201,7 +201,7 @@ public class MySQLSourceTest {
         } finally {
             // cleanup
             query = testClient.sqlStmts.getProperty("tpch.drop.orders");
-            SourceTestClient.performQuery(connDbz, query);
+            SourceTestClient.performQuery(connRoot, query);
             query = "DROP USER IF EXISTS debezium";
             SourceTestClient.performQuery(connRoot, query);
             connDbz.close();
