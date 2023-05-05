@@ -516,7 +516,7 @@ fn gen_table_plan_inner(
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    let session = context.session_ctx();
+    let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -579,6 +579,7 @@ fn gen_table_plan_inner(
     }
 
     let materialize = plan_root.gen_table_plan(
+        context,
         name,
         columns,
         definition,
@@ -619,7 +620,7 @@ pub async fn handle_create_table(
         }
     }
 
-    let (graph, source, table) = {
+    let (graph, source, table, notices) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
@@ -648,12 +649,16 @@ pub async fn handle_create_table(
                 append_only,
             )?,
         };
+
+        let context = plan.plan_base().ctx.clone();
+        let notices = context.take_warnings();
+
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
             .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table)
+        (graph, source, table, notices)
     };
 
     tracing::trace!(
@@ -665,7 +670,10 @@ pub async fn handle_create_table(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+    Ok(PgResponse::empty_result_with_notices(
+        StatementType::CREATE_TABLE,
+        notices,
+    ))
 }
 
 pub fn check_create_table_with_source(
