@@ -180,7 +180,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 // check whether each privilege is granted
                 for (String privilege : privilegesRequired) {
                     if (!grants.contains(privilege)) {
-                        throw ValidatorUtils.internalError(
+                        throw ValidatorUtils.invalidArgument(
                                 String.format(
                                         "MySQL user does not have privilege %s, which is needed for debezium connector",
                                         privilege));
