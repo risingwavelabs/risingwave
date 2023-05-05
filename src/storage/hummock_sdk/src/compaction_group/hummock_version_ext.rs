@@ -814,11 +814,14 @@ pub fn add_new_sub_level(
     if insert_sub_level_id == u64::MAX {
         return;
     }
-    if let Some(newest_level) = l0.sub_levels.last() {
+    let insert_pos = l0
+        .sub_levels
+        .partition_point(|sub_level| sub_level.get_sub_level_id() < insert_sub_level_id);
+    if let Some(existing_level) = l0.sub_levels.get(insert_pos) {
         assert!(
-            newest_level.sub_level_id < insert_sub_level_id,
-            "inserted new level is not the newest: prev newest: {}, insert: {}. L0: {:?}",
-            newest_level.sub_level_id,
+            existing_level.sub_level_id > insert_sub_level_id,
+            "inserted new level is duplicate with existing sub level: existing: {}, insert: {}. L0: {:?}",
+            existing_level.sub_level_id,
             insert_sub_level_id,
             l0,
         );
@@ -828,7 +831,7 @@ pub fn add_new_sub_level(
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
     l0.total_file_size += level.total_file_size;
     l0.uncompressed_file_size += level.uncompressed_file_size;
-    l0.sub_levels.push(level);
+    l0.sub_levels.insert(insert_pos, level);
 }
 
 pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVersionDelta {
