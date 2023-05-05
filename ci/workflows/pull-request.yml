@@ -198,6 +198,18 @@ steps:
   - label: "check"
     command: "ci/scripts/check.sh"
     plugins:
+      - gencer/cache#v2.4.10:
+          id: cache
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".cargo/advisory-db"
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
