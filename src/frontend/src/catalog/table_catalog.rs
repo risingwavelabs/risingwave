@@ -413,6 +413,22 @@ impl TableCatalog {
             })
     }
 
+    pub fn default_columns_key_id(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+        self.columns.iter().filter(|c| c.is_default()).map(|c| {
+            if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                c.column_desc.generated_or_default_column.clone().unwrap()
+            {
+                (
+                    c.column_id().get_id() as usize,
+                    ExprImpl::from_expr_proto(&expr.unwrap())
+                        .expect("expr in default columns corrupted"),
+                )
+            } else {
+                unreachable!()
+            }
+        })
+    }
+
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
     }
