@@ -220,7 +220,7 @@ impl CompactionDeleteRanges {
         }
     }
 
-    /// the `largest_user_key` always mean that
+    /// the `largest_user_key` is always exclusive
     pub(crate) fn get_tombstone_between(
         &self,
         smallest_user_key: UserKey<&[u8]>,
@@ -250,7 +250,6 @@ impl CompactionDeleteRanges {
             idx += 1;
         }
         while idx < self.events.len() {
-            // TODO: replace it with Bound
             if !extended_largest_user_key.is_empty()
                 && self.events[idx].0.as_ref().ge(&extended_largest_user_key)
             {
@@ -376,6 +375,10 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         } else {
             HummockEpoch::MAX
         }
+    }
+
+    fn next_range_epoch(&self) -> HummockEpoch {
+        self.table.value().meta.monotonic_tombstone_events[self.next_idx].new_epoch
     }
 
     fn next(&mut self) -> Self::NextFuture<'_> {
