@@ -478,11 +478,12 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                add_new_sub_level(
+                insert_new_sub_level(
                     levels.l0.as_mut().unwrap(),
                     insert_sub_level_id,
                     LevelType::Overlapping,
                     insert_table_infos,
+                    true,
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
@@ -802,30 +803,51 @@ pub fn add_ssts_to_sub_level(
         }
         return;
     }
-    add_new_sub_level(l0, insert_sub_level_id, level_type, insert_table_infos);
+    insert_new_sub_level(
+        l0,
+        insert_sub_level_id,
+        level_type,
+        insert_table_infos,
+        false,
+    );
 }
 
-pub fn add_new_sub_level(
+pub fn insert_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
     level_type: LevelType,
     insert_table_infos: Vec<SstableInfo>,
+    is_append: bool,
 ) {
     if insert_sub_level_id == u64::MAX {
         return;
     }
-    let insert_pos = l0
-        .sub_levels
-        .partition_point(|sub_level| sub_level.get_sub_level_id() < insert_sub_level_id);
-    if let Some(existing_level) = l0.sub_levels.get(insert_pos) {
-        assert!(
+    let insert_pos = if is_append {
+        if let Some(newest_level) = l0.sub_levels.last() {
+            assert!(
+                newest_level.sub_level_id < insert_sub_level_id,
+                "inserted new level is not the newest: prev newest: {}, insert: {}. L0: {:?}",
+                newest_level.sub_level_id,
+                insert_sub_level_id,
+                l0,
+            );
+        }
+        l0.sub_levels.len()
+    } else {
+        let ge_level = l0
+            .sub_levels
+            .partition_point(|sub_level| sub_level.get_sub_level_id() < insert_sub_level_id);
+        if let Some(existing_level) = l0.sub_levels.get(ge_level) {
+            assert!(
             existing_level.sub_level_id > insert_sub_level_id,
             "inserted new level is duplicate with existing sub level: existing: {}, insert: {}. L0: {:?}",
             existing_level.sub_level_id,
             insert_sub_level_id,
             l0,
         );
-    }
+        }
+        ge_level
+    };
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);

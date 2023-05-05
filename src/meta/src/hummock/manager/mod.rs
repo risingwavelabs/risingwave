@@ -27,7 +27,7 @@ use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, build_version_delta_after_version, get_compaction_group_ids,
+    build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
     HummockVersionUpdateExt,
 };
@@ -1508,11 +1508,12 @@ where
             };
             group_deltas.push(group_delta);
 
-            add_new_sub_level(
+            insert_new_sub_level(
                 version_l0,
                 l0_sub_level_id,
                 LevelType::Overlapping,
                 group_sstables,
+                true,
             );
         }
 
