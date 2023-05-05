@@ -1,4 +1,4 @@
-name: Connector Node Integration tests
+name: Connector Node Integration Tests
 
 on:
   push:
