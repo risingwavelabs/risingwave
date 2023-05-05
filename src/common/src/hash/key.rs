@@ -301,11 +301,7 @@ pub trait HashKey:
         data_chunk: &DataChunk,
         hash_codes: Vec<XxHash64HashCode>,
     ) -> Vec<Self> {
-        let mut serializers = Self::construct_serializers(
-            column_idxes,
-            data_chunk,
-            hash_codes
-        );
+        let mut serializers = Self::construct_serializers(column_idxes, data_chunk, hash_codes);
         for column_idx in column_idxes {
             data_chunk
                 .column_at(*column_idx)
@@ -869,7 +865,11 @@ impl<const N: usize, B: NullBitmap> HashKey for FixedSizeKey<N, B> {
     type Bitmap = B;
     type S = FixedSizeKeySerializer<N, B>;
 
-    fn construct_serializers(column_idxes: &[usize], data_chunk: &DataChunk, hash_codes: Vec<XxHash64HashCode>) -> Vec<Self::S> {
+    fn construct_serializers(
+        _column_idxes: &[usize],
+        _data_chunk: &DataChunk,
+        hash_codes: Vec<XxHash64HashCode>,
+    ) -> Vec<Self::S> {
         hash_codes
             .into_iter()
             .map(|hashcode| Self::S::from_hash_code(hashcode))
@@ -913,7 +913,11 @@ impl<B: NullBitmap> HashKey for SerializedKey<B> {
     type Bitmap = B;
     type S = SerializedKeySerializer<B>;
 
-    fn construct_serializers(column_idxes: &[usize], data_chunk: &DataChunk, hash_codes: Vec<XxHash64HashCode>) -> Vec<Self::S> {
+    fn construct_serializers(
+        column_idxes: &[usize],
+        data_chunk: &DataChunk,
+        hash_codes: Vec<XxHash64HashCode>,
+    ) -> Vec<Self::S> {
         // let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
         let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_idxes);
 
