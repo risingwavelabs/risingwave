@@ -58,6 +58,43 @@ pub trait ToStream {
     }
 }
 
+pub fn stream_enforce_eowc_requirement(
+    plan: PlanRef,
+    emit_on_window_close: bool,
+) -> Result<PlanRef> {
+    if emit_on_window_close && !plan.emit_on_window_close() {
+        let watermark_cols = plan.watermark_columns();
+        let n_watermark_cols = watermark_cols.count_ones(..);
+        if n_watermark_cols == 0 {
+            Err(ErrorCode::NotSupported(
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
+                "Try define a watermark column in the source, or avoid aggregation without GROUP BY"
+                    .to_string(),
+            )
+            .into())
+        } else if n_watermark_cols > 1 {
+            Err(ErrorCode::NotImplemented(
+                format!(
+                    "Currently only support Emit-On-Window-Close mode for single watermark column, but got {}",
+                    n_watermark_cols
+                ),
+                None.into(),
+            )
+            .into())
+        } else {
+            let watermark_col_idx = watermark_cols.ones().next().unwrap();
+            Ok(StreamSort::new(plan, watermark_col_idx).into())
+        }
+    } else if !emit_on_window_close && plan.emit_on_window_close() {
+        Err(ErrorCode::InternalError(
+            "Some bad thing happened, the generated plan is not correct.".to_string(),
+        )
+        .into())
+    } else {
+        Ok(plan)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
     share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,

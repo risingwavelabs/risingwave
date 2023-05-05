@@ -44,8 +44,9 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    generic, BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
-    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter, ToStreamContext,
+    generic, stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject,
+    LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -54,6 +55,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::InputRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -368,10 +370,11 @@ impl PlanRoot {
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
-                plan.to_stream_with_dist_required(
+                let plan = plan.to_stream_with_dist_required(
                     &self.required_dist,
                     &mut ToStreamContext::new(emit_on_window_close),
-                )
+                )?;
+                stream_enforce_eowc_requirement(plan, emit_on_window_close)
             }
             _ => unreachable!(),
         }?;
