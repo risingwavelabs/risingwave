@@ -21,7 +21,7 @@ use std::num::NonZeroU64;
 use std::ops::Deref;
 
 use chrono_tz::Tz;
-use derivative::{self, Derivative};
+use educe::{self, Educe}
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
