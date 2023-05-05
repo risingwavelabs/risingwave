@@ -200,7 +200,7 @@ fn check_default_column_constraints(
     let input_refs = expr.collect_input_refs(column_catalogs.len());
     if input_refs.count_ones(..) > 0 {
         return Err(ErrorCode::BindError(
-            "Default can not reference another column, and you should try Generate column instead."
+            "Default can not reference another column, and you should try generated column instead."
                 .to_string(),
         )
         .into());
