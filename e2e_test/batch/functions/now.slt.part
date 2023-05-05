@@ -21,3 +21,6 @@ drop table tz
 
 statement ok
 drop table t
+
+statement error Function `now` takes 0 argument (1 given)
+select now(1);
