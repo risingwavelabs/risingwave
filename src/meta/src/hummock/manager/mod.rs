@@ -1513,7 +1513,7 @@ where
                 l0_sub_level_id,
                 LevelType::Overlapping,
                 group_sstables,
-                true,
+                None,
             );
         }
 

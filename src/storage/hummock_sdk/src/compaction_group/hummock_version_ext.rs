@@ -331,10 +331,14 @@ impl HummockVersionUpdateExt for HummockVersion {
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let target_l0 = cur_levels.l0.as_mut().unwrap();
-                let mut target_level_idx = target_l0.sub_levels.len();
+                let mut insert_hint = Err(target_l0.sub_levels.len());
                 for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
                     if other.sub_level_id == sub_level.sub_level_id {
-                        target_level_idx = idx;
+                        insert_hint = Ok(idx);
+                        break;
+                    } else if other.sub_level_id > sub_level.sub_level_id {
+                        insert_hint = Err(idx);
+                        break;
                     }
                 }
                 // Remove SST from sub level may result in empty sub level. It will be purged
@@ -356,7 +360,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     });
                 add_ssts_to_sub_level(
                     target_l0,
-                    target_level_idx,
+                    insert_hint,
                     sub_level.sub_level_id,
                     sub_level.level_type(),
                     insert_table_infos,
@@ -483,7 +487,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     insert_sub_level_id,
                     LevelType::Overlapping,
                     insert_table_infos,
-                    true,
+                    None,
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
@@ -777,12 +781,12 @@ pub fn new_sub_level(
 
 pub fn add_ssts_to_sub_level(
     l0: &mut OverlappingLevel,
-    sub_level_idx: usize,
+    sub_level_insert_hint: Result<usize, usize>,
     insert_sub_level_id: u64,
     level_type: LevelType,
     insert_table_infos: Vec<SstableInfo>,
 ) {
-    if sub_level_idx < l0.sub_levels.len() {
+    if let Ok(sub_level_idx) = sub_level_insert_hint {
         insert_table_infos.iter().for_each(|sst| {
             l0.sub_levels[sub_level_idx].total_file_size += sst.file_size;
             l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
@@ -808,21 +812,24 @@ pub fn add_ssts_to_sub_level(
         insert_sub_level_id,
         level_type,
         insert_table_infos,
-        false,
+        Some(sub_level_insert_hint.unwrap_err()),
     );
 }
 
+/// `None` value of `sub_level_insert_hint` means append.
 pub fn insert_new_sub_level(
     l0: &mut OverlappingLevel,
     insert_sub_level_id: u64,
     level_type: LevelType,
     insert_table_infos: Vec<SstableInfo>,
-    is_append: bool,
+    sub_level_insert_hint: Option<usize>,
 ) {
     if insert_sub_level_id == u64::MAX {
         return;
     }
-    let insert_pos = if is_append {
+    let insert_pos = if let Some(insert_pos) = sub_level_insert_hint {
+        insert_pos
+    } else {
         if let Some(newest_level) = l0.sub_levels.last() {
             assert!(
                 newest_level.sub_level_id < insert_sub_level_id,
@@ -833,20 +840,6 @@ pub fn insert_new_sub_level(
             );
         }
         l0.sub_levels.len()
-    } else {
-        let ge_level = l0
-            .sub_levels
-            .partition_point(|sub_level| sub_level.get_sub_level_id() < insert_sub_level_id);
-        if let Some(existing_level) = l0.sub_levels.get(ge_level) {
-            assert!(
-            existing_level.sub_level_id > insert_sub_level_id,
-            "inserted new level is duplicate with existing sub level: existing: {}, insert: {}. L0: {:?}",
-            existing_level.sub_level_id,
-            insert_sub_level_id,
-            l0,
-        );
-        }
-        ge_level
     };
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
