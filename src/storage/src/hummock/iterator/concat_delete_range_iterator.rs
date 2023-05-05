@@ -56,6 +56,10 @@ impl ConcatDeleteRangeIterator {
                         )
                         .user_key)
                 {
+                    // When the last range of the current sstable is equal to the first range of the
+                    // next sstable, the `next` method would return two same `PointRange`. So we
+                    // must skip one.
+                    let exclusive_range_start = iter.next_extended_user_key().is_exclude_left_key;
                     let last_key_in_sst_start =
                         iter.next_extended_user_key()
                             .left_user_key
@@ -64,17 +68,15 @@ impl ConcatDeleteRangeIterator {
                             )
                             .user_key);
                     iter.next().await?;
-                    assert!(!iter.is_valid());
-                    if last_key_in_sst_start {
+                    if !iter.is_valid() && last_key_in_sst_start {
                         self.seek_idx(self.idx + 1, None).await?;
+                        let next_range = self.next_extended_user_key();
                         if self.is_valid()
-                            && self
-                                .next_extended_user_key()
-                                .left_user_key
-                                .eq(&FullKey::decode(
-                                    &self.sstables[self.idx].key_range.as_ref().unwrap().left,
-                                )
-                                .user_key)
+                            && next_range.is_exclude_left_key == exclusive_range_start
+                            && next_range.left_user_key.eq(&FullKey::decode(
+                                &self.sstables[self.idx].key_range.as_ref().unwrap().left,
+                            )
+                            .user_key)
                         {
                             self.current.as_mut().unwrap().next().await?;
                             return Ok(());
