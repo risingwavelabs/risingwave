@@ -68,10 +68,10 @@ impl BatchTopN {
 
         let single_dist = RequiredDist::single();
         let ensure_single_dist = if !partial_input.distribution().satisfies(&single_dist) {
-            single_dist.enforce_if_not_satisfies(partial_input.into(), &Order::any())?
+            single_dist.enforce_if_not_satisfies(partial_input, &Order::any())?
         } else {
             // The input's distribution is singleton, so use one phase topn is enough.
-            return Ok(partial_input.into());
+            return Ok(partial_input);
         };
 
         let batch_global_topn = self.clone_with_input(ensure_single_dist);
