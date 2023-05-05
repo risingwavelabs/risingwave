@@ -12,27 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use auto_enums::auto_enum;
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::types::ScalarImpl;
 use risingwave_expr_macro::function;
 
-fn string_to_array_inner(s: &str, sep: Option<&str>) -> Vec<String> {
-    if s.is_empty() {
-        vec![]
-    } else {
-        sep.map_or(
-            s.chars().map(|x| x.to_string()).collect_vec(),
-            |sep| match sep.is_empty() {
-                true => vec![s.to_string()],
-                false => s
-                    .split(sep)
-                    .collect_vec()
-                    .into_iter()
-                    .map(|x| x.to_string())
-                    .collect_vec(),
-            },
-        )
+#[auto_enum(Iterator)]
+fn string_to_array_inner<'a>(
+    s: &'a str,
+    sep: Option<&'a str>,
+) -> impl Iterator<Item = String> + 'a {
+    match s.is_empty() {
+        true => std::iter::empty(),
+        #[nested]
+        _ => match sep {
+            Some(sep) if sep.is_empty() => std::iter::once(s.to_string()),
+            Some(sep) => s.split(sep).map(|x| x.to_string()),
+            None => s.chars().map(|x| x.to_string()),
+        },
     }
 }
 
@@ -42,7 +40,6 @@ pub fn string_to_array2(s: Option<&str>, sep: Option<&str>) -> Option<ListValue>
     s.map(|s| {
         ListValue::new(
             string_to_array_inner(s, sep)
-                .into_iter()
                 .map(|x| Some(ScalarImpl::Utf8(x.into())))
                 .collect_vec(),
         )
@@ -56,16 +53,21 @@ pub fn string_to_array3(
     null: Option<&str>,
 ) -> Option<ListValue> {
     s.map(|s| {
-        null.map_or(string_to_array2(Some(s), sep).unwrap(), |null| {
-            ListValue::new(
-                string_to_array_inner(s, sep)
-                    .into_iter()
-                    .map(|x| match x == null {
-                        true => None,
-                        _ => Some(ScalarImpl::Utf8(x.into())),
-                    })
-                    .collect_vec(),
-            )
-        })
+        null.map_or_else(
+            || string_to_array2(Some(s), sep).unwrap(),
+            |null| {
+                ListValue::new(
+                    string_to_array_inner(s, sep)
+                        .map(|x| {
+                            if x == null {
+                                None
+                            } else {
+                                Some(ScalarImpl::Utf8(x.into()))
+                            }
+                        })
+                        .collect_vec(),
+                )
+            },
+        )
     })
 }

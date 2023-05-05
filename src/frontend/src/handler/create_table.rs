@@ -38,7 +38,9 @@ use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl};
-use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
+use crate::handler::create_source::{
+    bind_source_watermark, check_source_schema, UPSTREAM_SOURCE_KEY,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -399,6 +401,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     .await?;
 
     bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
+
+    check_source_schema(&properties, row_id_index, &columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
