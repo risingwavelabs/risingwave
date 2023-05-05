@@ -621,7 +621,13 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | <= 1);
+            if inputs.len() != 1 {
+                return Err(ErrorCode::BindError(format!(
+                    "Function `now` takes 0 argument ({} given)",
+                    inputs.len() - 1,
+                ))
+                .into());
+            }
             Ok(Some(DataType::Timestamptz))
         }
         ExprType::Proctime => {
