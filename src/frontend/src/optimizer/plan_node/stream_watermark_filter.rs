@@ -50,6 +50,7 @@ impl StreamWatermarkFilter {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
+            false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
         Self::with_base(base, input, watermark_descs)

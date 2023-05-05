@@ -384,6 +384,10 @@ impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
 }
 
 impl BatchPlanRef for PlanRef {
