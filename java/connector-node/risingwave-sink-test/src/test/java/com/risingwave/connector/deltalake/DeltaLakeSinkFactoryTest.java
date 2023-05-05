@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.deltalake;
 
+import com.risingwave.connector.DeltaLakeSinkFactory;
 import com.risingwave.connector.api.TableSchema;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
