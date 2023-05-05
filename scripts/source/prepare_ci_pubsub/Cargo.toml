@@ -12,8 +12,8 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-google-cloud-googleapis = { version = "0.6.0", features = ["pubsub"] }
-google-cloud-pubsub = "0.7.0"
+google-cloud-googleapis = { version = "0.8.0", features = ["pubsub"] }
+google-cloud-pubsub = "0.14"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

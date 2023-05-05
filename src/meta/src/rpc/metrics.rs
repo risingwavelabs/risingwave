@@ -525,14 +525,19 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client && let Ok(meta_members) = client.get_members().await {
+            if let Some(client) = &election_client
+                && let Ok(meta_members) = client.get_members().await
+            {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
                     .set(meta_members.len() as i64);
                 meta_members.into_iter().for_each(|m| {
-                    let role = if m.is_leader {"leader"} else {"follower"};
-                    meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
+                    let role = if m.is_leader { "leader" } else { "follower" };
+                    meta_metrics
+                        .meta_type
+                        .with_label_values(&[&m.id, role])
+                        .set(1);
                 });
             }
         }

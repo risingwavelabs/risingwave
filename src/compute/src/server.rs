@@ -38,6 +38,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -102,7 +103,11 @@ pub async fn compute_node_serve(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
-        opts.parallelism,
+        Property {
+            worker_node_parallelism: opts.parallelism as u64,
+            is_streaming: opts.role.for_streaming(),
+            is_serving: opts.role.for_serving(),
+        },
         &config.meta,
     )
     .await

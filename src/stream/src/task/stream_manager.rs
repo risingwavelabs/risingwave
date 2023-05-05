@@ -769,7 +769,7 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor{
+            if let Some(prev_actor) = ret && actor != &prev_actor {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

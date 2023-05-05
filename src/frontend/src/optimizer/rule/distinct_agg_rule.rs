@@ -18,7 +18,7 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
@@ -281,6 +281,8 @@ impl DistinctAggRule {
                     AggKind::BitAnd
                     | AggKind::BitOr
                     | AggKind::BitXor
+                    | AggKind::BoolAnd
+                    | AggKind::BoolOr
                     | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
@@ -288,6 +290,8 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
+                    | AggKind::JsonbAgg
+                    | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp

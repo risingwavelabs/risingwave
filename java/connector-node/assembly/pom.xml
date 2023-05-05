@@ -41,6 +41,10 @@
             <groupId>com.risingwave.java</groupId>
             <artifactId>risingwave-sink-deltalake</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>s3-common</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

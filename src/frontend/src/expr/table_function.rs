@@ -143,7 +143,7 @@ impl TableFunction {
                 }
 
                 let expr = args.into_iter().next().unwrap();
-                if matches!(expr.return_type(), DataType::List { datatype: _ }) {
+                if matches!(expr.return_type(), DataType::List(_)) {
                     let data_type = unnested_list_type(expr.return_type());
 
                     Ok(TableFunction {
@@ -174,8 +174,10 @@ impl TableFunction {
                                 Some(flag) => {
                                     let ScalarImpl::Utf8(flag) = flag else {
                                         return Err(ErrorCode::BindError(
-                                            "flag in regexp_matches must be a literal string".to_string(),
-                                        ).into());
+                                            "flag in regexp_matches must be a literal string"
+                                                .to_string(),
+                                        )
+                                        .into());
                                     };
                                     for c in flag.chars() {
                                         if !"icg".contains(c) {
@@ -204,9 +206,7 @@ impl TableFunction {
                 }
                 Ok(TableFunction {
                     args,
-                    return_type: DataType::List {
-                        datatype: Box::new(DataType::Varchar),
-                    },
+                    return_type: DataType::List(Box::new(DataType::Varchar)),
                     function_type: TableFunctionType::RegexpMatches,
                     udtf_catalog: None,
                 })

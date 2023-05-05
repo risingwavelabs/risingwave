@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::marker::PhantomData;
-use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -32,7 +31,6 @@ use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
-use crate::task::StopFlag;
 
 /// Lookup Join Base.
 /// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
@@ -53,7 +51,6 @@ pub struct LookupJoinBase<K> {
     pub chunk_size: usize,
     pub identity: String,
     pub _phantom: PhantomData<K>,
-    pub stop_flag: Arc<StopFlag>,
 }
 
 const AT_LEAST_OUTER_SIDE_ROWS: usize = 512;
@@ -75,9 +72,6 @@ impl<K: HashKey> LookupJoinBase<K> {
             utils::batch_read(self.outer_side_input.execute(), AT_LEAST_OUTER_SIDE_ROWS);
 
         while let Some(chunk_list) = outer_side_batch_read_stream.next().await {
-            if self.stop_flag.check_stop() {
-                return Ok(());
-            }
             let chunk_list = chunk_list?;
 
             // Group rows with the same key datums together
@@ -124,9 +118,6 @@ impl<K: HashKey> LookupJoinBase<K> {
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
-                if self.stop_flag.check_stop() {
-                    return Ok(());
-                }
                 let build_chunk = build_chunk?;
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
@@ -188,9 +179,6 @@ impl<K: HashKey> LookupJoinBase<K> {
                     DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
-                    if self.stop_flag.check_stop() {
-                        return Ok(());
-                    }
                     for output_chunk in output_chunk_builder
                         .append_chunk(chunk?.reorder_columns(&self.output_indices))
                     {
@@ -213,9 +201,6 @@ impl<K: HashKey> LookupJoinBase<K> {
                 };
                 #[for_await]
                 for chunk in stream {
-                    if self.stop_flag.check_stop() {
-                        return Ok(());
-                    }
                     yield chunk?.reorder_columns(&self.output_indices)
                 }
             }

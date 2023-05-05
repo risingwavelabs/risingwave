@@ -25,7 +25,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 use risingwave_sqlparser::ast::{
     Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
@@ -533,9 +533,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List {
-                            datatype: Box::new(DataType::Varchar),
-                        }));
+                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
                     };
 
                     let paths = if bool {

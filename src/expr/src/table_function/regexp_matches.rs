@@ -61,9 +61,7 @@ impl RegexpMatches {
 #[async_trait::async_trait]
 impl TableFunction for RegexpMatches {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
@@ -106,15 +104,7 @@ pub fn new_regexp_matches(
     prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
-    ensure!(
-        prost.return_type
-            == Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                }
-                .to_protobuf()
-            )
-    );
+    ensure!(prost.return_type == Some(DataType::List(Box::new(DataType::Varchar)).to_protobuf()));
     let mut args = prost.args.iter();
     let Some(text_node) = args.next() else {
         bail!("Expected argument text");

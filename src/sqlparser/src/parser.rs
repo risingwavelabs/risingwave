@@ -1600,7 +1600,9 @@ impl Parser {
         loop {
             assert!(self.index > 0);
             self.index -= 1;
-            if let Some(token) = self.tokens.get(self.index) && let Token::Whitespace(_) = token.token {
+            if let Some(token) = self.tokens.get(self.index)
+                && let Token::Whitespace(_) = token.token
+            {
                 continue;
             }
             return;
@@ -1986,7 +1988,9 @@ impl Parser {
         // parse: [ argname ] argtype
         let mut name = None;
         let mut data_type = self.parse_data_type()?;
-        if let DataType::Custom(n) = &data_type && !matches!(self.peek_token().token, Token::Comma | Token::RParen) {
+        if let DataType::Custom(n) = &data_type
+            && !matches!(self.peek_token().token, Token::Comma | Token::RParen)
+        {
             // the first token is actually a name
             name = Some(n.0[0].clone());
             data_type = self.parse_data_type()?;
@@ -2104,7 +2108,7 @@ impl Parser {
 
         let args = if self.consume_token(&Token::LParen) {
             if self.consume_token(&Token::RParen) {
-                None
+                Some(vec![])
             } else {
                 let args = self.parse_comma_separated(Parser::parse_function_arg)?;
                 self.expect_token(&Token::RParen)?;

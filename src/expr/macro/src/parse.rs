@@ -41,15 +41,6 @@ impl FunctionAttr {
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
 
-        let batch = attr.iter().find_map(|n| {
-            let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
-            if !nv.path.is_ident("batch") {
-                return None;
-            };
-            let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
-            Some(lit_str.value())
-        });
-
         let user_fn = UserFunctionAttr::parse(item)?;
 
         Ok(FunctionAttr {
@@ -60,7 +51,9 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
-            batch,
+            batch_fn: find_argument(attr, "batch_fn"),
+            state: find_argument(attr, "state"),
+            init_state: find_argument(attr, "init_state"),
             user_fn,
         })
     }
@@ -82,9 +75,15 @@ impl UserFunctionAttr {
 /// Check if the last argument is `&mut dyn Write`.
 fn last_arg_is_write(item: &syn::ItemFn) -> bool {
     let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false };
-    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else { return false };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else {
+        return false;
+    };
+    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
+        return false;
+    };
     path.segments.last().map_or(false, |s| s.ident == "Write")
 }
 
@@ -157,4 +156,16 @@ fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
         }
     }
     None
+}
+
+/// Find argument `#[xxx(.., name = "value")]`.
+fn find_argument(attr: &syn::AttributeArgs, name: &str) -> Option<String> {
+    attr.iter().find_map(|n| {
+        let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
+        if !nv.path.is_ident(name) {
+            return None;
+        }
+        let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
+        Some(lit_str.value())
+    })
 }
