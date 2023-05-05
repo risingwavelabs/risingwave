@@ -23,9 +23,7 @@ use rdkafka::{Offset, TopicPartitionList};
 
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{
-    KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL
-};
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
