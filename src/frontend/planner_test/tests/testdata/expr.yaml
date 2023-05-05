@@ -506,7 +506,7 @@
     select * from t where v1 >= now();
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v1 >= Now) }
+    └─LogicalFilter { predicate: (t.v1 >= '2021-04-01 00:00:00+00:00':Timestamptz) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
@@ -520,7 +520,7 @@
     select * from t where v1 >= now() - INTERVAL '2' SECOND;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
+    └─LogicalFilter { predicate: (t.v1 >= ('2021-04-01 00:00:00+00:00':Timestamptz - '00:00:02':Interval)) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
