@@ -456,7 +456,7 @@ impl Condition {
                         }
                     };
 
-                    let Some(new_cond) = new_expr.eval_row_const()? else {
+                    let Some(new_cond) = new_expr.eval_row_const().unwrap()? else {
                         // column = NULL, the result is always NULL.
                         return Ok(false_cond());
                     };
@@ -479,7 +479,7 @@ impl Condition {
                         let const_expr = const_expr
                             .cast_implicit(input_ref.data_type.clone())
                             .unwrap();
-                        let value = const_expr.eval_row_const()?;
+                        let value = const_expr.eval_row_const().unwrap()?;
                         let Some(value) = value else {
                             continue;
                         };
@@ -537,7 +537,7 @@ impl Condition {
                             }
                         }
                     };
-                    let Some(value) = new_expr.eval_row_const()? else {
+                    let Some(value) = new_expr.eval_row_const().unwrap()? else {
                         // column compare with NULL, the result is always  NULL.
                         return Ok(false_cond());
                     };
@@ -849,7 +849,7 @@ mod cast_compare {
             }
             _ => unreachable!(),
         };
-        match const_expr.eval_row_const().map_err(|_| ())? {
+        match const_expr.eval_row_const().unwrap().map_err(|_| ())? {
             Some(scalar) => {
                 let value = scalar.as_integral();
                 if value > upper_bound {

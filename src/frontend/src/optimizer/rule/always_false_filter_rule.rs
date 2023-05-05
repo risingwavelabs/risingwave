@@ -27,17 +27,7 @@ impl Rule for AlwaysFalseFilterRule {
             .predicate()
             .conjunctions
             .iter()
-            .filter_map(|e| {
-                if e.is_const() {
-                    if let Ok(v) = e.eval_row_const() {
-                        Some(v)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
+            .filter_map(|e| e.eval_row_const().transpose().ok().flatten())
             .any(|s| s.unwrap_or(ScalarImpl::Bool(true)) == ScalarImpl::Bool(false));
         if always_false {
             Some(LogicalValues::create(

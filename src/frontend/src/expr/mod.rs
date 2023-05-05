@@ -276,12 +276,21 @@ impl ExprImpl {
         Ok(backend_expr.eval_row(input).await?)
     }
 
-    /// Evaluate a constant expression.
-    pub fn eval_row_const(&self) -> RwResult<Datum> {
-        assert!(self.is_const());
-        self.eval_row(&OwnedRow::empty())
-            .now_or_never()
-            .expect("constant expression should not be async")
+    /// Try to evaluate an expression if it's a constant expression by `ExprImpl::is_const`.
+    ///
+    /// Returns...
+    /// - `None` if it's not a constant expression,
+    /// - `Some(Ok(_))` if constant evaluation succeeds,
+    /// - `Some(Err(_))` if there's an error while evaluating a constant expression.
+    pub fn eval_row_const(&self) -> Option<RwResult<Datum>> {
+        if self.is_const() {
+            self.eval_row(&OwnedRow::empty())
+                .now_or_never()
+                .expect("constant expression should not be async")
+                .into()
+        } else {
+            None
+        }
     }
 }
 
@@ -539,26 +548,41 @@ impl ExprImpl {
     }
 
     /// Checks whether this is a constant expr that can be evaluated over a dummy chunk.
-    /// Equivalent to `!has_input_ref && !has_agg_call && !has_subquery &&
-    /// !has_correlated_input_ref` but checks them in one pass.
+    ///
+    /// The expression tree should only consist of literals and **pure** function calls.
     pub fn is_const(&self) -> bool {
-        struct Has {
-            has: bool,
-        }
-        impl ExprVisitor<()> for Has {
-            fn merge(_: (), _: ()) {}
+        let can_eval_const = {
+            struct Has {
+                has: bool,
+            }
+            impl ExprVisitor<()> for Has {
+                fn merge(_: (), _: ()) {}
 
-            fn visit_expr(&mut self, expr: &ExprImpl) {
-                match expr {
-                    ExprImpl::Literal(_inner) => {}
-                    ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
-                    _ => self.has = true,
+                fn visit_expr(&mut self, expr: &ExprImpl) {
+                    match expr {
+                        ExprImpl::Literal(_inner) => {}
+                        ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
+                        ExprImpl::CorrelatedInputRef(_)
+                        | ExprImpl::InputRef(_)
+                        | ExprImpl::AggCall(_)
+                        | ExprImpl::Subquery(_)
+                        | ExprImpl::TableFunction(_)
+                        | ExprImpl::WindowFunction(_)
+                        | ExprImpl::UserDefinedFunction(_)
+                        | ExprImpl::Parameter(_)
+                        | ExprImpl::Now(_) => self.has = true,
+                    }
                 }
             }
-        }
-        let mut visitor = Has { has: false };
-        visitor.visit_expr(self);
-        !visitor.has
+
+            let mut visitor = Has { has: false };
+            visitor.visit_expr(self);
+            !visitor.has
+        };
+
+        let is_pure = self.is_pure();
+
+        can_eval_const && is_pure
     }
 
     /// Returns the `InputRefs` of an Equality predicate if it matches

@@ -24,10 +24,9 @@ impl ExprRewriter for ConstEvalRewriter {
         if self.error.is_some() {
             return expr;
         }
-        if expr.is_const() {
-            let data_type = expr.return_type();
-            match expr.eval_row_const() {
-                Ok(datum) => Literal::new(datum, data_type).into(),
+        if let Some(result) = expr.eval_row_const() {
+            match result {
+                Ok(datum) => Literal::new(datum, expr.return_type()).into(),
                 Err(e) => {
                     self.error = Some(e);
                     expr

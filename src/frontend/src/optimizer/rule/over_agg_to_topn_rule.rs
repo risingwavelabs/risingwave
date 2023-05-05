@@ -124,6 +124,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
                 .cast_implicit(DataType::Int64)
                 .ok()?
                 .eval_row_const()
+                .unwrap()
                 .ok()??;
             let v = *v.as_int64();
             match cmp {
@@ -139,6 +140,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
                 .cast_implicit(DataType::Int64)
                 .ok()?
                 .eval_row_const()
+                .unwrap()
                 .ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
