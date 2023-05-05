@@ -25,7 +25,7 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug, Derivative)]
+#[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
     #[educe(PartialEq(ignore))]

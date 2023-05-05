@@ -26,7 +26,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone, Derivative)]
+#[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,

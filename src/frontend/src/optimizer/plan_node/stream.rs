@@ -382,7 +382,7 @@ pub struct TopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug, Derivative)]
+#[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
     #[educe(PartialEq(ignore))]

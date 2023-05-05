@@ -27,7 +27,7 @@ use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, ExprImpl, FunctionCall};
 use crate::user::UserId;
 
-#[derive(Clone, Debug, Derivative)]
+#[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
     pub id: IndexId,

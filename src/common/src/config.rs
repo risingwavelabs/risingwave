@@ -120,7 +120,7 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
+#[derive(Educe, Clone, Serialize, Deserialize, Default)]
 #[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
