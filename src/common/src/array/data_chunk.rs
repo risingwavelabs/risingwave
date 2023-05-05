@@ -488,19 +488,16 @@ impl DataChunk {
 
     pub fn compute_key_sizes_by_columns(&self, column_indices: &[usize]) -> Vec<usize> {
         let (row_len_fixed, col_variable) = self.partition_sizes_for_columns(column_indices);
+        let update_sizes = |col_variable, i| unsafe { sizes.push(row_len_fixed + Self::compute_size_of_variable_cols_in_row(col_variable, i))};
         let mut sizes: Vec<usize> = vec![];
         match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                // First initialize buffer with the right size to avoid re-allocations
                 for i in 0..rows_num {
                     // SAFETY(value_at_unchecked): the idx is always in bound.
                     unsafe {
                         if vis.is_set_unchecked(i) {
-                            sizes.push(
-                                row_len_fixed
-                                    + Self::compute_size_of_variable_cols_in_row(&col_variable, i),
-                            );
+                            update_sizes(&col_variable, i);
                         }
                         // If invisible, just skip
                     }
@@ -508,12 +505,7 @@ impl DataChunk {
             }
             Vis::Compact(rows_num) => {
                 for i in 0..*rows_num {
-                    unsafe {
-                        sizes.push(
-                            row_len_fixed
-                                + Self::compute_size_of_variable_cols_in_row(&col_variable, i),
-                        );
-                    }
+                    update_sizes(&col_variable, i);
                 }
             }
         }
