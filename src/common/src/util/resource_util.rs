@@ -366,7 +366,7 @@ mod util {
     // Helper function that helps to retrieve value in file, if value is "max", max_value will be
     // returned instead.
     pub fn get_value_from_file(file_path: &str, max_value: usize) -> Result<usize, std::io::Error> {
-        let value_in_path = std::fs::read_to_string(&file_path)?;
+        let value_in_path = std::fs::read_to_string(file_path)?;
         if value_in_path.trim() == super::DEFAULT_CGROUP_MAX_INDICATOR {
             return Ok(max_value);
         }
