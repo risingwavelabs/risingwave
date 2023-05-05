@@ -157,14 +157,6 @@ public class MySQLSourceTest {
         query =
                 "GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'";
         SourceTestClient.performQuery(connRoot, query);
-        // user debezium connects to Mysql
-        DataSource dbzDataSource =
-                SourceTestClient.getDataSource(
-                        mysql.getJdbcUrl(),
-                        "debezium",
-                        mysql.getPassword(),
-                        mysql.getDriverClassName());
-        Connection connDbz = SourceTestClient.connect(dbzDataSource);
         query =
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connRoot, query);
@@ -205,7 +197,6 @@ public class MySQLSourceTest {
             SourceTestClient.performQuery(connRoot, query);
             query = "DROP USER IF EXISTS debezium";
             SourceTestClient.performQuery(connRoot, query);
-            connDbz.close();
             connRoot.close();
         }
     }

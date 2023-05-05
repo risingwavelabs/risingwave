@@ -13,12 +13,25 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
-use risingwave_expr_macro::build_function;
+use risingwave_pb::expr::ExprNode;
 
-use super::{BoxedExpression, Result};
+use super::Expr;
 
-#[build_function("now(timestamptz) -> timestamptz")]
-fn build_now_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    // there should be exact 1 child containing a timestamp literal
-    Ok(children.into_iter().next().unwrap())
+/// `NOW()` in streaming queries, representing a retractable monotonic timestamp stream and will be
+/// rewritten to `NowNode` for execution.
+///
+/// Note that `NOW()` in batch queries have already been rewritten to `Literal` when binding.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct Now;
+
+impl Expr for Now {
+    fn return_type(&self) -> DataType {
+        DataType::Timestamptz
+    }
+
+    fn to_expr_proto(&self) -> ExprNode {
+        unreachable!(
+            "`Now` should be translated to `Literal` in batch mode or `NowNode` in stream mode"
+        )
+    }
 }

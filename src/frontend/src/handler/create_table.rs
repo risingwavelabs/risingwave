@@ -38,7 +38,9 @@ use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl};
-use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
+use crate::handler::create_source::{
+    bind_source_watermark, check_source_schema, UPSTREAM_SOURCE_KEY,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -400,6 +402,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
+    check_source_schema(&properties, row_id_index, &columns)?;
+
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
         return Err(ErrorCode::BindError(
@@ -512,7 +516,7 @@ fn gen_table_plan_inner(
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    let session = context.session_ctx();
+    let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -575,6 +579,7 @@ fn gen_table_plan_inner(
     }
 
     let materialize = plan_root.gen_table_plan(
+        context,
         name,
         columns,
         definition,
@@ -615,7 +620,7 @@ pub async fn handle_create_table(
         }
     }
 
-    let (graph, source, table) = {
+    let (graph, source, table, notices) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
@@ -644,12 +649,16 @@ pub async fn handle_create_table(
                 append_only,
             )?,
         };
+
+        let context = plan.plan_base().ctx.clone();
+        let notices = context.take_warnings();
+
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
             .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table)
+        (graph, source, table, notices)
     };
 
     tracing::trace!(
@@ -661,7 +670,10 @@ pub async fn handle_create_table(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+    Ok(PgResponse::empty_result_with_notices(
+        StatementType::CREATE_TABLE,
+        notices,
+    ))
 }
 
 pub fn check_create_table_with_source(
