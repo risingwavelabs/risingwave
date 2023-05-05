@@ -29,6 +29,7 @@ message ColumnDesc {
   string type_name = 5;
   // Optional description for the generated column.
   GeneratedColumnDesc generated_column = 6;
+  bool is_from_key = 7;
 }
 
 message ColumnCatalog {

@@ -29,6 +29,7 @@ pub struct SourceColumnDesc {
     pub is_row_id: bool,
 
     pub is_meta: bool,
+    pub is_from_key: bool,
 }
 
 impl SourceColumnDesc {
@@ -47,6 +48,7 @@ impl SourceColumnDesc {
             fields: vec![],
             is_row_id: false,
             is_meta: false,
+            is_from_key: false,
         }
     }
 
@@ -66,6 +68,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             fields: c.field_descs.clone(),
             is_row_id: false,
             is_meta,
+            is_from_key: c.is_from_key,
         }
     }
 }
@@ -79,6 +82,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
             generated_column: None,
+            is_from_key: s.is_from_key,
         }
     }
 }

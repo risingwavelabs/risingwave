@@ -164,6 +164,7 @@ pub fn bind_sql_columns(
             field_descs,
             type_name: "".to_string(),
             generated_column: None,
+            is_from_key: false,
         });
     }
 

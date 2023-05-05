@@ -127,18 +127,24 @@ impl AvroParserConfig {
                 let mut index = 0;
                 let fields = fields
                     .iter()
-                    .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
+                    .map(|field| {
+                        avro_field_to_column_desc(&field.name, &field.schema, &mut index, false)
+                    })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(fields)
             }
             (Some(schema), true) => {
                 let mut index = 0;
-                let fields =
-                    avro_field_to_column_desc(AVRO_DEFAULT_KEY_COLUMN_NAME, schema, &mut index)?;
+                let fields = avro_field_to_column_desc(
+                    AVRO_DEFAULT_KEY_COLUMN_NAME,
+                    schema,
+                    &mut index,
+                    true,
+                )?;
                 Ok(vec![fields])
             }
             (schema, key_as_column) => Err(RwError::from(InternalError(format!(
-                "invalid operation with key schema {:?} and key_as_column {}",
+                "invalid combination with key schema {:?} and key_as_column {}",
                 schema, key_as_column
             )))),
         }
@@ -155,12 +161,15 @@ impl AvroParserConfig {
                     AVRO_DEFAULT_KEY_COLUMN_NAME,
                     self.key_schema.as_ref().unwrap(),
                     &mut index,
+                    true,
                 )?);
             }
 
             let mut fields = fields
                 .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
+                .map(|field| {
+                    avro_field_to_column_desc(&field.name, &field.schema, &mut index, false)
+                })
                 .collect::<Result<Vec<_>>>()?;
             if let Some(pk_column_desc) = pk_column_desc {
                 // if key.as.column is set, pk will always be the last column
@@ -216,26 +225,32 @@ impl AvroParser {
             Delete,
         }
 
-        let (_payload, op) = if self.is_enable_upsert() {
+        let (key, payload, op) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
-                    "extract payload err {:?}, you may need to check the 'upsert' parameter",
-                    e
+                    "extract payload err {:?}, key schema {:?}",
+                    e, self.key_schema
                 )))
             })?;
-            if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
-            } else if self.key_as_column {
-                (msg.primary_key, Op::)
+            match (!msg.record.is_empty(), self.key_as_column) {
+                (true, false) => (None, msg.record, Op::Insert),
+                (true, true) => (Some(msg.primary_key), msg.record, Op::Insert),
+                (false, false) => (None, msg.primary_key, Op::Delete),
+                (false, true) => {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "key_as_column is not supported when payload is empty, key: {:?}",
+                        msg.primary_key
+                    ))));
+                }
             }
         } else {
-            (Cow::from(&payload), Op::Insert)
+            (None, Cow::from(&payload), Op::Insert)
         };
 
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         let avro_value = if let Some(resolver) = &self.schema_resolver {
-            let (schema_id, mut raw_payload) = extract_schema_id(&_payload)?;
+            let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
             let writer_schema = resolver.get(schema_id).await?;
             let reader_schema = if matches!(op, Op::Delete) {
                 self.key_schema.as_deref()

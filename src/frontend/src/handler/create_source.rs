@@ -61,7 +61,7 @@ use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
-pub(crate) const KEY_AS_COLUMN_KEY: &str = "key_as_column";
+pub(crate) const KEY_AS_COLUMN_KEY: &str = "key.as.column";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -273,7 +273,15 @@ pub(crate) async fn resolve_source_schema(
         SourceSchema::UpsertAvro(avro_schema) => {
             let key_as_column = if let Some(key_as_column) = with_properties.get(KEY_AS_COLUMN_KEY)
             {
-                key_as_column.eq_ignore_ascii_case("true")
+                let res = key_as_column.eq_ignore_ascii_case("true");
+                if res || key_as_column.eq_ignore_ascii_case("false") {
+                    res
+                } else {
+                    return Err(RwError::from(ProtocolError(
+                        "Invalid value for key.as.column. Please use 'true' or 'false'."
+                            .to_string(),
+                    )));
+                }
             } else {
                 false
             };
@@ -378,6 +386,7 @@ pub(crate) async fn resolve_source_schema(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_column: None,
+                        is_from_key: false,
                     },
                     is_hidden: false,
                 });
@@ -389,6 +398,7 @@ pub(crate) async fn resolve_source_schema(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_column: None,
+                        is_from_key: false,
                     },
                     is_hidden: false,
                 });
@@ -556,6 +566,7 @@ fn check_and_add_timestamp_column(
             field_descs: vec![],
             type_name: "".to_string(),
             generated_column: None,
+            is_from_key: false,
         };
         column_descs.push(kafka_timestamp_column);
     }

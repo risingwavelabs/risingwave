@@ -562,6 +562,7 @@ mod tests {
                             ],
                             type_name: ".test.Country".to_string(),
                             generated_column: None,
+                            is_from_key: false,
                         },
                         is_hidden: false
                     }

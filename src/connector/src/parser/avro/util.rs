@@ -28,6 +28,7 @@ pub(crate) fn avro_field_to_column_desc(
     name: &str,
     schema: &Schema,
     index: &mut i32,
+    is_from_key: bool,
 ) -> Result<ColumnDesc> {
     let data_type = avro_type_mapping(schema)?;
     match schema {
@@ -38,7 +39,7 @@ pub(crate) fn avro_field_to_column_desc(
         } => {
             let vec_column = fields
                 .iter()
-                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
+                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index, is_from_key))
                 .collect::<Result<Vec<_>>>()?;
             *index += 1;
             Ok(ColumnDesc {
@@ -48,6 +49,7 @@ pub(crate) fn avro_field_to_column_desc(
                 field_descs: vec_column,
                 type_name: schema_name.to_string(),
                 generated_column: None,
+                is_from_key,
             })
         }
         _ => {
@@ -56,6 +58,7 @@ pub(crate) fn avro_field_to_column_desc(
                 column_type: Some(data_type.to_protobuf()),
                 column_id: *index,
                 name: name.to_owned(),
+                is_from_key,
                 ..Default::default()
             })
         }

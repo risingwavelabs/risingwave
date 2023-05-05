@@ -154,7 +154,9 @@ impl DebeziumAvroParserConfig {
             let mut index = 0;
             let fields = fields
                 .iter()
-                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
+                .map(|field| {
+                    avro_field_to_column_desc(&field.name, &field.schema, &mut index, false)
+                })
                 .collect::<Result<Vec<_>>>()?;
             Ok(fields)
         } else {
