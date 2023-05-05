@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink.iceberg;
 
 import static org.junit.Assert.*;
 
+import com.risingwave.connector.IcebergSink;
+import com.risingwave.connector.IcebergSinkFactory;
 import com.risingwave.connector.api.TableSchema;
 import java.io.IOException;
 import java.nio.file.Files;
