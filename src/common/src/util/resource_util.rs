@@ -66,6 +66,8 @@ mod runtime {
 pub mod memory {
     use sysinfo::{System, SystemExt};
 
+    use super::util::is_max_in_file_path;
+
     // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
     const V1_MEMORY_LIMIT_HIERARCHY: &str = "/memory/memory.limit_in_bytes";
     const V1_MEMORY_CURRENT_HIERARCHY: &str = "/memory/memory.usage_in_bytes";
@@ -154,8 +156,8 @@ pub mod memory {
 
     // Returns the memory limit of a container if running in a container else returns the system
     // memory available.
-    // When the limit is set to max, which is all memory in system, it will return an error,
-    // which will be handled in total_memory_available_bytes() to return default system memory.
+    // When the limit is set to max,total_memory_available_bytes() will return default system
+    // memory.
     fn get_container_memory_limit(
         cgroup_version: super::CgroupVersion,
     ) -> Result<usize, std::io::Error> {
@@ -171,6 +173,10 @@ pub mod memory {
                 V2_MEMORY_LIMIT_HIERARCHY
             ),
         };
+        let is_max = is_max_in_file_path(&limit_path)?;
+        if is_max {
+            return Ok(get_system_memory());
+        }
         super::util::read_integer_from_file_path(&limit_path)
     }
 
@@ -191,6 +197,10 @@ pub mod memory {
                 V2_MEMORY_CURRENT_HIERARCHY
             ),
         };
+        let is_max = is_max_in_file_path(&usage_path)?;
+        if is_max {
+            return Ok(get_system_memory_used());
+        }
         super::util::read_integer_from_file_path(&usage_path)
     }
 }
@@ -370,7 +380,7 @@ mod util {
     // Helper function to parse a cpu limit file path for cgroup_v2.
     // returns the CPU limit when cgroup_V2 is utilised.
     // interface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max
-    // 1000000". if max is present, will return an invalid data error kind which will be handled by
+    // 1000000"
     // total_cpu_available to return the default system cpu.
     pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> Result<f32, std::io::Error> {
         fs::read_to_string(file_path)
@@ -575,6 +585,69 @@ mod util {
                     test_file_path = String::from(file.path().to_str().unwrap())
                 }
                 match read_cgroup_v2_cpu_limit_from_file_path(&test_file_path) {
+                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        curr_test_case.expected.as_ref().unwrap_err().kind()
+                    ),
+                }
+            }
+        }
+        
+        #[test]
+        fn test_is_max_in_file_path(){
+            struct TestCase {
+                file_exists: bool,
+                value_in_file: String,
+                expected: Result<bool, std::io::Error>,
+            }
+
+            let test_cases = HashMap::from(
+                [
+                    (
+                        "max-value-in-file",
+                        TestCase {
+                            file_exists: true,
+                            value_in_file: String::from("max"),
+                            expected: Ok(true),
+                        },
+                    ),
+                    (
+                        "file-not-exist",
+                        TestCase {
+                            file_exists: false,
+                            value_in_file: String::from(""),
+                            expected: Err(std::io::Error::new(
+                                std::io::ErrorKind::NotFound,
+                                "File not found",
+                            )),
+                        },
+                    ),
+                    (
+                        "max-value-not-in-file",
+                        TestCase {
+                            file_exists: true,
+                            value_in_file: String::from("10000"),
+                            expected:  Ok(false),
+                        },
+                    ),
+
+                ]
+            );
+
+            for tc in test_cases {
+                let curr_test_case = &tc.1;
+                let mut file: tempfile::NamedTempFile;
+                let mut test_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
+                if curr_test_case.file_exists {
+                    file = tempfile::NamedTempFile::new()
+                        .expect("Error encountered while creating file!");
+                    file.as_file_mut()
+                        .write_all(curr_test_case.value_in_file.as_bytes())
+                        .expect("Error while writing to file");
+                    test_file_path = String::from(file.path().to_str().unwrap())
+                }
+                match is_max_in_file_path(&test_file_path) {
                     Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
                     Err(e) => assert_eq!(
                         e.kind(),
