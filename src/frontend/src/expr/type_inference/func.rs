@@ -621,7 +621,7 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            if inputs.len() != 1 {
+            if inputs.len() > 1 {
                 return Err(ErrorCode::BindError(format!(
                     "Function `now` takes 0 argument ({} given)",
                     inputs.len() - 1,
