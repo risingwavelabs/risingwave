@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::expr::Now;
+
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
@@ -33,6 +35,7 @@ pub trait ExprRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -119,5 +122,8 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         UserDefinedFunction { args, catalog }.into()
+    }
+    fn rewrite_now(&mut self, now: Now) -> ExprImpl {
+        now.into()
     }
 }

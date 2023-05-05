@@ -14,7 +14,7 @@
 
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
-    TableFunction, UserDefinedFunction, WindowFunction,
+    TableFunction, UserDefinedFunction, WindowFunction, Now,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -31,6 +31,7 @@ pub trait ExprMutator {
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
             ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
             ExprImpl::Parameter(inner) => self.visit_parameter(inner),
+            ExprImpl::Now(inner) => self.visit_now(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -70,4 +71,5 @@ pub trait ExprMutator {
             .iter_mut()
             .for_each(|expr| self.visit_expr(expr));
     }
+    fn visit_now(&mut self, _: &mut Now) {}
 }

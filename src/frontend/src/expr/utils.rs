@@ -447,7 +447,8 @@ impl WatermarkAnalyzer {
             | ExprImpl::AggCall(_)
             | ExprImpl::CorrelatedInputRef(_)
             | ExprImpl::WindowFunction(_)
-            | ExprImpl::Parameter(_) => unreachable!(),
+            | ExprImpl::Parameter(_)
+            | ExprImpl::Now(_) => unreachable!(), // TODO
             ExprImpl::UserDefinedFunction(_) => WatermarkDerivation::None,
         }
     }
