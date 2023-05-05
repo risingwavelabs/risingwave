@@ -28,14 +28,14 @@ message ColumnDesc {
   // this field will store the message name.
   string type_name = 5;
 
-  // deprecated
+  // deprecated, breaking change
   // GeneratedColumnDesc generated_column = 6 [deprecated = true];
-  reserved 6;
+  // reserved 6;
 
   // Optional description for the generated column or default value.
   oneof generated_or_default_column {
-    GeneratedColumnDesc generated_column = 7;
-    DefaultColumnDesc default_column = 8;
+    GeneratedColumnDesc generated_column = 6;
+    DefaultColumnDesc default_column = 7;
   }
 }
 
