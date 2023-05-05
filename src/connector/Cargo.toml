@@ -62,9 +62,9 @@ pulsar = { version = "4.2", default-features = false, features = [
     "telemetry",
     "auth-oauth2",
 ] }
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
+rdkafka = { workspace = true, features = [
     "cmake-build",
-    "ssl-vendored",
+    "ssl",
     "gssapi",
     "zstd",
 ] }

@@ -31,6 +31,7 @@ mod correlated_input_ref;
 mod function_call;
 mod input_ref;
 mod literal;
+mod now;
 mod parameter;
 mod pure;
 mod subquery;
@@ -56,6 +57,7 @@ pub use expr_visitor::ExprVisitor;
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
+pub use now::Now;
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -80,17 +82,32 @@ pub trait Expr: Into<ExprImpl> {
 }
 
 macro_rules! impl_expr_impl {
-    ($($t:ident),*) => {
+    ($($t:ident,)*) => {
         #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
         pub enum ExprImpl {
             $($t(Box<$t>),)*
         }
+
         $(
         impl From<$t> for ExprImpl {
             fn from(o: $t) -> ExprImpl {
                 ExprImpl::$t(Box::new(o))
             }
         })*
+
+        impl Expr for ExprImpl {
+            fn return_type(&self) -> DataType {
+                match self {
+                    $(ExprImpl::$t(expr) => expr.return_type(),)*
+                }
+            }
+
+            fn to_expr_proto(&self) -> ExprNode {
+                match self {
+                    $(ExprImpl::$t(expr) => expr.to_expr_proto(),)*
+                }
+            }
+        }
     };
 }
 
@@ -105,7 +122,8 @@ impl_expr_impl!(
     TableFunction,
     WindowFunction,
     UserDefinedFunction,
-    Parameter
+    Parameter,
+    Now,
 );
 
 impl ExprImpl {
@@ -699,15 +717,13 @@ impl ExprImpl {
 
     /// Checks if expr is of the form `now() [+- const_expr]`
     fn is_now_offset(&self) -> bool {
-        if let ExprImpl::FunctionCall(f) = self {
+        if let ExprImpl::Now(_) = self {
+            true
+        } else if let ExprImpl::FunctionCall(f) = self {
             match f.get_expr_type() {
-                ExprType::Now => true,
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.as_function_call()
-                        .map(|f| f.get_expr_type() == ExprType::Now)
-                        .unwrap_or(false)
-                        && rhs.is_const()
+                    lhs.is_now_offset() && rhs.is_const()
                 }
                 _ => false,
             }
@@ -877,42 +893,6 @@ impl ExprImpl {
     }
 }
 
-impl Expr for ExprImpl {
-    fn return_type(&self) -> DataType {
-        match self {
-            ExprImpl::InputRef(expr) => expr.return_type(),
-            ExprImpl::Literal(expr) => expr.return_type(),
-            ExprImpl::FunctionCall(expr) => expr.return_type(),
-            ExprImpl::AggCall(expr) => expr.return_type(),
-            ExprImpl::Subquery(expr) => expr.return_type(),
-            ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
-            ExprImpl::TableFunction(expr) => expr.return_type(),
-            ExprImpl::WindowFunction(expr) => expr.return_type(),
-            ExprImpl::UserDefinedFunction(expr) => expr.return_type(),
-            ExprImpl::Parameter(expr) => expr.return_type(),
-        }
-    }
-
-    fn to_expr_proto(&self) -> ExprNode {
-        match self {
-            ExprImpl::InputRef(e) => e.to_expr_proto(),
-            ExprImpl::Literal(e) => e.to_expr_proto(),
-            ExprImpl::FunctionCall(e) => e.to_expr_proto(),
-            ExprImpl::AggCall(e) => e.to_expr_proto(),
-            ExprImpl::Subquery(e) => e.to_expr_proto(),
-            ExprImpl::CorrelatedInputRef(e) => e.to_expr_proto(),
-            ExprImpl::TableFunction(_e) => {
-                unreachable!("Table function should not be converted to ExprNode")
-            }
-            ExprImpl::WindowFunction(_e) => {
-                unreachable!("Window function should not be converted to ExprNode")
-            }
-            ExprImpl::UserDefinedFunction(e) => e.to_expr_proto(),
-            ExprImpl::Parameter(e) => e.to_expr_proto(),
-        }
-    }
-}
-
 impl From<Condition> for ExprImpl {
     fn from(c: Condition) -> Self {
         merge_expr_by_binary(
@@ -944,6 +924,7 @@ impl std::fmt::Debug for ExprImpl {
                     f.debug_tuple("UserDefinedFunction").field(arg0).finish()
                 }
                 Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
+                Self::Now(_) => f.debug_tuple("Now").finish(),
             };
         }
         match self {
@@ -957,6 +938,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::WindowFunction(x) => write!(f, "{:?}", x),
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
             Self::Parameter(x) => write!(f, "{:?}", x),
+            Self::Now(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -1000,6 +982,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
+            ExprImpl::Now(x) => write!(f, "{:?}", x),
         }
     }
 }

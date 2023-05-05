@@ -413,17 +413,8 @@ impl ExprVisitor<usize> for CountNow {
         a + b
     }
 
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
-        if func_call.get_expr_type() == ExprType::Now {
-            1
-        } else {
-            func_call
-                .inputs()
-                .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
-                .unwrap_or_default()
-        }
+    fn visit_now(&mut self, _: &super::Now) -> usize {
+        1
     }
 }
 
@@ -462,7 +453,8 @@ impl WatermarkAnalyzer {
             | ExprImpl::AggCall(_)
             | ExprImpl::CorrelatedInputRef(_)
             | ExprImpl::WindowFunction(_)
-            | ExprImpl::Parameter(_) => unreachable!(),
+            | ExprImpl::Parameter(_)
+            | ExprImpl::Now(_) => unreachable!(),
             ExprImpl::UserDefinedFunction(_) => WatermarkDerivation::None,
         }
     }

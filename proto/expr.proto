@@ -176,7 +176,6 @@ message ExprNode {
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
-    NOW = 2022;
     PROCTIME = 2023;
     // User defined functions
     UDF = 3000;
