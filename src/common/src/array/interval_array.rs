@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{PrimitiveArray, PrimitiveArrayBuilder};
-use crate::types::interval::Interval;
+use crate::types::Interval;
 
 pub type IntervalArray = PrimitiveArray<Interval>;
 pub type IntervalArrayBuilder = PrimitiveArrayBuilder<Interval>;
@@ -23,7 +23,7 @@ mod tests {
     use super::IntervalArray;
     use crate::array::interval_array::{Interval, IntervalArrayBuilder};
     use crate::array::{Array, ArrayBuilder};
-    use crate::types::interval::test_utils::IntervalTestExt;
+    use crate::types::test_utils::IntervalTestExt;
 
     #[test]
     fn test_interval_array() {

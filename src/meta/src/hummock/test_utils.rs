@@ -26,6 +26,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::default_level_selector;
@@ -295,7 +296,15 @@ pub async fn setup_compute_env_with_config(
     };
     let fake_parallelism = 4;
     let worker_node = cluster_manager
-        .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address,
+            Property {
+                worker_node_parallelism: fake_parallelism as _,
+                is_streaming: true,
+                is_serving: true,
+            },
+        )
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)

@@ -1,0 +1,7 @@
+statement ok
+SET VISIBILITY_MODE TO all;
+
+include ../streaming/**/*.slt
+
+statement ok
+SET VISIBILITY_MODE TO checkpoint;

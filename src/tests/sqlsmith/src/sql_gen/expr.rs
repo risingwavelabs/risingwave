@@ -17,8 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::{DataType, DataTypeName, StructType};
 use risingwave_expr::agg::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
@@ -169,9 +168,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_list_data_type(&mut self, depth: usize) -> DataType {
-        DataType::List {
-            datatype: Box::new(self.gen_data_type_inner(depth)),
-        }
+        DataType::List(Box::new(self.gen_data_type_inner(depth)))
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {

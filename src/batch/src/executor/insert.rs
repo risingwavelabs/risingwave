@@ -19,8 +19,9 @@ use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;

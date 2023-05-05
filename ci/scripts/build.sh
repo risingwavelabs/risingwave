@@ -5,11 +5,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-while getopts 't:p:' opt; do
+while getopts 'p:' opt; do
     case ${opt} in
-        t )
-            target=$OPTARG
-            ;;
         p )
             profile=$OPTARG
             ;;
@@ -24,6 +21,12 @@ while getopts 't:p:' opt; do
 done
 shift $((OPTIND -1))
 
+# profile is either ci-dev or ci-release
+if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
+    echo "Invalid option: profile must be either ci-dev or ci-release" 1>&2
+    exit 1
+fi
+
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace
 
@@ -35,6 +38,13 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
+
+if [[ "$profile" == "ci-dev" ]]; then
+    RISINGWAVE_FEATURES="rw-dynamic-link"
+else 
+    RISINGWAVE_FEATURES="rw-static-link"
+fi
+
 cargo build \
     -p risingwave_cmd_all \
     -p risedev \
@@ -44,7 +54,7 @@ cargo build \
     -p risingwave_backup_cmd \
     -p risingwave_java_binding \
     -p risingwave_e2e_extended_mode_test \
-    --features "rw-static-link" \
+    --features "$RISINGWAVE_FEATURES" \
     --profile "$profile" \
     --timings
 
@@ -52,11 +62,11 @@ cargo build \
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
-ldd target/"$target"/risingwave
-ls -l target/"$target"
+ldd target/"$profile"/risingwave
+ls -l target/"$profile"
 
 echo "--- Upload artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
 
 buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 

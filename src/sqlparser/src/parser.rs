@@ -2108,7 +2108,7 @@ impl Parser {
 
         let args = if self.consume_token(&Token::LParen) {
             if self.consume_token(&Token::RParen) {
-                None
+                Some(vec![])
             } else {
                 let args = self.parse_comma_separated(Parser::parse_function_arg)?;
                 self.expect_token(&Token::RParen)?;

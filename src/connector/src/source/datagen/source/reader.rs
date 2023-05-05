@@ -265,7 +265,7 @@ fn generator_from_data_type(
                     .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
-        DataType::List { datatype } => {
+        DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
             let generator = generator_from_data_type(
@@ -313,8 +313,7 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
-    use risingwave_common::types::struct_type::StructType;
-    use risingwave_common::types::{ScalarImpl, ToDatumRef};
+    use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
 

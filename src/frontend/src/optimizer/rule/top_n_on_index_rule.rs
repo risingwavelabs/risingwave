@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
@@ -66,13 +66,7 @@ impl TopNOnIndexRule {
                         .min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
                         as u32,
                 );
-
-                let logical_limit = LogicalLimit::create(
-                    index_scan.into(),
-                    logical_top_n.limit_attr().limit(),
-                    logical_top_n.offset(),
-                );
-                return Some(logical_limit);
+                return Some(logical_top_n.clone_with_input(index_scan.into()).into());
             }
         }
 
@@ -112,12 +106,7 @@ impl TopNOnIndexRule {
                 ((u32::MAX as u64).min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
                     as u32,
             );
-            let logical_limit = LogicalLimit::create(
-                logical_scan.into(),
-                logical_top_n.limit_attr().limit(),
-                logical_top_n.offset(),
-            );
-            Some(logical_limit)
+            Some(logical_top_n.clone_with_input(logical_scan.into()).into())
         } else {
             None
         }

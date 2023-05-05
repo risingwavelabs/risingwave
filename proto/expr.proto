@@ -176,7 +176,6 @@ message ExprNode {
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
-    NOW = 2022;
     PROCTIME = 2023;
     // User defined functions
     UDF = 3000;
@@ -272,6 +271,10 @@ message AggCall {
     BIT_AND = 15;
     BIT_OR = 16;
     BIT_XOR = 17;
+    BOOL_AND = 18;
+    BOOL_OR = 19;
+    JSONB_AGG = 20;
+    JSONB_OBJECT_AGG = 21;
   }
   Type type = 1;
   repeated InputRef args = 2;

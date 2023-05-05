@@ -24,10 +24,10 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::serial_array::Serial;
-use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
-use crate::types::num256::Int256;
-use crate::types::{Date, Decimal, Interval, NativeType, Scalar, Time, Timestamp};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
+use crate::types::{
+    Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
+};
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;
@@ -186,7 +186,6 @@ where
 mod tests {
     use super::*;
     use crate::array::interval_array::IntervalArray;
-    use crate::array::serial_array::SerialArray;
     use crate::array::*;
     use crate::for_all_variants;
 
