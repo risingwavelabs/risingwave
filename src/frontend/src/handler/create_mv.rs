@@ -183,6 +183,7 @@ pub async fn handle_create_mv(
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_string());
     }
+
     Ok(PgResponse::empty_result_with_notices(
         StatementType::CREATE_MATERIALIZED_VIEW,
         notices,

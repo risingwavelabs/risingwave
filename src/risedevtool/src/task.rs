@@ -37,7 +37,6 @@ mod utils;
 mod zookeeper_service;
 
 use std::env;
-use std::io::Read;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -46,8 +45,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
-use isahc::prelude::*;
-use isahc::Request;
+use reqwest::blocking::Client;
 use tempfile::TempDir;
 pub use utils::*;
 
@@ -192,11 +190,10 @@ where
         let server = server.as_ref();
         wait(
             || {
-                let resp = Request::get(server)
-                    .connect_timeout(Duration::from_secs(1))
+                let resp = Client::new()
+                    .get(server)
                     .timeout(Duration::from_secs(1))
                     .body("")
-                    .unwrap()
                     .send()?;
                 if resp.status().is_success() {
                     Ok(())
@@ -220,15 +217,13 @@ where
         let server = server.as_ref();
         wait(
             || {
-                let resp = Request::get(server)
-                    .connect_timeout(Duration::from_secs(1))
+                let resp = Client::new()
+                    .get(server)
                     .timeout(Duration::from_secs(1))
                     .body("")
-                    .unwrap()
                     .send()?;
                 if resp.status().is_success() {
-                    let mut data = String::new();
-                    resp.into_body().read_to_string(&mut data)?;
+                    let data = resp.text()?;
                     if cb(&data) {
                         Ok(())
                     } else {
