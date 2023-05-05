@@ -79,8 +79,8 @@ impl ConcatDeleteRangeIterator {
                             .user_key)
                         {
                             self.current.as_mut().unwrap().next().await?;
-                            return Ok(());
                         }
+                        return Ok(());
                     }
                 } else {
                     iter.next().await?;
