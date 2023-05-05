@@ -69,6 +69,10 @@ pub trait HashKeyDispatcher: Sized {
     /// 1. What bitmap to use for representing null values in group keys.
     /// 2. What key type to store group keys in.
     fn dispatch(self) -> Self::Output {
+        if cfg!(debug_assertions) {
+            return self.dispatch_impl::<hash::KeySerialized<HeapNullBitmap>>();
+        }
+
         if self.data_types().len() <= MAX_GROUP_KEYS_ON_STACK {
             self.dispatch_by_key_size::<StackNullBitmap>()
         } else {
