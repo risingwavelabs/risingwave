@@ -15,17 +15,6 @@ cargo-cache: &cargo-cache
     - ".cargo/advisory-db"
 
 steps:
-  - label: "check ci image rebuild"
-    if: build.env("CPU_FLAMEGRAPH") == "true" || build.env("HEAP_FLAMEGRAPH") == "true"
-    plugins:
-      - chronotc/monorepo-diff#v2.3.0:
-          diff: "git diff --name-only origin/main"
-          watch:
-            - path: "ci/build-ci-image.sh"
-              config:
-                command: "ci/build-ci-image.sh"
-                label: "ci build images"
-  - wait
   # Builds cpu flamegraph env
   - label: "cpu-flamegraph-env-build"
     key: "cpu-flamegraph-env-build"
@@ -65,7 +54,7 @@ steps:
     # - Nexmark event generation: ~3min for 100mil records.
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
-    timeout_in_minutes: 360
+    timeout_in_minutes: 480
 
   # Generates Heap flamegraph if label `HEAP_FLAMEGRAPH=true` is added to env var.
   - label: "Generate Heap flamegraph"

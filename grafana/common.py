@@ -91,6 +91,12 @@ class Layout:
 
 class Panels:
 
+    common_options = {
+        "fillOpacity": 10,
+        "interval": "1s",
+        "maxDataPoints": 1000,
+    }
+
     def __init__(self, datasource):
         self.layout = Layout()
         self.datasource = datasource
@@ -129,7 +135,7 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_count(self,
@@ -143,10 +149,10 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_percentage(self,
@@ -162,10 +168,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_latency(self,
@@ -180,10 +186,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_latency(self,
@@ -198,10 +204,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=0,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_latency_small(self,
@@ -216,10 +222,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=0,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_query_per_sec(self,
@@ -234,10 +240,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="Qps",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytes_per_sec(self,
@@ -252,10 +258,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="Bps",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytes(self,
@@ -270,10 +276,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_row(self, title, description, targets, legendCols=["mean"]):
@@ -284,10 +290,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="row",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_ms(self, title, description, targets, legendCols=["mean"]):
@@ -297,10 +303,10 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_kilobytes(self,
@@ -315,10 +321,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="kbytes",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_dollar(self,
@@ -333,10 +339,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="$",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_ops(self, title, description, targets, legendCols=["mean"]):
@@ -347,10 +353,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_ops(self,
@@ -365,10 +371,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=0,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_ops_small(self,
@@ -383,10 +389,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=0,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_rowsps(self,
@@ -401,10 +407,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytesps(self,
@@ -419,10 +425,10 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="MB/s",
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_rowsps(self, title, description, targets):
@@ -433,9 +439,9 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            fillOpacity=0,
             legendDisplayMode="table",
             legendPlacement="right",
+            **self.common_options,
         )
 
     def timeseries_memory(self, title, description, targets):
@@ -446,7 +452,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_cpu(self, title, description, targets):
@@ -457,7 +463,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_latency_small(self, title, description, targets):
@@ -468,7 +474,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_id(self, title, description, targets):
@@ -478,9 +484,9 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
+            **self.common_options,
         )
 
     def table_info(self, title, description, targets, excluded_columns):

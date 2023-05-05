@@ -41,9 +41,7 @@ mod tests {
              456
              789",
         );
-        let return_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
+        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 0),
@@ -74,9 +72,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_array_agg_empty() -> Result<()> {
-        let return_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
+        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 0),
@@ -123,9 +119,7 @@ mod tests {
              789  2
              321  9",
         );
-        let return_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
+        let return_type = DataType::List(Box::new(DataType::Int32));
         let mut agg = crate::agg::build(AggCall {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 0),

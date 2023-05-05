@@ -18,6 +18,8 @@ use std::time::{Duration, SystemTime};
 
 use parse_display::Display;
 
+use crate::types::ScalarImpl;
+
 static UNIX_RISINGWAVE_DATE_SEC: u64 = 1_617_235_200;
 
 /// [`UNIX_RISINGWAVE_DATE_EPOCH`] represents the risingwave date of the UNIX epoch:
@@ -76,6 +78,12 @@ impl Epoch {
 
     pub fn as_unix_millis(&self) -> u64 {
         UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
+    }
+
+    /// Returns the epoch in a Int64(Timestamptz) scalar.
+    pub fn as_scalar(&self) -> ScalarImpl {
+        // Timestamptz is in microseconds.
+        ScalarImpl::Int64(self.as_unix_millis() as i64 * 1000)
     }
 
     /// Returns the epoch in real system time.

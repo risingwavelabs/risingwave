@@ -110,6 +110,84 @@ fn count<T>(state: i64, _: T) -> i64 {
     state + 1
 }
 
+/// Returns true if all non-null input values are true, otherwise false.
+///
+/// # Example
+///
+/// ```slt
+/// statement ok
+/// create table t (b1 boolean, b2 boolean, b3 boolean, b4 boolean);
+///
+/// query T
+/// select bool_and(b1) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// insert into t values
+///     (true,  null, false, null),
+///     (false, true, null,  null),
+///     (null,  true, false, null);
+///
+/// query TTTTTT
+/// select
+///     bool_and(b1),
+///     bool_and(b2),
+///     bool_and(b3),
+///     bool_and(b4),
+///     bool_and(NOT b2),
+///     bool_and(NOT b3)
+/// FROM t;
+/// ----
+/// f t f NULL f t
+///
+/// statement ok
+/// drop table t;
+/// ```
+#[aggregate("bool_and(boolean) -> boolean")]
+fn bool_and(state: bool, input: bool) -> bool {
+    state && input
+}
+
+/// Returns true if any non-null input value is true, otherwise false.
+///
+/// # Example
+///
+/// ```slt
+/// statement ok
+/// create table t (b1 boolean, b2 boolean, b3 boolean, b4 boolean);
+///
+/// query T
+/// select bool_or(b1) from t;
+/// ----
+/// NULL
+///
+/// statement ok
+/// insert into t values
+///     (true,  null, false, null),
+///     (false, true, null,  null),
+///     (null,  true, false, null);
+///
+/// query TTTTTT
+/// select
+///     bool_or(b1),
+///     bool_or(b2),
+///     bool_or(b3),
+///     bool_or(b4),
+///     bool_or(NOT b2),
+///     bool_or(NOT b3)
+/// FROM t;
+/// ----
+/// t t f NULL f t
+///
+/// statement ok
+/// drop table t;
+/// ```
+#[aggregate("bool_or(boolean) -> boolean")]
+fn bool_or(state: bool, input: bool) -> bool {
+    state || input
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -236,12 +314,8 @@ mod tests {
             DataType::Int32,
         );
         let agg_type = AggKind::Min;
-        let input_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
-        let return_type = DataType::List {
-            datatype: Box::new(DataType::Int32),
-        };
+        let input_type = DataType::List(Box::new(DataType::Int32));
+        let return_type = DataType::List(Box::new(DataType::Int32));
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
@@ -249,9 +323,7 @@ mod tests {
             return_type,
             ArrayBuilderImpl::List(ListArrayBuilder::with_type(
                 0,
-                DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                },
+                DataType::List(Box::new(DataType::Int32)),
             )),
         )
         .await?;

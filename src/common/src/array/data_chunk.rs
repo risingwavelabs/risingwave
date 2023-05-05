@@ -582,8 +582,8 @@ impl fmt::Debug for DataChunk {
     }
 }
 
-impl From<StructArray> for DataChunk {
-    fn from(array: StructArray) -> Self {
+impl<'a> From<&'a StructArray> for DataChunk {
+    fn from(array: &'a StructArray) -> Self {
         let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
             columns,

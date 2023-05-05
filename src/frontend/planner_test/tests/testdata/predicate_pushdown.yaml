@@ -257,9 +257,8 @@
     select * from t1 cross join t2 where v1 = v2 and v1 > now() + '1 hr';
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalFilter { predicate: (t1.v1 > (Now + '01:00:00':Interval)) }
-    | └─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalScan { table: t2, columns: [t2.v2] }
+    ├─LogicalScan { table: t1, columns: [t1.v1], predicate: (t1.v1 > ('2021-04-01 00:00:00+00:00':Timestamptz + '01:00:00':Interval)) }
+    └─LogicalScan { table: t2, columns: [t2.v2], predicate: (t2.v2 > ('2021-04-01 00:00:00+00:00':Timestamptz + '01:00:00':Interval)) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
@@ -277,9 +276,9 @@
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1, t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan_for_batch: |
-    LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
-    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.v1] }
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) AND (t1.v1 > $expr1), output: [t1.v1, t2.v2, t2.v3] }
+    ├─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
@@ -288,9 +287,9 @@
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1 cross join t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan_for_batch: |
-    LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
-    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.v1] }
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) AND (t1.v1 > $expr1), output: [t1.v1, t2.v2, t2.v3] }
+    ├─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now() does not get pushed to scan, but others do
@@ -298,8 +297,7 @@
     create table t1(v1 timestamp with time zone, v2 int);
     select * from t1 where v1 > now() + '30 min' and v2 > 5;
   optimized_logical_plan_for_batch: |
-    LogicalFilter { predicate: (t1.v1 > (Now + '00:30:00':Interval)) }
-    └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
+    LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v1 > ('2021-04-01 00:00:00+00:00':Timestamptz + '00:30:00':Interval)) AND (t1.v2 > 5:Int32) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1.v2, t1._row_id] }
@@ -343,9 +341,8 @@
     select * from t1 cross join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalFilter { predicate: (t1.v1 > Now) }
-    | └─LogicalScan { table: t1, columns: [t1.v1] }
-    └─LogicalScan { table: t2, columns: [t2.v2] }
+    ├─LogicalScan { table: t1, columns: [t1.v1], predicate: (t1.v1 > '2021-04-01 00:00:00+00:00':Timestamptz) }
+    └─LogicalScan { table: t2, columns: [t2.v2], predicate: (t2.v2 > '2021-04-01 00:00:00+00:00':Timestamptz) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], stream_key: [t1._row_id, t2._row_id, v1], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }

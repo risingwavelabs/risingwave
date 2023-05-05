@@ -129,9 +129,7 @@ fn bench_encoding(c: &mut Criterion) {
         ),
         Case::new(
             "List of Bool (len = 100)",
-            DataType::List {
-                datatype: Box::new(DataType::Boolean),
-            },
+            DataType::List(Box::new(DataType::Boolean)),
             ScalarImpl::List(ListValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
         ),
     ];

@@ -26,7 +26,6 @@ mod expand;
 mod filter;
 mod global_simple_agg;
 mod group_top_n;
-mod group_top_n_appendonly;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
@@ -45,7 +44,6 @@ mod sort;
 mod source;
 mod temporal_join;
 mod top_n;
-mod top_n_appendonly;
 mod union;
 mod values;
 mod watermark_filter;
@@ -67,7 +65,6 @@ use self::expand::*;
 use self::filter::*;
 use self::global_simple_agg::*;
 use self::group_top_n::GroupTopNExecutorBuilder;
-use self::group_top_n_appendonly::AppendOnlyGroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
@@ -86,7 +83,6 @@ use self::sort::*;
 use self::source::*;
 use self::temporal_join::*;
 use self::top_n::*;
-use self::top_n_appendonly::*;
 use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
@@ -135,8 +131,8 @@ pub async fn create_executor(
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder,
-        NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
+        NodeBody::TopN => TopNExecutorBuilder::<false>,
+        NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
@@ -154,8 +150,8 @@ pub async fn create_executor(
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
-        NodeBody::GroupTopN => GroupTopNExecutorBuilder,
-        NodeBody::AppendOnlyGroupTopN => AppendOnlyGroupTopNExecutorBuilder,
+        NodeBody::GroupTopN => GroupTopNExecutorBuilder::<false>,
+        NodeBody::AppendOnlyGroupTopN => GroupTopNExecutorBuilder::<true>,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,

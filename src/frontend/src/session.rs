@@ -190,7 +190,7 @@ impl FrontendEnv {
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
-            0,
+            Default::default(),
             &config.meta,
         )
         .await?;
