@@ -810,10 +810,6 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    fn next_range_epoch(&self) -> HummockEpoch {
-        self.inner.monotonic_tombstone_events[self.next_idx].new_epoch
-    }
-
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             self.next_idx += 1;
