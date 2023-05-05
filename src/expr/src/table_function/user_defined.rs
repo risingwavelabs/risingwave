@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema, SchemaRef};
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
 
@@ -52,14 +52,9 @@ impl TableFunction for UserDefinedTableFunction {
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
         let output = self.client.call(&self.identifier, input).await?;
-        let array: arrow_array::ArrayRef = if output.num_columns() == 1 {
-            output.column(0).clone()
-        } else {
-            Arc::new(arrow_array::StructArray::from(output))
-        };
+        let array = output.column(0);
         // TODO: split by chunk_size
-        // Ok(vec![Arc::new(ArrayImpl::try_from(&array)?)])
-        todo!()
+        Ok(ArrayImpl::try_from(array)?.into_list())
     }
 }
 

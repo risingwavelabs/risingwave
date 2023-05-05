@@ -137,24 +137,17 @@ pub async fn handle_create_function(
             .map(|t| arrow_schema::Field::new("", t.into(), true))
             .collect(),
     );
-    let returns = match kind {
-        Kind::Scalar(_) => arrow_schema::Schema::new(vec![arrow_schema::Field::new(
-            "",
-            return_type.clone().into(),
-            true,
-        )]),
-        Kind::Table(_) => arrow_schema::Schema::new(match &return_type {
-            DataType::Struct(s) => (s.fields.iter())
-                .map(|t| arrow_schema::Field::new("", t.clone().into(), true))
-                .collect(),
-            _ => vec![arrow_schema::Field::new(
-                "",
-                return_type.clone().into(),
-                true,
-            )],
-        }),
-        _ => unreachable!(),
-    };
+    let returns = arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "",
+        match kind {
+            Kind::Scalar(_) => return_type.clone().into(),
+            Kind::Table(_) => arrow_schema::DataType::List(
+                arrow_schema::Field::new("item", return_type.clone().into(), true).into(),
+            ),
+            _ => unreachable!(),
+        },
+        true,
+    )]);
     client
         .check(&identifier, &args, &returns)
         .await

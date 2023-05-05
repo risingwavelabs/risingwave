@@ -81,18 +81,11 @@ class TableFunction(UserDefinedFunction):
         # Iterate through rows in the input RecordBatch
         for row_index in range(batch.num_rows):
             row = tuple(column[row_index].as_py() for column in batch)
-            result_rows.extend(self.eval(*row))
-
-        result_columns = (
-            zip(*result_rows) if len(self._result_schema) > 1 else [result_rows]
-        )
+            result_rows.append(list(self.eval(*row)))
 
         # Convert the result columns to arrow arrays
-        arrays = [
-            pa.array(col, type)
-            for col, type in zip(result_columns, self._result_schema.types)
-        ]
-        return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
+        array = pa.array(result_rows, self._result_schema.types[0])
+        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 class UserDefinedScalarFunctionWrapper(ScalarFunction):
@@ -137,9 +130,13 @@ class UserDefinedTableFunctionWrapper(TableFunction):
                 [_to_data_type(t) for t in _to_list(input_types)],
             )
         )
-        self._result_schema = pa.schema(
-            [("", _to_data_type(t)) for t in _to_list(result_types)]
+        result_types = _to_list(result_types)
+        result_type = pa.list_(
+            _to_data_type(result_types[0])
+            if len(result_types) == 1
+            else pa.struct([pa.field("", _to_data_type(t)) for t in result_types])
         )
+        self._result_schema = pa.schema([("", result_type)])
         self._name = name or (
             func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
         )
