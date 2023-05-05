@@ -45,6 +45,7 @@ impl ExprRewriter for ConstEvalRewriter {
                 ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
                 ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
                 ExprImpl::Parameter(_) => unreachable!("Parameter should not appear here. It will be replaced by a literal before this step."),
+                ExprImpl::Now(inner) => self.rewrite_now(*inner),
             }
         }
     }
