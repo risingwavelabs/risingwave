@@ -77,7 +77,7 @@ impl Expression for NestedConstructExpression {
         }
         if let DataType::Struct { .. } = &self.data_type {
             Ok(Some(StructValue::new(datums).to_scalar_value()))
-        } else if let DataType::List { datatype: _ } = &self.data_type {
+        } else if let DataType::List(_) = &self.data_type {
             Ok(Some(ListValue::new(datums).to_scalar_value()))
         } else {
             Err(ExprError::UnsupportedFunction(
@@ -127,9 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
@@ -140,9 +138,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_row_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 

@@ -19,7 +19,7 @@ use serde_json::Value;
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::types::{DataType, JsonbRef, JsonbVal};
+use crate::types::{DataType, JsonbRef, JsonbVal, F32, F64};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug)]
@@ -189,5 +189,27 @@ impl FromIterator<JsonbVal> for JsonbArray {
 impl EstimateSize for JsonbArray {
     fn estimated_heap_size(&self) -> usize {
         self.bitmap.estimated_heap_size() + self.data.capacity() * size_of::<Value>()
+    }
+}
+
+impl From<F32> for Value {
+    fn from(v: F32) -> Value {
+        serde_json::Number::from_f64(v.0 as f64)
+            .expect("todo: convert Inf/NaN to jsonb")
+            .into()
+    }
+}
+
+impl From<F64> for Value {
+    fn from(v: F64) -> Value {
+        serde_json::Number::from_f64(v.0)
+            .expect("todo: convert Inf/NaN to jsonb")
+            .into()
+    }
+}
+
+impl From<JsonbRef<'_>> for Value {
+    fn from(v: JsonbRef<'_>) -> Value {
+        v.0.clone()
     }
 }
