@@ -31,7 +31,7 @@ steps:
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
+      - https://github.com/xxchan/docker-compose-buildkite-plugin#a3a59c1:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
