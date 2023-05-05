@@ -44,8 +44,8 @@ pub struct Scan {
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
     pub for_system_time_as_of_proctime: bool,
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 }
 

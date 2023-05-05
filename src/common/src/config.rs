@@ -139,7 +139,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     pub system: SystemConfig,
 
     #[serde(flatten)]

@@ -42,8 +42,8 @@ pub struct Source {
     pub gen_row_id: bool,
     /// True if it is a source created when creating table with a source.
     pub for_table: bool,
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
     /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.

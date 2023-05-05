@@ -215,7 +215,7 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
 #[educe(Default, Clone, Copy, Debug, PartialEq)]
 pub struct HashCode<T: 'static + BuildHasher> {
     value: u64,
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     _phantom: PhantomData<&'static T>,
 }
 

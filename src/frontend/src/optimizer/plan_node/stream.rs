@@ -385,16 +385,16 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, i
 #[derive(Clone, Debug, Derivative)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub dist: Distribution,
     pub append_only: bool,
 }

@@ -47,7 +47,7 @@ pub struct BuildFragmentGraphState {
     next_table_id: u32,
 
     /// rewrite will produce new operators, and we need to track next operator id
-    #[educe(Default(value = "u32::MAX - 1"))]
+    #[educe(Default(expression = "u32::MAX - 1"))]
     next_operator_id: u32,
 
     /// dependent streaming job ids.

@@ -335,7 +335,7 @@ pub struct ConfigMap {
     query_epoch: QueryEpoch,
 
     /// Session timezone. Defaults to UTC.
-    #[educe(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
+    #[educe(Default(expression = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
     timezone: Timezone,
 
     /// If `STREAMING_PARALLELISM` is non-zero, CREATE MATERIALIZED VIEW/TABLE/INDEX will use it as

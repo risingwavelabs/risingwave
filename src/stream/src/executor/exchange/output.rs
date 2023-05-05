@@ -50,10 +50,10 @@ pub type BoxedOutput = Box<dyn Output>;
 pub struct LocalOutput {
     actor_id: ActorId,
 
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     span: await_tree::Span,
 
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     ch: Sender,
 }
 
@@ -99,10 +99,10 @@ impl Output for LocalOutput {
 pub struct RemoteOutput {
     actor_id: ActorId,
 
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     span: await_tree::Span,
 
-    #[educe(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     ch: Sender,
 }
 

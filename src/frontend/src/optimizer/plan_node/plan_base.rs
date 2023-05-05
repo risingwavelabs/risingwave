@@ -28,11 +28,11 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 #[derive(Clone, Debug, Derivative)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk

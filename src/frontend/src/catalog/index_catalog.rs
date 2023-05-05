@@ -53,8 +53,8 @@ pub struct IndexCatalog {
     /// `BTreeMap`. BTW, the trait `std::hash::Hash` is not implemented for
     /// `HashMap<function_call::FunctionCall, usize>`, so we need to ignore it. It will not
     /// affect the correctness, since it can be derived by `index_item`.
-    #[educe(PartialEq = "ignore")]
-    #[educe(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,
