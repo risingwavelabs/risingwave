@@ -71,8 +71,8 @@ impl ConcatDeleteRangeIterator {
                     if !iter.is_valid() && last_key_in_sst_start {
                         self.seek_idx(self.idx + 1, None).await?;
                         let next_range = self.next_extended_user_key();
-                        if self.is_valid()
-                            && next_range.is_exclude_left_key == exclusive_range_start
+                        debug_assert!(self.is_valid());
+                        if next_range.is_exclude_left_key == exclusive_range_start
                             && next_range.left_user_key.eq(&FullKey::decode(
                                 &self.sstables[self.idx].key_range.as_ref().unwrap().left,
                             )
