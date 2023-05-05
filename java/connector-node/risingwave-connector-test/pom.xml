@@ -147,5 +147,10 @@
             <artifactId>risingwave-connector-service</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-jdbc</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

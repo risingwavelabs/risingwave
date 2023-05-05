@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
+import com.risingwave.connector.JDBCSink;
+import com.risingwave.connector.JDBCSinkConfig;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data.Op;
