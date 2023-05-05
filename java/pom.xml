@@ -15,7 +15,6 @@
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-jdbc</module>
-        <module>connector-node/risingwave-sink-test</module>
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-source-test</module>
         <module>connector-node/risingwave-connector-service</module>

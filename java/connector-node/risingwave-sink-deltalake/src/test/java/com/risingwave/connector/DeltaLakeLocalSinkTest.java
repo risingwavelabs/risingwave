@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.deltalake;
+package com.risingwave.connector;
 
+import static com.risingwave.connector.DeltaLakeSinkFactoryTest.*;
 import static com.risingwave.proto.Data.*;
 import static org.apache.spark.sql.types.DataTypes.*;
 
 import com.google.common.collect.Iterators;
-import com.risingwave.connector.DeltaLakeSink;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import io.delta.standalone.DeltaLog;
@@ -40,7 +40,7 @@ public class DeltaLakeLocalSinkTest {
     static String location = "/tmp/rw-sinknode/delta-lake/delta";
 
     private static DeltaLakeSink createMockSink(String location) {
-        DeltaLakeSinkFactoryTest.createMockTable(location);
+        createMockTable(location);
         Configuration conf = new Configuration();
         DeltaLog log = DeltaLog.forTable(conf, location);
         return new DeltaLakeSink(TableSchema.getMockTableSchema(), conf, log);
@@ -80,7 +80,7 @@ public class DeltaLakeLocalSinkTest {
         validateTableWithSpark(location, rows, schema);
 
         sink.drop();
-        DeltaLakeSinkFactoryTest.dropMockTable(location);
+        dropMockTable(location);
     }
 
     @Test
@@ -106,21 +106,22 @@ public class DeltaLakeLocalSinkTest {
         validateTableWithSpark(location, rows, schema);
 
         sink.drop();
-        DeltaLakeSinkFactoryTest.dropMockTable(location);
+        dropMockTable(location);
     }
 
     @Test
     public void testDrop() throws IOException {
         DeltaLakeSink sink = createMockSink(location);
-        DataTypes.createStructType(
-                new StructField[] {
-                    createStructField("id", IntegerType, false),
-                    createStructField("name", StringType, false),
-                });
+        StructType schema =
+                DataTypes.createStructType(
+                        new StructField[] {
+                            createStructField("id", IntegerType, false),
+                            createStructField("name", StringType, false),
+                        });
 
         sink.drop();
         assert (Files.exists(Paths.get(location)));
 
-        DeltaLakeSinkFactoryTest.dropMockTable(location);
+        dropMockTable(location);
     }
 }
