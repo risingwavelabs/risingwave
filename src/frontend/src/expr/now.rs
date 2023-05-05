@@ -3,6 +3,10 @@ use risingwave_pb::expr::ExprNode;
 
 use super::Expr;
 
+/// `NOW()` in streaming queries, representing a retractable monotonic timestamp stream and will be
+/// rewritten to `NowNode` for execution.
+///
+/// Note that `NOW()` in batch queries have already been rewritten to `Literal` when binding.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct Now;
 

@@ -982,7 +982,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
-            ExprImpl::Now(x) => write!(f, "{:?}", x), // TODO
+            ExprImpl::Now(x) => write!(f, "{:?}", x),
         }
     }
 }
