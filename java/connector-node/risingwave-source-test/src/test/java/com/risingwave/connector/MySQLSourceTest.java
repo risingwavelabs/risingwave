@@ -194,7 +194,7 @@ public class MySQLSourceTest {
                             "test",
                             "orders");
             assertEquals(
-                    "INTERNAL: MySQL user does not have privilege LOCK TABLES, which is needed for debezium connector",
+                    "INVALID_ARGUMENT: MySQL user does not have privilege LOCK TABLES, which is needed for debezium connector",
                     resp.getError().getErrorMessage());
         } catch (Exception e) {
             Assert.fail("validate rpc fail: " + e.getMessage());
