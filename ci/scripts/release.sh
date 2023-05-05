@@ -20,7 +20,7 @@ mvn -v
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
 source "$HOME/.cargo/env"
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
@@ -43,8 +43,8 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
-cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
-cargo build --bin risectl --features "static-link static-log-level" --profile release
+cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
+cargo build --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"

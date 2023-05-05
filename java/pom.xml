@@ -19,6 +19,7 @@
         <module>connector-node/risingwave-source-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
+        <module>connector-node/s3-common</module>
     </modules>
     <packaging>pom</packaging>
 
@@ -38,6 +39,7 @@
         <debezium.version>1.9.7.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
+        <hadoop.version>3.3.3</hadoop.version>
     </properties>
 
     <dependencyManagement>
@@ -105,14 +107,6 @@
                 <artifactId>debezium-connector-mysql</artifactId>
                 <version>${debezium.version}</version>
             </dependency>
-
-
-            <dependency>
-                <groupId>org.apache.derby</groupId>
-                <artifactId>derby</artifactId>
-                <version>10.15.2.0</version>
-                <scope>test</scope>
-            </dependency>
             <dependency>
                 <groupId>org.postgresql</groupId>
                 <artifactId>postgresql</artifactId>
@@ -146,6 +140,21 @@
                 <scope>provided</scope>
             </dependency>
             <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-client</artifactId>
+                <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-common</artifactId>
+                <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.hadoop</groupId>
+                <artifactId>hadoop-aws</artifactId>
+                <version>${hadoop.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>junit</groupId>
                 <artifactId>junit</artifactId>
                 <version>4.13.2</version>
@@ -169,6 +178,11 @@
             <dependency>
                 <groupId>com.risingwave.java</groupId>
                 <artifactId>connector-api</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
+                <artifactId>s3-common</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>
@@ -271,6 +285,33 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.0.0-M7</version>
+                <configuration>
+                    <environmentVariables>
+                        <_JAVA_OPTIONS>
+                            --add-opens=java.base/java.lang=ALL-UNNAMED
+                            --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+                            --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+                            --add-opens=java.base/java.io=ALL-UNNAMED
+                            --add-opens=java.base/java.net=ALL-UNNAMED
+                            --add-opens=java.base/java.nio=ALL-UNNAMED
+                            --add-opens=java.base/java.util=ALL-UNNAMED
+                            --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+                            --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+                            --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+                            --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
+                            --add-opens=java.base/sun.security.action=ALL-UNNAMED
+                            --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+                            --add-opens=java.base/jdk.internal.reflect=ALL-UNNAMED
+                            --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+                        </_JAVA_OPTIONS>
+                    </environmentVariables>
+                </configuration>
             </plugin>
 
         </plugins>

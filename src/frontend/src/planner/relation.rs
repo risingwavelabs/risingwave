@@ -71,7 +71,7 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_now,
+            base_table.for_system_time_as_of_proctime,
         )
         .into())
     }
@@ -242,7 +242,9 @@ impl Planner {
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
-        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
+            args.next_tuple()
+        else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 

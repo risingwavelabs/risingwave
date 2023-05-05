@@ -270,14 +270,9 @@ impl<S: StateStore> LookupExecutor<S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
+            self.lookup_cache.evict();
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
-                    if self.arrangement.use_current_epoch {
-                        // If we are using current epoch, stream barrier should always come after
-                        // arrange barrier. So we flush now.
-                        self.lookup_cache.flush();
-                    }
-
                     self.process_barrier(&barrier);
 
                     if self.arrangement.use_current_epoch {
@@ -297,10 +292,6 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
 
                     if !self.arrangement.use_current_epoch {
-                        // If we are using previous epoch, arrange barrier should always come after
-                        // stream barrier. So we flush now.
-                        self.lookup_cache.flush();
-
                         // When look prev epoch, arrange ready will always come after stream
                         // barrier. So we yield barrier now.
                         yield Message::Barrier(barrier);

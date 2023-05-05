@@ -18,6 +18,7 @@ use risingwave_connector::sink::{SinkConfig, DOWNSTREAM_SINK_KEY};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
+use crate::common::log_store::BoundedInMemLogStoreFactory;
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
 pub struct SinkExecutorBuilder;
@@ -36,6 +37,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+        let sink_id = sink_desc.get_id().into();
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
             .downstream_pk
@@ -53,15 +55,21 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         }
         let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
-        Ok(Box::new(SinkExecutor::new(
-            materialize_executor,
-            stream.streaming_metrics.clone(),
-            config,
-            params.executor_id,
-            params.env.connector_params(),
-            schema,
-            pk_indices,
-            sink_type,
-        )))
+        Ok(Box::new(
+            SinkExecutor::new(
+                materialize_executor,
+                stream.streaming_metrics.clone(),
+                config,
+                params.executor_id,
+                params.env.connector_params(),
+                schema,
+                pk_indices,
+                sink_type,
+                sink_id,
+                params.actor_context,
+                BoundedInMemLogStoreFactory::new(1),
+            )
+            .await?,
+        ))
     }
 }

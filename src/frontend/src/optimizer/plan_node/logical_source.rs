@@ -37,7 +37,6 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
-use crate::TableCatalog;
 
 /// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
 /// can limit the timestamp range when querying it directly with batch query. The column type is
@@ -50,9 +49,6 @@ pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
-
-    /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
-    kafka_timestamp_range: (Bound<i64>, Bound<i64>),
 }
 
 impl LogicalSource {
@@ -64,6 +60,7 @@ impl LogicalSource {
         for_table: bool,
         ctx: OptimizerContextRef,
     ) -> Self {
+        let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
         let core = generic::Source {
             catalog: source_catalog,
             column_catalog,
@@ -71,16 +68,12 @@ impl LogicalSource {
             gen_row_id,
             for_table,
             ctx,
+            kafka_timestamp_range,
         };
 
         let base = PlanBase::new_logical_with_core(&core);
 
-        let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
-        LogicalSource {
-            base,
-            core,
-            kafka_timestamp_range,
-        }
+        LogicalSource { base, core }
     }
 
     pub fn with_catalog(
@@ -204,41 +197,19 @@ impl LogicalSource {
         self.core.catalog.clone()
     }
 
-    pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        generic::Source::infer_internal_table_catalog()
-    }
-
-    pub fn kafka_timestamp_range(&self) -> &(Bound<i64>, Bound<i64>) {
-        &self.kafka_timestamp_range
-    }
-
-    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        let lower_bound = match &self.kafka_timestamp_range.0 {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t - 1),
-            Unbounded => None,
-        };
-
-        let upper_bound = match &self.kafka_timestamp_range.1 {
-            Included(t) => Some(*t),
-            Excluded(t) => Some(*t + 1),
-            Unbounded => None,
-        };
-        (lower_bound, upper_bound)
-    }
-
     fn clone_with_kafka_timestamp_range(&self, range: (Bound<i64>, Bound<i64>)) -> Self {
+        let mut core = self.core.clone();
+        core.kafka_timestamp_range = range;
         Self {
             base: self.base.clone(),
-            core: self.core.clone(),
-            kafka_timestamp_range: range,
+            core,
         }
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,
     /// instead of the columns defined in source catalog. The difference is generated columns.
     #[must_use]
-    fn rewrite_to_stream_batch_source(&self) -> Self {
+    fn rewrite_to_stream_batch_source(&self) -> generic::Source {
         let column_catalog = self.core.column_catalog.clone();
         // Filter out the generated columns.
         let row_id_index = Self::rewrite_row_id_idx(&column_catalog, self.core.row_id_index);
@@ -246,20 +217,12 @@ impl LogicalSource {
             .into_iter()
             .filter(|c| !c.is_generated())
             .collect_vec();
-        let core = generic::Source {
+        generic::Source {
             catalog: self.core.catalog.clone(),
             column_catalog: source_column_catalogs,
             row_id_index,
-            gen_row_id: self.core.gen_row_id,
-            for_table: self.core.for_table,
             ctx: self.core.ctx.clone(),
-        };
-        let base = PlanBase::new_logical_with_core(&core);
-
-        Self {
-            base,
-            core,
-            kafka_timestamp_range: self.kafka_timestamp_range,
+            ..self.core
         }
     }
 
@@ -274,10 +237,10 @@ impl LogicalSource {
         )?;
         if let Some(exprs) = exprs {
             let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = LogicalProject::new(source.into(), exprs);
+            let logical_project = generic::Project::new(exprs, source.into());
             Ok(StreamProject::new(logical_project).into())
         } else {
-            let source = StreamSource::new(self.clone());
+            let source = StreamSource::new(self.core.clone());
             Ok(source.into())
         }
     }
@@ -293,10 +256,10 @@ impl LogicalSource {
         )?;
         if let Some(exprs) = exprs {
             let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = LogicalProject::new(source.into(), exprs);
+            let logical_project = generic::Project::new(exprs, source.into());
             Ok(BatchProject::new(logical_project).into())
         } else {
-            let source = BatchSource::new(self.clone());
+            let source = BatchSource::new(self.core.clone());
             Ok(source.into())
         }
     }
@@ -312,7 +275,7 @@ impl fmt::Display for LogicalSource {
                 "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
                 catalog.name,
                 self.column_names().join(", "),
-                self.kafka_timestamp_range(),
+                self.core.kafka_timestamp_range,
             )
         } else {
             write!(f, "LogicalSource")
@@ -487,7 +450,7 @@ impl PredicatePushdown for LogicalSource {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut range = self.kafka_timestamp_range;
+        let mut range = self.core.kafka_timestamp_range;
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
@@ -528,7 +491,10 @@ impl ToStream for LogicalSource {
             self.wrap_with_optional_generated_columns_stream_proj()?
         };
 
-        if let Some(catalog) = self.source_catalog() && !catalog.watermark_descs.is_empty() && !self.core.for_table{
+        if let Some(catalog) = self.source_catalog()
+            && !catalog.watermark_descs.is_empty()
+            && !self.core.for_table
+        {
             plan = StreamWatermarkFilter::new(plan, catalog.watermark_descs.clone()).into();
         }
 

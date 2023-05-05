@@ -118,11 +118,11 @@ SELECT E'De\\678dBeEf'::bytea;
 --
 
 -- E021-09 trim function
---@ SELECT TRIM(BOTH FROM '  bunch o blanks  ') = 'bunch o blanks' AS "bunch o blanks";
---@ 
---@ SELECT TRIM(LEADING FROM '  bunch o blanks  ') = 'bunch o blanks  ' AS "bunch o blanks  ";
---@ 
---@ SELECT TRIM(TRAILING FROM '  bunch o blanks  ') = '  bunch o blanks' AS "  bunch o blanks";
+SELECT TRIM(BOTH FROM '  bunch o blanks  ') = 'bunch o blanks' AS "bunch o blanks";
+
+SELECT TRIM(LEADING FROM '  bunch o blanks  ') = 'bunch o blanks  ' AS "bunch o blanks  ";
+
+SELECT TRIM(TRAILING FROM '  bunch o blanks  ') = '  bunch o blanks' AS "  bunch o blanks";
 
 SELECT TRIM(BOTH 'x' FROM 'xxxxxsome Xsxxxxx') = 'some Xs' AS "some Xs";
 
@@ -264,9 +264,9 @@ SELECT SUBSTRING('string' FROM -10 FOR -2147483646) AS "error";
 \pset null ''
 
 -- E021-11 position expression
---@ SELECT POSITION('4' IN '1234567890') = '4' AS "4";
---@ 
---@ SELECT POSITION('5' IN '1234567890') = '5' AS "5";
+SELECT POSITION('4' IN '1234567890') = '4' AS "4";
+
+SELECT POSITION('5' IN '1234567890') = '5' AS "5";
 
 -- T312 character overlay function
 SELECT OVERLAY('abcdef' PLACING '45' FROM 4) AS "abc45f";
@@ -648,13 +648,13 @@ select md5('12345678901234567890123456789012345678901234567890123456789012345678
 --
 -- encode/decode
 --
---@ SELECT encode('\x1234567890abcdef00', 'hex');
---@ SELECT decode('1234567890abcdef00', 'hex');
---@ SELECT encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea, 'base64');
---@ SELECT decode(encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea,
---@                      'base64'), 'base64');
---@ SELECT encode('\x1234567890abcdef00', 'escape');
---@ SELECT decode(encode('\x1234567890abcdef00', 'escape'), 'escape');
+SELECT encode('\x1234567890abcdef00', 'hex');
+SELECT decode('1234567890abcdef00', 'hex');
+SELECT encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea, 'base64');
+SELECT decode(encode(('\x' || repeat('1234567890abcdef0001', 7))::bytea,
+                     'base64'), 'base64');
+SELECT encode('\x1234567890abcdef00', 'escape');
+SELECT decode(encode('\x1234567890abcdef00', 'escape'), 'escape');
 
 --
 -- get_bit/set_bit etc

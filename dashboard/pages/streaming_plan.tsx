@@ -30,7 +30,7 @@ import {
 } from "@chakra-ui/react"
 import * as d3 from "d3"
 import { dagStratify } from "d3-dag"
-import { toLower } from "lodash"
+import _ from "lodash"
 import Head from "next/head"
 import { useRouter } from "next/router"
 import { Fragment, useCallback, useEffect, useState } from "react"
@@ -72,9 +72,19 @@ function buildPlanNodeDependency(
 
   let dispatcherName = "noDispatcher"
   if (firstActor.dispatcher.length > 1) {
-    dispatcherName = "multipleDispatchers"
+    if (
+      firstActor.dispatcher.every(
+        (d) => d.type === firstActor.dispatcher[0].type
+      )
+    ) {
+      dispatcherName = `${_.camelCase(
+        firstActor.dispatcher[0].type
+      )}Dispatchers`
+    } else {
+      dispatcherName = "multipleDispatchers"
+    }
   } else if (firstActor.dispatcher.length === 1) {
-    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+    dispatcherName = `${_.camelCase(firstActor.dispatcher[0].type)}Dispatcher`
   }
 
   const dispatcherNode = fragment.actors.reduce((obj, actor) => {

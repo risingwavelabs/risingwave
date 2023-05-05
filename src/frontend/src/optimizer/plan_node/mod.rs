@@ -46,6 +46,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
+use self::batch::BatchPlanRef;
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -385,6 +386,12 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        &self.plan_base().order
+    }
+}
+
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
         &self.plan_base().schema
@@ -594,6 +601,7 @@ pub use predicate_pushdown::*;
 mod merge_eq_nodes;
 pub use merge_eq_nodes::*;
 
+pub mod batch;
 pub mod generic;
 pub mod stream;
 pub mod stream_derive;
@@ -626,6 +634,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_dedup;
 mod logical_delete;
 mod logical_expand;
 mod logical_filter;
@@ -646,9 +655,11 @@ mod logical_topn;
 mod logical_union;
 mod logical_update;
 mod logical_values;
+mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
 mod stream_dynamic_filter;
+mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
@@ -664,6 +675,7 @@ mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
 mod stream_sink;
+mod stream_sort;
 mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
@@ -702,6 +714,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
@@ -711,7 +724,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
-pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
+pub use logical_over_agg::LogicalOverAgg;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -722,9 +735,11 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
+pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
@@ -741,6 +756,7 @@ pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
+pub use stream_sort::StreamSort;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
@@ -793,7 +809,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
-            // , { Logical, Sort } we don't need a LogicalSort, just require the Order
+            , { Logical, Dedup }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -844,6 +860,9 @@ macro_rules! for_all_plan_nodes {
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
             , { Stream, Values }
+            , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }
@@ -875,8 +894,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, OverAgg }
             , { Logical, Share }
             , { Logical, Now }
-            // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
-            // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
+            , { Logical, Dedup }
         }
     };
 }
@@ -945,6 +963,9 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, WatermarkFilter }
             , { Stream, TemporalJoin }
             , { Stream, Values }
+            , { Stream, Dedup }
+            , { Stream, EowcOverWindow }
+            , { Stream, Sort }
         }
     };
 }

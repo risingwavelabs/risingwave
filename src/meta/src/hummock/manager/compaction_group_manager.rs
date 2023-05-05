@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
-    HummockVersionUpdateExt,
+    HummockVersionUpdateExt, TableGroupInfo,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -91,7 +91,8 @@ impl<S: MetaStore> HummockManager<S> {
     /// Registers `table_fragments` to compaction groups.
     pub async fn register_table_fragments(
         &self,
-        table_fragments: &TableFragments,
+        mv_table: Option<u32>,
+        mut internal_tables: Vec<u32>,
         table_properties: &HashMap<String, String>,
     ) -> Result<Vec<StateTableId>> {
         let is_independent_compaction_group = table_properties
@@ -99,18 +100,22 @@ impl<S: MetaStore> HummockManager<S> {
             .map(|s| s == "1")
             == Some(true);
         let mut pairs = vec![];
-        // materialized_view
-        pairs.push((
-            table_fragments.table_id().table_id,
-            if is_independent_compaction_group {
-                CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
-            } else {
-                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
-            },
-        ));
+        if let Some(mv_table) = mv_table {
+            if internal_tables.drain_filter(|t| *t == mv_table).count() > 0 {
+                tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
+            }
+            // materialized_view
+            pairs.push((
+                mv_table,
+                if is_independent_compaction_group {
+                    CompactionGroupId::from(StaticCompactionGroupId::NewCompactionGroup)
+                } else {
+                    CompactionGroupId::from(StaticCompactionGroupId::MaterializedView)
+                },
+            ));
+        }
         // internal states
-        for table_id in table_fragments.internal_table_ids() {
-            assert_ne!(table_id, table_fragments.table_id().table_id);
+        for table_id in internal_tables {
             pairs.push((
                 table_id,
                 if is_independent_compaction_group {
@@ -142,11 +147,7 @@ impl<S: MetaStore> HummockManager<S> {
     /// The caller should ensure [`table_fragments_list`] remain unchanged during [`purge`].
     /// Currently [`purge`] is only called during meta service start ups.
     #[named]
-    pub async fn purge(&self, table_fragments_list: &[TableFragments]) -> Result<()> {
-        let valid_ids = table_fragments_list
-            .iter()
-            .flat_map(|table_fragments| table_fragments.all_table_ids())
-            .collect_vec();
+    pub async fn purge(&self, valid_ids: &[u32]) -> Result<()> {
         let registered_members =
             get_member_table_ids(&read_lock!(self, versioning).await.current_version);
         let to_unregister = registered_members
@@ -631,6 +632,14 @@ impl<S: MetaStore> HummockManager<S> {
         }
         Ok(target_compaction_group_id)
     }
+
+    #[named]
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
+        let versioning_guard = read_lock!(self, versioning).await;
+        versioning_guard
+            .current_version
+            .calculate_compaction_group_statistic()
+    }
 }
 
 #[derive(Default)]
@@ -798,6 +807,12 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
                 target.level0_stop_write_threshold_sub_level_number = *c;
             }
+            MutableConfig::Level0SubLevelCompactLevelCount(c) => {
+                target.level0_sub_level_compact_level_count = *c;
+            }
+            MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c) => {
+                target.level0_overlapping_sub_level_compact_level_count = *c;
+            }
         }
     }
 }
@@ -806,6 +821,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 mod tests {
     use std::collections::{BTreeMap, HashMap};
 
+    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -920,12 +936,20 @@ mod tests {
         )]);
 
         compaction_group_manager
-            .register_table_fragments(&table_fragment_1, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
         compaction_group_manager
-            .register_table_fragments(&table_fragment_2, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_2.table_id().table_id),
+                table_fragment_2.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 8);
@@ -939,7 +963,7 @@ mod tests {
 
         // Test purge_stale_members: table fragments
         compaction_group_manager
-            .purge(&[table_fragment_2])
+            .purge(&table_fragment_2.all_table_ids().collect_vec())
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);
@@ -953,7 +977,11 @@ mod tests {
             String::from("1"),
         );
         compaction_group_manager
-            .register_table_fragments(&table_fragment_1, &table_properties)
+            .register_table_fragments(
+                Some(table_fragment_1.table_id().table_id),
+                table_fragment_1.internal_table_ids(),
+                &table_properties,
+            )
             .await
             .unwrap();
         assert_eq!(registered_number().await, 4);

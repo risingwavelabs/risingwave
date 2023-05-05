@@ -215,7 +215,7 @@ statement ok
 create table t(id int primary key, a int, b varchar);
 
 statement ok
-create index idx on t(a);
+create index idx on t(a, lower(b));
 
 statement ok
 alter table t add column c int;

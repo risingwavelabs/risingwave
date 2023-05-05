@@ -43,10 +43,12 @@ stream_unsafe_extreme_cache_size = 1024
 stream_chunk_size = 1024
 stream_exchange_initial_permits = 8192
 stream_exchange_batched_permits = 1024
+stream_exchange_concurrent_barriers = 2
 
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
+imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false
 enable_local_spill = true
@@ -56,6 +58,7 @@ sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
+max_preload_wait_time_mill = 10
 
 [storage.file_cache]
 dir = ""
@@ -70,8 +73,6 @@ checkpoint_frequency = 10
 sstable_size_mb = 256
 block_size_kb = 64
 bloom_false_positive = 0.001
-state_store = ""
-data_directory = "hummock_001"
 backup_storage_url = "memory"
 backup_storage_directory = "backup"
 telemetry_enabled = true

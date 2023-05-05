@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, Time, Timestamp};
+use risingwave_common::types::{
+    DataType, Date, Datum, Interval, ScalarImpl, StructType, Time, Timestamp,
+};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::{memcmp_encoding, value_encoding};
 

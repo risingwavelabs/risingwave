@@ -95,6 +95,7 @@ impl Rule for IndexDeltaJoinRule {
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
                             p2s_mapping,
+                            index.function_mapping(),
                             chain_type,
                         )
                         .into(),
@@ -104,9 +105,13 @@ impl Rule for IndexDeltaJoinRule {
             // Primary table is also an index.
             let primary_table = table_scan.logical();
             if let Some(primary_table_distribution_key) = primary_table.distribution_key()
-                && primary_table_distribution_key == join_indices {
+                && primary_table_distribution_key == join_indices
+            {
                 // Check join key is prefix of primary table order key
-                let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
+                let primary_table_order_key_prefix = primary_table
+                    .table_desc()
+                    .pk
+                    .iter()
                     .map(|x| x.column_index)
                     .take(primary_table_distribution_key.len())
                     .collect_vec();
@@ -117,7 +122,11 @@ impl Rule for IndexDeltaJoinRule {
 
                 if chain_type != table_scan.chain_type() {
                     Some(
-                        StreamTableScan::new_with_chain_type(table_scan.logical().clone(), chain_type).into()
+                        StreamTableScan::new_with_chain_type(
+                            table_scan.logical().clone(),
+                            chain_type,
+                        )
+                        .into(),
                     )
                 } else {
                     Some(table_scan.clone().into())

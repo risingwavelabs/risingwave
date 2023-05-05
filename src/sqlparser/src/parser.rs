@@ -496,6 +496,7 @@ impl Parser {
                 Keyword::EXISTS => self.parse_exists_expr(),
                 Keyword::EXTRACT => self.parse_extract_expr(),
                 Keyword::SUBSTRING => self.parse_substring_expr(),
+                Keyword::POSITION => self.parse_position_expr(),
                 Keyword::OVERLAY => self.parse_overlay_expr(),
                 Keyword::TRIM => self.parse_trim_expr(),
                 Keyword::INTERVAL => self.parse_literal_interval(),
@@ -928,6 +929,25 @@ impl Parser {
         })
     }
 
+    /// POSITION(<expr> IN <expr>)
+    pub fn parse_position_expr(&mut self) -> Result<Expr, ParserError> {
+        self.expect_token(&Token::LParen)?;
+
+        // Logically `parse_expr`, but limited to those with precedence higher than `BETWEEN`/`IN`,
+        // to avoid conflict with general IN operator, for example `position(a IN (b) IN (c))`.
+        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/parser/gram.y#L16012
+        let substring = self.parse_subexpr(Precedence::Between)?;
+        self.expect_keyword(Keyword::IN)?;
+        let string = self.parse_subexpr(Precedence::Between)?;
+
+        self.expect_token(&Token::RParen)?;
+
+        Ok(Expr::Position {
+            substring: Box::new(substring),
+            string: Box::new(string),
+        })
+    }
+
     /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
     pub fn parse_overlay_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
@@ -955,28 +975,41 @@ impl Parser {
         })
     }
 
-    /// TRIM (WHERE 'text' FROM 'text')\
-    /// TRIM ('text')
+    /// TRIM ([WHERE] ['text'] FROM 'text')\
+    /// TRIM ([WHERE] [FROM] 'text' [, 'text'])
     pub fn parse_trim_expr(&mut self) -> Result<Expr, ParserError> {
         self.expect_token(&Token::LParen)?;
-        let mut where_expr = None;
+        let mut trim_where = None;
         if let Token::Word(word) = self.peek_token().token {
             if [Keyword::BOTH, Keyword::LEADING, Keyword::TRAILING]
                 .iter()
                 .any(|d| word.keyword == *d)
             {
-                let trim_where = self.parse_trim_where()?;
-                let sub_expr = self.parse_expr()?;
-                self.expect_keyword(Keyword::FROM)?;
-                where_expr = Some((trim_where, Box::new(sub_expr)));
+                trim_where = Some(self.parse_trim_where()?);
             }
         }
-        let expr = self.parse_expr()?;
+
+        let (mut trim_what, expr) = if self.parse_keyword(Keyword::FROM) {
+            (None, self.parse_expr()?)
+        } else {
+            let mut expr = self.parse_expr()?;
+            if self.parse_keyword(Keyword::FROM) {
+                let trim_what = std::mem::replace(&mut expr, self.parse_expr()?);
+                (Some(Box::new(trim_what)), expr)
+            } else {
+                (None, expr)
+            }
+        };
+
+        if trim_what.is_none() && self.consume_token(&Token::Comma) {
+            trim_what = Some(Box::new(self.parse_expr()?));
+        }
         self.expect_token(&Token::RParen)?;
 
         Ok(Expr::Trim {
             expr: Box::new(expr),
-            trim_where: where_expr,
+            trim_where,
+            trim_what,
         })
     }
 
@@ -1325,21 +1358,69 @@ impl Parser {
         }
     }
 
+    /// We parse both array[1,9][1], array[1,9][1:2], array[1,9][:2], array[1,9][1:] and
+    /// array[1,9][:] in this function.
     pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let index = Box::new(self.parse_expr()?);
-        self.expect_token(&Token::RBracket)?;
-
-        // Create ArrayIndex
-        let array_index = Expr::ArrayIndex {
-            obj: Box::new(expr),
-            index,
+        let new_expr = match self.peek_token().token {
+            Token::Colon => {
+                // [:] or [:N]
+                assert!(self.consume_token(&Token::Colon));
+                let end = match self.peek_token().token {
+                    Token::RBracket => None,
+                    _ => {
+                        let end_index = Box::new(self.parse_expr()?);
+                        Some(end_index)
+                    }
+                };
+                Expr::ArrayRangeIndex {
+                    obj: Box::new(expr),
+                    start: None,
+                    end,
+                }
+            }
+            _ => {
+                // [N], [N:], [N:M]
+                let index = Box::new(self.parse_expr()?);
+                match self.peek_token().token {
+                    Token::Colon => {
+                        // [N:], [N:M]
+                        assert!(self.consume_token(&Token::Colon));
+                        match self.peek_token().token {
+                            Token::RBracket => {
+                                // [N:]
+                                Expr::ArrayRangeIndex {
+                                    obj: Box::new(expr),
+                                    start: Some(index),
+                                    end: None,
+                                }
+                            }
+                            _ => {
+                                // [N:M]
+                                let end = Some(Box::new(self.parse_expr()?));
+                                Expr::ArrayRangeIndex {
+                                    obj: Box::new(expr),
+                                    start: Some(index),
+                                    end,
+                                }
+                            }
+                        }
+                    }
+                    _ => {
+                        // [N]
+                        Expr::ArrayIndex {
+                            obj: Box::new(expr),
+                            index,
+                        }
+                    }
+                }
+            }
         };
-
-        // Return ArrayIndex Expr after after recursively checking for more indices
+        self.expect_token(&Token::RBracket)?;
+        // recursively checking for more indices
         if self.consume_token(&Token::LBracket) {
-            self.parse_array_index(array_index)
+            self.parse_array_index(new_expr)
         } else {
-            Ok(array_index)
+            Ok(new_expr)
         }
     }
 
@@ -1519,7 +1600,9 @@ impl Parser {
         loop {
             assert!(self.index > 0);
             self.index -= 1;
-            if let Some(token) = self.tokens.get(self.index) && let Token::Whitespace(_) = token.token {
+            if let Some(token) = self.tokens.get(self.index)
+                && let Token::Whitespace(_) = token.token
+            {
                 continue;
             }
             return;
@@ -1725,6 +1808,8 @@ impl Parser {
             self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
+        } else if self.parse_keyword(Keyword::CONNECTION) {
+            self.parse_create_connection()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_create_function(or_replace, temporary)
         } else if or_replace {
@@ -1821,6 +1906,17 @@ impl Parser {
         })
     }
 
+    // CREATE
+    // CONNECTION
+    // [IF NOT EXISTS]?
+    // <connection_name: Ident>
+    // [WITH (properties)]?
+    pub fn parse_create_connection(&mut self) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateConnection {
+            stmt: CreateConnectionStatement::parse_to(self)?,
+        })
+    }
+
     pub fn parse_create_function(
         &mut self,
         or_replace: bool,
@@ -1892,7 +1988,9 @@ impl Parser {
         // parse: [ argname ] argtype
         let mut name = None;
         let mut data_type = self.parse_data_type()?;
-        if let DataType::Custom(n) = &data_type {
+        if let DataType::Custom(n) = &data_type
+            && !matches!(self.peek_token().token, Token::Comma | Token::RParen)
+        {
             // the first token is actually a name
             name = Some(n.0[0].clone());
             data_type = self.parse_data_type()?;
@@ -2010,7 +2108,7 @@ impl Parser {
 
         let args = if self.consume_token(&Token::LParen) {
             if self.consume_token(&Token::RParen) {
-                None
+                Some(vec![])
             } else {
                 let args = self.parse_comma_separated(Parser::parse_function_arg)?;
                 self.expect_token(&Token::RParen)?;
@@ -2040,7 +2138,7 @@ impl Parser {
         let mut distributed_by = vec![];
         if self.parse_keywords(&[Keyword::DISTRIBUTED, Keyword::BY]) {
             self.expect_token(&Token::LParen)?;
-            distributed_by = self.parse_comma_separated(Parser::parse_identifier_non_reserved)?;
+            distributed_by = self.parse_comma_separated(Parser::parse_expr)?;
             self.expect_token(&Token::RParen)?;
         }
         Ok(Statement::CreateIndex {
@@ -2962,14 +3060,17 @@ impl Parser {
         }
     }
 
-    pub fn parse_for_system_time_as_of_now(&mut self) -> Result<bool, ParserError> {
+    /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
+    pub fn parse_for_system_time_as_of_proctime(&mut self) -> Result<bool, ParserError> {
         let after_for = self.parse_keyword(Keyword::FOR);
         if after_for {
             self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
             let ident = self.parse_identifier()?;
-            if ident.real_value() != "now" {
-                return parser_err!(format!("Expected now, found: {}", ident.real_value()));
+            // Backward compatibility for now.
+            if ident.real_value() != "proctime" && ident.real_value() != "now" {
+                return parser_err!(format!("Expected proctime, found: {}", ident.real_value()));
             }
+
             self.expect_token(&Token::LParen)?;
             self.expect_token(&Token::RParen)?;
             Ok(true)
@@ -3574,6 +3675,16 @@ impl Parser {
                         return self.expected("from after columns", self.peek_token());
                     }
                 }
+                Keyword::CONNECTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Connection {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
+                Keyword::FUNCTIONS => {
+                    return Ok(Statement::ShowObjects(ShowObject::Function {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
                 _ => {}
             }
         }
@@ -3777,12 +3888,12 @@ impl Parser {
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::TableFunction { name, alias, args })
             } else {
-                let for_system_time_as_of_now = self.parse_for_system_time_as_of_now()?;
+                let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::Table {
                     name,
                     alias,
-                    for_system_time_as_of_now,
+                    for_system_time_as_of_proctime,
                 })
             }
         }

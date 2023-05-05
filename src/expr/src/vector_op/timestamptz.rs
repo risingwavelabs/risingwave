@@ -16,8 +16,7 @@ use std::fmt::Write;
 
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use num_traits::ToPrimitive;
-use risingwave_common::types::{Timestamp, F64};
+use risingwave_common::types::{IntoOrdered, Timestamp, F64};
 use risingwave_expr_macro::function;
 
 use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
@@ -35,10 +34,10 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 #[function("to_timestamp(float64) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
-    (elem * 1e6)
-        .round() // TODO(#5576): should round to even
-        .to_i64()
-        .ok_or(ExprError::NumericOutOfRange)
+    (elem.0 * 1e6)
+        .into_ordered()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]

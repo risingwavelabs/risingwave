@@ -25,13 +25,14 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]
 #![feature(is_some_and)]
 #![feature(extend_one)]
+#![feature(type_alias_impl_trait)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -43,7 +44,7 @@ pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
-mod optimizer;
+pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;

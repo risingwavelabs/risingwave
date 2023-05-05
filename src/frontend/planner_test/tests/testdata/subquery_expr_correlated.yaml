@@ -5,10 +5,10 @@
     select * from t1 where x > (select 1.5 * min(x) from t2 where t1.y=t2.y and t2.y = 1000)
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
-    └─LogicalFilter { predicate: (t1.x > $expr1) }
+    └─LogicalFilter { predicate: (t1.x::Decimal > $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)) as $expr1] }
+        └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)::Decimal) as $expr1] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) AND (t2.y = 1000:Int32) }
@@ -17,7 +17,7 @@
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal as $expr1] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x)) as $expr2] }
+    └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x)::Decimal) as $expr2] }
       └─LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, t2.x] }
           ├─LogicalAgg { group_key: [t1.y], aggs: [] }
@@ -86,10 +86,10 @@
     select * from t1 where x > (select 1.5 * min(x) from t2 where t1.y = t2.y);
   logical_plan: |
     LogicalProject { exprs: [t1.x, t1.y] }
-    └─LogicalFilter { predicate: (t1.x > $expr1) }
+    └─LogicalFilter { predicate: (t1.x::Decimal > $expr1) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
         ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)) as $expr1] }
+        └─LogicalProject { exprs: [(1.5:Decimal * min(t2.x)::Decimal) as $expr1] }
           └─LogicalAgg { aggs: [min(t2.x)] }
             └─LogicalProject { exprs: [t2.x] }
               └─LogicalFilter { predicate: (CorrelatedInputRef { index: 1, correlated_id: 1 } = t2.y) }
@@ -98,7 +98,7 @@
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(t1.y, t1.y) AND ($expr1 > $expr2), output: [t1.x, t1.y] }
     ├─LogicalProject { exprs: [t1.x, t1.y, t1.x::Decimal as $expr1] }
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
-    └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x)) as $expr2] }
+    └─LogicalProject { exprs: [t1.y, (1.5:Decimal * min(t2.x)::Decimal) as $expr2] }
       └─LogicalAgg { group_key: [t1.y], aggs: [min(t2.x)] }
         └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.y, t2.y), output: [t1.y, t2.x] }
           ├─LogicalAgg { group_key: [t1.y], aggs: [] }
@@ -210,7 +210,11 @@
     create table t1(x int, y int);
     create table t2(x int, y int);
     select x from t1 where y in (select y, x from t2 where t1.x > t2.x + 1000);
-  binder_error: 'Bind error: Subquery must return only one column'
+  binder_error: |-
+    Bind error: failed to bind expression: y IN (SELECT y, x FROM t2 WHERE t1.x > t2.x + 1000)
+
+    Caused by:
+      Bind error: Subquery must return only one column
 - name: correlated outer subquery with an uncorrelated inner subquery
   sql: |
     create table t1(x int, y int);

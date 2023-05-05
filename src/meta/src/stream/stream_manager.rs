@@ -65,6 +65,8 @@ pub struct CreateStreamingJobContext {
 
     /// DDL definition.
     pub definition: String,
+
+    pub mv_table_id: Option<u32>,
 }
 
 impl CreateStreamingJobContext {
@@ -112,10 +114,15 @@ impl CreatingStreamingJobInfo {
     async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         for job_id in job_ids {
-            if let Some(job) = jobs.get_mut(&job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
-                let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
-                    tracing::warn!("failed to send canceling state");
-                });
+            if let Some(job) = jobs.get_mut(&job_id)
+                && let Some(shutdown_tx) = job.shutdown_tx.take()
+            {
+                let _ = shutdown_tx
+                    .send(CreatingState::Canceling)
+                    .await
+                    .inspect_err(|_| {
+                        tracing::warn!("failed to send canceling state");
+                    });
             }
         }
     }
@@ -388,17 +395,23 @@ where
             building_locations,
             existing_locations,
             definition,
+            mv_table_id,
+            internal_tables,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
         let hummock_manager_ref = self.hummock_manager.clone();
         let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, &table_properties)
+            .register_table_fragments(
+                mv_table_id,
+                internal_tables.keys().copied().collect(),
+                &table_properties,
+            )
             .await?;
         debug_assert_eq!(
             registered_table_ids.len(),
-            table_fragments.all_table_ids().count()
+            table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
         revert_funcs.push(Box::pin(async move {
             if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
@@ -646,9 +659,7 @@ mod tests {
             &self,
             _request: Request<BarrierCompleteRequest>,
         ) -> std::result::Result<Response<BarrierCompleteResponse>, Status> {
-            Ok(Response::new(BarrierCompleteResponse {
-                ..Default::default()
-            }))
+            Ok(Response::new(BarrierCompleteResponse::default()))
         }
 
         async fn wait_epoch_commit(
@@ -736,6 +747,7 @@ mod tests {
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
+                    meta_metrics.clone(),
                 )
                 .await?,
             );

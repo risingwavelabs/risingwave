@@ -19,7 +19,8 @@ use std::num::NonZeroU32;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_sqlparser::ast::{
-    CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
+    Value,
 };
 
 mod options {
@@ -53,6 +54,10 @@ impl WithOptions {
     /// Get the reference of the inner map.
     pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.inner
     }
 
     /// Take the value of the inner map.
@@ -144,6 +149,12 @@ impl TryFrom<&Statement> for WithOptions {
             | Statement::CreateSink {
                 stmt:
                     CreateSinkStatement {
+                        with_properties, ..
+                    },
+            }
+            | Statement::CreateConnection {
+                stmt:
+                    CreateConnectionStatement {
                         with_properties, ..
                     },
             } => Self::try_from(with_properties.0.as_slice()),

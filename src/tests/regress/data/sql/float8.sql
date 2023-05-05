@@ -106,9 +106,9 @@ select floor(f1) as floor_f1 from float8_tbl f;
 SET extra_float_digits = 0;
 
 -- square root
---@ SELECT sqrt(double precision '64') AS eight;
+SELECT sqrt(double precision '64') AS eight;
 
---@ SELECT |/ double precision '64' AS eight;
+SELECT |/ double precision '64' AS eight;
 
 --@ SELECT f.f1, |/f.f1 AS sqrt_f1
 --@    FROM FLOAT8_TBL f
@@ -248,13 +248,13 @@ SELECT * FROM FLOAT8_TBL;
 
 -- test edge-case coercions to integer
 SELECT '32767.4'::float8::int2 AS int2;
---@ SELECT '32767.6'::float8::int2;
+SELECT '32767.6'::float8::int2;
 SELECT '-32768.4'::float8::int2 AS int2;
---@ SELECT '-32768.6'::float8::int2;
+SELECT '-32768.6'::float8::int2;
 SELECT '2147483647.4'::float8::int4 AS int4;
---@ SELECT '2147483647.6'::float8::int4;
+SELECT '2147483647.6'::float8::int4;
 SELECT '-2147483648.4'::float8::int4 AS int4;
---@ SELECT '-2147483648.6'::float8::int4;
+SELECT '-2147483648.6'::float8::int4;
 SELECT '9223372036854773760'::float8::int8 AS int8;
 SELECT '9223372036854775807'::float8::int8;
 SELECT '-9223372036854775808.5'::float8::int8 AS int8;
@@ -262,17 +262,17 @@ SELECT '-9223372036854780000'::float8::int8;
 
 -- test exact cases for trigonometric functions in degrees
 
---@ SELECT x,
---@        sind(x),
---@        sind(x) IN (-1,-0.5,0,0.5,1) AS sind_exact
---@ FROM (VALUES (0), (30), (90), (150), (180),
---@       (210), (270), (330), (360)) AS t(x);
+SELECT x,
+       sind(x),
+       sind(x) IN (-1,-0.5,0,0.5,1) AS sind_exact
+FROM (VALUES (0), (30), (90), (150), (180),
+      (210), (270), (330), (360)) AS t(x);
 
---@ SELECT x,
---@        cosd(x),
---@        cosd(x) IN (-1,-0.5,0,0.5,1) AS cosd_exact
---@ FROM (VALUES (0), (60), (90), (120), (180),
---@       (240), (270), (300), (360)) AS t(x);
+SELECT x,
+       cosd(x),
+       cosd(x) IN (-1,-0.5,0,0.5,1) AS cosd_exact
+FROM (VALUES (0), (60), (90), (120), (180),
+      (240), (270), (300), (360)) AS t(x);
 
 --@ SELECT x,
 --@        tand(x),

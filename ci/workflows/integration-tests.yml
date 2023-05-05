@@ -18,6 +18,7 @@ steps:
           - "mysql-sink"
           - "postgres-sink"
           - "iceberg-sink"
+          - "debezium-mysql"
         format:
           - "json"
           - "protobuf"
@@ -64,5 +65,9 @@ steps:
           skip: true
         - with:
             testcase: "iceberg-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-mysql"
             format: "protobuf"
           skip: true

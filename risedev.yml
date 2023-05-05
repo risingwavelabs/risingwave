@@ -286,6 +286,28 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-gen-cpu-flamegraph:
+    steps:
+      # NOTE(kwannoel): We do not use aws-s3 here, to avoid
+      # contention over s3 bucket when multiple benchmarks at run at once.
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+        parallelism: 8
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+      # Do not use kafka and zookeeper here, we will spawn it separately,
+      # so we don't have to re-generate data each time.
+      # - use: zookeeper
+      #   persist-data: true
+      # RW will still be ale to talk to it.
+      # - use: kafka
+      #   port: 9092
+      #   persist-data: true
+
   ######################################
   ### Configurations used in Compose ###
   ######################################
@@ -777,13 +799,6 @@ template:
 
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
-
-    # The policy for compute node memory control.
-    memory-control-policy: streaming-only
-
-    #  The proportion of streaming memory to all available memory for computing. Only works when
-    # `memory_control_policy` is set to "streaming-batch".
-    streaming-memory-proportion: 0.7
 
     # Parallelism of tasks per compute node
     parallelism: 4

@@ -2,6 +2,10 @@
 #
 # Note: this file is embedded in the binary and cannot be changed without recompiling.
 
+[meta]
+# a relatively small number to make it easier to timeout
+max_heartbeat_interval_secs = 15
+
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 4

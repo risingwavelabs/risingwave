@@ -29,9 +29,10 @@ pub trait TelemetryInfoFetcher {
     async fn fetch_telemetry_info(&self) -> Result<Option<String>>;
 }
 
+#[async_trait::async_trait]
 pub trait TelemetryReportCreator {
     // inject dependencies to impl structs if more metrics needed
-    fn create_report(
+    async fn create_report(
         &self,
         tracking_id: String,
         session_id: String,
@@ -41,7 +42,7 @@ pub trait TelemetryReportCreator {
     fn report_type(&self) -> &str;
 }
 
-pub fn start_telemetry_reporting<F, I>(
+pub async fn start_telemetry_reporting<F, I>(
     info_fetcher: Arc<I>,
     report_creator: Arc<F>,
 ) -> (JoinHandle<()>, Sender<()>)
@@ -90,6 +91,7 @@ where
                     session_id.clone(),
                     begin_time.elapsed().as_secs(),
                 )
+                .await
                 .map(|r| r.to_json())
             {
                 Ok(Ok(report_json)) => report_json,

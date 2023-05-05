@@ -16,7 +16,7 @@ use itertools::Itertools;
 use parse_display::Display;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
-use crate::hash::HashCode;
+use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
 use crate::types::ScalarRefImpl;
 use crate::util::hash_util::Crc32FastBuilder;
@@ -37,11 +37,11 @@ pub struct VirtualNode(VirtualNodeInner);
 type VirtualNodeInner = u16;
 static_assertions::const_assert!(VirtualNodeInner::BITS >= VirtualNode::BITS as u32);
 
-impl From<HashCode> for VirtualNode {
-    fn from(hash_code: HashCode) -> Self {
+impl From<Crc32HashCode> for VirtualNode {
+    fn from(hash_code: Crc32HashCode) -> Self {
         // Take the least significant bits of the hash code.
         // TODO: should we use the most significant bits?
-        let inner = (hash_code.0 % Self::COUNT as u64) as VirtualNodeInner;
+        let inner = (hash_code.value() % Self::COUNT as u64) as VirtualNodeInner;
         VirtualNode(inner)
     }
 }
@@ -113,11 +113,12 @@ impl VirtualNode {
     // be the one that contains RowId, and use a special method to skip the calculation of Hash
     // and directly extract the `VirtualNode` from `RowId`.
     pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
-        if let Ok(idx) = keys.iter().exactly_one() &&
-            let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
-
-            return serial_array.iter()
-                .map(|serial|extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
+        if let Ok(idx) = keys.iter().exactly_one()
+            && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref()
+        {
+            return serial_array
+                .iter()
+                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
                 .collect();
         }
 
@@ -148,15 +149,15 @@ mod tests {
     use crate::types::ScalarImpl;
     use crate::util::row_id::RowIdGenerator;
 
-    #[tokio::test]
-    async fn test_serial_key_chunk() {
-        let mut gen = RowIdGenerator::new(100);
+    #[test]
+    fn test_serial_key_chunk() {
+        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
         let chunk = format!(
             "SRL I
              {} 1
              {} 2",
-            gen.next().await,
-            gen.next().await,
+            gen.next(),
+            gen.next(),
         );
 
         let chunk = DataChunk::from_pretty(chunk.as_str());
@@ -168,16 +169,45 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_serial_key_row() {
-        let mut gen = RowIdGenerator::new(100);
+    #[test]
+    fn test_serial_key_row() {
+        let mut gen = RowIdGenerator::new([VirtualNode::from_index(100)]);
         let row = OwnedRow::new(vec![
-            Some(ScalarImpl::Serial(gen.next().await.into())),
+            Some(ScalarImpl::Serial(gen.next().into())),
             Some(ScalarImpl::Int64(12345)),
         ]);
 
         let vnode = VirtualNode::compute_row(&row, &[0]);
 
         assert_eq!(vnode, VirtualNode::from_index(100));
+    }
+
+    #[test]
+    fn test_serial_key_chunk_multiple_vnodes() {
+        let mut gen = RowIdGenerator::new([100, 200].map(VirtualNode::from_index));
+        let chunk = format!(
+            "SRL I
+             {} 1
+             {} 2
+             {} 3
+             {} 4",
+            gen.next(),
+            gen.next(),
+            gen.next(),
+            gen.next(),
+        );
+
+        let chunk = DataChunk::from_pretty(chunk.as_str());
+        let vnodes = VirtualNode::compute_chunk(&chunk, &[0]);
+
+        assert_eq!(
+            vnodes.as_slice(),
+            &[
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+                VirtualNode::from_index(100),
+                VirtualNode::from_index(200),
+            ]
+        );
     }
 }

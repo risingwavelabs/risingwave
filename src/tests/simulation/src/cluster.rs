@@ -98,7 +98,7 @@ impl Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
             frontend_nodes: 2,
             compute_nodes: 3,
-            meta_nodes: 1,
+            meta_nodes: 3,
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
@@ -231,6 +231,8 @@ impl Cluster {
                 "etcd:2388",
                 "--state-store",
                 "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "--data-directory",
+                "hummock_001",
             ]);
             handle
                 .create_node()
@@ -432,6 +434,10 @@ impl Cluster {
                 }
                 nodes.push(format!("meta-{}", i));
             }
+            // don't kill all meta services
+            if nodes.len() == self.config.meta_nodes {
+                nodes.truncate(1);
+            }
         }
         if opts.kill_frontend {
             let rand = rand::thread_rng().gen_range(0..3);
@@ -475,7 +481,14 @@ impl Cluster {
             tracing::info!("kill {name}");
             madsim::runtime::Handle::current().kill(name);
 
-            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            let mut t =
+                rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            // has a small chance to restart after a long time
+            // so that the node is expired and removed from the cluster
+            if rand::thread_rng().gen_bool(0.1) {
+                // max_heartbeat_interval_secs = 60
+                t += Duration::from_secs(opts.restart_delay_secs as u64);
+            }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
             madsim::runtime::Handle::current().restart(name);
@@ -579,6 +592,7 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+    pub restart_delay_secs: u32,
 }
 
 impl KillOpts {
@@ -589,5 +603,6 @@ impl KillOpts {
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
+        restart_delay_secs: 20,
     };
 }

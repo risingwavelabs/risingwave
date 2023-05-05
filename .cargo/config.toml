@@ -26,6 +26,9 @@ rustflags = [
 rustflags = [
     "--cfg",
     "tokio_unstable",
+    # uncomment the following two lines to enable `TaskLocalAlloc`
+    # "--cfg",
+    # "enable_task_local_alloc",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",

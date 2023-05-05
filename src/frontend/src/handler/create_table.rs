@@ -212,7 +212,7 @@ pub fn bind_sql_column_constraints(
         names
     };
 
-    let mut binder = Binder::new_for_stream(session);
+    let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
     for column in columns {
         for option_def in column.options {
@@ -532,6 +532,8 @@ fn gen_table_plan_inner(
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
+        definition: "".to_string(),
+        connection_id: None,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
@@ -802,10 +804,12 @@ mod tests {
         ] {
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
-                    columns,
-                    constraints,
-                    ..
-                } = ast.remove(0) else { panic!("test case should be create table") };
+                columns,
+                constraints,
+                ..
+            } = ast.remove(0) else {
+                panic!("test case should be create table")
+            };
             let actual: Result<_> = (|| {
                 let column_descs =
                     bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;

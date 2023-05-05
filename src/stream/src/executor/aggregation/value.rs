@@ -16,14 +16,17 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
+use risingwave_common_proc_macro::EstimateSize;
+use risingwave_expr::agg::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
-use crate::executor::aggregation::AggCall;
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
 /// Agg executors will get the result and store it in result state table.
+#[derive(EstimateSize)]
 pub struct ValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
@@ -81,17 +84,16 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::agg::{AggArgs, AggKind};
 
     use super::*;
-    use crate::executor::aggregation::AggArgs;
 
     fn create_test_count_agg() -> AggCall {
         AggCall {
-            kind: risingwave_expr::expr::AggKind::Count,
+            kind: AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only: false,
             filter: None,
             distinct: false,
         }
@@ -130,11 +132,10 @@ mod tests {
 
     fn create_test_max_agg_append_only() -> AggCall {
         AggCall {
-            kind: risingwave_expr::expr::AggKind::Max,
+            kind: AggKind::Max,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only: true,
             filter: None,
             distinct: false,
         }

@@ -222,7 +222,7 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -236,6 +236,13 @@ mod tests {
             0.0,
         ));
         let mut project = project.execute();
+
+        tx.push_barrier(1, false);
+        let barrier = project.next().await.unwrap().unwrap();
+        barrier.as_barrier().unwrap();
+
+        tx.push_chunk(chunk1);
+        tx.push_chunk(chunk2);
 
         let msg = project.next().await.unwrap().unwrap();
         assert_eq!(
@@ -258,6 +265,7 @@ mod tests {
             )
         );
 
+        tx.push_barrier(2, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
     #[tokio::test]
@@ -284,8 +292,11 @@ mod tests {
         ));
         let mut project = project.execute();
 
+        tx.push_barrier(1, false);
         tx.push_int64_watermark(0, 100);
 
+        let b1 = project.next().await.unwrap().unwrap();
+        b1.as_barrier().unwrap();
         let w1 = project.next().await.unwrap().unwrap();
         let w1 = w1.as_watermark().unwrap();
         let w2 = project.next().await.unwrap().unwrap();
@@ -314,7 +325,7 @@ mod tests {
             }
         );
         tx.push_int64_watermark(1, 100);
-        tx.push_barrier(1, true);
+        tx.push_barrier(2, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }

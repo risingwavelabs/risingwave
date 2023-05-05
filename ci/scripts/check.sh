@@ -5,8 +5,8 @@ set -euo pipefail
 
 # Check ci bash scripts contains `set -euo pipefail`.
 for script in ci/**/*.sh; do
-    # skip .env.sh
-    if [[ "$script" == *".env.sh" ]]; then
+    # skip .env.sh and common.sh
+    if [[ "$script" == *"common.sh" ]] || [[ "$script" == *".env.sh" ]]; then
         continue
     fi
     if ! grep -Fq 'set -euo pipefail' "$script"; then
@@ -15,13 +15,13 @@ for script in ci/**/*.sh; do
     fi
 done
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 echo "--- Run clippy check (dev, all features)"
 cargo clippy --all-targets --all-features --locked -- -D warnings
 
 echo "--- Run clippy check (release)"
-cargo clippy --release  --all-targets --features "static-link static-log-level" --locked -- -D warnings
+cargo clippy --release  --all-targets --features "rw-static-link" --locked -- -D warnings
 
 echo "--- Build documentation"
 cargo doc --document-private-items --no-deps

@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{CreateSink, Query, Statement};
 
+use super::query::BoundResult;
 use super::{handle, query, HandlerArgs, RwPgResponse};
-use crate::binder::BoundStatement;
 use crate::session::SessionImpl;
 
 /// Except for Query,Insert,Delete,Update statement, we store other statement as `PureStatement`.
@@ -40,8 +40,7 @@ pub enum PrepareStatement {
 #[derive(Clone)]
 pub struct PreparedResult {
     pub statement: Statement,
-    pub bound_statement: BoundStatement,
-    pub param_types: Vec<DataType>,
+    pub bound_result: BoundResult,
 }
 
 #[derive(Clone)]
@@ -53,7 +52,7 @@ pub enum Portal {
 #[derive(Clone)]
 pub struct PortalResult {
     pub statement: Statement,
-    pub bound_statement: BoundStatement,
+    pub bound_result: BoundResult,
     pub result_formats: Vec<Format>,
 }
 
@@ -69,11 +68,10 @@ pub fn handle_parse(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_parse(handler_args, statement, specific_param_types),
-        Statement::CreateView {
-            query,
-            ..
-        } => {
+        | Statement::Update { .. } => {
+            query::handle_parse(handler_args, statement, specific_param_types)
+        }
+        Statement::CreateView { query, .. } => {
             if have_parameter_in_query(query) {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE VIEW with parameters".to_string(),
@@ -83,15 +81,13 @@ pub fn handle_parse(
             }
             Ok(PrepareStatement::PureStatement(statement))
         }
-        Statement::CreateTable {
-            query,
-            ..
-        } => {
+        Statement::CreateTable { query, .. } => {
             if let Some(query) = query && have_parameter_in_query(query) {
                 Err(ErrorCode::NotImplemented(
                     "CREATE TABLE AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -101,7 +97,8 @@ pub fn handle_parse(
                 Err(ErrorCode::NotImplemented(
                     "CREATE SINK AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -119,21 +116,35 @@ pub fn handle_bind(
     match prepare_statement {
         PrepareStatement::Prepared(prepared_result) => {
             let PreparedResult {
+                bound_result,
                 statement,
-                bound_statement,
-                ..
             } = prepared_result;
-            let bound_statement = bound_statement.bind_parameter(params, param_formats)?;
+            let BoundResult {
+                stmt_type,
+                must_dist,
+                bound,
+                param_types,
+                dependent_relations,
+            } = bound_result;
+
+            let new_bound = bound.bind_parameter(params, param_formats)?;
+            let new_bound_result = BoundResult {
+                stmt_type,
+                must_dist,
+                param_types,
+                dependent_relations,
+                bound: new_bound,
+            };
             Ok(Portal::Portal(PortalResult {
-                statement,
-                bound_statement,
+                bound_result: new_bound_result,
                 result_formats,
+                statement,
             }))
         }
         PrepareStatement::PureStatement(stmt) => {
             assert!(
-                params.is_empty() && param_formats.is_empty(),
-                "params and param_formats should be empty for pure statement"
+                params.is_empty(),
+                "params should be empty for pure statement"
             );
             Ok(Portal::PureStatement(stmt))
         }

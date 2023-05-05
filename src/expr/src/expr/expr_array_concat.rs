@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
+use risingwave_common::types::{
+    DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef, ToOwnedDatum,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -97,14 +99,13 @@ impl ArrayConcatExpression {
     /// ```
     fn concat_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
-            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
+            (None, right) => right.to_owned_datum(),
+            (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                    left.iter_elems_ref()
+                        .chain(right.iter_elems_ref())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -147,16 +148,13 @@ impl ArrayConcatExpression {
     fn append_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
-            (None, right) => {
-                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
-            (left, None) => left.map(ScalarRefImpl::into_scalar_impl),
+            (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
+            (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
+                    left.iter_elems_ref()
                         .chain(std::iter::once(right))
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -192,17 +190,15 @@ impl ArrayConcatExpression {
     /// select array_append(null::int[], null::int);
     /// ----
     /// {NULL}
+    /// ```
     fn append_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (None, right) => {
-                Some(ListValue::new(vec![right.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
+            (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
+                    left.iter_elems_ref()
                         .chain(std::iter::once(right))
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -241,18 +237,17 @@ impl ArrayConcatExpression {
     /// select array_cat(null::int[], null::int[][]);
     /// ----
     /// NULL
+    /// ```
     fn prepend_array(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
             (None, None) => None,
-            (left, None) => {
-                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
-            (None, right) => right.map(ScalarRefImpl::into_scalar_impl),
+            (left, None) => Some(ListValue::new(vec![left.to_owned_datum()]).into()),
+            (None, right) => right.to_owned_datum(),
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .chain(right.iter_elems_ref())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -288,16 +283,15 @@ impl ArrayConcatExpression {
     /// select array_prepend(null::int, null::int[]);
     /// ----
     /// {NULL}
+    /// ```
     fn prepend_value(left: DatumRef<'_>, right: DatumRef<'_>) -> Datum {
         match (left, right) {
-            (left, None) => {
-                Some(ListValue::new(vec![left.map(ScalarRefImpl::into_scalar_impl)]).into())
-            }
+            (left, None) => Some(ListValue::new(vec![left.to_owned_datum()]).into()),
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.values_ref().into_iter())
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .chain(right.iter_elems_ref())
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),

@@ -21,8 +21,7 @@ use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::to_text::ToText;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 
@@ -117,12 +116,12 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
 
     /// Returns the hash code of the row.
     #[inline]
-    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
             hash_datum(datum, &mut hasher);
         }
-        HashCode(hasher.finish())
+        hasher.finish().into()
     }
 
     /// Determines whether the datums of this row are equal to those of another.
@@ -182,11 +181,11 @@ impl<R: Row> RowExt for R {}
 /// Forward the implementation of [`Row`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
-        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        fn datum_at(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at(index)
         }
 
-        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at_unchecked(index)
         }
 
@@ -226,7 +225,7 @@ macro_rules! deref_forward_row {
             (**self).memcmp_serialize(serde)
         }
 
-        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode {
+        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode<H> {
             (**self).hash(hash_builder)
         }
 
@@ -375,6 +374,7 @@ impl<R: Row> Row for Option<R> {
     }
 }
 
+mod ascent_owned_row;
 mod chain;
 mod compacted_row;
 mod empty;
@@ -382,10 +382,12 @@ mod once;
 mod owned_row;
 mod project;
 mod repeat_n;
+#[allow(deprecated)]
+pub use ascent_owned_row::AscentOwnedRow;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
 pub use once::{once, Once};
-pub use owned_row::{AscentOwnedRow, OwnedRow, RowDeserializer};
+pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};

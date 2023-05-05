@@ -22,7 +22,7 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
         Decimal::zero()
     } else {
         // rust_decimal can only handle up to 28 digits of scale
-        input.round_dp(std::cmp::min(digits as u32, 28))
+        input.round_dp_ties_away(std::cmp::min(digits as u32, 28))
     }
 }
 
@@ -49,20 +49,19 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
 // Ties are broken by rounding away from zero
 #[function("round(float64) -> float64")]
 pub fn round_f64(input: F64) -> F64 {
-    f64::round(input.0).into()
+    f64::round_ties_even(input.0).into()
 }
 
 // Ties are broken by rounding away from zero
 #[function("round(decimal) -> decimal")]
 pub fn round_decimal(input: Decimal) -> Decimal {
-    input.round_dp(0)
+    input.round_dp_ties_away(0)
 }
 
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
-    use num_traits::FromPrimitive;
     use risingwave_common::types::{Decimal, F64};
 
     use super::ceil_f64;
@@ -95,8 +94,10 @@ mod tests {
         assert_eq!(floor_f64(F64::from(-42.8)), F64::from(-43.0));
 
         assert_eq!(round_f64(F64::from(42.4)), F64::from(42.0));
-        assert_eq!(round_f64(F64::from(42.5)), F64::from(43.0));
-        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-7.0));
+        assert_eq!(round_f64(F64::from(42.5)), F64::from(42.0));
+        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-6.0));
+        assert_eq!(round_f64(F64::from(43.5)), F64::from(44.0));
+        assert_eq!(round_f64(F64::from(-7.5)), F64::from(-8.0));
     }
 
     #[test]
@@ -113,6 +114,6 @@ mod tests {
     }
 
     fn dec(f: f64) -> Decimal {
-        Decimal::from_f64(f).unwrap()
+        Decimal::try_from(f).unwrap()
     }
 }

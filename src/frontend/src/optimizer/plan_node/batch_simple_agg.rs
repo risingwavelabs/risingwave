@@ -32,11 +32,8 @@ pub struct BatchSimpleAgg {
 
 impl BatchSimpleAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let input = logical.input.clone();
-        let input_dist = input.distribution();
-        let base = PlanBase::new_batch(ctx, base.schema, input_dist.clone(), Order::any());
+        let input_dist = logical.input.distribution().clone();
+        let base = PlanBase::new_batch_from_logical(&logical, input_dist, Order::any());
         BatchSimpleAgg { base, logical }
     }
 
@@ -101,7 +98,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 })
                 .collect();
             let total_agg_logical =
-                generic::Agg::new(total_agg_types, self.logical.group_key.to_vec(), exchange);
+                generic::Agg::new(total_agg_types, self.logical.group_key.clone(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self

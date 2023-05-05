@@ -32,6 +32,7 @@ pub struct CompactorMetrics {
     pub compact_sst_duration: Histogram,
     pub compact_task_duration: HistogramVec,
     pub compact_task_pending_num: IntGauge,
+    pub compact_task_size: HistogramVec,
     pub write_build_l0_sst_duration: Histogram,
     pub shared_buffer_to_sstable_size: Histogram,
     pub get_table_id_total_time_duration: Histogram,
@@ -43,6 +44,8 @@ pub struct CompactorMetrics {
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
+    pub preload_io_count: GenericCounter<AtomicU64>,
+    pub refill_cache_duration: Histogram,
 }
 
 impl CompactorMetrics {
@@ -76,13 +79,25 @@ impl CompactorMetrics {
         let compact_task_duration =
             register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
         let opts = histogram_opts!(
+            "compactor_compact_task_size",
+            "Total size of compact that have been issued to state store",
+            exponential_buckets(4096.0, 1.6, 28).unwrap() // max 52000s
+        );
+        let compact_task_size =
+            register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
+        let opts = histogram_opts!(
             "compactor_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",
             exponential_buckets(0.1, 1.6, 28).unwrap() // max 52000s
         );
         let get_table_id_total_time_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
-
+        let opts = histogram_opts!(
+            "compute_refill_cache_duration",
+            "Total time of compact that have been issued to state store",
+            exponential_buckets(0.001, 1.6, 20).unwrap() // max 520s
+        );
+        let refill_cache_duration = register_histogram_with_registry!(opts, registry).unwrap();
         let opts = histogram_opts!(
             "compactor_remote_read_time",
             "Total time of operations which read from remote storage when enable prefetch",
@@ -207,6 +222,12 @@ impl CompactorMetrics {
 
         let sstable_distinct_epoch_count =
             register_histogram_with_registry!(opts, registry).unwrap();
+        let preload_io_count = register_int_counter_with_registry!(
+            "sstable_preload_io_count",
+            "Total number of preload io count",
+            registry
+        )
+        .unwrap();
 
         Self {
             compaction_upload_sst_counts,
@@ -219,6 +240,7 @@ impl CompactorMetrics {
             compact_sst_duration,
             compact_task_duration,
             compact_task_pending_num,
+            compact_task_size,
             write_build_l0_sst_duration,
             shared_buffer_to_sstable_size,
             get_table_id_total_time_duration,
@@ -230,6 +252,8 @@ impl CompactorMetrics {
             iter_scan_key_counts,
             write_build_l0_bytes,
             sstable_distinct_epoch_count,
+            preload_io_count,
+            refill_cache_duration,
         }
     }
 

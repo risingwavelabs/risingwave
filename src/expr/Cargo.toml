@@ -26,6 +26,7 @@ ctor = "0.1"
 dyn-clone = "1"
 either = "1"
 futures-util = "0.3"
+hex = "0.4.3"
 itertools = "0.10"
 md5 = "0.7.0"
 num-traits = "0.2"
@@ -37,6 +38,7 @@ risingwave_common = { path = "../common" }
 risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 speedate = "0.7.0"
 static_assertions = "1"
 thiserror = "1"

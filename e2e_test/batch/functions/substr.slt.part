@@ -4,7 +4,7 @@ select substr('W7Jc3Vyufj', (INT '-2147483648'));
 ----
 W7Jc3Vyufj
 
-statement error length in substr should be non-negative
+statement error negative substring length not allowed
 select substr('W7Jc3Vyufj', INT '-2147483648', INT '-2147483648');
 
 query T

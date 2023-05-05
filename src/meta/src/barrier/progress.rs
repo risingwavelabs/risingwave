@@ -278,7 +278,10 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
     ) -> Option<TrackingCommand<S>> {
         let actor = progress.chain_actor_id;
         let Some(epoch) = self.actor_map.get(&actor).copied() else {
-            panic!("no tracked progress for actor {}, is it already finished?", actor);
+            panic!(
+                "no tracked progress for actor {}, is it already finished?",
+                actor
+            );
         };
 
         let new_state = if progress.done {

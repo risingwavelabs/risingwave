@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod catalog;
-pub mod console;
 pub mod kafka;
 pub mod redis;
 pub mod remote;
@@ -28,8 +27,7 @@ use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
@@ -38,7 +36,6 @@ use thiserror::Error;
 pub use tracing;
 
 use self::catalog::{SinkCatalog, SinkType};
-use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
@@ -72,7 +69,6 @@ pub enum SinkConfig {
     Redis(RedisConfig),
     Kafka(Box<KafkaConfig>),
     Remote(RemoteConfig),
-    Console(ConsoleConfig),
     BlackHole,
 }
 
@@ -80,16 +76,44 @@ pub enum SinkConfig {
 pub enum SinkState {
     Kafka,
     Redis,
-    Console,
     Remote,
     Blackhole,
 }
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
+#[derive(Debug)]
+pub struct BlockHoleSink;
+
+#[async_trait]
+impl Sink for BlockHoleSink {
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+        Ok(())
+    }
+
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl SinkConfig {
-    pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
+    pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
         const CONNECTOR_TYPE_KEY: &str = "connector";
+        const CONNECTION_NAME_KEY: &str = "connection.name";
+        const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
+
+        // remove privatelink related properties if any
+        properties.remove(PRIVATE_LINK_TARGET_KEY);
+        properties.remove(CONNECTION_NAME_KEY);
+
         let sink_type = properties
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
@@ -97,9 +121,6 @@ impl SinkConfig {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
             )?))),
-            CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
-                properties,
-            )?)),
             BLACKHOLE_SINK => Ok(SinkConfig::BlackHole),
             _ => Ok(SinkConfig::Remote(RemoteConfig::from_hashmap(properties)?)),
         }
@@ -110,7 +131,6 @@ impl SinkConfig {
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
-            SinkConfig::Console(_) => "console",
             SinkConfig::BlackHole => "blackhole",
         }
     }
@@ -118,13 +138,28 @@ impl SinkConfig {
 
 #[derive(Debug)]
 pub enum SinkImpl {
-    Redis(Box<RedisSink>),
-    Kafka(Box<KafkaSink<true>>),
-    UpsertKafka(Box<KafkaSink<false>>),
-    Remote(Box<RemoteSink<true>>),
-    UpsertRemote(Box<RemoteSink<false>>),
-    Console(Box<ConsoleSink>),
-    Blackhole,
+    Redis(RedisSink),
+    Kafka(KafkaSink<true>),
+    UpsertKafka(KafkaSink<false>),
+    Remote(RemoteSink<true>),
+    UpsertRemote(RemoteSink<false>),
+    BlackHole(BlockHoleSink),
+}
+
+#[macro_export]
+macro_rules! dispatch_sink {
+    ($impl:expr, $sink:ident, $body:tt) => {{
+        use $crate::sink::SinkImpl;
+
+        match $impl {
+            SinkImpl::Redis($sink) => $body,
+            SinkImpl::Kafka($sink) => $body,
+            SinkImpl::UpsertKafka($sink) => $body,
+            SinkImpl::Remote($sink) => $body,
+            SinkImpl::UpsertRemote($sink) => $body,
+            SinkImpl::BlackHole($sink) => $body,
+        }
+    }};
 }
 
 impl SinkImpl {
@@ -134,37 +169,41 @@ impl SinkImpl {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
         sink_type: SinkType,
+        sink_id: u64,
     ) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
             SinkConfig::Kafka(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only Kafka sink
-                    SinkImpl::Kafka(Box::new(
-                        KafkaSink::<true>::new(*cfg, schema, pk_indices).await?,
-                    ))
+                    SinkImpl::Kafka(KafkaSink::<true>::new(*cfg, schema, pk_indices).await?)
                 } else {
                     // Upsert Kafka sink
-                    SinkImpl::UpsertKafka(Box::new(
-                        KafkaSink::<false>::new(*cfg, schema, pk_indices).await?,
-                    ))
+                    SinkImpl::UpsertKafka(KafkaSink::<false>::new(*cfg, schema, pk_indices).await?)
                 }
             }
-            SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
-                    SinkImpl::Remote(Box::new(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
-                    ))
+                    SinkImpl::Remote(
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
+                            .await?,
+                    )
                 } else {
                     // Upsert remote sink
-                    SinkImpl::UpsertRemote(Box::new(
-                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
-                    ))
+                    SinkImpl::UpsertRemote(
+                        RemoteSink::<false>::new(
+                            cfg,
+                            schema,
+                            pk_indices,
+                            connector_params,
+                            sink_id,
+                        )
+                        .await?,
+                    )
                 }
             }
-            SinkConfig::BlackHole => SinkImpl::Blackhole,
+            SinkConfig::BlackHole => SinkImpl::BlackHole(BlockHoleSink),
         })
     }
 
@@ -189,54 +228,9 @@ impl SinkImpl {
                     RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
                 }
             }
-            SinkConfig::Console(_) => Ok(()),
             SinkConfig::BlackHole => Ok(()),
         }
     }
-}
-
-macro_rules! impl_sink {
-    ($($variant_name:ident),*) => {
-        #[async_trait]
-        impl Sink for SinkImpl {
-            async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.write_batch(chunk).await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.begin_epoch(epoch).await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn commit(&mut self) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.commit().await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn abort(&mut self) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.abort().await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-        }
-    }
-}
-
-impl_sink! {
-    Redis,
-    Kafka,
-    UpsertKafka,
-    Remote,
-    UpsertRemote,
-    Console
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -311,8 +305,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             json!(v.to_text())
         }
-        (DataType::Timestamptz, ScalarRefImpl::Timestamp(v)) => {
-            json!(v.0.and_local_timezone(chrono::Utc).unwrap().to_rfc3339())
+        (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
+            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
+            // timezone info and the time is in microsecond.
+            json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
             // todo: just ignore the nanos part to avoid leap second complex
@@ -332,9 +328,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v.as_iso_8601())
         }
         (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let elems = list_ref.iter_elems_ref();
+            let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in list_ref.values_ref() {
+            for sub_datum_ref in elems {
                 let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
@@ -342,7 +339,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
                 st.fields
                     .iter()
                     .zip_eq_fast(st.field_names.iter())
@@ -353,9 +350,9 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             }
             json!(map)
         }
-        _ => {
+        (data_type, scalar_ref) => {
             return Err(ArrayError::internal(
-                "datum_to_json_object: unsupported data type".to_string(),
+                format!("datum_to_json_object: unsupported data type: field name: {:?}, logical type: {:?}, physical type: {:?}", field.name, data_type, scalar_ref),
             ));
         }
     };
@@ -367,6 +364,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 mod tests {
 
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
+    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]
@@ -412,23 +410,15 @@ mod tests {
 
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
         let tstz_str = "2018-01-26T18:30:09.453Z";
-        let tstz_value = datum_to_json_object(
+        let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
+        datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
             },
-            Some(
-                ScalarImpl::Timestamp(
-                    chrono::DateTime::parse_from_rfc3339(tstz_str)
-                        .unwrap()
-                        .naive_utc()
-                        .into(),
-                )
-                .as_scalar_ref_impl(),
-            ),
+            Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
         )
         .unwrap();
-        chrono::DateTime::parse_from_rfc3339(tstz_value.as_str().unwrap_or_default()).unwrap();
 
         let ts_value = datum_to_json_object(
             &Field {

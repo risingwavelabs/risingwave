@@ -14,19 +14,24 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
 use super::{
     gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
-use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, TableFunction,
 };
-use crate::optimizer::property::Order;
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::{
+    CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
+use crate::utils::{ColIndexMapping, Condition, Substitute};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
 ///
@@ -178,26 +183,7 @@ impl LogicalProjectSet {
         let _verbose = self.base.ctx.is_explain_verbose();
         // TODO: add verbose display like Project
 
-        let mut builder = f.debug_struct(name);
-        builder.field("select_list", self.select_list());
-        builder.finish()
-    }
-}
-
-impl LogicalProjectSet {
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.core.o2i_col_mapping()
-    }
-
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.core.i2o_col_mapping()
-    }
-
-    /// Map the order of the input to use the updated indices
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core
-            .i2o_col_mapping()
-            .rewrite_provided_order(self.input().order())
+        self.core.fmt_with_name(f, name)
     }
 }
 
@@ -239,14 +225,61 @@ impl fmt::Display for LogicalProjectSet {
 
 impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: column pruning for ProjectSet https://github.com/risingwavelabs/risingwave/issues/8593
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        let new_input = {
-            let input = self.input();
-            let required = (0..input.schema().len()).collect_vec();
-            input.prune_col(&required, ctx)
+        let input_col_num = self.input().schema().len();
+        let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
+
+        // Record each InputRef's index.
+        let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
+        required_cols.iter().filter(|&&i| i > 0).for_each(|&i| {
+            if let ExprImpl::InputRef(ref input_ref) = self.select_list()[i - 1] {
+                let input_idx = input_ref.index;
+                input_required_appeared.put(input_idx);
+            } else {
+                input_ref_collector.visit_expr(&self.select_list()[i - 1]);
+            }
+        });
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::from(input_ref_collector);
+            tmp.union_with(&input_required_appeared);
+            tmp
         };
-        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
+        let input_required_cols = input_required_cols.ones().collect_vec();
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
+        let mut mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        // Rewrite each InputRef with new index.
+        let select_list = required_cols
+            .iter()
+            .filter(|&&id| id > 0)
+            .map(|&id| mapping.rewrite_expr(self.select_list()[id - 1].clone()))
+            .collect();
+
+        // Reconstruct the LogicalProjectSet
+        let new_node: PlanRef = LogicalProjectSet::new(new_input, select_list).into();
+        if new_node.schema().len() == required_cols.len() {
+            // current schema perfectly fit the required columns
+            new_node
+        } else {
+            // projected_row_id column is not needed so we did a projection to remove it
+            let mut new_output_cols = Vec::from(required_cols);
+            if !required_cols.contains(&0) {
+                new_output_cols.insert(0, 0);
+            }
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = new_node.schema().len();
+            LogicalProject::with_mapping(
+                new_node,
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+            )
+            .into()
+        }
     }
 }
 
@@ -272,15 +305,41 @@ impl PredicatePushdown for LogicalProjectSet {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
+        // convert the predicate to one that references the child of the project
+        let mut subst = Substitute {
+            mapping: {
+                let mut output_list = self.select_list().clone();
+                output_list.insert(
+                    0,
+                    ExprImpl::InputRef(Box::new(InputRef {
+                        index: 0,
+                        data_type: DataType::Int64,
+                    })),
+                );
+                output_list
+            },
+        };
+
+        let remain_mask = {
+            let mut remain_mask = FixedBitSet::with_capacity(self.select_list().len() + 1);
+            remain_mask.set(0, true);
+            self.select_list()
+                .iter()
+                .enumerate()
+                .for_each(|(i, e)| remain_mask.set(i + 1, e.is_impure() || e.has_table_function()));
+            remain_mask
+        };
+        let (remained_cond, pushed_cond) = predicate.split_disjoint(&remain_mask);
+        let pushed_cond = pushed_cond.rewrite_expr(&mut subst);
+
+        gen_filter_and_pushdown(self, remained_cond, pushed_cond, ctx)
     }
 }
 
 impl ToBatch for LogicalProjectSet {
     fn to_batch(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = self.input().to_batch()?;
         Ok(BatchProjectSet::new(new_logical).into())
     }
 }
@@ -324,7 +383,8 @@ impl ToStream for LogicalProjectSet {
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(StreamProjectSet::new(new_logical).into())
     }
 }

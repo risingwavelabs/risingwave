@@ -715,22 +715,23 @@ impl ActorGraphBuilder {
         let merge_updates = external_changes
             .iter()
             .flat_map(|(actor_id, change)| {
-                change
-                    .new_upstreams
-                    .values()
-                    .map(move |upstream| {
-                        let EdgeId::DownstreamExternal { original_upstream_fragment_id, .. } = upstream.edge_id else {
-                            unreachable!("edge from internal to external must be `DownstreamExternal`")
-                        };
+                change.new_upstreams.values().map(move |upstream| {
+                    let EdgeId::DownstreamExternal {
+                        original_upstream_fragment_id,
+                        ..
+                    } = upstream.edge_id
+                    else {
+                        unreachable!("edge from internal to external must be `DownstreamExternal`")
+                    };
 
-                        MergeUpdate {
-                            actor_id: actor_id.as_global_id(),
-                            upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
-                            new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
-                            added_upstream_actor_id: upstream.actors.as_global_ids(),
-                            removed_upstream_actor_id: vec![],
-                        }
-                    })
+                    MergeUpdate {
+                        actor_id: actor_id.as_global_id(),
+                        upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
+                        new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
+                        added_upstream_actor_id: upstream.actors.as_global_ids(),
+                        removed_upstream_actor_id: vec![],
+                    }
+                })
             })
             .collect();
 

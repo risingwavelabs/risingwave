@@ -227,7 +227,7 @@ impl FunctionCall {
 
                 if return_type != DataType::Boolean {
                     return Err(ErrorCode::BindError(format!(
-                        "op ANY/ALL (array) requires operator to yield boolean, but got {:?}",
+                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
                         return_type
                     ))
                     .into());
@@ -265,11 +265,6 @@ impl FunctionCall {
 
     pub fn get_expr_type(&self) -> ExprType {
         self.func_type
-    }
-
-    /// Refer to [`ExprType`] for details.
-    pub fn is_pure(&self) -> bool {
-        0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 
     /// Get a reference to the function call's inputs.
@@ -377,7 +372,7 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
             }
-            ExprType::Now => {
+            ExprType::Now | ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)
             }
             _ => {

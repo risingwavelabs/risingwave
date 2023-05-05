@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 't:p:' opt; do
     case ${opt} in
@@ -44,7 +44,8 @@ cargo build \
     -p risingwave_backup_cmd \
     -p risingwave_java_binding \
     -p risingwave_e2e_extended_mode_test \
-    --features "static-link static-log-level" --profile "$profile"
+    --features "rw-static-link" \
+    --profile "$profile"
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)

@@ -105,7 +105,7 @@ impl Binder {
         }
         let mut exprs = exprs
             .into_iter()
-            .map(|e| self.bind_expr(e))
+            .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let element_type = align_types(exprs.iter_mut())?;
         let expr: ExprImpl = FunctionCall::new_unchecked(
@@ -152,13 +152,13 @@ impl Binder {
     }
 
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
-        let obj = self.bind_expr(obj)?;
+        let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
             DataType::List {
                 datatype: return_type,
             } => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
-                vec![obj, self.bind_expr(index)?],
+                vec![obj, self.bind_expr_inner(index)?],
                 *return_type,
             )
             .into()),
@@ -170,11 +170,51 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_array_range_index(
+        &mut self,
+        obj: Expr,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let obj = self.bind_expr_inner(obj)?;
+        let start = match start {
+            None => ExprImpl::literal_int(1),
+            Some(expr) => self
+                .bind_expr_inner(*expr)?
+                .cast_implicit(DataType::Int32)?,
+        };
+        // Don't worry, the backend implementation will stop iterating once it encounters the end
+        // of the array.
+        let end = match end {
+            None => ExprImpl::literal_int(i32::MAX),
+            Some(expr) => self
+                .bind_expr_inner(*expr)?
+                .cast_implicit(DataType::Int32)?,
+        };
+        match obj.return_type() {
+            DataType::List {
+                datatype: return_type,
+            } => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayRangeAccess,
+                vec![obj, start, end],
+                DataType::List {
+                    datatype: return_type,
+                },
+            )
+            .into()),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array range index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into()),
+        }
+    }
+
     /// `Row(...)` is represented as an function call at the binder stage.
     pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
         let exprs = exprs
             .into_iter()
-            .map(|e| self.bind_expr(e))
+            .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
             DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
@@ -201,7 +241,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..len {
             if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -245,7 +285,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..2 {
             if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
