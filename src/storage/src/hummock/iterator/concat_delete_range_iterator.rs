@@ -45,9 +45,9 @@ impl ConcatDeleteRangeIterator {
     async fn next_inner(&mut self) -> HummockResult<()> {
         if let Some(iter) = self.current.as_mut() {
             if iter.is_valid() {
-                if self.idx + 1 < self.sstables.len()
+                if iter.is_last_range()
+                    && self.idx + 1 < self.sstables.len()
                     && self.sstables[self.idx + 1].range_tombstone_count > 0
-                    && iter.next_range_epoch() == HummockEpoch::MAX
                     && iter
                         .next_extended_user_key()
                         .left_user_key

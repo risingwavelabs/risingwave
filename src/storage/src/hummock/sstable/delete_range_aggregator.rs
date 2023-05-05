@@ -357,8 +357,17 @@ impl SstableDeleteRangeIterator {
         Self { table, next_idx: 0 }
     }
 
-    pub fn next_range_epoch(&self) -> HummockEpoch {
-        self.table.value().meta.monotonic_tombstone_events[self.next_idx].new_epoch
+    /// Retrieves whether `next_extended_user_key` is the last range of this SST file.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - This function should return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
+    pub fn is_last_range(&self) -> bool {
+        debug_assert!(self.next_idx < self.table.value().meta.monotonic_tombstone_events.len());
+        self.next_idx + 1 == self.table.value().meta.monotonic_tombstone_events.len()
     }
 }
 
