@@ -593,47 +593,44 @@ mod util {
                 }
             }
         }
-        
+
         #[test]
-        fn test_is_max_in_file_path(){
+        fn test_is_max_in_file_path() {
             struct TestCase {
                 file_exists: bool,
                 value_in_file: String,
                 expected: Result<bool, std::io::Error>,
             }
 
-            let test_cases = HashMap::from(
-                [
-                    (
-                        "max-value-in-file",
-                        TestCase {
-                            file_exists: true,
-                            value_in_file: String::from("max"),
-                            expected: Ok(true),
-                        },
-                    ),
-                    (
-                        "file-not-exist",
-                        TestCase {
-                            file_exists: false,
-                            value_in_file: String::from(""),
-                            expected: Err(std::io::Error::new(
-                                std::io::ErrorKind::NotFound,
-                                "File not found",
-                            )),
-                        },
-                    ),
-                    (
-                        "max-value-not-in-file",
-                        TestCase {
-                            file_exists: true,
-                            value_in_file: String::from("10000"),
-                            expected:  Ok(false),
-                        },
-                    ),
-
-                ]
-            );
+            let test_cases = HashMap::from([
+                (
+                    "max-value-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("max"),
+                        expected: Ok(true),
+                    },
+                ),
+                (
+                    "file-not-exist",
+                    TestCase {
+                        file_exists: false,
+                        value_in_file: String::from(""),
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "File not found",
+                        )),
+                    },
+                ),
+                (
+                    "max-value-not-in-file",
+                    TestCase {
+                        file_exists: true,
+                        value_in_file: String::from("10000"),
+                        expected: Ok(false),
+                    },
+                ),
+            ]);
 
             for tc in test_cases {
                 let curr_test_case = &tc.1;
