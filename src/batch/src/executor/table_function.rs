@@ -52,8 +52,15 @@ impl TableFunctionExecutor {
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
-        let mut data_chunk_builder =
-            DataChunkBuilder::new(vec![self.table_function.return_type()], self.chunk_size);
+        let data_chunk_type = {
+            match self.table_function.return_type() {
+                DataType::Struct(s) => s.fields.clone(),
+                other => vec![other],
+            }
+        };
+
+        let mut data_chunk_builder = DataChunkBuilder::new(data_chunk_type, self.chunk_size);
+
         for array in self.table_function.eval(&dummy_chunk).await? {
             let len = array.len();
             if len == 0 {
