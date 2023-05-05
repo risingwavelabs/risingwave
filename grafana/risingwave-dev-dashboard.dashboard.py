@@ -634,6 +634,16 @@ def section_streaming(panels):
             ]
         ),
         panels.timeseries_rowsps(
+            "Sink Throughput(rows/s)",
+            "The figure shows the number of rows output by each sink per second.",
+            [
+                panels.target(
+                    f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
+                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
             "Backfill Snapshot Read Throughput(rows)",
             "Total number of rows that have been read from the backfill snapshot",
             [
