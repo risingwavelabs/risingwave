@@ -124,6 +124,26 @@ select series2(3);
 (1,#1)
 (2,#2)
 
+query II
+select x, series(x) from series(4) t(x);
+----
+1 0
+2 0
+2 1
+3 0
+3 1
+3 2
+
+query IT
+select x, series2(x) from series(4) t(x);
+----
+1 (0,#0)
+2 (0,#0)
+2 (1,#1)
+3 (0,#0)
+3 (1,#1)
+3 (2,#2)
+
 # TODO: support argument implicit cast for UDF
 # e.g. extract_tcp_info(E'\\x45');
 
