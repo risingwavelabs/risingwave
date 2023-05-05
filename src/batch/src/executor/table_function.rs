@@ -56,10 +56,14 @@ impl TableFunctionExecutor {
             DataChunkBuilder::new(vec![self.table_function.return_type()], self.chunk_size);
         for array in self.table_function.eval(&dummy_chunk).await? {
             let len = array.len();
+            if len <= 0 {
+                continue;
+            }
             let data_chunk = match array.as_ref() {
                 ArrayImpl::Struct(s) => DataChunk::from(s),
                 _ => DataChunk::new(vec![Column::new(array.clone())], len),
             };
+
             for chunk in data_chunk_builder.append_chunk(data_chunk) {
                 yield chunk;
             }
