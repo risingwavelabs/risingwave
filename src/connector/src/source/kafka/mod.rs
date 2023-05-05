@@ -27,6 +27,7 @@ pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
+use crate::deserialize_duration_from_string;
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
@@ -57,9 +58,24 @@ pub struct KafkaProperties {
     #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
     pub consumer_group: Option<String>,
 
+    /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
+    /// combine both key and value fields of the Kafka message.
+    /// TODO: Currently, `Option<bool>` can not be parsed here.
+    #[serde(rename = "upsert")]
+    pub upsert: Option<String>,
+
+    #[serde(
+        rename = "properties.sync.call.timeout",
+        deserialize_with = "deserialize_duration_from_string",
+        default = "default_kafka_sync_call_timeout"
+    )]
+    pub sync_call_timeout: Duration,
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 }
 
-const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);
+const fn default_kafka_sync_call_timeout() -> Duration {
+    Duration::from_secs(5)
+}
 const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
