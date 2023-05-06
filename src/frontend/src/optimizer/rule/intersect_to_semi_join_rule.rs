@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalIntersect, LogicalJoin, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
@@ -31,39 +33,53 @@ impl Rule for IntersectToSemiJoinRule {
         }
 
         let inputs = logical_intersect.inputs();
-        inputs.into_iter().fold(None, |left, right| match left {
-            None => Some(right),
-            Some(left) => {
-                let on = (left
-                    .schema()
-                    .fields()
-                    .iter()
-                    .zip_eq_debug(right.schema().fields())
-                    .enumerate())
-                .fold(None, |expr, (i, (left_field, right_field))| {
-                    let equal = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
-                        ExprType::IsNotDistinctFrom,
-                        vec![
-                            ExprImpl::InputRef(Box::new(InputRef::new(i, left_field.data_type()))),
-                            ExprImpl::InputRef(Box::new(InputRef::new(
-                                i + left.schema().len(),
-                                right_field.data_type(),
-                            ))),
-                        ],
-                        Boolean,
-                    )));
+        let join = inputs
+            .into_iter()
+            .fold(None, |left, right| match left {
+                None => Some(right),
+                Some(left) => {
+                    let on =
+                        IntersectToSemiJoinRule::gen_null_safe_equal(left.clone(), right.clone());
+                    Some(LogicalJoin::create(left, right, JoinType::LeftSemi, on))
+                }
+            })
+            .unwrap();
 
-                    match expr {
-                        None => Some(equal),
-                        Some(expr) => Some(ExprImpl::FunctionCall(Box::new(
-                            FunctionCall::new_unchecked(ExprType::And, vec![expr, equal], Boolean),
-                        ))),
-                    }
-                })
-                .unwrap();
-                Some(LogicalJoin::create(left, right, JoinType::LeftSemi, on))
+        let mut bit_set = FixedBitSet::with_capacity(join.schema().len());
+        bit_set.toggle_range(..);
+        Some(Agg::new(vec![], bit_set, join).into())
+    }
+}
+
+impl IntersectToSemiJoinRule {
+    fn gen_null_safe_equal(left: PlanRef, right: PlanRef) -> ExprImpl {
+        (left
+            .schema()
+            .fields()
+            .iter()
+            .zip_eq_debug(right.schema().fields())
+            .enumerate())
+        .fold(None, |expr, (i, (left_field, right_field))| {
+            let equal = ExprImpl::FunctionCall(Box::new(FunctionCall::new_unchecked(
+                ExprType::IsNotDistinctFrom,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(i, left_field.data_type()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(
+                        i + left.schema().len(),
+                        right_field.data_type(),
+                    ))),
+                ],
+                Boolean,
+            )));
+
+            match expr {
+                None => Some(equal),
+                Some(expr) => Some(ExprImpl::FunctionCall(Box::new(
+                    FunctionCall::new_unchecked(ExprType::And, vec![expr, equal], Boolean),
+                ))),
             }
         })
+        .unwrap()
     }
 }
 

@@ -8,10 +8,10 @@ statement ok
 create table t2 (v1 int, v3 int);
 
 statement ok
-insert into t1 values(1, 2);
+insert into t1 values(1, 2),(1, 2);
 
 statement ok
-insert into t2 values(1, 2);
+insert into t2 values(1, 2),(1, 2);
 
 query II
 select * from t1 intersect select * from t2

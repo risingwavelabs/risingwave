@@ -15,7 +15,7 @@ select * from v;
 ----
 
 statement ok
-insert into t1 values(1, 2);
+insert into t1 values(1, 2),(1, 2);
 
 query II
 select * from v;
@@ -23,7 +23,7 @@ select * from v;
 
 
 statement ok
-insert into t2 values(1, 2);
+insert into t2 values(1, 2),(1, 2);
 
 
 query II
