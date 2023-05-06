@@ -57,9 +57,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 })
                 .collect(),
         ),
-        DataType::List { datatype: ref typ } => {
-            AstDataType::Array(Box::new(data_type_to_ast_data_type(typ)))
-        }
+        DataType::List(ref typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
     }
 }
 

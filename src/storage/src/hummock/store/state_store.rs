@@ -467,7 +467,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
     HummockIteratorUnion<
         Forward,
         StagingDataIterator,
-        OrderedMergeIteratorInner<SstableIterator>,
+        SstableIterator,
         ConcatIteratorInner<SstableIterator>,
     >,
 >;

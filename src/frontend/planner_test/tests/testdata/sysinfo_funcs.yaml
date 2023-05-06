@@ -14,15 +14,15 @@
 - sql: |
     select current_schemas(true);
   batch_plan: |
-    BatchValues { rows: [[ARRAY[pg_catalog, public]:List { datatype: Varchar }]] }
+    BatchValues { rows: [[ARRAY[pg_catalog, public]:List(Varchar)]] }
 - sql: |
     select current_schemas(false);
   batch_plan: |
-    BatchValues { rows: [[ARRAY[public]:List { datatype: Varchar }]] }
+    BatchValues { rows: [[ARRAY[public]:List(Varchar)]] }
 - sql: |
     select current_schemas(null);
   batch_plan: |
-    BatchValues { rows: [[null:List { datatype: Varchar }]] }
+    BatchValues { rows: [[null:List(Varchar)]] }
 - sql: |
     select current_schemas(true and false);
   binder_error: |-

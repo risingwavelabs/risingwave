@@ -431,6 +431,20 @@ impl DataChunk {
         DataChunk::new(columns, indexes.len())
     }
 
+    fn partition_sizes_for_columns(&self, col_indices: &[usize]) -> (usize, Vec<&Column>) {
+        let mut col_variable: Vec<&Column> = vec![];
+        let mut row_len_fixed: usize = 0;
+        for i in col_indices {
+            let col = &self.columns[*i];
+            if let Some(field_len) = try_get_exact_serialize_datum_size(&col.array()) {
+                row_len_fixed += field_len;
+            } else {
+                col_variable.push(col);
+            }
+        }
+        (row_len_fixed, col_variable)
+    }
+
     /// Partition fixed size datums and variable length ones.
     /// ---
     /// In some cases, we have fixed size for the entire column,
@@ -470,6 +484,35 @@ impl DataChunk {
         Vec::with_capacity(
             row_len_fixed + Self::compute_size_of_variable_cols_in_row(variable_cols, row_idx),
         )
+    }
+
+    pub fn compute_key_sizes_by_columns(&self, column_indices: &[usize]) -> Vec<usize> {
+        let (row_len_fixed, col_variable) = self.partition_sizes_for_columns(column_indices);
+        let mut sizes: Vec<usize> = Vec::with_capacity(self.capacity());
+        let update_sizes = |sizes: &mut Vec<usize>, col_variable, i| unsafe {
+            sizes.push(row_len_fixed + Self::compute_size_of_variable_cols_in_row(col_variable, i))
+        };
+        match &self.vis2 {
+            Vis::Bitmap(vis) => {
+                let rows_num = vis.len();
+                for i in 0..rows_num {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        if vis.is_set_unchecked(i) {
+                            update_sizes(&mut sizes, &col_variable, i);
+                        } else {
+                            sizes.push(0)
+                        }
+                    }
+                }
+            }
+            Vis::Compact(rows_num) => {
+                for i in 0..*rows_num {
+                    update_sizes(&mut sizes, &col_variable, i);
+                }
+            }
+        }
+        sizes
     }
 
     /// Serialize each row into value encoding bytes.
@@ -582,8 +625,8 @@ impl fmt::Debug for DataChunk {
     }
 }
 
-impl From<StructArray> for DataChunk {
-    fn from(array: StructArray) -> Self {
+impl<'a> From<&'a StructArray> for DataChunk {
+    fn from(array: &'a StructArray) -> Self {
         let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
             columns,

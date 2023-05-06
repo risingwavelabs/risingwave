@@ -143,9 +143,8 @@ pub async fn handle_create_mv(
     let has_order_by = !query.order_by.is_empty();
 
     session.check_relation_name_duplicated(name.clone())?;
-    let mut notice = String::new();
 
-    let (table, graph) = {
+    let (table, graph, mut notices) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let context = plan.plan_base().ctx.clone();
@@ -157,9 +156,10 @@ pub async fn handle_create_mv(
         // Set the timezone for the stream environment
         let env = graph.env.as_mut().unwrap();
         env.timezone = context.get_session_timezone();
-        context.append_notice(&mut notice);
 
-        (table, graph)
+        let notices = context.take_warnings();
+
+        (table, graph, notices)
     };
 
     let _job_guard =
@@ -179,13 +179,14 @@ pub async fn handle_create_mv(
         .await?;
 
     if has_order_by {
-        notice.push_str(r#"
-The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#);
+        notices.push(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_string());
     }
-    Ok(PgResponse::empty_result_with_notice(
+
+    Ok(PgResponse::empty_result_with_notices(
         StatementType::CREATE_MATERIALIZED_VIEW,
-        notice.to_string(),
+        notices,
     ))
 }
 
@@ -317,18 +318,17 @@ pub mod tests {
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
         assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert_eq!(response.get_notice(), None);
+        assert!(response.get_notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
         assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
         assert_eq!(
-            response.get_notice().unwrap(),
-r#"
-The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#
-                .to_string()
+            response.get_notices()[0],
+            r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#
         );
     }
 }

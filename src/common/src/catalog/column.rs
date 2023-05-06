@@ -15,7 +15,8 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{GeneratedColumnDesc, PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
@@ -93,7 +94,7 @@ pub struct ColumnDesc {
     pub name: String,
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
-    pub generated_column: Option<GeneratedColumnDesc>,
+    pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub is_from_key: bool,
 }
 
@@ -105,7 +106,7 @@ impl ColumnDesc {
             name: String::new(),
             field_descs: vec![],
             type_name: String::new(),
-            generated_column: None,
+            generated_or_default_column: None,
             is_from_key: false,
         }
     }
@@ -123,7 +124,7 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
-            generated_column: self.generated_column.clone(),
+            generated_or_default_column: self.generated_or_default_column.clone(),
             is_from_key: self.is_from_key,
         }
     }
@@ -167,7 +168,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
             is_from_key: false,
         }
     }
@@ -188,7 +189,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
             is_from_key: false,
         }
     }
@@ -204,7 +205,7 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
-            generated_column: None,
+            generated_or_default_column: None,
             is_from_key: false,
         }
     }
@@ -214,7 +215,17 @@ impl ColumnDesc {
     }
 
     pub fn is_generated(&self) -> bool {
-        self.generated_column.is_some()
+        matches!(
+            self.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::GeneratedColumn(_))
+        )
+    }
+
+    pub fn is_default(&self) -> bool {
+        matches!(
+            self.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::DefaultColumn(_))
+        )
     }
 }
 
@@ -231,7 +242,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             name: prost.name,
             type_name: prost.type_name,
             field_descs,
-            generated_column: prost.generated_column,
+            generated_or_default_column: prost.generated_or_default_column,
             is_from_key: prost.is_from_key,
         }
     }
@@ -251,7 +262,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
-            generated_column: c.generated_column.clone(),
+            generated_or_default_column: c.generated_or_default_column.clone(),
             is_from_key: c.is_from_key,
         }
     }
@@ -271,7 +282,12 @@ impl ColumnCatalog {
 
     /// If the column is a generated column
     pub fn is_generated(&self) -> bool {
-        self.column_desc.generated_column.is_some()
+        self.column_desc.is_generated()
+    }
+
+    /// If the column is a column with default expr
+    pub fn is_default(&self) -> bool {
+        self.column_desc.is_default()
     }
 
     /// Get a reference to the column desc's data type.

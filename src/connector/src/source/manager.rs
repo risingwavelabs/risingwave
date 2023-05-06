@@ -81,7 +81,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name: s.name.clone(),
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
             is_from_key: s.is_from_key,
         }
     }

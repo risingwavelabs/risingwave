@@ -27,7 +27,7 @@ steps:
   - wait
 
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
