@@ -46,13 +46,11 @@ impl<'a> TryFrom<&'a ExprNode> for ProcTimeExpression {
     }
 }
 
-/// Get the processing time in microseconds from the task-local epoch.
-fn proc_time_us_from_epoch() -> Result<ScalarImpl> {
-    let us = epoch::task_local::curr_epoch()
-        .ok_or(ExprError::Context)?
-        .as_unix_millis()
-        * 1000;
-    Ok(ScalarImpl::Int64(us as i64))
+/// Get the processing time in Timestamptz scalar from the task-local epoch.
+fn proc_time_from_epoch() -> Result<ScalarImpl> {
+    epoch::task_local::curr_epoch()
+        .map(|e| e.as_scalar())
+        .ok_or(ExprError::Context)
 }
 
 #[async_trait::async_trait]
@@ -62,14 +60,14 @@ impl Expression for ProcTimeExpression {
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        proc_time_us_from_epoch().map(|s| ValueImpl::Scalar {
+        proc_time_from_epoch().map(|s| ValueImpl::Scalar {
             value: Some(s),
             capacity: input.capacity(),
         })
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
-        proc_time_us_from_epoch().map(Some)
+        proc_time_from_epoch().map(Some)
     }
 }
 
