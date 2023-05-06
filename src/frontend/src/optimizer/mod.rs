@@ -374,7 +374,7 @@ impl PlanRoot {
                     &self.required_dist,
                     &mut ToStreamContext::new(emit_on_window_close),
                 )?;
-                stream_enforce_eowc_requirement(plan, emit_on_window_close)
+                stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)
             }
             _ => unreachable!(),
         }?;

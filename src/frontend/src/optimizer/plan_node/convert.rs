@@ -59,6 +59,7 @@ pub trait ToStream {
 }
 
 pub fn stream_enforce_eowc_requirement(
+    ctx: OptimizerContextRef,
     plan: PlanRef,
     emit_on_window_close: bool,
 ) -> Result<PlanRef> {
@@ -72,16 +73,10 @@ pub fn stream_enforce_eowc_requirement(
                     .to_string(),
             )
             .into())
-        } else if n_watermark_cols > 1 {
-            Err(ErrorCode::NotImplemented(
-                format!(
-                    "Currently only support Emit-On-Window-Close mode for single watermark column, but got {}",
-                    n_watermark_cols
-                ),
-                None.into(),
-            )
-            .into())
         } else {
+            if n_watermark_cols > 1 {
+                ctx.warn("There are multiple watermark columns in the query, currently only the first one will be used.");
+            }
             let watermark_col_idx = watermark_cols.ones().next().unwrap();
             Ok(StreamSort::new(plan, watermark_col_idx).into())
         }
