@@ -291,7 +291,7 @@ where
         let sys_params_manager = env.system_params_manager();
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
-        let state_store_dir = sys_params.data_directory();
+        let state_store_dir: &str = sys_params.data_directory();
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -303,7 +303,12 @@ where
 
         // Make sure data dir is not used by another cluster.
         if env.cluster_first_launch() {
-            write_exclusive_cluster_id(env.cluster_id().clone(), object_store.clone()).await?;
+            write_exclusive_cluster_id(
+                state_store_dir,
+                env.cluster_id().clone(),
+                object_store.clone(),
+            )
+            .await?;
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2277,29 +2282,27 @@ fn gen_version_delta<'a>(
 }
 
 async fn write_exclusive_cluster_id(
+    state_store_dir: &str,
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
 ) -> Result<()> {
-    // Point get interface can't distinguish non-existent object from other errors.
-    if object_store.list(CLUSTER_ID_OBJECT_NAME).await?.is_empty() {
+    let cluster_id_object_path = format!("{}/{}", state_store_dir, CLUSTER_ID_OBJECT_NAME);
+    let cluster_id_res = object_store.read(&cluster_id_object_path, None).await;
+
+    if let Ok(cluster_id) = cluster_id_res {
+        Err(ObjectError::internal(format!(
+            "data directory is already used by another cluster with id {:?}",
+            String::from_utf8(cluster_id.to_vec()).unwrap()
+        ))
+        .into())
+    } else {
+        // FIXME: Can't distinguish no such item from other errors.
         object_store
             .upload(
-                CLUSTER_ID_OBJECT_NAME,
+                &cluster_id_object_path,
                 Bytes::from(String::from(cluster_id)),
             )
             .await?;
-    } else {
-        return Err(ObjectError::internal(format!(
-            "data directory is already used by another cluster with id {:?}",
-            String::from_utf8(
-                object_store
-                    .read(CLUSTER_ID_OBJECT_NAME, None)
-                    .await?
-                    .to_vec(),
-            )
-            .unwrap()
-        ))
-        .into());
+        Ok(())
     }
-    Ok(())
 }
