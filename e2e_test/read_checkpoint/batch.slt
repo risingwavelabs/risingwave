@@ -1,4 +1,5 @@
 statement ok
 SET VISIBILITY_MODE TO checkpoint;
 
-include ../batch/**/*.slt
+include ../batch/distribution_mode.slt
+include ../batch/local_mode.slt
