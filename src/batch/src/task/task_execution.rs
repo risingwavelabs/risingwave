@@ -490,6 +490,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn change_state(&self, task_status: TaskStatus) {
         *self.state.lock() = task_status;
+        info!(
+            "Task {:?} state changed to {:?}",
+            &self.task_id, task_status
+        );
     }
 
     async fn run(
