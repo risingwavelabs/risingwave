@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use derivative::Derivative;
+use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -27,8 +27,8 @@ use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, ExprImpl, FunctionCall};
 use crate::user::UserId;
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
     pub id: IndexId,
 
@@ -53,8 +53,8 @@ pub struct IndexCatalog {
     /// `BTreeMap`. BTW, the trait `std::hash::Hash` is not implemented for
     /// `HashMap<function_call::FunctionCall, usize>`, so we need to ignore it. It will not
     /// affect the correctness, since it can be derived by `index_item`.
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,

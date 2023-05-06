@@ -3,10 +3,10 @@ name: Connector Node Integration Tests
 on:
   push:
     branches: [main]
-    paths: [java/**, proto/**]
   pull_request:
     branches: [main]
-    paths: [java/**, proto/**]
+  merge_group:
+    types: [checks_requested]
 
 jobs:
   build:
@@ -17,13 +17,23 @@ jobs:
     name: Java ${{ matrix.java }}
     steps:
       - uses: actions/checkout@v3
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            java:
+              - 'java/**'
+            proto:
+              - 'proto/**'
       - name: Set up JDK ${{ matrix.java }}
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         uses: actions/setup-java@v3
         with:
           java-version: ${{ matrix.java }}
           distribution: 'adopt'
           cache: 'maven'
       - name: run integration tests
+        if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         run: |
           set -ex
           

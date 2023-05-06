@@ -389,6 +389,21 @@ impl Extend<usize> for CollectInputRef {
     }
 }
 
+/// Collect all `InputRef`s' indexes in the expressions.
+///
+/// # Panics
+/// Panics if `input_ref >= input_col_num`.
+pub fn collect_input_refs<'a>(
+    input_col_num: usize,
+    exprs: impl IntoIterator<Item = &'a ExprImpl>,
+) -> FixedBitSet {
+    let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
+    for expr in exprs {
+        input_ref_collector.visit_expr(expr);
+    }
+    input_ref_collector.into()
+}
+
 /// Count `Now`s in the expression.
 #[derive(Clone, Default)]
 pub struct CountNow {}
