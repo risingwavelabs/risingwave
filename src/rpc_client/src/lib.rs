@@ -117,10 +117,12 @@ where
             .clients
             .try_get_with(
                 addr.clone(),
-                S::new_clients(addr, self.connection_pool_size as usize),
+                S::new_clients(addr.clone(), self.connection_pool_size as usize),
             )
             .await
-            .map_err(|e| -> RpcError { anyhow!("failed to create RPC client: {:?}", e).into() })?
+            .map_err(|e| -> RpcError {
+                anyhow!("failed to create RPC client to {addr}: {:?}", e).into()
+            })?
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone())
