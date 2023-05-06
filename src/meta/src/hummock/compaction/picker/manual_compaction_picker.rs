@@ -313,6 +313,14 @@ impl CompactionPicker for ManualCompactionPicker {
             target_sub_level_id: 0,
         })
     }
+
+    fn get_select_level(&self) -> usize {
+        self.option.level
+    }
+
+    fn get_target_level(&self) -> usize {
+        self.target_level
+    }
 }
 
 #[cfg(test)]

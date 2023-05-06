@@ -44,7 +44,22 @@ impl TierCompactionPicker {
     }
 }
 
-impl TierCompactionPicker {
+pub struct TierMultiLevelColumnPicker {
+    config: Arc<CompactionConfig>,
+    overlap_strategy: Arc<dyn OverlapStrategy>,
+}
+
+impl TierMultiLevelColumnPicker {
+    pub fn new(
+        config: Arc<CompactionConfig>,
+        overlap_strategy: Arc<dyn OverlapStrategy>,
+    ) -> TierMultiLevelColumnPicker {
+        TierMultiLevelColumnPicker {
+            config,
+            overlap_strategy,
+        }
+    }
+
     fn pick_multi_level(
         &self,
         l0: &OverlappingLevel,
@@ -238,7 +253,9 @@ impl TierCompactionPicker {
         }
         None
     }
+}
 
+impl TierCompactionPicker {
     fn pick_overlapping_level(
         &self,
         l0: &OverlappingLevel,
@@ -344,16 +361,40 @@ impl CompactionPicker for TierCompactionPicker {
         if l0.sub_levels.is_empty() {
             return None;
         }
+        self.pick_overlapping_level(l0, &level_handlers[0], stats)
+    }
+
+    fn get_select_level(&self) -> usize {
+        0
+    }
+    fn get_target_level(&self) -> usize {
+        0
+    }
+}
+
+impl CompactionPicker for TierMultiLevelColumnPicker {
+    fn pick_compaction(
+        &mut self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput> {
+        let l0 = levels.l0.as_ref().unwrap();
+        if l0.sub_levels.is_empty() {
+            return None;
+        }
 
         if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
             return Some(ret);
         }
 
-        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
-            return Some(ret);
-        }
-
         self.pick_multi_level(l0, &level_handlers[0], stats)
+    }
+    fn get_select_level(&self) -> usize {
+        0
+    }
+    fn get_target_level(&self) -> usize {
+        0
     }
 }
 

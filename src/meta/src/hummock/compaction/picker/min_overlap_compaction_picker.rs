@@ -143,6 +143,12 @@ impl CompactionPicker for MinOverlappingPicker {
             target_sub_level_id: 0,
         })
     }
+    fn get_select_level(&self) -> usize {
+        self.level
+    }
+    fn get_target_level(&self) -> usize {
+        self.target_level
+    }
 }
 
 pub struct NonOverlapSubLevelPicker {

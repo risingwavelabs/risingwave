@@ -323,6 +323,9 @@ pub trait CompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
+
+    fn get_select_level(&self) -> usize;
+    fn get_target_level(&self) -> usize;
 }
 
 #[derive(Default, Clone, Debug)]

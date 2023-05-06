@@ -54,7 +54,7 @@ impl CompactionPicker for LevelCompactionPicker {
         let is_l0_pending_compact =
             level_handlers[0].is_level_all_pending_compact(&l0.sub_levels[0]);
 
-        if !self.config.split_by_state_table && is_l0_pending_compact {
+        if is_l0_pending_compact {
             stats.skip_by_pending_files += 1;
             return None;
         }
@@ -66,6 +66,12 @@ impl CompactionPicker for LevelCompactionPicker {
             level_handlers,
             stats,
         )
+    }
+    fn get_select_level(&self) -> usize {
+        0
+    }
+    fn get_target_level(&self) -> usize {
+        self.target_level
     }
 }
 
