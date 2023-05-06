@@ -40,8 +40,8 @@ cargo make ci-kill
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3streaming-2serving-3fe
-sqllogictest ${host_args} -d dev './e2e_test/read_barrier/ddl.slt' -j 16 --junit "parallel-batch-${profile}"
-sqllogictest ${host_args} -d dev './e2e_test/read_checkpoint/ddl.slt' -j 16 --junit "parallel-batch-${profile}"
+sqllogictest ${host_args} -d dev './e2e_test/read_barrier/ddl.slt' -j 16 --junit "parallel-batch-ddl-${profile}"
+sqllogictest ${host_args} -d dev './e2e_test/read_checkpoint/ddl.slt' -j 16 --junit "parallel-batch-ddl-${profile}"
 sqllogictest ${host_args} -d dev './e2e_test/read_barrier/batch.slt' -j 16 --junit "parallel-batch-${profile}"
 sqllogictest ${host_args} -d dev './e2e_test/read_checkpoint/batch.slt' -j 16 --junit "parallel-batch-${profile}"
 

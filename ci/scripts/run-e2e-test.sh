@@ -44,8 +44,8 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/read_barrier/ddl.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/ddl.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/read_barrier/batch.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/batch.slt' --junit "batch-ddl-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_barrier/batch.slt' --junit "batch-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/batch.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
