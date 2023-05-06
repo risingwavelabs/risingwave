@@ -1759,8 +1759,8 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job)",
-                    "uploading memory - {{job}}",
+                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],
         ),

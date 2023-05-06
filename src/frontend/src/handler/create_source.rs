@@ -353,7 +353,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "_id".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -364,7 +364,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "payload".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -531,7 +531,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
