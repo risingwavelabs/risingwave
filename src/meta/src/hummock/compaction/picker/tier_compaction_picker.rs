@@ -69,17 +69,10 @@ impl TierCompactionPicker {
 
             let tier_sub_level_compact_level_count =
                 self.config.level0_sub_level_compact_level_count as usize;
-            // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
-            let max_depth = std::cmp::max(
-                (self.config.max_compaction_bytes as f64
-                    / self.config.sub_level_max_compaction_bytes as f64) as usize,
-                tier_sub_level_compact_level_count + 1,
-            );
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-                0,
+                self.config.sub_level_max_compaction_bytes / 2,
                 max_compaction_bytes,
-                1,
-                max_depth,
+                tier_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 self.overlap_strategy.clone(),
             );
@@ -95,11 +88,9 @@ impl TierCompactionPicker {
             let mut level_select_tables: Vec<Vec<SstableInfo>> = vec![];
             // Limit the number of selection levels for the non-overlapping
             // sub_level at least level0_sub_level_compact_level_count
-            for (plan_index, (compaction_bytes, all_file_count, level_select_sst)) in
-                l0_select_tables_vec.into_iter().enumerate()
-            {
+            for (plan_index, input) in l0_select_tables_vec.into_iter().enumerate() {
                 if plan_index == 0
-                    && level_select_sst.len()
+                    && input.sstable_infos.len()
                         < self.config.level0_sub_level_compact_level_count as usize
                 {
                     // first plan level count smaller than limit
@@ -107,7 +98,7 @@ impl TierCompactionPicker {
                 }
 
                 let mut max_level_size = 0;
-                for level_select_table in &level_select_sst {
+                for level_select_table in &input.sstable_infos {
                     let level_select_size = level_select_table
                         .iter()
                         .map(|sst| sst.file_size)
@@ -122,17 +113,18 @@ impl TierCompactionPicker {
                 // of level0_sub_level_compact_level_count just for convenient.
                 let is_write_amp_large =
                     max_level_size * self.config.level0_sub_level_compact_level_count as u64 / 2
-                        >= compaction_bytes;
+                        >= input.total_file_size;
 
                 if is_write_amp_large
-                    && level_select_sst.len() < tier_sub_level_compact_level_count
-                    && all_file_count < self.config.level0_max_compact_file_number as usize
+                    && input.sstable_infos.len() <= tier_sub_level_compact_level_count
+                    && input.total_file_count <= self.config.level0_max_compact_file_number as usize
+                    && input.total_file_size <= max_compaction_bytes
                 {
                     skip_by_write_amp = true;
                     continue;
                 }
 
-                level_select_tables = level_select_sst;
+                level_select_tables = input.sstable_infos;
                 break;
             }
 

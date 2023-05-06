@@ -115,19 +115,11 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        // FIXME(li0k): Just workaround, need to use more reasonable way to limit task size
-        let max_depth = std::cmp::max(
-            (self.config.max_compaction_bytes as f64
-                / self.config.sub_level_max_compaction_bytes as f64) as usize,
-            self.config.level0_sub_level_compact_level_count as usize + 1,
-        );
-
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-            0,
+            self.config.sub_level_max_compaction_bytes,
             self.config.max_compaction_bytes,
-            1,
+            self.config.level0_sub_level_compact_level_count as usize,
             // The maximum number of sub_level compact level per task
-            max_depth,
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
         );
@@ -147,8 +139,9 @@ impl LevelCompactionPicker {
         ) = (vec![], vec![]);
 
         {
-            for (total_select_size, _, level_select_table) in l0_select_tables_vec {
-                let l0_select_tables = level_select_table
+            for input in l0_select_tables_vec {
+                let l0_select_tables = input
+                    .sstable_infos
                     .iter()
                     .flat_map(|select_tables| select_tables.clone())
                     .collect_vec();
@@ -175,7 +168,7 @@ impl LevelCompactionPicker {
                 }
 
                 if !target_level_ssts.is_empty()
-                    && level_select_table.len()
+                    && input.sstable_infos.len()
                         < self.config.level0_sub_level_compact_level_count as usize
                 {
                     // not trivial move
@@ -183,12 +176,12 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
-                if total_select_size < target_level_size {
+                if input.total_file_size < target_level_size {
                     skip_by_write_amp = true;
                     continue;
                 }
 
-                level_select_files = level_select_table;
+                level_select_files = input.sstable_infos;
                 target_level_files = target_level_ssts;
                 break;
             }
