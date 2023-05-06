@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use futures::FutureExt;
@@ -184,9 +186,7 @@ impl ExprImpl {
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        let mut visitor = CollectInputRef::with_capacity(input_col_num);
-        visitor.visit_expr(self);
-        visitor.into()
+        collect_input_refs(input_col_num, once(self))
     }
 
     /// Check if the expression has no side effects and output is deterministic
