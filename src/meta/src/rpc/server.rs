@@ -20,7 +20,6 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
-use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -593,8 +592,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
-        if system_params_reader.telemetry_enabled(){
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
             mgr.start_telemetry_reporting().await;
         }
         sub_tasks.push(mgr.watch_params_change());

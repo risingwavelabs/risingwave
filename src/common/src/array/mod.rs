@@ -72,7 +72,6 @@ pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::types::*;
-use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -105,14 +104,11 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> Self {
-        // No metadata by default.
-        Self::with_meta(capacity, ArrayMeta::Simple)
-    }
+    fn new(capacity: usize) -> Self;
 
     /// # Panics
     /// Panics if `meta`'s type mismatches with the array type.
-    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
+    fn with_type(capacity: usize, ty: DataType) -> Self;
 
     /// Append a value multiple times.
     ///
@@ -273,41 +269,11 @@ pub trait Array:
         self.len() == 0
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl;
-
-    fn array_meta(&self) -> ArrayMeta {
-        ArrayMeta::Simple
+    fn create_builder(&self, capacity: usize) -> Self::Builder {
+        Self::Builder::with_type(capacity, self.data_type())
     }
-}
 
-/// The creation of [`Array`] typically does not rely on [`DataType`].
-/// For now the exceptions are list and struct, which require type details
-/// as they decide the layout of the array.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ArrayMeta {
-    Simple, // Simple array without given any extra metadata.
-    Struct {
-        children: Arc<[DataType]>,
-        children_names: Arc<[String]>,
-    },
-    List {
-        datatype: Box<DataType>,
-    },
-}
-
-impl From<&DataType> for ArrayMeta {
-    fn from(data_type: &DataType) -> Self {
-        match data_type {
-            DataType::Struct(struct_type) => ArrayMeta::Struct {
-                children: struct_type.fields.clone().into(),
-                children_names: struct_type.field_names.clone().into(),
-            },
-            DataType::List { datatype } => ArrayMeta::List {
-                datatype: datatype.clone(),
-            },
-            _ => ArrayMeta::Simple,
-        }
-    }
+    fn data_type(&self) -> DataType;
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -319,10 +285,11 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
-            if visible {
-                builder.append(elem);
+        let mut builder = A::Builder::with_type(cardinality, self.data_type());
+        for idx in visibility.iter_ones() {
+            // SAFETY(value_at_unchecked): the idx is always in bound.
+            unsafe {
+                builder.append(self.value_at_unchecked(idx));
             }
         }
         builder.finish()
@@ -662,7 +629,7 @@ macro_rules! impl_array {
 
             pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
-                    $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
+                    $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
                 }
             }
         }
@@ -747,13 +714,14 @@ impl PartialEq for ArrayImpl {
 mod tests {
 
     use super::*;
+    use crate::util::iter_util::ZipEqFast;
 
     fn filter<'a, A, F>(data: &'a A, pred: F) -> ArrayResult<A>
     where
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::with_meta(data.len(), data.array_meta());
+        let mut builder = A::Builder::with_type(data.len(), data.data_type());
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i));
@@ -772,7 +740,6 @@ mod tests {
         assert_eq!(array.iter().collect::<Vec<Option<i32>>>(), vec![Some(60)]);
     }
 
-    use num_traits::cast::AsPrimitive;
     use num_traits::ops::checked::CheckedAdd;
 
     fn vec_add<T1, T2, T3>(
@@ -780,14 +747,14 @@ mod tests {
         b: &PrimitiveArray<T2>,
     ) -> ArrayResult<PrimitiveArray<T3>>
     where
-        T1: PrimitiveArrayItemType + AsPrimitive<T3>,
-        T2: PrimitiveArrayItemType + AsPrimitive<T3>,
-        T3: PrimitiveArrayItemType + CheckedAdd,
+        T1: PrimitiveArrayItemType,
+        T2: PrimitiveArrayItemType,
+        T3: PrimitiveArrayItemType + CheckedAdd + From<T1> + From<T2>,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
         for (a, b) in a.iter().zip_eq_fast(b.iter()) {
             let item = match (a, b) {
-                (Some(a), Some(b)) => Some(a.as_() + b.as_()),
+                (Some(a), Some(b)) => Some(T3::from(a) + T3::from(b)),
                 _ => None,
             };
             builder.append(item);

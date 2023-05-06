@@ -58,8 +58,8 @@ impl StreamHashAgg {
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
         // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.iter().enumerate() {
-            if input.watermark_columns().contains(*input_idx) {
+        for (idx, input_idx) in logical.group_key.ones().enumerate() {
+            if input.watermark_columns().contains(input_idx) {
                 watermark_columns.insert(idx);
             }
         }
@@ -78,7 +78,7 @@ impl StreamHashAgg {
         &self.logical.agg_calls
     }
 
-    pub fn group_key(&self) -> &[usize] {
+    pub fn group_key(&self) -> &FixedBitSet {
         &self.logical.group_key
     }
 
@@ -134,7 +134,7 @@ impl StreamNode for StreamHashAgg {
             self.logical.infer_tables(&self.base, self.vnode_col_idx);
 
         PbNodeBody::HashAgg(HashAggNode {
-            group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
+            group_key: self.group_key().ones().map(|idx| idx as u32).collect(),
             agg_calls: self
                 .agg_calls()
                 .iter()

@@ -91,7 +91,16 @@ impl Rule for PullUpCorrelatedPredicateRule {
         let on = apply_on.and(Condition {
             conjunctions: cor_exprs,
         });
-        Some(LogicalJoin::new(apply_left, project, join_type, on).into())
+        Some(
+            LogicalJoin::with_output_indices(
+                apply_left,
+                project,
+                join_type,
+                on,
+                (0..apply.schema().len()).collect(),
+            )
+            .into(),
+        )
     }
 }
 

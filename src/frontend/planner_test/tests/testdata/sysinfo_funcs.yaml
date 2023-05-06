@@ -26,7 +26,10 @@
 - sql: |
     select current_schemas(true and false);
   binder_error: |-
-    Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.
+    Bind error: failed to bind expression: current_schemas(true AND false)
+
+    Caused by:
+      Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     select current_timestamp > now() - interval '10 minutes';

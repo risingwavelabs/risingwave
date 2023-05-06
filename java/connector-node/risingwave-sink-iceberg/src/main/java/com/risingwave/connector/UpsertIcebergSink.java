@@ -48,7 +48,7 @@ import org.apache.iceberg.types.Types;
 
 public class UpsertIcebergSink extends SinkBase {
     private final HadoopCatalog hadoopCatalog;
-    private final Transaction transaction;
+    private final Table icebergTable;
     private final FileFormat fileFormat;
     private final Schema rowSchema;
     private final Schema deleteRowSchema;
@@ -64,7 +64,7 @@ public class UpsertIcebergSink extends SinkBase {
             FileFormat fileFormat) {
         super(tableSchema);
         this.hadoopCatalog = hadoopCatalog;
-        this.transaction = icebergTable.newTransaction();
+        this.icebergTable = icebergTable;
         this.fileFormat = fileFormat;
         this.rowSchema =
                 icebergTable.schema().select(Arrays.asList(getTableSchema().getColumnNames()));
@@ -87,22 +87,18 @@ public class UpsertIcebergSink extends SinkBase {
         try {
             String filename = fileFormat.addExtension(UUID.randomUUID().toString());
             OutputFile outputFile =
-                    transaction
-                            .table()
+                    icebergTable
                             .io()
                             .newOutputFile(
-                                    transaction.table().location()
+                                    icebergTable.location()
                                             + "/data/"
-                                            + transaction
-                                                    .table()
-                                                    .spec()
-                                                    .partitionToPath(partitionKey)
+                                            + icebergTable.spec().partitionToPath(partitionKey)
                                             + "/"
                                             + filename);
             return Parquet.writeDeletes(outputFile)
-                    .forTable(transaction.table())
+                    .forTable(icebergTable)
                     .rowSchema(deleteRowSchema)
-                    .withSpec(transaction.table().spec())
+                    .withSpec(icebergTable.spec())
                     .withPartition(partitionKey)
                     .createWriterFunc(GenericParquetWriter::buildWriter)
                     .overwrite()
@@ -121,21 +117,17 @@ public class UpsertIcebergSink extends SinkBase {
         try {
             String filename = fileFormat.addExtension(UUID.randomUUID().toString());
             OutputFile outputFile =
-                    transaction
-                            .table()
+                    icebergTable
                             .io()
                             .newOutputFile(
-                                    transaction.table().location()
+                                    icebergTable.location()
                                             + "/data/"
-                                            + transaction
-                                                    .table()
-                                                    .spec()
-                                                    .partitionToPath(partitionKey)
+                                            + icebergTable.spec().partitionToPath(partitionKey)
                                             + "/"
                                             + filename);
             return Parquet.writeData(outputFile)
                     .schema(rowSchema)
-                    .withSpec(transaction.table().spec())
+                    .withSpec(icebergTable.spec())
                     .withPartition(partitionKey)
                     .createWriterFunc(GenericParquetWriter::buildWriter)
                     .overwrite()
@@ -163,7 +155,7 @@ public class UpsertIcebergSink extends SinkBase {
                 }
                 Record record = newRecord(rowSchema, row);
                 PartitionKey partitionKey =
-                        new PartitionKey(transaction.table().spec(), transaction.table().schema());
+                        new PartitionKey(icebergTable.spec(), icebergTable.schema());
                 partitionKey.partition(record);
                 SinkRowMap sinkRowMap;
                 if (sinkRowMapByPartition.containsKey(partitionKey)) {
@@ -212,6 +204,7 @@ public class UpsertIcebergSink extends SinkBase {
 
     @Override
     public void sync() {
+        Transaction transaction = icebergTable.newTransaction();
         for (Map.Entry<PartitionKey, SinkRowMap> entry : sinkRowMapByPartition.entrySet()) {
             EqualityDeleteWriter<Record> equalityDeleteWriter =
                     newEqualityDeleteWriter(entry.getKey());

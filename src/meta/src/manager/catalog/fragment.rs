@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitMapping};
+use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
@@ -42,7 +43,7 @@ use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, TableFragments, ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::{visit_stream_node, SplitAssignment};
+use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {

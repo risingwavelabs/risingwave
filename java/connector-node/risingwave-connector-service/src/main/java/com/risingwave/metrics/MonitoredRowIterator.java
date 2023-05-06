@@ -19,9 +19,14 @@ import java.util.Iterator;
 
 public class MonitoredRowIterator implements Iterator<SinkRow> {
     private final Iterator<SinkRow> inner;
+    private final String connectorType;
+    private final String sinkId;
 
-    public MonitoredRowIterator(Iterator<SinkRow> inner) {
+    public MonitoredRowIterator(Iterator<SinkRow> inner, String connectorType, String sinkId) {
+
         this.inner = inner;
+        this.connectorType = connectorType;
+        this.sinkId = sinkId;
     }
 
     @Override
@@ -31,7 +36,7 @@ public class MonitoredRowIterator implements Iterator<SinkRow> {
 
     @Override
     public SinkRow next() {
-        ConnectorNodeMetrics.incSinkRowsReceived();
+        ConnectorNodeMetrics.incSinkRowsReceived(connectorType, sinkId, 1);
         return inner.next();
     }
 }

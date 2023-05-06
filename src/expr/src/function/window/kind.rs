@@ -14,11 +14,16 @@
 
 use parse_display::{Display, FromStr};
 
+use crate::function::aggregate::AggKind;
+
 /// Kind of window functions.
 #[derive(Debug, Display, FromStr, Copy, Clone, PartialEq, Eq, Hash)]
 #[display(style = "snake_case")]
 pub enum WindowFuncKind {
     // General-purpose window functions.
+    RowNumber,
+    Rank,
+    DenseRank,
     Lag,
     Lead,
     // FirstValue,
@@ -26,6 +31,12 @@ pub enum WindowFuncKind {
     // NthValue,
 
     // Aggregate functions that are used with `OVER`.
-    // #[display("{0}")]
-    // Aggregate(AggKind),
+    #[display("{0}")]
+    Aggregate(AggKind),
+}
+
+impl WindowFuncKind {
+    pub fn is_rank(&self) -> bool {
+        matches!(self, Self::RowNumber | Self::Rank | Self::DenseRank)
+    }
 }

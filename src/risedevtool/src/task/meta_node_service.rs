@@ -162,6 +162,8 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

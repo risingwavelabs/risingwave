@@ -76,6 +76,7 @@ mod lookup_union;
 mod managed_state;
 mod merge;
 mod mview;
+mod no_op;
 mod now;
 mod over_window;
 mod project;
@@ -125,6 +126,7 @@ pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use no_op::NoOpExecutor;
 pub use now::NowExecutor;
 pub use project::ProjectExecutor;
 pub use project_set::*;
@@ -148,6 +150,8 @@ use self::barrier_align::AlignedMessageStream;
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
+
+pub use risingwave_common::util::epoch::task_local::{curr_epoch, epoch, prev_epoch};
 
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 

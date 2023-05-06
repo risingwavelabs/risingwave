@@ -222,13 +222,12 @@ pub async fn sst_dump_via_sstable_store(
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
     println!(
-        "Range Tomestone Count: {}",
-        sstable_meta.range_tombstone_list.len()
+        "Monotonoic Deletes Count: {}",
+        sstable_meta.monotonic_tombstone_events.len()
     );
-    for range_tomstone in &sstable_meta.range_tombstone_list {
-        println!("\tstart: {:?}", range_tomstone.start_user_key);
-        println!("\tend: {:?}", range_tomstone.end_user_key);
-        println!("\tepoch: {:?}", range_tomstone.sequence);
+    for monotonic_delete in &sstable_meta.monotonic_tombstone_events {
+        println!("\tevent key: {:?}", monotonic_delete.event_key);
+        println!("\tnew epoch: {:?}", monotonic_delete.new_epoch);
     }
 
     println!("Block Count: {}", sstable.block_count());

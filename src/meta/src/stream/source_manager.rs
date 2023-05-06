@@ -53,6 +53,8 @@ pub struct SourceManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 }
 
+const MAX_FAIL_CNT: u32 = 10;
+
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
 }
@@ -66,9 +68,19 @@ struct ConnectorSourceWorker {
     enumerator: SplitEnumeratorImpl,
     period: Duration,
     metrics: Arc<MetaMetrics>,
+    connector_properties: ConnectorProperties,
+    fail_cnt: u32,
 }
 
 impl ConnectorSourceWorker {
+    async fn refresh(&mut self) -> MetaResult<()> {
+        let enumerator = SplitEnumeratorImpl::create(self.connector_properties.clone()).await?;
+        self.enumerator = enumerator;
+        self.fail_cnt = 0;
+        tracing::info!("refreshed source enumerator: {}", self.source_name);
+        Ok(())
+    }
+
     pub async fn create(
         connector_rpc_endpoint: &Option<String>,
         source: &Source,
@@ -81,7 +93,7 @@ impl ConnectorSourceWorker {
             let table_schema = Self::extract_source_schema(source);
             properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
-        let enumerator = SplitEnumeratorImpl::create(properties).await?;
+        let enumerator = SplitEnumeratorImpl::create(properties.clone()).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id: source.id,
@@ -90,6 +102,8 @@ impl ConnectorSourceWorker {
             enumerator,
             period,
             metrics,
+            connector_properties: properties,
+            fail_cnt: 0,
         })
     }
 
@@ -108,6 +122,11 @@ impl ConnectorSourceWorker {
                     }
                 }
                 _ = interval.tick() => {
+                    if self.fail_cnt > MAX_FAIL_CNT {
+                        if let Err(e) = self.refresh().await {
+                            tracing::error!("error happened when refresh from connector source worker: {}", e.to_string());
+                        }
+                    }
                     if let Err(e) = self.tick().await {
                         tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
                     }
@@ -125,9 +144,11 @@ impl ConnectorSourceWorker {
         };
         let splits = self.enumerator.list_splits().await.map_err(|e| {
             source_is_up(0);
+            self.fail_cnt += 1;
             e
         })?;
         source_is_up(1);
+        self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits

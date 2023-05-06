@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::config::MetaBackend;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
@@ -32,13 +31,10 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
     }
 
     async fn get_tracking_id(&self) -> Option<ClusterId> {
-        match self.meta_store.meta_store_type() {
-            MetaBackend::Etcd => ClusterId::from_meta_store(&self.meta_store)
-                .await
-                .ok()
-                .flatten(),
-            MetaBackend::Mem => None,
-        }
+        ClusterId::from_meta_store(&self.meta_store)
+            .await
+            .ok()
+            .flatten()
     }
 }
 
