@@ -17,8 +17,9 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::types::num256::Int256;
-use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time};
+use risingwave_common::types::{
+    DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
@@ -115,13 +116,11 @@ fn do_parse_simd_json_value(
         DataType::Jsonb => {
             // jsonb will be output as a string in debezium format
             if *format == SourceFormat::DebeziumJson {
-                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_str(ensure_str!(
-                    v, "jsonb"
-                ))?)
+                ScalarImpl::Jsonb(JsonbVal::from_str(ensure_str!(v, "jsonb"))?)
             } else {
                 let v: serde_json::Value = v.clone().try_into()?;
                 #[expect(clippy::disallowed_methods)]
-                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_serde(v))
+                ScalarImpl::Jsonb(JsonbVal::from_serde(v))
             }
         }
         DataType::Struct(struct_type_info) => {
@@ -139,9 +138,7 @@ fn do_parse_simd_json_value(
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }
-        DataType::List {
-            datatype: item_type,
-        } => {
+        DataType::List(item_type) => {
             if let BorrowedValue::Array(values) = v {
                 let values = values
                     .iter()

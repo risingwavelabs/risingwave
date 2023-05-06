@@ -72,7 +72,7 @@ pub async fn compactor_serve(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
-        0,
+        Default::default(),
         &config.meta,
     )
     .await

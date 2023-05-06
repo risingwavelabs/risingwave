@@ -26,7 +26,7 @@ pub type SystemParamsError = String;
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
 /// Only includes undeprecated params.
-/// Macro input is { field identifier, type, default value }
+/// Macro input is { field identifier, type, default value, is mutable }
 ///
 /// Note:
 /// - Having `None` as default value means the parameter must be initialized.
@@ -34,18 +34,18 @@ type Result<T> = core::result::Result<T, SystemParamsError>;
 macro_rules! for_all_undeprecated_params {
     ($macro:ident
         // Hack: match trailing fields to implement `for_all_params`
-        $(, { $field:ident, $type:ty, $default:expr })*) => {
+        $(, { $field:ident, $type:ty, $default:expr, $is_mutable:expr })*) => {
         $macro! {
-            { barrier_interval_ms, u32, Some(1000_u32) },
-            { checkpoint_frequency, u64, Some(10_u64) },
-            { sstable_size_mb, u32, Some(256_u32) },
-            { block_size_kb, u32, Some(64_u32) },
-            { bloom_false_positive, f64, Some(0.001_f64) },
-            { state_store, String, None },
-            { data_directory, String, None },
-            { backup_storage_url, String, Some("memory".to_string()) },
-            { backup_storage_directory, String, Some("backup".to_string()) },
-            { telemetry_enabled, bool, Some(true) },
+            { barrier_interval_ms, u32, Some(1000_u32), false },
+            { checkpoint_frequency, u64, Some(10_u64), true },
+            { sstable_size_mb, u32, Some(256_u32), false },
+            { block_size_kb, u32, Some(64_u32), false },
+            { bloom_false_positive, f64, Some(0.001_f64), false },
+            { state_store, String, None, false },
+            { data_directory, String, None, false },
+            { backup_storage_url, String, Some("memory".to_string()), false },
+            { backup_storage_directory, String, Some("backup".to_string()), false },
+            { telemetry_enabled, bool, Some(true), true },
             $({ $field, $type, $default },)*
         }
     };
@@ -72,7 +72,7 @@ macro_rules! key_of {
 
 /// Define key constants for fields in `SystemParams` for use of other modules.
 macro_rules! def_key {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         paste! {
             $(
                 pub const [<$field:upper _KEY>]: &str = key_of!($field);
@@ -85,7 +85,7 @@ for_all_params!(def_key);
 
 /// Define default value functions.
 macro_rules! def_default {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         pub mod default {
             $(
                 pub fn $field() -> Option<$type> {
@@ -114,7 +114,7 @@ macro_rules! impl_check_missing_fields {
 
 /// Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
         #[allow(clippy::vec_init_then_push)]
@@ -131,7 +131,7 @@ macro_rules! impl_system_params_to_kv {
 }
 
 macro_rules! impl_derive_missing_fields {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         fn derive_missing_fields(params: &mut SystemParams) {
             $(
                 if params.$field.is_none() && let Some(v) = OverrideFromParams::$field(params) {
@@ -144,7 +144,7 @@ macro_rules! impl_derive_missing_fields {
 
 /// Derive deserialization from kv pairs.
 macro_rules! impl_system_params_from_kv {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         /// Try to deserialize deprecated fields as well.
         /// Return error if there are unrecognized fields.
         pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<SystemParams>
@@ -178,22 +178,22 @@ macro_rules! impl_system_params_from_kv {
     };
 }
 
-/// Define check rules when a field is changed. By default all fields are immutable.
+/// Define check rules when a field is changed.
 /// If you want custom rules, please override the default implementation in
 /// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation_on_set {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         #[allow(clippy::ptr_arg)]
         trait ValidateOnSet {
             $(
                 fn $field(_v: &$type) -> Result<()> {
-                    Self::expect_immutable(key_of!($field))
+                    if !$is_mutable {
+                        Err(format!("{:?} is immutable", key_of!($field)))
+                    } else {
+                        Ok(())
+                    }
                 }
             )*
-
-            fn expect_immutable(field: &str) -> Result<()> {
-                Err(format!("{:?} is immutable", field))
-            }
 
             fn expect_range<T, R>(v: T, range: R) -> Result<()>
             where
@@ -231,7 +231,7 @@ macro_rules! impl_default_validation_on_set {
 ///
 /// Note that newer versions must be prioritized during derivation.
 macro_rules! impl_default_from_other_params {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         trait FromParams {
             $(
                 fn $field(_params: &SystemParams) -> Option<$type> {
@@ -243,7 +243,7 @@ macro_rules! impl_default_from_other_params {
 }
 
 macro_rules! impl_set_system_param {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         pub fn set_system_param(params: &mut SystemParams, key: &str, value: Option<String>) -> Result<()> {
              match key {
                 $(
@@ -269,8 +269,21 @@ macro_rules! impl_set_system_param {
     };
 }
 
+macro_rules! impl_is_mutable {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
+        pub fn is_mutable(field: &str) -> Result<bool> {
+            match field {
+                $(
+                    key_of!($field) => Ok($is_mutable),
+                )*
+                _ => Err(format!("{:?} is not a system parameter", field))
+            }
+        }
+    }
+}
+
 macro_rules! impl_system_params_for_test {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         #[allow(clippy::needless_update)]
         pub fn system_params_for_test() -> SystemParams {
             let mut ret = SystemParams {
@@ -286,8 +299,9 @@ macro_rules! impl_system_params_for_test {
     };
 }
 
-for_all_undeprecated_params!(impl_derive_missing_fields);
 for_all_params!(impl_system_params_from_kv);
+for_all_params!(impl_is_mutable);
+for_all_undeprecated_params!(impl_derive_missing_fields);
 for_all_undeprecated_params!(impl_check_missing_fields);
 for_all_undeprecated_params!(impl_system_params_to_kv);
 for_all_undeprecated_params!(impl_set_system_param);
@@ -307,10 +321,6 @@ impl ValidateOnSet for OverrideValidateOnSet {
 
     fn backup_storage_url(_v: &String) -> Result<()> {
         // TODO
-        Ok(())
-    }
-
-    fn telemetry_enabled(_: &bool) -> Result<()> {
         Ok(())
     }
 }

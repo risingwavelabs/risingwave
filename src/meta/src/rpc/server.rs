@@ -461,7 +461,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id && let Some(security_group_id) = &env.opts.security_group_id {
+    if let Some(my_vpc_id) = &env.opts.vpc_id
+        && let Some(security_group_id) = &env.opts.security_group_id
+    {
         let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
         aws_cli = Some(cli);
     }

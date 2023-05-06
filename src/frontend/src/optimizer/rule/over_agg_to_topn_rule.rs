@@ -47,12 +47,12 @@ impl Rule for OverAggToTopNRule {
         // The filter is directly on top of the over agg after predicate pushdown.
         let over_agg = plan.as_logical_over_agg()?;
 
-        if over_agg.window_functions.len() != 1 {
+        if over_agg.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
             return None;
         }
 
-        let f = &over_agg.window_functions[0];
+        let f = &over_agg.window_functions()[0];
         if !f.kind.is_rank() {
             // Only rank functions can be converted to TopN.
             return None;
@@ -120,11 +120,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     for cond in rank_preds {
         if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             match cmp {
                 ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
@@ -135,11 +131,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             }
         } else if let Some((input_ref, v)) = cond.as_eq_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
                 tracing::error!(

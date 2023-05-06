@@ -25,8 +25,7 @@ use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::{OwnedRow, Row};
-use crate::types::to_text::ToText;
-use crate::types::DataType;
+use crate::types::{DataType, ToText};
 use crate::util::iter_util::ZipEqFast;
 
 /// `Op` represents three operations in `StreamChunk`.

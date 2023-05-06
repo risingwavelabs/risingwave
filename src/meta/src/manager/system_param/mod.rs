@@ -164,7 +164,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
 // 4. None, None: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. The new field is not initialized either, just leave it as `None`.
 macro_rules! impl_merge_params {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
             $(
                 match (persisted.$field.as_ref(), init.$field) {

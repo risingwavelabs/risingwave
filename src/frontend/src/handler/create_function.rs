@@ -66,16 +66,10 @@ pub async fn handle_create_function(
         .into());
     }
     let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
-        return Err(ErrorCode::InvalidParameterValue(
-            "AS must be specified".to_string(),
-        )
-        .into());
+        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
     };
     let Some(CreateFunctionUsing::Link(link)) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue(
-            "USING must be specified".to_string(),
-        )
-        .into());
+        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
     };
     let return_type;
     let kind = match returns {
