@@ -122,9 +122,49 @@
 - sql: |
     create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') ROW FORMAT JSON;
     select lag(a, 2) over (partition by b order by tm) from t;
+  eowc_stream_plan: |
+    StreamMaterialize { columns: [lag, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamProject { exprs: [lag, _row_id] }
+        └─StreamEowcOverWindow { window_functions: [lag(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)] }
+          └─StreamSort { sort_column_index: 2 }
+            └─StreamExchange { dist: HashShard(b) }
+              └─StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
+                └─StreamRowIdGen { row_id_index: 3 }
+                  └─StreamWatermarkFilter { watermark_descs: [idx: 2, expr: (tm - '00:05:00':Interval)] }
+                    └─StreamSource { source: "t", columns: ["a", "b", "tm", "_row_id"] }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [lag, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck" }
+    ├── materialized table: 4294967294
+    └──  StreamExchange Hash([1]) from 1
+
+    Fragment 1
+    StreamProject { exprs: [lag, _row_id] }
+    └── StreamEowcOverWindow { window_functions: [lag(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)] }
+        └── StreamSort { sort_column_index: 2 }
+            └──  StreamExchange Hash([1]) from 2
+
+    Fragment 2
+    StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
+    └── StreamRowIdGen { row_id_index: 3 }
+        └── StreamWatermarkFilter { watermark_descs: [idx: 2, expr: (tm - '00:05:00':Interval)] }
+            └──  StreamSource { source: "t", columns: ["a", "b", "tm", "_row_id"] } { source state table: 3 }
+
+    Table 3
+    ├── columns: [ partition_id, offset_info ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 1
+
+    Table 4294967294
+    ├── columns: [ lag, _row_id ]
+    ├── primary key: [ $1 ASC ]
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 1
+
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-  eowc_stream_error: |-
     Feature is not yet implemented: OverAgg to stream
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124

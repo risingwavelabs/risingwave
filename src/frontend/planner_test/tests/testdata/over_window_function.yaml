@@ -4,7 +4,7 @@
     select lag(x) over() from t;
   logical_plan: |
     LogicalProject { exprs: [lag] }
-    └─LogicalOverAgg { window_functions: [lag() OVER(ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverAgg { window_functions: [lag(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -25,7 +25,7 @@
     select lead(x, 2) over() from t;
   logical_plan: |
     LogicalProject { exprs: [lead] }
-    └─LogicalOverAgg { window_functions: [lead() OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
+    └─LogicalOverAgg { window_functions: [lead(t.x) OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -53,7 +53,7 @@
     select sum(x) over() from t;
   logical_plan: |
     LogicalProject { exprs: [sum] }
-    └─LogicalOverAgg { window_functions: [sum() OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverAgg { window_functions: [sum(t.x) OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -66,14 +66,14 @@
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, min] }
-    └─LogicalOverAgg { window_functions: [min() OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverAgg { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, min] }
-    └─LogicalOverAgg { window_functions: [min() OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
+    └─LogicalOverAgg { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch
@@ -94,7 +94,7 @@
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, lag] }
-    └─LogicalOverAgg { window_functions: [lag() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverAgg { window_functions: [lag(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: OverAgg to batch

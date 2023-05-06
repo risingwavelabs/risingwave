@@ -80,6 +80,15 @@ impl StreamSort {
         let mut order_cols = HashSet::new();
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
         order_cols.insert(self.sort_column_index);
+
+        let dist_key = self.base.dist.dist_column_indices().to_vec();
+        for idx in &dist_key {
+            if !order_cols.contains(idx) {
+                tbl_builder.add_order_column(*idx, OrderType::ascending());
+                order_cols.insert(*idx);
+            }
+        }
+
         for idx in self.input.logical_pk() {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());
@@ -87,9 +96,8 @@ impl StreamSort {
             }
         }
 
-        let in_dist_key = self.input.distribution().dist_column_indices();
         let read_prefix_len_hint = 0;
-        tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
+        tbl_builder.build(dist_key, read_prefix_len_hint)
     }
 }
 
