@@ -99,15 +99,17 @@ pub fn gen_create_mv_plan(
 
     let col_names = get_column_names(&bound, session, columns)?;
 
+    let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
+    if emit_on_window_close {
+        context.warn("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+    }
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     }
-    let materialize = plan_root.gen_materialize_plan(
-        table_name,
-        definition,
-        emit_mode == Some(EmitMode::OnWindowClose),
-    )?;
+    let materialize =
+        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
