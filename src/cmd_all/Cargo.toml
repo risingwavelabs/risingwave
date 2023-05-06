@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
+rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]

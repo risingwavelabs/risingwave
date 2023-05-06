@@ -369,9 +369,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::List {
-            datatype: item_type,
-        } => deserialize_list(item_type, data)?,
+        DataType::List(item_type) => deserialize_list(item_type, data)?,
     })
 }
 

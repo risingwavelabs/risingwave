@@ -17,7 +17,9 @@ package com.risingwave.connector;
 import static org.assertj.core.api.Assertions.*;
 import static org.junit.Assert.assertEquals;
 
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.*;
+import com.risingwave.proto.Data;
 import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -27,10 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.*;
 import javax.sql.DataSource;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.MySQLContainer;
@@ -139,8 +138,66 @@ public class MySQLSourceTest {
             assertEquals(10000, count);
         } catch (ExecutionException e) {
             fail("Execution exception: ", e);
+        } finally {
+            // cleanup
+            query = testClient.sqlStmts.getProperty("tpch.drop.orders");
+            SourceTestClient.performQuery(connection, query);
+            connection.close();
         }
-        connection.close();
+    }
+
+    // test whether validation catches permission errors
+    @Test
+    public void testPermissionCheck() throws SQLException {
+        // user Root creates a superuser debezium
+        Connection connRoot = SourceTestClient.connect(mysqlDataSource);
+        String query = "CREATE USER debezium IDENTIFIED BY '" + mysql.getPassword() + "'";
+        SourceTestClient.performQuery(connRoot, query);
+        query =
+                "GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'debezium'";
+        SourceTestClient.performQuery(connRoot, query);
+        query =
+                "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connRoot, query);
+        ConnectorServiceProto.TableSchema tableSchema =
+                ConnectorServiceProto.TableSchema.newBuilder()
+                        .addColumns(
+                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                        .setName("o_key")
+                                        .setDataType(Data.DataType.TypeName.INT64)
+                                        .build())
+                        .addColumns(
+                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                        .setName("o_val")
+                                        .setDataType(Data.DataType.TypeName.INT32)
+                                        .build())
+                        .addPkIndices(0)
+                        .build();
+
+        try {
+            var resp =
+                    testClient.validateSource(
+                            mysql.getJdbcUrl(),
+                            mysql.getHost(),
+                            "debezium",
+                            mysql.getPassword(),
+                            SourceType.MYSQL,
+                            tableSchema,
+                            "test",
+                            "orders");
+            assertEquals(
+                    "INVALID_ARGUMENT: MySQL user does not have privilege LOCK TABLES, which is needed for debezium connector",
+                    resp.getError().getErrorMessage());
+        } catch (Exception e) {
+            Assert.fail("validate rpc fail: " + e.getMessage());
+        } finally {
+            // cleanup
+            query = testClient.sqlStmts.getProperty("tpch.drop.orders");
+            SourceTestClient.performQuery(connRoot, query);
+            query = "DROP USER IF EXISTS debezium";
+            SourceTestClient.performQuery(connRoot, query);
+            connRoot.close();
+        }
     }
 
     // generates test cases for the risingwave debezium parser

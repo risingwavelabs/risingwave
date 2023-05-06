@@ -148,7 +148,9 @@ impl LogicalOverAgg {
                     }
                     offset_expr
                         .cast_implicit(DataType::Int64)?
-                        .eval_row_const()?
+                        .try_fold_const()
+                        .transpose()?
+                        .flatten()
                         .map(|v| *v.as_int64() as usize)
                         .unwrap_or(1usize)
                 } else {

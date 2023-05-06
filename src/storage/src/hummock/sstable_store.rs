@@ -538,6 +538,16 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
+impl Default for SstableWriterOptions {
+    fn default() -> Self {
+        Self {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::NotFill,
+        }
+    }
+}
+
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
