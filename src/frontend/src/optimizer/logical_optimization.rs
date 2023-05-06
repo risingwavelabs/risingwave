@@ -119,9 +119,12 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
-    static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(
-        "Union Merge",
-        vec![UnionMergeRule::create()],
+    static ref SET_OPERATION_MERGE: OptimizationStage = OptimizationStage::new(
+        "Set Operation Merge",
+        vec![
+            UnionMergeRule::create(),
+            IntersectMergeRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 
@@ -378,9 +381,8 @@ impl LogicalOptimizer {
             }
         }
 
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-
-        plan = plan.optimize_by_rules(&UNION_MERGE);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
@@ -450,8 +452,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-        plan = plan.optimize_by_rules(&UNION_MERGE);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
