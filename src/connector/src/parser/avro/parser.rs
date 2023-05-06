@@ -257,8 +257,31 @@ impl AvroParser {
             } else {
                 Some(&*self.schema)
             };
-            from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
-                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
+            let mut value =
+                from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
+                    .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            if self.key_as_column && let Some(key_payload) = key {
+                let (schema_id, mut raw_payload) = extract_schema_id(&key_payload)?;
+                let writer_schema = resolver.get(schema_id).await?;
+                let key_avro_value = from_avro_datum(
+                    writer_schema.as_ref(),
+                    &mut raw_payload,
+                    self.key_schema.as_deref(),
+                ).map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+                if let Value::Record(fields) = value {
+                    let mut fields = fields;
+                    fields.push((AVRO_DEFAULT_KEY_COLUMN_NAME.to_string(), key_avro_value));
+                    value = Value::Record(fields);
+                } else {
+                    return Err(RwError::from(ProtocolError(
+                        "avro parse key_as_column unexpected value".to_string(),
+                    )));
+                }
+            }
+
+            value
         } else {
             let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
