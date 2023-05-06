@@ -226,7 +226,7 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("tracking id not found in meta store", err.to_error_str());
+        assert_eq!("cluster id not found in meta store", err.to_error_str());
 
         ClusterId::new()
             .put_at_meta_store(&meta_store)
