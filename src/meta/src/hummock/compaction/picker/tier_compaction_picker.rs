@@ -182,7 +182,6 @@ impl TierCompactionPicker {
                 0,
                 0,
                 self.config.sub_level_max_compaction_bytes,
-                false,
                 self.overlap_strategy.clone(),
             );
 
@@ -240,107 +239,13 @@ impl TierCompactionPicker {
         None
     }
 
-    fn pick_table_same_files(
-        &self,
-        l0: &OverlappingLevel,
-        level_handler: &LevelHandler,
-        member_table_ids: Vec<u32>,
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
-        // do not pick the first sub-level because we do not want to block the level compaction.
-        let non_overlapping_type = LevelType::Nonoverlapping as i32;
-        for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type != non_overlapping_type
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
-                continue;
-            }
-
-            for sst in &level.table_infos {
-                if level_handler.is_pending_compact(&sst.sst_id) {
-                    continue;
-                }
-            }
-
-            let max_compaction_bytes = std::cmp::min(
-                self.config.max_compaction_bytes,
-                self.config.sub_level_max_compaction_bytes,
-            );
-
-            for table_id in &member_table_ids {
-                let mut max_level_bytes = 0;
-                let mut waiting_enough_files = true;
-                let mut select_level_inputs = vec![];
-                let mut compaction_bytes = 0;
-                for other in &l0.sub_levels[idx..] {
-                    if compaction_bytes >= max_compaction_bytes {
-                        waiting_enough_files = false;
-                        break;
-                    }
-
-                    let mut pending_compact = false;
-                    let mut cur_level = InputLevel {
-                        level_idx: 0,
-                        level_type: other.level_type,
-                        table_infos: vec![],
-                    };
-                    let mut cur_level_size = 0;
-                    for sst in &other.table_infos {
-                        if *table_id == sst.table_ids[0] {
-                            if level_handler.is_pending_compact(&sst.sst_id) {
-                                pending_compact = true;
-                                break;
-                            }
-                            cur_level.table_infos.push(sst.clone());
-                            cur_level_size += sst.file_size;
-                        }
-                    }
-
-                    if pending_compact
-                        || cur_level_size > self.config.sub_level_max_compaction_bytes
-                    {
-                        break;
-                    }
-
-                    if cur_level.table_infos.is_empty() {
-                        continue;
-                    }
-
-                    compaction_bytes += cur_level_size;
-                    max_level_bytes = std::cmp::max(max_level_bytes, cur_level_size);
-                    select_level_inputs.push(cur_level);
-                }
-
-                if select_level_inputs.len()
-                    < self.config.level0_sub_level_compact_level_count as usize
-                {
-                    stats.skip_by_count_limit += 1;
-                    continue;
-                }
-
-                if max_level_bytes * 2 > compaction_bytes && waiting_enough_files {
-                    stats.skip_by_write_amp_limit += 1;
-                    continue;
-                }
-
-                select_level_inputs.reverse();
-                return Some(CompactionInput {
-                    input_levels: select_level_inputs,
-                    target_level: 0,
-                    target_sub_level_id: level.sub_level_id,
-                });
-            }
-        }
-        None
-    }
-
     fn pick_overlapping_level(
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        // do not pick the first sub-level because we do not want to block the level compaction.
+        let l0_level_count = l0.sub_levels.len();
         let overlapping_type = LevelType::Overlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type != overlapping_type {
@@ -408,12 +313,14 @@ impl TierCompactionPicker {
             // levels to ensure that we can merge as many sub_levels as possible
             let tier_sub_level_compact_level_count =
                 self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            if select_level_inputs.len() < tier_sub_level_compact_level_count
-                && waiting_enough_files
-            {
+            let min_level0_compact_file_number = self.config.level0_tier_compact_file_number
+                * std::cmp::max(1, l0_level_count / tier_sub_level_compact_level_count);
+
+            if compact_file_count < min_level0_compact_file_number && waiting_enough_files {
                 stats.skip_by_count_limit += 1;
                 continue;
             }
+
             select_level_inputs.reverse();
 
             return Some(CompactionInput {
@@ -446,27 +353,7 @@ impl CompactionPicker for TierCompactionPicker {
             return Some(ret);
         }
 
-        if !self.config.split_by_state_table {
-            return self.pick_multi_level(l0, &level_handlers[0], stats);
-        }
-
-        let mut member_table_ids = levels.member_table_ids.clone();
-        for level in &l0.sub_levels {
-            if level.level_type != LevelType::Nonoverlapping as i32 {
-                continue;
-            }
-            for sst in &level.table_infos {
-                if sst.table_ids[0] != *member_table_ids.last().unwrap() {
-                    member_table_ids.push(sst.table_ids[0]);
-                }
-            }
-        }
-
-        member_table_ids.sort();
-        member_table_ids.dedup();
-        use rand::prelude::SliceRandom;
-        member_table_ids.shuffle(&mut thread_rng());
-        self.pick_table_same_files(l0, &level_handlers[0], member_table_ids, stats)
+        self.pick_multi_level(l0, &level_handlers[0], stats)
     }
 }
 

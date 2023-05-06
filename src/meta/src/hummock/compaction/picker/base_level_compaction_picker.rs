@@ -59,36 +59,6 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if self.config.split_by_state_table {
-            let mut member_table_ids = levels.member_table_ids.clone();
-            for level in &l0.sub_levels {
-                if level.level_type != LevelType::Nonoverlapping as i32 {
-                    continue;
-                }
-                // expand table id because there may be some state-table drop from member_table_ids.
-                for sst in &level.table_infos {
-                    if sst.table_ids[0] != *member_table_ids.last().unwrap() {
-                        member_table_ids.push(sst.table_ids[0]);
-                    }
-                }
-            }
-            member_table_ids.sort();
-            member_table_ids.dedup();
-            use rand::prelude::SliceRandom;
-            member_table_ids.shuffle(&mut thread_rng());
-            for table_id in member_table_ids {
-                if let Some(ret) = self.pick_files_to_target_level(
-                    l0,
-                    levels.get_level(self.target_level),
-                    level_handlers,
-                    Some(table_id),
-                    stats,
-                ) {
-                    return Some(ret);
-                }
-            }
-        }
-
         debug_assert!(self.target_level == levels.get_level(self.target_level).level_idx as usize);
         self.pick_multi_level_to_base(
             l0,

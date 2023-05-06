@@ -29,7 +29,6 @@ pub struct MinOverlappingPicker {
     max_select_bytes: u64,
     level: usize,
     target_level: usize,
-    split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -38,14 +37,12 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        split_by_table: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             max_select_bytes,
             level,
             target_level,
-            split_by_table,
             overlap_strategy,
         }
     }
@@ -67,7 +64,9 @@ impl MinOverlappingPicker {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
                     break;
                 }
-                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
+                if select_tables[left].table_ids.len() == 1
+                    && table.table_ids != select_tables[left].table_ids
+                {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {
@@ -363,13 +362,8 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -440,13 +434,8 @@ pub mod tests {
 
     #[test]
     fn test_expand_l1_files() {
-        let mut picker = MinOverlappingPicker::new(
-            1,
-            2,
-            10000,
-            false,
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let mut picker =
+            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
         let levels = vec![
             Level {
                 level_idx: 1,
