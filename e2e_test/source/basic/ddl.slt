@@ -41,6 +41,63 @@ create source invalid_format with (
   properties.bootstrap.server = '127.0.0.1:29092'
 ) row format abc;
 
+statement error Invalid value "INVALID" for configuration property "security.protocol"
+create source invalid_security_protocol with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'INVALID'
+) row format json;
+
+# TODO: Refine the error message
+statement error Invalid sasl.kerberos.kinit.cmd value: Property not available: "sasl.kerberos.keytab"
+create source sasl_plaintext_only with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'SASL_PLAINTEXT'
+) row format json;
+
+statement error sasl.username and sasl.password must be set
+create source sasl_plain_without_credential with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'SASL_PLAINTEXT',
+  properties.sasl.mechanism	= 'PLAIN'
+) row format json;
+
+statement error sasl.username and sasl.password must be set
+create source sasl_plain_without_password with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'SASL_PLAINTEXT',
+  properties.sasl.mechanism	= 'PLAIN',
+  properties.sasl.username = 'tao'
+) row format json;
+
+# TODO: Refine the error message
+statement error BrokerTransportFailure \(Local: Broker transport failure\)
+create source sasl_plain_wrong_credential with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'SASL_PLAINTEXT',
+  properties.sasl.mechanism	= 'PLAIN',
+  properties.sasl.username = 'tao',
+  properties.sasl.password = 'pass'
+) row format json;
+
+statement error Unsupported SASL mechanism: INVALID
+create source sasl_ssl_invalid_mechanism with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.security.protocol = 'SASL_SSL',
+  properties.sasl.mechanism	= 'INVALID',
+) row format json;
+
 statement ok
 create table s with (
   connector = 'kafka',
