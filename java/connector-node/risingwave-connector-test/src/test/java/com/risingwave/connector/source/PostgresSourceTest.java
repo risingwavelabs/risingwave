@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.source;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.Assert.*;
 
+import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
 import io.grpc.*;
@@ -45,14 +46,14 @@ public class PostgresSourceTest {
                     .withCommand("postgres -c wal_level=logical -c max_wal_senders=10");
 
     public static Server connectorServer =
-            ServerBuilder.forPort(ConnectorService.DEFAULT_PORT)
+            ServerBuilder.forPort(SourceTestClient.DEFAULT_PORT)
                     .addService(new ConnectorServiceImpl())
                     .build();
 
     public static SourceTestClient testClient =
             new SourceTestClient(
                     Grpc.newChannelBuilder(
-                                    "localhost:" + ConnectorService.DEFAULT_PORT,
+                                    "localhost:" + SourceTestClient.DEFAULT_PORT,
                                     InsecureChannelCredentials.create())
                             .build());
 

@@ -8,15 +8,52 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    <name>risingwave-source-test</name>
+    <name>risingwave-connector-test</name>
     <packaging>jar</packaging>
-    <artifactId>risingwave-source-test</artifactId>
+    <artifactId>risingwave-connector-test</artifactId>
 
     <properties>
         <testcontainers.version>1.17.6</testcontainers.version>
+        <iceberg.version>1.0.0</iceberg.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>connector-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-deltalake</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-iceberg</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>s3-common</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-core_2.12</artifactId>
+            <version>2.2.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.delta</groupId>
+            <artifactId>delta-standalone_2.12</artifactId>
+            <version>0.6.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-api</artifactId>
@@ -28,6 +65,28 @@
         <dependency>
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-client</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-sql_2.12</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-spark-3.2_2.12</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-arrow</artifactId>
+            <version>${iceberg.version}</version>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
@@ -85,6 +144,11 @@
         <dependency>
             <groupId>com.risingwave.java</groupId>
             <artifactId>risingwave-connector-service</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>risingwave-sink-jdbc</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

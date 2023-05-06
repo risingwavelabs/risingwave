@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink.iceberg;
 
 import static org.junit.Assert.assertEquals;
 
+import com.risingwave.connector.SinkRowMap;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
@@ -40,9 +41,9 @@ public class SinkRowMapTest {
         r.set(0, row.get(0));
 
         sinkRowMap.insert(key, r);
-        assertEquals(1, sinkRowMap.map.size());
-        assertEquals(null, sinkRowMap.map.get(key).getDelete());
-        assertEquals(r, sinkRowMap.map.get(key).getInsert());
+        assertEquals(1, sinkRowMap.getMap().size());
+        assertEquals(null, sinkRowMap.getMap().get(key).getDelete());
+        assertEquals(r, sinkRowMap.getMap().get(key).getInsert());
     }
 
     @Test
@@ -68,9 +69,9 @@ public class SinkRowMapTest {
 
         sinkRowMap.delete(key1, r1);
         sinkRowMap.insert(key1, r2);
-        assertEquals(1, sinkRowMap.map.size());
-        assertEquals(r1, sinkRowMap.map.get(key1).getDelete());
-        assertEquals(r2, sinkRowMap.map.get(key1).getInsert());
+        assertEquals(1, sinkRowMap.getMap().size());
+        assertEquals(r1, sinkRowMap.getMap().get(key1).getDelete());
+        assertEquals(r2, sinkRowMap.getMap().get(key1).getInsert());
     }
 
     @Test
@@ -112,9 +113,9 @@ public class SinkRowMapTest {
         r.set(0, row.get(0));
 
         sinkRowMap.delete(key, r);
-        assertEquals(1, sinkRowMap.map.size());
-        assertEquals(null, sinkRowMap.map.get(key).getInsert());
-        assertEquals(r, sinkRowMap.map.get(key).getDelete());
+        assertEquals(1, sinkRowMap.getMap().size());
+        assertEquals(null, sinkRowMap.getMap().get(key).getInsert());
+        assertEquals(r, sinkRowMap.getMap().get(key).getDelete());
     }
 
     @Test
@@ -156,7 +157,7 @@ public class SinkRowMapTest {
 
         sinkRowMap.insert(key, r);
         sinkRowMap.delete(key, r);
-        assertEquals(0, sinkRowMap.map.size());
+        assertEquals(0, sinkRowMap.getMap().size());
     }
 
     @Test
@@ -185,9 +186,9 @@ public class SinkRowMapTest {
         sinkRowMap.delete(key1, r1);
         sinkRowMap.insert(key2, r2);
         sinkRowMap.delete(key2, r2);
-        assertEquals(1, sinkRowMap.map.size());
-        assertEquals(null, sinkRowMap.map.get(key1).getInsert());
-        assertEquals(r1, sinkRowMap.map.get(key1).getDelete());
+        assertEquals(1, sinkRowMap.getMap().size());
+        assertEquals(null, sinkRowMap.getMap().get(key1).getInsert());
+        assertEquals(r1, sinkRowMap.getMap().get(key1).getDelete());
     }
 
     @Test
@@ -203,6 +204,6 @@ public class SinkRowMapTest {
         sinkRowMap.insert(key, r);
 
         sinkRowMap.clear();
-        assertEquals(0, sinkRowMap.map.size());
+        assertEquals(0, sinkRowMap.getMap().size());
     }
 }
