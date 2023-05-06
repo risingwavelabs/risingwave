@@ -42,8 +42,7 @@ echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/read_barrier/batch.slt' --junit "batch-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/read_checkpoint/batch.slt' --junit "batch-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 

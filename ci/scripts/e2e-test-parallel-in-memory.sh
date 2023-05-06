@@ -35,7 +35,7 @@ cargo make ci-kill
 echo "--- e2e, ci-3cn-3fe-in-memory, batch"
 cargo make ci-start ci-3cn-3fe-in-memory
 sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-in-memory-batch-ddl-${profile}"
-sqllogictest ${host_args} -d dev  './e2e_test/read_barrier/batch.slt' -j 16 --junit "parallel-in-memory-batch-${profile}"
+sqllogictest ${host_args} -d dev  './e2e_test/visibility_mode/barrier.slt' -j 16 --junit "parallel-in-memory-batch-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
