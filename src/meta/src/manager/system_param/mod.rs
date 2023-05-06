@@ -43,8 +43,6 @@ pub struct SystemParamsManager<S: MetaStore> {
     notification_manager: NotificationManagerRef<S>,
     // Cached parameters.
     params: RwLock<SystemParams>,
-    // If cluster is launched for the first time.
-    first_launch: bool,
 }
 
 impl<S: MetaStore> SystemParamsManager<S> {
@@ -53,13 +51,16 @@ impl<S: MetaStore> SystemParamsManager<S> {
         meta_store: Arc<S>,
         notification_manager: NotificationManagerRef<S>,
         init_params: SystemParams,
+        cluster_first_launch: bool,
     ) -> MetaResult<Self> {
-        let persisted = SystemParams::get(meta_store.as_ref()).await?;
-
-        let (params, first_launch) = if let Some(persisted) = persisted {
-            (merge_params(persisted, init_params), false)
+        let params = if cluster_first_launch {
+            init_params
+        } else if let Some(persisted) = SystemParams::get(meta_store.as_ref()).await? {
+            merge_params(persisted, init_params)
         } else {
-            (init_params, true)
+            return Err(MetaError::system_param(
+                "cluster is not newly created but no system parameters can be found",
+            ));
         };
 
         info!("system parameters: {:?}", params);
@@ -68,7 +69,6 @@ impl<S: MetaStore> SystemParamsManager<S> {
         Ok(Self {
             meta_store,
             notification_manager,
-            first_launch,
             params: RwLock::new(params),
         })
     }
@@ -113,10 +113,6 @@ impl<S: MetaStore> SystemParamsManager<S> {
             SystemParams::insert(self.params.read().await.deref(), self.meta_store.as_ref())
                 .await?,
         )
-    }
-
-    pub fn cluster_first_launch(&self) -> bool {
-        self.first_launch
     }
 
     // Periodically sync params to worker nodes.

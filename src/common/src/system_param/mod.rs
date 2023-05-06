@@ -117,6 +117,7 @@ macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
+        #[allow(clippy::vec_init_then_push)]
         pub fn system_params_to_kv(params: &SystemParams) -> Result<Vec<(String, String)>> {
             check_missing_params(params)?;
             let mut ret = Vec::new();

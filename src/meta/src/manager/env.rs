@@ -23,6 +23,7 @@ use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
+use crate::model::ClusterId;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -52,6 +53,12 @@ where
 
     /// system param manager.
     system_params_manager: SystemParamsManagerRef<S>,
+
+    /// Unique identifier of the cluster.
+    cluster_id: ClusterId,
+
+    /// Whether the cluster is launched for the first time.
+    cluster_first_launch: bool,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -158,15 +165,21 @@ where
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
+        let (cluster_id, cluster_first_launch) =
+            if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
+                (id, false)
+            } else {
+                (ClusterId::new(), true)
+            };
         let system_params_manager = Arc::new(
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
                 init_system_params,
+                cluster_first_launch,
             )
             .await?,
         );
-
         Ok(Self {
             id_gen_manager,
             meta_store,
@@ -174,6 +187,8 @@ where
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            cluster_id,
+            cluster_first_launch,
             opts: opts.into(),
         })
     }
@@ -225,6 +240,14 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        &self.cluster_id
+    }
+
+    pub fn cluster_first_launch(&self) -> bool {
+        self.cluster_first_launch
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -241,11 +264,13 @@ impl MetaSrvEnv<MemStore> {
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
+        let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);
         let system_params_manager = Arc::new(
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
                 risingwave_common::system_param::system_params_for_test(),
+                true,
             )
             .await
             .unwrap(),
@@ -258,6 +283,8 @@ impl MetaSrvEnv<MemStore> {
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            cluster_id,
+            cluster_first_launch,
             opts,
         }
     }

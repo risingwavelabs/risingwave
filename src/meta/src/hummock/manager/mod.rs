@@ -20,6 +20,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
@@ -64,7 +65,8 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
+    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
+    VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
@@ -82,6 +84,8 @@ mod compaction;
 mod worker;
 
 use compaction::*;
+
+const CLUSTER_ID_OBJECT_NAME: &str = "__cluster_id";
 
 type Snapshot = ArcSwap<HummockSnapshot>;
 
@@ -295,14 +299,10 @@ where
             )
             .await,
         );
-        // If the cluster is being created, the object store should be empty.
-        if sys_params_manager.cluster_first_launch()
-            && !object_store.list(state_store_dir).await?.is_empty()
-        {
-            return Err(ObjectError::internal(
-                "object store is not empty on cluster creation, existing data might be overwritten",
-            )
-            .into());
+
+        // Make sure data dir is not used by another cluster.
+        if env.cluster_first_launch() {
+            write_exclusive_cluster_id(env.cluster_id().clone(), object_store.clone()).await?;
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2174,4 +2174,32 @@ fn gen_version_delta<'a>(
     }
 
     version_delta
+}
+
+async fn write_exclusive_cluster_id(
+    cluster_id: ClusterId,
+    object_store: ObjectStoreRef,
+) -> Result<()> {
+    // Point get interface can't distinguish non-existent object from other errors.
+    if object_store.list(CLUSTER_ID_OBJECT_NAME).await?.is_empty() {
+        object_store
+            .upload(
+                CLUSTER_ID_OBJECT_NAME,
+                Bytes::from(String::from(cluster_id)),
+            )
+            .await?;
+    } else {
+        return Err(ObjectError::internal(format!(
+            "data directory is already used by another cluster with id {:?}",
+            String::from_utf8(
+                object_store
+                    .read(CLUSTER_ID_OBJECT_NAME, None)
+                    .await?
+                    .to_vec(),
+            )
+            .unwrap()
+        ))
+        .into());
+    }
+    Ok(())
 }

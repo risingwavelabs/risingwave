@@ -72,7 +72,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher, TrackingId};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -585,21 +585,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let mgr = TelemetryManager::new(
         local_system_params_manager.watch_params(),
-        Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
+        Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
         Arc::new(MetaReportCreator::new(
             cluster_manager,
             meta_store.meta_store_type(),
         )),
     );
-
-    {
-        // always create a tracking_id for a cluster
-        // if it's persistent in etcd, won't create a new one
-        let tracking_id: String = TrackingId::get_or_create_meta_store(&meta_store)
-            .await?
-            .into();
-        tracing::info!("Launching Meta {}", tracking_id);
-    }
 
     // May start telemetry reporting
     if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
@@ -641,7 +632,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
     system_params_manager.flush_params().await?;
+    env.cluster_id().put_at_meta_store(&meta_store).await?;
 
+    tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
