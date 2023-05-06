@@ -254,8 +254,14 @@ lazy_static! {
     );
 
     static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
-        "Pull up hop",
+        "Pull Up Hop",
         vec![PullUpHopRule::create()],
+        ApplyOrder::BottomUp,
+    );
+
+    static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
+        "Set Operation To Join",
+        vec![IntersectToSemiJoinRule::create()],
         ApplyOrder::BottomUp,
     );
 }
@@ -372,6 +378,8 @@ impl LogicalOptimizer {
             }
         }
 
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+
         plan = plan.optimize_by_rules(&UNION_MERGE);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
@@ -442,6 +450,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
         plan = plan.optimize_by_rules(&UNION_MERGE);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 

@@ -729,77 +729,11 @@ impl HummockVersionReader {
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
-        let mut fetch_meta_reqs = vec![];
-        for level in committed.levels(read_options.table_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-
-            if level.level_type == LevelType::Nonoverlapping as i32 {
-                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
-
-                let fetch_meta_req = table_infos
-                    .filter(|sstable_info| {
-                        sstable_info
-                            .table_ids
-                            .binary_search(&read_options.table_id.table_id)
-                            .is_ok()
-                    })
-                    .collect_vec();
-                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
-            } else {
-                let table_infos = prune_overlapping_ssts(
-                    &level.table_infos,
-                    read_options.table_id,
-                    &table_key_range,
-                );
-                // Overlapping
-                let fetch_meta_req = table_infos.rev().collect_vec();
-                if !fetch_meta_req.is_empty() {
-                    fetch_meta_reqs.push((level.level_type, fetch_meta_req));
-                }
-            }
-        }
-        let mut flatten_reqs = vec![];
-        let mut req_count = 0;
-        for (_, fetch_meta_req) in &fetch_meta_reqs {
-            for sstable_info in fetch_meta_req {
-                let inner_req_count = req_count;
-                let capture_ref = async {
-                    // We would fill block to high priority cache for level-0
-                    self.sstable_store
-                        .sstable_syncable(sstable_info, &local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
-                        .await
-                };
-                // use `buffer_unordered` to simulate `try_join_all` by assigning an index
-                flatten_reqs
-                    .push(async move { capture_ref.await.map(|result| (inner_req_count, result)) });
-                req_count += 1;
-            }
-        }
         let timer = self
             .state_store_metrics
             .iter_fetch_meta_duration
             .with_label_values(&[table_id_label])
             .start_timer();
-        let mut local_cache_meta_block_unhit = 0;
-        let mut flatten_resps = vec![None; req_count];
-        for flatten_req in flatten_reqs {
-            let (req_index, resp) = flatten_req.await?;
-            local_cache_meta_block_unhit += resp.2;
-            flatten_resps[req_count - req_index - 1] = Some(resp);
-        }
-        let fetch_meta_duration_sec = timer.stop_and_record();
-        self.state_store_metrics
-            .iter_fetch_meta_cache_unhits
-            .set(local_cache_meta_block_unhit as i64);
-        if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
-            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.", table_id_string, epoch, fetch_meta_duration_sec, local_cache_meta_block_unhit);
-            self.state_store_metrics
-                .iter_slow_fetch_meta_cache_unhits
-                .set(local_cache_meta_block_unhit as i64);
-        }
 
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.exhaust_iter {
@@ -807,41 +741,38 @@ impl HummockVersionReader {
                 Some(user_key_range.1.map(|key| key.cloned()));
         }
         let sst_read_options = Arc::new(sst_read_options);
+        for level in committed.levels(read_options.table_id) {
+            if level.table_infos.is_empty() {
+                continue;
+            }
 
-        for (level_type, fetch_meta_req) in fetch_meta_reqs {
-            if level_type == LevelType::Nonoverlapping as i32 {
-                let mut sstables = vec![];
-                for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss, ..) =
-                        flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
-                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
-                    }
-                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
-                            continue;
-                        }
-                    }
-                    sstables.push(sstable);
+            if level.level_type == LevelType::Nonoverlapping as i32 {
+                let table_infos = prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref);
+                let sstables = table_infos
+                    .filter(|sstable_info| {
+                        sstable_info
+                            .table_ids
+                            .binary_search(&read_options.table_id.table_id)
+                            .is_ok()
+                    })
+                    .cloned()
+                    .collect_vec();
+                if sstables.is_empty() {
+                    continue;
                 }
-
-                non_overlapping_iters.push(ConcatIterator::new_with_prefetch(
-                    sstables,
-                    self.sstable_store.clone(),
-                    sst_read_options.clone(),
-                ));
-            } else {
-                let mut iters = Vec::new();
-                for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss, ..) =
-                        flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
-                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
+                if sstables.len() > 1 {
+                    delete_range_iter.add_concat_iter(sstables.clone(), self.sstable_store.clone());
+                    non_overlapping_iters.push(ConcatIterator::new(
+                        sstables,
+                        self.sstable_store.clone(),
+                        sst_read_options.clone(),
+                    ));
+                } else {
+                    let sstable = self
+                        .sstable_store
+                        .sstable(&sstables[0], &mut local_stats)
+                        .in_span(Span::enter_with_local_parent("get_sstable"))
+                        .await?;
                     if !sstable.value().meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
@@ -854,15 +785,58 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
-                    iters.push(SstableIterator::new(
+                    overlapping_iters.push(SstableIterator::new(
+                        sstable,
+                        self.sstable_store.clone(),
+                        sst_read_options.clone(),
+                    ));
+                }
+            } else {
+                let table_infos = prune_overlapping_ssts(
+                    &level.table_infos,
+                    read_options.table_id,
+                    &table_key_range,
+                );
+                // Overlapping
+                let fetch_meta_req = table_infos.rev().collect_vec();
+                if fetch_meta_req.is_empty() {
+                    continue;
+                }
+                for sstable_info in fetch_meta_req {
+                    let sstable = self
+                        .sstable_store
+                        .sstable(sstable_info, &mut local_stats)
+                        .in_span(Span::enter_with_local_parent("get_sstable"))
+                        .await?;
+                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
+                    if !sstable.value().meta.monotonic_tombstone_events.is_empty()
+                        && !read_options.ignore_range_tombstone
+                    {
+                        delete_range_iter
+                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
+                        {
+                            continue;
+                        }
+                    }
+                    overlapping_iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
                     overlapping_iter_count += 1;
                 }
-                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
+        }
+        let fetch_meta_duration_sec = timer.stop_and_record();
+        if fetch_meta_duration_sec > SLOW_ITER_FETCH_META_DURATION_SECOND {
+            tracing::warn!("Fetching meta while creating an iter to read table_id {:?} at epoch {:?} is slow: duration = {:?}s, cache unhits = {:?}.",
+                table_id_string, epoch, fetch_meta_duration_sec, local_stats.cache_meta_block_miss);
+            self.state_store_metrics
+                .iter_slow_fetch_meta_cache_unhits
+                .set(local_stats.cache_meta_block_miss as i64);
         }
         local_stats.overlapping_iter_count = overlapping_iter_count;
         local_stats.non_overlapping_iter_count = non_overlapping_iters.len() as u64;

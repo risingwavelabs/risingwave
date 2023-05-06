@@ -640,6 +640,7 @@ mod logical_expand;
 mod logical_filter;
 mod logical_hop_window;
 mod logical_insert;
+mod logical_intersect;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
@@ -720,6 +721,7 @@ pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
+pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -810,6 +812,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
+            , { Logical, Intersect }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -895,6 +898,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
+            , { Logical, Intersect }
         }
     };
 }
