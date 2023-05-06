@@ -12,6 +12,11 @@
     <packaging>jar</packaging>
     <artifactId>risingwave-connector-test</artifactId>
 
+    <properties>
+        <testcontainers.version>1.17.6</testcontainers.version>
+        <iceberg.version>1.0.0</iceberg.version>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>com.risingwave.java</groupId>

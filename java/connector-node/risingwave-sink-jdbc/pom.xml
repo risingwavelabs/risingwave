@@ -13,10 +13,6 @@
     <version>1.0-SNAPSHOT</version>
     <name>risingwave-sink-jdbc</name>
 
-    <properties>
-        <testcontainers.version>1.17.6</testcontainers.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>com.risingwave.java</groupId>

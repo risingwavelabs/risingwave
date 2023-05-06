@@ -40,8 +40,6 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
-        <testcontainers.version>1.17.6</testcontainers.version>
-        <iceberg.version>1.0.0</iceberg.version>
     </properties>
 
     <dependencyManagement>
