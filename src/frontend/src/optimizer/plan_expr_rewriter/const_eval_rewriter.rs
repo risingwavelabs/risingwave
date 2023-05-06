@@ -24,7 +24,7 @@ impl ExprRewriter for ConstEvalRewriter {
         if self.error.is_some() {
             return expr;
         }
-        if let Some(result) = expr.eval_row_const() {
+        if let Some(result) = expr.try_fold_const() {
             match result {
                 Ok(datum) => Literal::new(datum, expr.return_type()).into(),
                 Err(e) => {

@@ -120,12 +120,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     for cond in rank_preds {
         if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .unwrap()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             match cmp {
                 ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
@@ -136,12 +131,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             }
         } else if let Some((input_ref, v)) = cond.as_eq_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .unwrap()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
                 tracing::error!(

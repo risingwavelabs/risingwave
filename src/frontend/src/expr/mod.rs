@@ -282,7 +282,7 @@ impl ExprImpl {
     /// - `None` if it's not a constant expression,
     /// - `Some(Ok(_))` if constant evaluation succeeds,
     /// - `Some(Err(_))` if there's an error while evaluating a constant expression.
-    pub fn eval_row_const(&self) -> Option<RwResult<Datum>> {
+    pub fn try_fold_const(&self) -> Option<RwResult<Datum>> {
         if self.is_const() {
             self.eval_row(&OwnedRow::empty())
                 .now_or_never()
@@ -291,6 +291,11 @@ impl ExprImpl {
         } else {
             None
         }
+    }
+
+    /// Similar to `ExprImpl::try_fold_const`, but panics if the expression is not constant.
+    pub fn fold_const(&self) -> RwResult<Datum> {
+        self.try_fold_const().expect("expression is not constant")
     }
 }
 

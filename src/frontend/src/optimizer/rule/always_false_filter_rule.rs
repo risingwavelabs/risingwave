@@ -27,7 +27,7 @@ impl Rule for AlwaysFalseFilterRule {
             .predicate()
             .conjunctions
             .iter()
-            .filter_map(|e| e.eval_row_const().transpose().ok().flatten())
+            .filter_map(|e| e.try_fold_const().transpose().ok().flatten())
             .any(|s| s.unwrap_or(ScalarImpl::Bool(true)) == ScalarImpl::Bool(false));
         if always_false {
             Some(LogicalValues::create(
