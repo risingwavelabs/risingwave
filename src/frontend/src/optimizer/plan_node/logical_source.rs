@@ -371,24 +371,24 @@ fn expr_to_kafka_timestamp_range(
             ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2 => {
                 match (&function_call.inputs()[0], &function_call.inputs()[1]) {
                     (ExprImpl::InputRef(input_ref), literal)
-                        if literal.is_const()
+                        if let Some(datum) = literal.try_fold_const().transpose()?
                             && schema.fields[input_ref.index].name
                                 == KAFKA_TIMESTAMP_COLUMN_NAME
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_int64() / 1000,
                             false,
                         )))
                     }
                     (literal, ExprImpl::InputRef(input_ref))
-                        if literal.is_const()
+                        if let Some(datum) = literal.try_fold_const().transpose()?
                             && schema.fields[input_ref.index].name
                                 == KAFKA_TIMESTAMP_COLUMN_NAME
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_int64() / 1000,
                             true,
                         )))
                     }
