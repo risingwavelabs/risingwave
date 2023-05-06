@@ -18,7 +18,6 @@
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
-        <iceberg.version>1.0.0</iceberg.version>
     </properties>
 
     <dependencies>
