@@ -68,6 +68,7 @@ impl StreamGroupTopN {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
+            false, // TODO(rc): group top-n EOWC support?
             watermark_columns,
         );
         StreamGroupTopN {

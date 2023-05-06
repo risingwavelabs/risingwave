@@ -57,6 +57,7 @@ impl StreamSort {
             fd_set,
             dist,
             true,
+            true,
             watermark_columns,
         );
         Self {

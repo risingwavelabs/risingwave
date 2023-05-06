@@ -67,7 +67,13 @@ impl StreamTemporalJoin {
                 .rewrite_bitset(logical.left.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(&logical, dist, true, watermark_columns);
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
+            dist,
+            true,
+            false, // TODO(rc): derive EOWC property from input
+            watermark_columns,
+        );
 
         Self {
             base,
