@@ -91,9 +91,8 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
-        let default_columns_from_catalog = table_catalog
-            .default_columns()
-            .collect::<BTreeMap<_, _>>();
+        let default_columns_from_catalog =
+            table_catalog.default_columns().collect::<BTreeMap<_, _>>();
 
         // TODO(yuhao): update a table with generated columns
         if table_catalog.has_generated_column() {
