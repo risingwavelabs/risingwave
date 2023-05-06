@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derivative::Derivative;
+use educe::Educe;
 use generic::PlanAggCall;
 use itertools::Itertools;
 use pb::stream_node as pb_node;
@@ -382,19 +382,19 @@ pub struct TopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub dist: Distribution,
     pub append_only: bool,
 }

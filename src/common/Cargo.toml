@@ -32,8 +32,8 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
-derivative = "2"
 easy-ext = "1"
+educe = "0.4"
 either = "1"
 enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
