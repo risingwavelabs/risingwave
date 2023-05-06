@@ -99,7 +99,7 @@ macro_rules! def_default {
 for_all_undeprecated_params!(def_default);
 
 macro_rules! impl_check_missing_fields {
-    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+    ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr },)*) => {
         /// Check if any undeprecated fields are missing.
         pub fn check_missing_params(params: &SystemParams) -> Result<()> {
             $(
