@@ -17,11 +17,11 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use crate::CtlContext;
 
-pub async fn list_version(context: &CtlContext, full_print: bool) -> anyhow::Result<()> {
+pub async fn list_version(context: &CtlContext, verbose: bool) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
 
-    if full_print {
+    if verbose {
         println!("{:#?}", version);
     } else {
         println!(
