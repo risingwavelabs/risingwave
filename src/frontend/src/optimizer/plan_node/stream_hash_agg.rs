@@ -65,7 +65,13 @@ impl StreamHashAgg {
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
+            dist,
+            false,
+            false, // TODO(rc): support generating EOWC hash agg plan
+            watermark_columns,
+        );
         StreamHashAgg {
             base,
             logical,

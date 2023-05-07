@@ -238,7 +238,7 @@ impl StateStoreCollector {
         descs.extend(meta_cache_size.desc().into_iter().cloned());
         let limit_memory_size = IntGauge::with_opts(Opts::new(
             "state_store_limit_memory_size",
-            "the size of cache for meta file cache",
+            "the size of uploading SSTs memory usage",
         ))
         .unwrap();
         descs.extend(limit_memory_size.desc().into_iter().cloned());
