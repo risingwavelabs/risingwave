@@ -66,9 +66,9 @@ ldd target/"$profile"/risingwave
 ls -lh target/"$profile"
 
 echo "--- Upload artifacts"
-# echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
 
-# buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
+buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
 echo "--- Show sccache stats"
 sccache --show-stats

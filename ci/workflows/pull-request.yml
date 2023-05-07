@@ -7,7 +7,7 @@ cargo-cache: &cargo-cache
   backend: s3
   s3:
     bucket: ci-cache-bucket
-    # args: '--no-progress'
+    args: '--no-progress'
   paths:
     - ".cargo/registry/index"
     - ".cargo/registry/cache"
@@ -31,7 +31,7 @@ steps:
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - https://github.com/xxchan/docker-compose-buildkite-plugin#e7da7cb:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
