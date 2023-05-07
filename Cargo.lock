@@ -1968,17 +1968,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derivative"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "derive_builder"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2722,9 +2711,9 @@ dependencies = [
 
 [[package]]
 name = "halfbrown"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "389d755cc2bcc8cdb7554b89ddaa59d9275a727ec8915b0e2bc4176c33cc39cb"
+checksum = "6d9ab7d9233262d3b74ae4c4a7a090fc4379b07c6eb9b02ecab7cbb12ad67a58"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -5637,8 +5626,8 @@ dependencies = [
  "crc32fast",
  "criterion",
  "darwin-libproc",
- "derivative",
  "easy-ext",
+ "educe",
  "either",
  "enum-as-inner",
  "ethnum",
@@ -5678,6 +5667,7 @@ dependencies = [
  "serde_json",
  "serde_with 2.3.1",
  "smallbitset",
+ "speedate",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -5862,7 +5852,6 @@ dependencies = [
  "rand",
  "reqwest",
  "risingwave_common",
- "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rust_decimal",
@@ -5959,7 +5948,6 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "serde_json",
- "speedate",
  "static_assertions",
  "thiserror",
  "tracing",
@@ -5990,10 +5978,10 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap 4.1.11",
- "derivative",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
+ "educe",
  "enum-as-inner",
  "fixedbitset",
  "futures",
@@ -6495,8 +6483,8 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "derivative",
  "dyn-clone",
+ "educe",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -8698,7 +8686,6 @@ dependencies = [
  "serde_json",
  "serde_with 2.3.1",
  "smallvec",
- "strum",
  "subtle",
  "syn 1.0.109",
  "time 0.3.17",

@@ -29,7 +29,7 @@ use std::io::{Cursor, Read};
 use std::marker::PhantomData;
 
 use chrono::{Datelike, Timelike};
-use derivative::Derivative;
+use educe::Educe;
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
@@ -211,11 +211,11 @@ impl<T: AsRef<[bool]> + IntoIterator<Item = bool>> From<T> for HeapNullBitmap {
 }
 
 /// A wrapper for u64 hash result. Generic over the hasher.
-#[derive(Derivative)]
-#[derivative(Default, Clone, Copy, Debug, PartialEq)]
+#[derive(Educe)]
+#[educe(Default, Clone, Copy, Debug, PartialEq)]
 pub struct HashCode<T: 'static + BuildHasher> {
     value: u64,
-    #[derivative(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     _phantom: PhantomData<&'static T>,
 }
 
@@ -911,12 +911,15 @@ impl<B: NullBitmap> HashKey for SerializedKey<B> {
         data_chunk: &DataChunk,
         hash_codes: Vec<XxHash64HashCode>,
     ) -> Vec<Self> {
-        let estimated_key_size = data_chunk.estimate_value_encoding_size(column_idxes);
+        let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_idxes);
 
         // Construct serializers for each row.
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
-            .map(|hashcode| Self::S::from_hash_code(hashcode, estimated_key_size))
+            .zip_eq_fast(estimated_key_sizes)
+            .map(|(hashcode, estimated_key_size)| {
+                Self::S::from_hash_code(hashcode, estimated_key_size)
+            })
             .collect();
 
         for column_idx in column_idxes {

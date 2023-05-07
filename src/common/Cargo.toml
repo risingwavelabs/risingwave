@@ -32,8 +32,8 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
-derivative = "2"
 easy-ext = "1"
+educe = "0.4"
 either = "1"
 enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
@@ -71,6 +71,7 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
 smallbitset = "0.6.1"
+speedate = "0.7.0"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"

@@ -170,6 +170,11 @@ where
                 always!(node.state_table, "EowcOverWindow");
             }
 
+            // Sort
+            NodeBody::Sort(node) => {
+                always!(node.state_table, "Sort");
+            }
+
             // Note: add internal tables for new nodes here.
             _ => {}
         }
