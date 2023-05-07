@@ -45,6 +45,10 @@ impl StreamPlanNode for DynamicFilter {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for Exchange {
@@ -71,6 +75,10 @@ impl StreamPlanNode for Exchange {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -101,6 +109,10 @@ impl StreamPlanNode for DeltaJoin {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for Expand {
@@ -127,6 +139,10 @@ impl StreamPlanNode for Expand {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -157,6 +173,10 @@ impl StreamPlanNode for Filter {
     fn append_only(&self) -> bool {
         self.core.input.append_only()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for GlobalSimpleAgg {
@@ -183,6 +203,10 @@ impl StreamPlanNode for GlobalSimpleAgg {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -213,6 +237,10 @@ impl StreamPlanNode for GroupTopN {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for HashAgg {
@@ -239,6 +267,10 @@ impl StreamPlanNode for HashAgg {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -269,6 +301,10 @@ impl StreamPlanNode for HashJoin {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for HopWindow {
@@ -295,6 +331,10 @@ impl StreamPlanNode for HopWindow {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -325,6 +365,10 @@ impl StreamPlanNode for IndexScan {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for LocalSimpleAgg {
@@ -351,6 +395,10 @@ impl StreamPlanNode for LocalSimpleAgg {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -381,6 +429,10 @@ impl StreamPlanNode for Materialize {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for ProjectSet {
@@ -407,6 +459,10 @@ impl StreamPlanNode for ProjectSet {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -439,6 +495,10 @@ impl StreamPlanNode for Project {
     fn append_only(&self) -> bool {
         self.core.input.append_only()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.core.input.emit_on_window_close()
+    }
 }
 
 impl GenericPlanNode for Sink {
@@ -465,6 +525,10 @@ impl StreamPlanNode for Sink {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }
@@ -495,6 +559,10 @@ impl StreamPlanNode for Source {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for TableScan {
@@ -523,6 +591,10 @@ impl StreamPlanNode for TableScan {
     fn append_only(&self) -> bool {
         todo!()
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        todo!()
+    }
 }
 
 impl GenericPlanNode for TopN {
@@ -549,6 +621,10 @@ impl StreamPlanNode for TopN {
     }
 
     fn append_only(&self) -> bool {
+        todo!()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
         todo!()
     }
 }

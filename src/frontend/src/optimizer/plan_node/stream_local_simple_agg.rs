@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -54,6 +55,7 @@ impl StreamLocalSimpleAgg {
             &logical,
             input_dist.clone(),
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamLocalSimpleAgg { base, logical }

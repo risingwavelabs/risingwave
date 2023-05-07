@@ -30,6 +30,7 @@ use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use tokio::select;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::SenderError;
@@ -490,6 +491,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub fn change_state(&self, task_status: TaskStatus) {
         *self.state.lock() = task_status;
+        tracing::debug!(
+            "Task {:?} state changed to {:?}",
+            &self.task_id,
+            task_status
+        );
     }
 
     async fn run(
@@ -501,51 +507,75 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
+
+        let mut shutdown_rx = self.shutdown_rx.clone();
         loop {
-            match data_chunk_stream.next().await {
-                Some(Ok(data_chunk)) => {
-                    if let Err(e) = sender.send(data_chunk).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                state = TaskStatus::Finished;
-                                break;
-                            }
-                            x => {
-                                error!("Failed to send data!");
-                                error = Some(x);
-                                state = TaskStatus::Failed;
-                                break;
-                            }
+            select! {
+                biased;
+                // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
+                _ = shutdown_rx.changed() => {
+                    match self.shutdown_rx.borrow().clone() {
+                        ShutdownMsg::Abort(e) => {
+                            error = Some(BatchError::Aborted(e));
+                            state = TaskStatus::Aborted;
+                            break;
+                        }
+                        ShutdownMsg::Cancel => {
+                            state = TaskStatus::Cancelled;
+                            break;
+                        }
+                        ShutdownMsg::Init => {
+                            unreachable!("Init message should not be received here!")
                         }
                     }
                 }
-                Some(Err(e)) => match self.shutdown_rx.borrow().clone() {
-                    ShutdownMsg::Init => {
-                        // There is no message received from shutdown channel, which means it caused
-                        // task failed.
-                        error!("Batch task failed: {:?}", e);
-                        error = Some(BatchError::from(e));
-                        state = TaskStatus::Failed;
-                        break;
+                date_chunk = data_chunk_stream.next()=> {
+                    match date_chunk {
+                        Some(Ok(data_chunk)) => {
+                            if let Err(e) = sender.send(data_chunk).await {
+                                match e {
+                                    BatchError::SenderError => {
+                                        // This is possible since when we have limit executor in parent
+                                        // stage, it may early stop receiving data from downstream, which
+                                        // leads to close of channel.
+                                        warn!("Task receiver closed!");
+                                        state = TaskStatus::Finished;
+                                        break;
+                                    }
+                                    x => {
+                                        error!("Failed to send data!");
+                                        error = Some(x);
+                                        state = TaskStatus::Failed;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        Some(Err(e)) => match self.shutdown_rx.borrow().clone() {
+                            ShutdownMsg::Init => {
+                                // There is no message received from shutdown channel, which means it caused
+                                // task failed.
+                                error!("Batch task failed: {:?}", e);
+                                error = Some(BatchError::from(e));
+                                state = TaskStatus::Failed;
+                                break;
+                            }
+                            ShutdownMsg::Abort(_) => {
+                                error = Some(BatchError::from(e));
+                                state = TaskStatus::Aborted;
+                                break;
+                            }
+                            ShutdownMsg::Cancel => {
+                                state = TaskStatus::Cancelled;
+                                break;
+                            }
+                        },
+                        None => {
+                            debug!("Batch task {:?} finished successfully.", self.task_id);
+                            state = TaskStatus::Finished;
+                            break;
+                        }
                     }
-                    ShutdownMsg::Abort(_) => {
-                        error = Some(BatchError::from(e));
-                        state = TaskStatus::Aborted;
-                        break;
-                    }
-                    ShutdownMsg::Cancel => {
-                        state = TaskStatus::Cancelled;
-                        break;
-                    }
-                },
-                None => {
-                    debug!("Batch task {:?} finished successfully.", self.task_id);
-                    state = TaskStatus::Finished;
-                    break;
                 }
             }
         }

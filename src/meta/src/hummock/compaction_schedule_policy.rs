@@ -476,17 +476,11 @@ mod tests {
                 level_idx: 0,
                 level_type: 0,
                 table_infos: vec![SstableInfo {
-                    object_id: 0,
-                    sst_id: 0,
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
-                    meta_offset: 0,
-                    stale_key_count: 0,
-                    total_key_count: 0,
                     uncompressed_file_size: input_file_size,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }],
             }],
             splits: vec![],

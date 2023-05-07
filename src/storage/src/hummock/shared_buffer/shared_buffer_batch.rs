@@ -792,6 +792,10 @@ impl SharedBufferDeleteRangeIterator {
 }
 
 impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
+    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
     fn next_extended_user_key(&self) -> PointRange<&[u8]> {
         self.inner.monotonic_tombstone_events[self.next_idx]
             .event_key
@@ -806,21 +810,30 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    fn next(&mut self) {
-        self.next_idx += 1;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            self.next_idx += 1;
+            Ok(())
+        }
     }
 
-    fn rewind(&mut self) {
-        self.next_idx = 0;
+    fn rewind(&mut self) -> Self::RewindFuture<'_> {
+        async move {
+            self.next_idx = 0;
+            Ok(())
+        }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
-            |MonotonicDeleteEvent { event_key, .. }| {
-                event_key.as_ref().le(&target_extended_user_key)
-            },
-        );
+    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
+            let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+            self.next_idx = self.inner.monotonic_tombstone_events.partition_point(
+                |MonotonicDeleteEvent { event_key, .. }| {
+                    event_key.as_ref().le(&target_extended_user_key)
+                },
+            );
+            Ok(())
+        }
     }
 
     fn is_valid(&self) -> bool {

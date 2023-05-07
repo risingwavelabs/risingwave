@@ -66,6 +66,16 @@ def section_overview(panels):
                 )
             ],
         ),
+        panels.timeseries_rowsps(
+            "Aggregated Sink Throughput(rows/s)",
+            "The figure shows the number of rows output by each sink per second.",
+            [
+                panels.target(
+                    f"sum(rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])) by (source_name)",
+                    "{{source_name}}",
+                ),
+            ],
+        ),
         panels.timeseries_latency(
             "Barrier Latency",
             "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "

@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
@@ -34,7 +34,7 @@ use risingwave_sqlparser::ast::{
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
     TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
@@ -343,17 +343,18 @@ impl Binder {
         }
 
         fn now() -> Handle {
-            Box::new(move |binder, mut inputs| {
-                binder.ensure_now_function_allowed()?;
-                // `now()` in batch query will be convert to the binder time.
-                if binder.is_for_batch() {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                raw_call(ExprType::Now)(binder, inputs)
-            })
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_now_function_allowed()?;
+                    // `now()` in batch query will be convert to the binder time.
+                    Ok(if binder.is_for_batch() {
+                        Literal::new(Some(binder.epoch.as_scalar()), DataType::Timestamptz).into()
+                    } else {
+                        Now.into()
+                    })
+                }),
+            )
         }
 
         fn pi() -> Handle {

@@ -20,6 +20,7 @@ anyhow = "1"
 arrow-array = "36"
 arrow-schema = "36"
 async-trait = "0.1"
+auto_enums = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 ctor = "0.1"
@@ -40,7 +41,6 @@ risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 serde_json = "1"
-speedate = "0.7.0"
 static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }

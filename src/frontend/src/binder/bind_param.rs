@@ -44,6 +44,7 @@ impl ExprRewriter for ParamRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
 
