@@ -36,6 +36,17 @@
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:15:00':Interval) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: [now] }
+- name: Temporal filter works on complex columns on LHS (with time zone)
+  sql: |
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where ts > (now() AT TIME ZONE 'UTC' - INTERVAL '2' SECOND);
+  stream_plan: |
+    StreamMaterialize { columns: [ts, t1._row_id(hidden)], stream_key: [t1._row_id], pk_columns: [t1._row_id], pk_conflict: "NoCheck", watermark_columns: [ts] }
+    └─StreamDynamicFilter { predicate: (t1.ts > $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id] }
+      ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: Broadcast }
+        └─StreamProject { exprs: [AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:02':Interval), 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+          └─StreamNow { output: [now] }
 - name: Temporal filter fails without `now()` in lower bound
   sql: |-
     create table t1 (ts timestamp with time zone);

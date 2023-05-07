@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
+use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
@@ -501,7 +501,8 @@ impl WatermarkAnalyzer {
             ExprType::Subtract
             | ExprType::Divide
             | ExprType::TumbleStart
-            | ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
+            | ExprType::AtTimeZone
+            | ExprType::CastWithTimeZone => match self.visit_binary_op(func_call.inputs()) {
                 (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
                     WatermarkDerivation::Constant
                 }
@@ -539,8 +540,21 @@ impl WatermarkAnalyzer {
             ExprType::ToTimestamp => self.visit_unary_op(func_call.inputs()),
             ExprType::ToTimestamp1 => WatermarkDerivation::None,
             ExprType::Cast => {
-                // TODO: need more derivation
-                WatermarkDerivation::None
+                let inputs = func_call.inputs();
+                if matches!(
+                    func_call.return_type(),
+                    DataType::Timestamp | DataType::Timestamptz
+                ) && inputs.len() == 1
+                    && matches!(
+                        inputs[0].return_type(),
+                        DataType::Timestamp | DataType::Timestamptz
+                    )
+                {
+                    self.visit_unary_op(func_call.inputs())
+                } else {
+                    // TODO: need more derivation
+                    WatermarkDerivation::None
+                }
             }
             ExprType::Case => {
                 // TODO: do we need derive watermark when every case can derive a common watermark?
