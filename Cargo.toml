@@ -116,6 +116,7 @@ opt-level = 3
 # The simulator can only run single-threaded, so optimization is required to make the running time
 # reasonable. The optimization level is customized to speed up the build.
 [profile.ci-sim]
+debug-assertions = true
 inherits = "dev"
 opt-level = 2
 incremental = false
