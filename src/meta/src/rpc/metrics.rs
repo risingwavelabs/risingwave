@@ -442,11 +442,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        // let opts = histogram_opts!(
-        //     "storage_l0_compact_level_count",
-        //     "level_count of l0 compact task",
-        //     exponential_buckets(0.1, 1.5, 20).unwrap()
-        // );
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -455,11 +450,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        // let opts = histogram_opts!(
-        //     "storage_compact_task_size",
-        //     "size of compact task",
-        //     exponential_buckets(0.1, 1.5, 20).unwrap() // max 52s
-        // );
         let compact_task_size = register_histogram_vec_with_registry!(
             "storage_compact_task_size",
             "size of compact task",
