@@ -202,7 +202,6 @@ pub(crate) use start_measure_real_process_timer;
 
 use super::compaction::{LevelSelector, ManualCompactionSelector};
 use super::Compactor;
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -425,7 +424,12 @@ where
                 checkpoint
             } else {
                 // As no record found in stores, create a initial version.
-                let checkpoint = create_init_version();
+                let default_compaction_config = self
+                    .compaction_group_manager
+                    .read()
+                    .await
+                    .default_compaction_config();
+                let checkpoint = create_init_version(default_compaction_config);
                 tracing::info!("init hummock version checkpoint");
                 HummockVersionStats::default()
                     .insert(self.env.meta_store())
@@ -487,9 +491,10 @@ where
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
         let configs = self
             .compaction_group_manager
-            .read()
+            .write()
             .await
-            .get_compaction_group_configs(&all_group_ids);
+            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
@@ -762,11 +767,18 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
 
-        let group_config = self
+        // When the last table of a compaction group is deleted, the compaction group (and its
+        // config) is destroyed as well. Then a compaction task for this group may come later and
+        // cannot find its config.
+        let group_config = match self
             .compaction_group_manager
             .read()
             .await
-            .get_compaction_group_config(compaction_group_id);
+            .try_get_compaction_group_config(compaction_group_id)
+        {
+            Some(config) => config,
+            None => return Ok(None),
+        };
         self.precheck_compaction_group(
             compaction_group_id,
             compaction_statuses,
@@ -2002,9 +2014,10 @@ where
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
         let total_cpu_core = self.compactor_manager.total_cpu_core_num();
         let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
-        let version = {
+        let (version, configs) = {
             let guard = read_lock!(self, versioning).await;
-            guard.current_version.clone()
+            let c = self.get_compaction_group_map().await;
+            (guard.current_version.clone(), c)
         };
         let mut global_info = ScaleCompactorInfo {
             total_cores: total_cpu_core as u64,
@@ -2015,12 +2028,8 @@ where
         let compaction = read_lock!(self, compaction).await;
         for (group_id, status) in &compaction.compaction_statuses {
             if let Some(levels) = version.levels.get(group_id) {
-                let cg = self
-                    .compaction_group_manager
-                    .read()
-                    .await
-                    .get_compaction_group_config(*group_id);
-                let info = status.get_compaction_info(levels, cg.compaction_config());
+                let info =
+                    status.get_compaction_info(levels, configs[group_id].compaction_config());
                 global_info.add(&info);
                 tracing::debug!("cg {} info {:?}", group_id, info);
             }
@@ -2046,7 +2055,6 @@ where
 
     #[named]
     pub async fn start_lsm_stat_report(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
-        use crate::hummock::model::CompactionGroup;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             let mut min_interval = tokio::time::interval(std::time::Duration::from_secs(10));
@@ -2063,24 +2071,20 @@ where
                 }
 
                 {
-                    let id_to_config = hummock_manager.get_compaction_group_map().await;
-                    let current_version = {
+                    let (current_version, id_to_config) = {
                         let mut versioning_guard =
                             write_lock!(hummock_manager.as_ref(), versioning).await;
-                        versioning_guard.deref_mut().current_version.clone()
+                        let configs = hummock_manager.get_compaction_group_map().await;
+                        (
+                            versioning_guard.deref_mut().current_version.clone(),
+                            configs,
+                        )
                     };
 
                     let compaction_group_ids_from_version =
                         get_compaction_group_ids(&current_version);
-                    let default_config = CompactionConfigBuilder::new().build();
                     for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = id_to_config
-                            .get(compaction_group_id)
-                            .cloned()
-                            .unwrap_or_else(|| {
-                                CompactionGroup::new(*compaction_group_id, default_config.clone())
-                            });
-
+                        let compaction_group_config = &id_to_config[compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),
@@ -2103,9 +2107,9 @@ where
     pub async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
-        let groups = {
+        let (groups, configs) = {
             let versioning_guard = read_lock!(self, versioning).await;
-            versioning_guard
+            let g = versioning_guard
                 .current_version
                 .levels
                 .iter()
@@ -2122,13 +2126,14 @@ where
                             .sum::<u64>(),
                     )
                 })
-                .collect_vec()
+                .collect_vec();
+            let c = self.get_compaction_group_map().await;
+            (g, c)
         };
         let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
         {
-            let manager = self.compaction_group_manager.read().await;
             for (group_id, l0_file_size) in groups {
-                let group = manager.get_compaction_group_config(group_id);
+                let group = &configs[&group_id];
                 if l0_file_size
                     > MAX_COMPACTION_L0_MULTIPLIER
                         * group.compaction_config.max_bytes_for_level_base
