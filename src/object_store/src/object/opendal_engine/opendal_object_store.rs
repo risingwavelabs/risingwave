@@ -157,7 +157,6 @@ impl ObjectStore for OpendalObjectStore {
         let mut metadata_list = vec![];
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
-            // let metadata=  object.metadata();
 
             let key = object.path().to_string();
 
