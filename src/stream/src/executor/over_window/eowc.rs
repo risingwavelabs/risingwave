@@ -86,11 +86,9 @@ impl Partition {
 
 impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
         let mut total_size = self.curr_row_buffer.estimated_heap_size();
-        for state in self.states {
-            total_size += state.estimate_heap_size();
+        for state in &self.states {
+            total_size += state.estimated_heap_size();
         }
         total_size
     }

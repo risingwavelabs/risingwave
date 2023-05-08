@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
@@ -21,7 +19,7 @@ use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::function::window::{Frame, FrameBound};
 use smallvec::SmallVec;
 
-use super::{StateKey, StateOutput, StatePos, WindowState, EstimatedVecDeque};
+use super::{EstimatedVecDeque, StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
 use crate::executor::StreamExecutorResult;
 

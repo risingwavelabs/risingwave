@@ -154,15 +154,20 @@ impl<T: EstimateSize> VecWithKvSize<T> {
         self.inner.push(value);
     }
 
-    pub fn into_iter(self) -> impl IntoIterator<Item = T> {
-        self.inner.into_iter()
-    }
-
     pub fn into_inner(self) -> Vec<T> {
         self.inner
     }
 
     pub fn inner(&self) -> &Vec<T> {
         &self.inner
+    }
+}
+
+impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = T;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
     }
 }

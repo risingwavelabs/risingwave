@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 
+use educe::Educe;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common_proc_macro::EstimateSize;
@@ -137,19 +138,14 @@ pub(super) fn create_window_state(
     })
 }
 
+#[derive(Educe)]
+#[educe(Default)]
 pub struct EstimatedVecDeque<T: EstimateSize> {
     inner: VecDeque<T>,
     heap_size: usize,
 }
 
 impl<T: EstimateSize> EstimatedVecDeque<T> {
-    pub fn new() -> Self {
-        Self {
-            inner: VecDeque::new(),
-            heap_size: 0,
-        }
-    }
-
     #[expect(dead_code)]
     pub fn pop_back(&mut self) -> Option<T> {
         self.inner
@@ -180,6 +176,18 @@ impl<T: EstimateSize> EstimatedVecDeque<T> {
 
     pub fn front(&self) -> Option<&T> {
         self.inner.front()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<T: EstimateSize> std::ops::Index<usize> for EstimatedVecDeque<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.inner[index]
     }
 }
 

@@ -43,7 +43,7 @@ impl LagState {
         let offset = must_match!(frame, Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow) => *offset);
         Self {
             offset,
-            buffer: EstimatedVecDeque::new(),
+            buffer: Default::default(),
             curr_idx: 0,
         }
     }
