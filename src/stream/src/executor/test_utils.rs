@@ -259,7 +259,7 @@ pub mod agg_executor {
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
-        AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
+        AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
@@ -432,7 +432,7 @@ pub mod agg_executor {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: GroupAggExecutorExtraArgs {
+            extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
                 emit_on_window_close,
