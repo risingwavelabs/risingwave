@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use rand::thread_rng;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
@@ -23,9 +22,8 @@ use risingwave_pb::hummock::{
 };
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
-use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionInput, CompactionPicker, LocalPickerStatistic,
-};
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
+use crate::hummock::compaction::create_overlap_strategy;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
@@ -66,12 +64,6 @@ impl CompactionPicker for LevelCompactionPicker {
             level_handlers,
             stats,
         )
-    }
-    fn get_select_level(&self) -> usize {
-        0
-    }
-    fn get_target_level(&self) -> usize {
-        self.target_level
     }
 }
 
@@ -208,95 +200,6 @@ impl LevelCompactionPicker {
 
         Some(CompactionInput {
             input_levels: select_level_inputs,
-            target_level: self.target_level,
-            target_sub_level_id: 0,
-        })
-    }
-
-    fn pick_files_to_target_level(
-        &self,
-        l0: &OverlappingLevel,
-        target_level: &Level,
-        level_handlers: &[LevelHandler],
-        table_id: Option<u32>,
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
-        let mut input_levels = vec![];
-        let mut l0_total_file_size = 0;
-        let mut l0_total_file_count = 0;
-        for level in &l0.sub_levels {
-            // This break is optional. We can include overlapping sub-level actually.
-            if level.level_type() != LevelType::Nonoverlapping {
-                break;
-            }
-            if l0_total_file_size >= self.config.max_compaction_bytes {
-                break;
-            }
-
-            if l0_total_file_count > self.config.level0_max_compact_file_number {
-                break;
-            }
-
-            let mut pending_compact = false;
-            let mut cur_level_size = 0;
-            let mut select_level = InputLevel {
-                level_idx: 0,
-                level_type: level.level_type,
-                table_infos: vec![],
-            };
-            for sst in &level.table_infos {
-                if table_id.map(|id| sst.table_ids[0] == id).unwrap_or(false) {
-                    continue;
-                }
-
-                if level_handlers[0].is_pending_compact(&sst.sst_id) {
-                    pending_compact = true;
-                    break;
-                }
-                cur_level_size += sst.file_size;
-                select_level.table_infos.push(sst.clone());
-            }
-            if pending_compact {
-                break;
-            }
-            if select_level.table_infos.is_empty() {
-                continue;
-            }
-
-            l0_total_file_count += select_level.table_infos.len() as u64;
-            l0_total_file_size += cur_level_size;
-            input_levels.push(select_level);
-        }
-        if l0_total_file_size == 0 {
-            return None;
-        }
-
-        let target_level_files = target_level
-            .table_infos
-            .iter()
-            .filter(|sst| table_id.map(|id| sst.table_ids[0] == id).unwrap_or(true));
-        let mut target_level_size = 0;
-        for sst in target_level_files.clone() {
-            if level_handlers[self.target_level].is_pending_compact(&sst.sst_id) {
-                return None;
-            }
-            target_level_size += sst.file_size;
-        }
-
-        if target_level_size > l0_total_file_size {
-            stats.skip_by_write_amp_limit += 1;
-            return None;
-        }
-
-        // reverse because the ix of low sub-level is smaller.
-        input_levels.reverse();
-        input_levels.push(InputLevel {
-            level_idx: self.target_level as u32,
-            level_type: LevelType::Nonoverlapping as i32,
-            table_infos: target_level_files.cloned().collect_vec(),
-        });
-        Some(CompactionInput {
-            input_levels,
             target_level: self.target_level,
             target_sub_level_id: 0,
         })

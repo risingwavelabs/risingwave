@@ -14,17 +14,14 @@
 
 use std::sync::Arc;
 
-use rand::thread_rng;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactionConfig, InputLevel, LevelType, OverlappingLevel, SstableInfo,
 };
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
-use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
-};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
@@ -38,23 +35,6 @@ impl TierCompactionPicker {
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> TierCompactionPicker {
         TierCompactionPicker {
-            config,
-            overlap_strategy,
-        }
-    }
-}
-
-pub struct TierMultiLevelColumnPicker {
-    config: Arc<CompactionConfig>,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
-}
-
-impl TierMultiLevelColumnPicker {
-    pub fn new(
-        config: Arc<CompactionConfig>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> TierMultiLevelColumnPicker {
-        TierMultiLevelColumnPicker {
             config,
             overlap_strategy,
         }
@@ -253,9 +233,7 @@ impl TierMultiLevelColumnPicker {
         }
         None
     }
-}
 
-impl TierCompactionPicker {
     fn pick_overlapping_level(
         &self,
         l0: &OverlappingLevel,
@@ -331,7 +309,7 @@ impl TierCompactionPicker {
             let tier_sub_level_compact_level_count =
                 self.config.level0_overlapping_sub_level_compact_level_count as usize;
             let min_level0_compact_file_number = self.config.level0_tier_compact_file_number
-                * std::cmp::max(1, l0_level_count / tier_sub_level_compact_level_count);
+                * std::cmp::max(1, l0_level_count / tier_sub_level_compact_level_count) as u64;
 
             if compact_file_count < min_level0_compact_file_number && waiting_enough_files {
                 stats.skip_by_count_limit += 1;
@@ -361,40 +339,15 @@ impl CompactionPicker for TierCompactionPicker {
         if l0.sub_levels.is_empty() {
             return None;
         }
-        self.pick_overlapping_level(l0, &level_handlers[0], stats)
-    }
-
-    fn get_select_level(&self) -> usize {
-        0
-    }
-    fn get_target_level(&self) -> usize {
-        0
-    }
-}
-
-impl CompactionPicker for TierMultiLevelColumnPicker {
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput> {
-        let l0 = levels.l0.as_ref().unwrap();
-        if l0.sub_levels.is_empty() {
-            return None;
-        }
 
         if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
             return Some(ret);
         }
 
+        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
+            return Some(ret);
+        }
         self.pick_multi_level(l0, &level_handlers[0], stats)
-    }
-    fn get_select_level(&self) -> usize {
-        0
-    }
-    fn get_target_level(&self) -> usize {
-        0
     }
 }
 
@@ -412,7 +365,7 @@ pub mod tests {
         generate_table, push_table_level0_overlapping,
     };
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
-    use crate::hummock::compaction::{
+    use crate::hummock::compaction::picker::{
         CompactionInput, CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
     };
     use crate::hummock::level_handler::LevelHandler;

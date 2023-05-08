@@ -20,12 +20,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::{
     OverlapInfo, OverlapStrategy, RangeOverlapInfo,
 };
-use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, ManualCompactionOption,
-};
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -312,14 +311,6 @@ impl CompactionPicker for ManualCompactionPicker {
             target_level,
             target_sub_level_id: 0,
         })
-    }
-
-    fn get_select_level(&self) -> usize {
-        self.option.level
-    }
-
-    fn get_target_level(&self) -> usize {
-        self.target_level
     }
 }
 

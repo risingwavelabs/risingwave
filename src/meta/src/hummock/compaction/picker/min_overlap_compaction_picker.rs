@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
@@ -142,12 +142,6 @@ impl CompactionPicker for MinOverlappingPicker {
             target_level: self.target_level,
             target_sub_level_id: 0,
         })
-    }
-    fn get_select_level(&self) -> usize {
-        self.level
-    }
-    fn get_target_level(&self) -> usize {
-        self.target_level
     }
 }
 

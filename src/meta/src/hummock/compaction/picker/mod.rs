@@ -22,6 +22,44 @@ mod ttl_reclaim_compaction_picker;
 pub use base_level_compaction_picker::LevelCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
+use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::InputLevel;
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
-pub use tier_compaction_picker::{TierCompactionPicker, TierMultiLevelColumnPicker};
+pub use tier_compaction_picker::TierCompactionPicker;
 pub use ttl_reclaim_compaction_picker::{TtlPickerState, TtlReclaimCompactionPicker};
+
+use crate::hummock::level_handler::LevelHandler;
+
+#[derive(Default)]
+pub struct LocalPickerStatistic {
+    pub skip_by_write_amp_limit: u64,
+    pub skip_by_count_limit: u64,
+    pub skip_by_pending_files: u64,
+    pub skip_by_overlapping: u64,
+}
+pub struct CompactionInput {
+    pub input_levels: Vec<InputLevel>,
+    pub target_level: usize,
+    pub target_sub_level_id: u64,
+}
+
+impl CompactionInput {
+    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
+        for level in &self.input_levels {
+            level_handlers[level.level_idx as usize].add_pending_task(
+                task_id,
+                self.target_level,
+                &level.table_infos,
+            );
+        }
+    }
+}
+
+pub trait CompactionPicker {
+    fn pick_compaction(
+        &mut self,
+        levels: &Levels,
+        level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
+    ) -> Option<CompactionInput>;
+}
