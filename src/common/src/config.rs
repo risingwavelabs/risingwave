@@ -915,6 +915,7 @@ mod tests {
         let expected =
             toml::Value::try_from(RwConfig::default()).expect("serialize default config failed");
 
+        // Compare the `Value` representation instead of string for normalization.
         pretty_assertions::assert_eq!(
             actual, expected,
             "\n`config/example.toml` is not up-to-date with the default values specified in `config.rs`.\nPlease run `./risedev generate-example-config` to update it."
