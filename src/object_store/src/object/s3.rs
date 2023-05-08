@@ -63,8 +63,8 @@ const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
 /// Retry config for compute node http timeout error.
 const DEFAULT_RETRY_INTERVAL: u64 = 20;
-const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(5);
-const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 10;
+const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
 ///
