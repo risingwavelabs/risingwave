@@ -498,16 +498,27 @@ impl WatermarkAnalyzer {
                 }
                 _ => WatermarkDerivation::None,
             },
-            ExprType::Subtract
+            ty @ (ExprType::Subtract
             | ExprType::Divide
             | ExprType::TumbleStart
             | ExprType::AtTimeZone
-            | ExprType::CastWithTimeZone => match self.visit_binary_op(func_call.inputs()) {
+            | ExprType::CastWithTimeZone) => match self.visit_binary_op(func_call.inputs()) {
                 (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
                     WatermarkDerivation::Constant
                 }
                 (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Watermark(idx)
+                    if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
+                        && func_call.inputs()[1]
+                            .as_literal()
+                            .unwrap()
+                            .get_data()
+                            .as_ref()
+                            .map_or(false, |time_zone| *time_zone != String::from("UTC").into())
+                    {
+                        WatermarkDerivation::None
+                    } else {
+                        WatermarkDerivation::Watermark(idx)
+                    }
                 }
                 _ => WatermarkDerivation::None,
             },
@@ -541,10 +552,8 @@ impl WatermarkAnalyzer {
             ExprType::ToTimestamp1 => WatermarkDerivation::None,
             ExprType::Cast => {
                 let inputs = func_call.inputs();
-                if matches!(
-                    func_call.return_type(),
-                    DataType::Timestamp | DataType::Timestamptz
-                ) && inputs.len() == 1
+                if func_call.return_type() == DataType::Timestamptz
+                    && inputs.len() == 1
                     && matches!(
                         inputs[0].return_type(),
                         DataType::Timestamp | DataType::Timestamptz

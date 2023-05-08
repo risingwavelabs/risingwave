@@ -750,16 +750,27 @@ impl ExprImpl {
             true
         } else if let ExprImpl::FunctionCall(f) = self {
             match f.get_expr_type() {
-                ExprType::Add
+                ty @ (ExprType::Add
                 | ExprType::Subtract
                 | ExprType::AtTimeZone
-                | ExprType::CastWithTimeZone => {
+                | ExprType::CastWithTimeZone) => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.is_now_offset() && rhs.is_const()
+                    if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
+                        && rhs
+                            .as_literal()
+                            .unwrap()
+                            .get_data()
+                            .as_ref()
+                            .map_or(false, |time_zone| *time_zone != String::from("UTC").into())
+                    {
+                        false
+                    } else {
+                        lhs.is_now_offset() && rhs.is_const()
+                    }
                 }
                 ExprType::Cast => {
                     let inputs = f.inputs();
-                    matches!(f.return_type(), DataType::Timestamp | DataType::Timestamptz)
+                    f.return_type() == DataType::Timestamptz
                         && inputs.len() == 1
                         && matches!(
                             inputs[0].return_type(),
