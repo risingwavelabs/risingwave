@@ -47,6 +47,7 @@ use risingwave_pb::hummock::{
     IntraLevelDelta, LevelType, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_sqlparser::keywords::CLUSTER;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
@@ -85,8 +86,6 @@ mod compaction;
 mod worker;
 
 use compaction::*;
-
-const CLUSTER_ID_OBJECT_NAME: &str = "__cluster_id";
 
 type Snapshot = ArcSwap<HummockSnapshot>;
 
@@ -2286,23 +2285,24 @@ async fn write_exclusive_cluster_id(
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
 ) -> Result<()> {
-    let cluster_id_object_path = format!("{}/{}", state_store_dir, CLUSTER_ID_OBJECT_NAME);
-    let cluster_id_res = object_store.read(&cluster_id_object_path, None).await;
+    const CLUSTER_ID_DIR: &str = "cluster_id";
+    const CLUSTER_ID_NAME: &str = "0";
 
-    if let Ok(cluster_id) = cluster_id_res {
+    let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
+    let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    let metadata = object_store.list(&cluster_id_dir).await?;
+
+    if metadata.is_empty() {
+        object_store
+            .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
+            .await?;
+        Ok(())
+    } else {
+        let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
         Err(ObjectError::internal(format!(
             "data directory is already used by another cluster with id {:?}",
             String::from_utf8(cluster_id.to_vec()).unwrap()
         ))
         .into())
-    } else {
-        // FIXME: Can't distinguish no such item from other errors.
-        object_store
-            .upload(
-                &cluster_id_object_path,
-                Bytes::from(String::from(cluster_id)),
-            )
-            .await?;
-        Ok(())
     }
 }
