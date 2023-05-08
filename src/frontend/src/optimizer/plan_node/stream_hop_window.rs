@@ -20,6 +20,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -61,7 +62,8 @@ impl StreamHopWindow {
         let base = PlanBase::new_stream_with_logical(
             &logical,
             dist,
-            logical.input.append_only(),
+            input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         Self {

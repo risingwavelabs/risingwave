@@ -34,10 +34,10 @@ use super::{
     TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
-    LocalSelectorStatistic, MinOverlappingPicker,
+use crate::hummock::compaction::picker::{
+    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
 };
+use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -595,12 +595,8 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
-            min_epoch: 0,
-            max_epoch: 0,
+            ..Default::default()
         }
     }
 
@@ -625,12 +621,10 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids,
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch,
             max_epoch,
+            ..Default::default()
         }
     }
 

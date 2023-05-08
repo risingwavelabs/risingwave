@@ -194,7 +194,6 @@ pub(crate) async fn resolve_source_schema(
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
     validate_compatibility(&source_schema, with_properties)?;
-    check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
     let is_kafka = is_kafka_connector(with_properties);
 
@@ -354,7 +353,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "_id".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -365,7 +364,7 @@ pub(crate) async fn resolve_source_schema(
                         name: "payload".to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 });
@@ -532,7 +531,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -653,7 +652,13 @@ fn validate_compatibility(
     Ok(())
 }
 
-fn check_nexmark_schema(
+/// Performs early stage checking in frontend to see if the schema of the given `columns` is
+/// compatible with the connector extracted from the properties. Currently this only works for
+/// `nexmark` connector since it's in chunk format.
+///
+/// One should only call this function after all properties of all columns are resolved, like
+/// generated column descriptors.
+pub(super) fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -683,9 +688,21 @@ fn check_nexmark_schema(
         }
     };
 
+    // Ignore the generated columns and map the index of row_id column.
+    let user_defined_columns = columns.iter().filter(|c| !c.is_generated());
+    let row_id_index = if let Some(index) = row_id_index {
+        let col_id = columns[index].column_id();
+        user_defined_columns
+            .clone()
+            .position(|c| c.column_id() == col_id)
+            .unwrap()
+            .into()
+    } else {
+        None
+    };
+
     let expected = get_event_data_types_with_names(event_type, row_id_index);
-    let user_defined = columns
-        .iter()
+    let user_defined = user_defined_columns
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
@@ -695,9 +712,9 @@ fn check_nexmark_schema(
         .collect_vec();
 
     if expected != user_defined {
+        let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
-            "The shema of the nexmark source must specify all columns in order, expected {:?}, but get {:?}",
-            expected, user_defined
+            "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
     Ok(())
@@ -759,6 +776,8 @@ pub async fn handle_create_source(
     assert!(watermark_descs.len() <= 1);
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source

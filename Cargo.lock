@@ -1548,27 +1548,12 @@ dependencies = [
 
 [[package]]
 name = "crc"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49fc9a695bca7f35f5f4c15cddc84415f66a74ea78eef08e90c5024f2b540e23"
-dependencies = [
- "crc-catalog 1.1.1",
-]
-
-[[package]]
-name = "crc"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86ec7a15cbe22e59248fc7eadb1907dab5ba09372595da4d73dd805ed4417dfe"
 dependencies = [
- "crc-catalog 2.2.0",
+ "crc-catalog",
 ]
-
-[[package]]
-name = "crc-catalog"
-version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccaeedb56da03b09f598226e25e80088cb4cd25f316e6e4df7d695f0feeb1403"
 
 [[package]]
 name = "crc-catalog"
@@ -1980,17 +1965,6 @@ dependencies = [
  "const-oid",
  "pem-rfc7468",
  "zeroize",
-]
-
-[[package]]
-name = "derivative"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc3dd5e9e9c0b295d6e1e4d811fb6f157d5ffd784b8d202fc62eac8035a770b"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -2737,9 +2711,9 @@ dependencies = [
 
 [[package]]
 name = "halfbrown"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "389d755cc2bcc8cdb7554b89ddaa59d9275a727ec8915b0e2bc4176c33cc39cb"
+checksum = "6d9ab7d9233262d3b74ae4c4a7a090fc4379b07c6eb9b02ecab7cbb12ad67a58"
 dependencies = [
  "hashbrown 0.13.2",
  "serde",
@@ -2889,9 +2863,9 @@ checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
 
 [[package]]
 name = "hyper"
-version = "0.14.25"
+version = "0.14.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc5e554ff619822309ffd57d8734d77cd5ce6238bc956f037ea06c58238c9899"
+checksum = "ab302d72a6f11a3b910431ff93aae7e773078c769f0a3ef15fb9ec692ed147d4"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -3106,12 +3080,10 @@ dependencies = [
  "crossbeam-utils",
  "curl",
  "curl-sys",
- "encoding_rs",
  "event-listener",
  "futures-lite",
  "http",
  "log",
- "mime",
  "once_cell",
  "polling",
  "slab",
@@ -3193,21 +3165,6 @@ dependencies = [
  "serde",
  "serde_json",
  "simple_asn1",
-]
-
-[[package]]
-name = "kafka"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b11c86b0c0c9a9d89b136b2938a5b46a35c40f66eced2f09c76458b17dadfc2a"
-dependencies = [
- "byteorder",
- "crc 2.1.0",
- "fnv",
- "ref_slice",
- "thiserror",
- "tracing",
- "twox-hash",
 ]
 
 [[package]]
@@ -5121,7 +5078,7 @@ dependencies = [
  "bit-vec",
  "bytes",
  "chrono",
- "crc 3.0.1",
+ "crc",
  "data-url",
  "futures",
  "futures-io",
@@ -5329,12 +5286,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ref_slice"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4ed1d73fb92eba9b841ba2aef69533a060ccc0d3ec71c90aeda5996d4afb7a9"
-
-[[package]]
 name = "regex"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5402,9 +5353,9 @@ dependencies = [
 
 [[package]]
 name = "reqwest"
-version = "0.11.15"
+version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ba30cc2c0cd02af1222ed216ba659cdb2f879dfe3181852fe7c50b1d0005949"
+checksum = "13293b639a097af28fc8a90f22add145a9c954e49d77da06263d58cf44d5fb91"
 dependencies = [
  "base64 0.21.0",
  "bytes",
@@ -5484,12 +5435,12 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "indicatif",
- "isahc",
  "itertools",
- "kafka",
+ "madsim-rdkafka",
  "madsim-tokio",
  "redis",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_with 2.3.1",
@@ -5675,8 +5626,8 @@ dependencies = [
  "crc32fast",
  "criterion",
  "darwin-libproc",
- "derivative",
  "easy-ext",
+ "educe",
  "either",
  "enum-as-inner",
  "ethnum",
@@ -5701,6 +5652,7 @@ dependencies = [
  "parse-display",
  "paste",
  "postgres-types",
+ "pretty_assertions",
  "procfs 0.12.0",
  "prometheus",
  "prost",
@@ -5716,6 +5668,7 @@ dependencies = [
  "serde_json",
  "serde_with 2.3.1",
  "smallbitset",
+ "speedate",
  "static_assertions",
  "strum",
  "strum_macros",
@@ -5900,7 +5853,6 @@ dependencies = [
  "rand",
  "reqwest",
  "risingwave_common",
- "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rust_decimal",
@@ -5974,6 +5926,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "async-trait",
+ "auto_enums",
  "chrono",
  "chrono-tz",
  "criterion",
@@ -5996,7 +5949,6 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "serde_json",
- "speedate",
  "static_assertions",
  "thiserror",
  "tracing",
@@ -6027,10 +5979,10 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap 4.1.11",
- "derivative",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",
+ "educe",
  "enum-as-inner",
  "fixedbitset",
  "futures",
@@ -6051,6 +6003,7 @@ dependencies = [
  "pin-project-lite",
  "postgres-types",
  "pretty-xmlish",
+ "pretty_assertions",
  "prometheus",
  "rand",
  "risingwave_batch",
@@ -6231,6 +6184,7 @@ dependencies = [
  "spin 0.9.8",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tracing",
 ]
 
@@ -6531,8 +6485,8 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "derivative",
  "dyn-clone",
+ "educe",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -8654,11 +8608,11 @@ dependencies = [
 name = "workspace-config"
 version = "1.0.0-alpha"
 dependencies = [
- "isahc",
  "log",
  "madsim-rdkafka",
  "openssl",
  "tracing",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -8687,16 +8641,13 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-core",
- "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
  "futures-util",
  "hashbrown 0.12.3",
  "hashbrown 0.13.2",
- "hdrhistogram",
  "hyper",
- "isahc",
  "itertools",
  "lexical-core",
  "lexical-parse-float",
@@ -8707,6 +8658,7 @@ dependencies = [
  "libc",
  "lock_api",
  "log",
+ "madsim-rdkafka",
  "madsim-tokio",
  "memchr",
  "miniz_oxide",
@@ -8736,7 +8688,6 @@ dependencies = [
  "serde_json",
  "serde_with 2.3.1",
  "smallvec",
- "strum",
  "subtle",
  "syn 1.0.109",
  "time 0.3.17",
@@ -8749,7 +8700,6 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-core",
- "tracing-futures",
  "tracing-subscriber",
  "url",
  "uuid",

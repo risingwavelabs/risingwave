@@ -16,7 +16,7 @@
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
-        <module>connector-node/risingwave-source-test</module>
+        <module>connector-node/risingwave-connector-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>

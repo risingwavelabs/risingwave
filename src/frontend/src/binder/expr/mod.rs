@@ -515,7 +515,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
-                    generated_column: None,
+                    generated_or_default_column: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -528,7 +528,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
-        generated_column: None,
+        generated_or_default_column: None,
     })
 }
 
@@ -554,9 +554,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List {
-            datatype: Box::new(bind_data_type(datatype)?),
-        },
+        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),

@@ -161,8 +161,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 2,
@@ -178,8 +177,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }),
             ],
             epoch_id_vec_for_clear,

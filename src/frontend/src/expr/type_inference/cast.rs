@@ -85,7 +85,7 @@ pub fn align_array_and_element(
     let array = inputs[array_idx].return_type();
     let element = inputs[element_idx].return_type();
     let array_ele_type_opt = match &array {
-        DataType::List { datatype: array_et } => Some(array_et),
+        DataType::List(array_et) => Some(array_et),
         _ => None,
     };
     let array_ele_type = array_ele_type_opt.ok_or_else(|| {
@@ -103,9 +103,7 @@ pub fn align_array_and_element(
 
     // found common type
     let common_ele_type = common_ele_type.unwrap();
-    let array_type = DataType::List {
-        datatype: Box::new(common_ele_type.clone()),
-    };
+    let array_type = DataType::List(Box::new(common_ele_type.clone()));
 
     // try to cast inputs to inputs to common type
     let inputs_owned = std::mem::take(inputs);
@@ -170,19 +168,14 @@ fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> 
 
 fn cast_ok_array(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     match (source, target) {
-        (
-            DataType::List {
-                datatype: source_elem,
-            },
-            DataType::List {
-                datatype: target_elem,
-            },
-        ) => cast_ok(source_elem, target_elem, allows),
+        (DataType::List(source_elem), DataType::List(target_elem)) => {
+            cast_ok(source_elem, target_elem, allows)
+        }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.
         // https://www.postgresql.org/docs/14/sql-createcast.html#id-1.9.3.58.7.4
-        (DataType::Varchar, DataType::List { datatype: _ }) => CastContext::Explicit <= allows,
-        (DataType::List { datatype: _ }, DataType::Varchar) => CastContext::Assign <= allows,
+        (DataType::Varchar, DataType::List(_)) => CastContext::Explicit <= allows,
+        (DataType::List(_), DataType::Varchar) => CastContext::Assign <= allows,
         _ => false,
     }
 }

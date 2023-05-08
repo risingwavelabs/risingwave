@@ -36,7 +36,7 @@
   sql: |
     select current_schemas(NULL);
   batch_plan: |
-    BatchValues { rows: [[null:List { datatype: Varchar }]] }
+    BatchValues { rows: [[null:List(Varchar)]] }
 - name: FILTER (FILTER NULL)
   sql: |
     create table t(v1 int);
@@ -76,7 +76,7 @@
   sql: |
     select current_schemas('y');
   batch_plan: |
-    BatchValues { rows: [[ARRAY[pg_catalog, public]:List { datatype: Varchar }]] }
+    BatchValues { rows: [[ARRAY[pg_catalog, public]:List(Varchar)]] }
 - name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |
     create table t(v1 int);

@@ -32,7 +32,7 @@ fn build_array_to_string(
     let list = iter.next().unwrap();
     let delimiter = iter.next().unwrap();
     let elem_type = match list.return_type() {
-        DataType::List { datatype } => *datatype,
+        DataType::List(datatype) => *datatype,
         _ => panic!("expected list type"),
     };
     let expr = BinaryBytesExpression::<ListArray, Utf8Array, _>::new(
@@ -122,7 +122,7 @@ fn build_array_to_string_with_null(
     let delimiter = iter.next().unwrap();
     let null_string = iter.next().unwrap();
     let elem_type = match list.return_type() {
-        DataType::List { datatype } => *datatype,
+        DataType::List(datatype) => *datatype,
         _ => panic!("expected list type"),
     };
     let expr = TernaryBytesExpression::<ListArray, Utf8Array, Utf8Array, _>::new(

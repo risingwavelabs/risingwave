@@ -27,7 +27,7 @@ use risingwave_pb::stream_service::{
     ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
@@ -130,7 +130,7 @@ where
 
                 // Migrate actors in expired CN to newly joined one.
                 let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                    error!(err = ?err, "migrate actors failed");
+                    warn!(err = ?err, "migrate actors failed");
                 })?;
                 if migrated {
                     info = self.resolve_actor_info_for_recovery().await;
@@ -138,15 +138,15 @@ where
 
                 // Reset all compute nodes, stop and drop existing actors.
                 self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                    error!(err = ?err, "reset compute nodes failed");
+                    warn!(err = ?err, "reset compute nodes failed");
                 })?;
 
                 // update and build all actors.
                 self.update_actors(&info).await.inspect_err(|err| {
-                    error!(err = ?err, "update actors failed");
+                    warn!(err = ?err, "update actors failed");
                 })?;
                 self.build_actors(&info).await.inspect_err(|err| {
-                    error!(err = ?err, "build_actors failed");
+                    warn!(err = ?err, "build_actors failed");
                 })?;
 
                 // get split assignments for all actors
@@ -194,14 +194,14 @@ where
                 let res = match barrier_complete_rx.recv().await.unwrap().result {
                     Ok(response) => {
                         if let Err(err) = command_ctx.post_collect().await {
-                            error!(err = ?err, "post_collect failed");
+                            warn!(err = ?err, "post_collect failed");
                             Err(err)
                         } else {
                             Ok((new_epoch, response))
                         }
                     }
                     Err(err) => {
-                        error!(err = ?err, "inject_barrier failed");
+                        warn!(err = ?err, "inject_barrier failed");
                         Err(err)
                     }
                 };
