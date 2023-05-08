@@ -159,14 +159,26 @@ where
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
         }
+        // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
+        // then call `seal_current` later outside the `if let` instead of calling
+        // `seal_current` at where we set `need_seal_current = true`. This is because
+        // `seal_current` is an async method, and if we call `seal_current` within the `if let`,
+        // this temporary reference to `current_builder` will be captured in the future generated
+        // from the current method. Since this generated future is usually required to be `Send`,
+        // the captured reference to `current_builder` is also required to be `Send`, and then
+        // `current_builder` itself is required to be `Sync`, which is unnecessary.
+        let mut need_seal_current = false;
         if let Some(builder) = self.current_builder.as_ref() {
             if is_new_user_key && (switch_builder || builder.reach_capacity()) {
-                let monotonic_deletes = self
-                    .del_agg
-                    .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
-                self.seal_current(monotonic_deletes).await?;
-                self.last_sealed_key.extend_from_other(&full_key.user_key);
+                need_seal_current = true;
             }
+        }
+        if need_seal_current {
+            let monotonic_deletes = self
+                .del_agg
+                .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
+            self.seal_current(monotonic_deletes).await?;
+            self.last_sealed_key.extend_from_other(&full_key.user_key);
         }
 
         if self.current_builder.is_none() {
