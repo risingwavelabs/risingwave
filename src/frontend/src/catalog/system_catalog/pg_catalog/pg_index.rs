@@ -26,12 +26,7 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
         (DataType::Int32, "indexrelid"),
         (DataType::Int32, "indrelid"),
         (DataType::Int16, "indnatts"),
-        (
-            DataType::List {
-                datatype: Box::new(DataType::Int16),
-            },
-            "indkey",
-        ),
+        (DataType::List(Box::new(DataType::Int16)), "indkey"),
         // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
         (DataType::Varchar, "indexprs"),
         // None. We don't have `pg_node_tree` type yet, so we use `text` instead.

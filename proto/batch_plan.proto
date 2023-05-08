@@ -80,6 +80,12 @@ message InsertNode {
   // Version of the table.
   uint64 table_version_id = 5;
   repeated uint32 column_indices = 2;
+
+  // deprecated, breaking change
+  // DefaultColumns default_columns = 6 [deprecated = true];
+  // reserved 6;
+
+  plan_common.DefaultColumns default_columns = 6;
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
   // be filled in streaming.
@@ -299,6 +305,9 @@ message PlanNode {
     GroupTopNNode group_top_n = 32;
     DistributedLookupJoinNode distributed_lookup_join = 33;
     SourceNode source = 34;
+    // The following nodes are used for testing.
+    bool block_executor = 35;
+    bool busy_loop_executor = 36;
   }
   string identity = 24;
 }

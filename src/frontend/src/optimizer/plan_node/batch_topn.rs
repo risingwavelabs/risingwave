@@ -22,7 +22,8 @@ use super::generic::Limit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::plan_node::{BatchLimit, LogicalLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -35,11 +36,8 @@ pub struct BatchTopN {
 impl BatchTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(logical.group_key.is_empty());
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
-        let base = PlanBase::new_batch(
-            ctx,
-            base.schema,
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             logical.input.distribution().clone(),
             // BatchTopN outputs data in the order of specified order
             logical.order.clone(),
@@ -53,11 +51,29 @@ impl BatchTopN {
             self.logical.limit_attr.with_ties(),
         );
         let new_offset = 0;
-        let logical_partial_topn =
-            generic::TopN::without_group(input, new_limit, new_offset, self.logical.order.clone());
-        let batch_partial_topn = Self::new(logical_partial_topn);
-        let ensure_single_dist = RequiredDist::single()
-            .enforce_if_not_satisfies(batch_partial_topn.into(), &Order::any())?;
+        let partial_input: PlanRef = if input.order().satisfies(&self.logical.order) {
+            let logical_partial_limit = LogicalLimit::new(input, new_limit.limit(), new_offset);
+            let batch_partial_limit = BatchLimit::new(logical_partial_limit);
+            batch_partial_limit.into()
+        } else {
+            let logical_partial_topn = generic::TopN::without_group(
+                input,
+                new_limit,
+                new_offset,
+                self.logical.order.clone(),
+            );
+            let batch_partial_topn = Self::new(logical_partial_topn);
+            batch_partial_topn.into()
+        };
+
+        let single_dist = RequiredDist::single();
+        let ensure_single_dist = if !partial_input.distribution().satisfies(&single_dist) {
+            single_dist.enforce_if_not_satisfies(partial_input, &Order::any())?
+        } else {
+            // The input's distribution is singleton, so use one phase topn is enough.
+            return Ok(partial_input);
+        };
+
         let batch_global_topn = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_topn.into())
     }

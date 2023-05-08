@@ -62,6 +62,7 @@ impl StreamDynamicFilter {
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
         let core = generic::DynamicFilter {

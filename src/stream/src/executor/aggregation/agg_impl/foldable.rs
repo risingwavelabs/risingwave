@@ -15,13 +15,16 @@
 //! Implementation of `StreamingFoldAgg`, which includes sum and count.
 
 use std::marker::PhantomData;
+use std::ops::BitXor;
 
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::ExprError;
 
 use super::{StreamingAggImpl, StreamingAggInput, StreamingAggOutput};
@@ -55,7 +58,7 @@ pub trait StreamingFoldable<R: Scalar, I: Scalar>: std::fmt::Debug + Send + Sync
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
 /// `S`: Sum function.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -82,7 +85,7 @@ where
 
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct PrimitiveSummable<S, I>
 where
     I: Scalar + Into<S> + std::ops::Neg<Output = I>,
@@ -194,6 +197,46 @@ where
     }
 }
 
+/// `BitXorable` returns the result of `bit_xor` all the values.
+/// It produces the same type of output as input `S`.
+#[derive(Debug)]
+pub struct BitXorable<S>
+where
+    S: Scalar + BitXor<Output = S>,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for BitXorable<S>
+where
+    S: Scalar + BitXor<Output = S>,
+{
+    fn accumulate(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().bitxor(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+
+    /// `fn accumulate` and `fn retract` share the same implementation.
+    fn retract(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().bitxor(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+}
+
 /// `Minimizable` return minimum value overall.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
@@ -288,18 +331,19 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in visibility
-                    .iter()
-                    .zip_eq_fast(ops.iter())
-                    .zip_eq_fast(data.iter())
-                {
-                    if visible {
-                        match op {
+                for idx in visibility.iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        match ops[idx] {
                             Op::Insert | Op::UpdateInsert => {
-                                self.result = S::accumulate(self.result.as_ref(), data)?
+                                self.result = S::accumulate(
+                                    self.result.as_ref(),
+                                    data.value_at_unchecked(idx),
+                                )?
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                self.result = S::retract(self.result.as_ref(), data)?
+                                self.result =
+                                    S::retract(self.result.as_ref(), data.value_at_unchecked(idx))?
                             }
                         }
                     }
@@ -448,6 +492,8 @@ mod tests {
     type TestStreamingMinAgg<R> = StreamingFoldAgg<R, R, Minimizable<<R as Array>::OwnedItem>>;
 
     type TestStreamingMaxAgg<R> = StreamingFoldAgg<R, R, Maximizable<<R as Array>::OwnedItem>>;
+
+    type TestStreamingBitXorAgg<R> = StreamingFoldAgg<R, R, BitXorable<<R as Array>::OwnedItem>>;
 
     #[test]
     /// This test uses `Box<dyn StreamingAggImpl>` to test an aggregator.
@@ -655,6 +701,27 @@ mod tests {
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
     }
 
+    #[test]
+    fn test_bit_xor() {
+        let mut agg = TestStreamingBitXorAgg::<I64Array>::default();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&array!(I64Array, [Some(10), Some(1), None, Some(5)]).into()],
+        )
+        .unwrap();
+
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &14);
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
+            None,
+            &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
+        )
+        .unwrap();
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
+    }
+
     fn bench_i64(
         b: &mut Bencher,
         mut agg: Box<dyn StreamingAggImpl>,
@@ -672,12 +739,17 @@ mod tests {
             Some(rand_bitmap::gen_rand_bitmap(
                 chunk_size,
                 (chunk_size as f64 * vis_rate) as usize,
+                666,
             ))
         } else {
             None
         };
-        let (ops, data) =
-            rand_stream_chunk::gen_legal_stream_chunk(bitmap.as_ref(), chunk_size, append_only);
+        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
+            bitmap.as_ref(),
+            chunk_size,
+            append_only,
+            666,
+        );
         b.iter(|| {
             for _ in 0..iter_count {
                 agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();

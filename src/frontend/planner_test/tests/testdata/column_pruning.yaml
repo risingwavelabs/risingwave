@@ -120,6 +120,40 @@
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: [t1.v1, t2.v1] }
     ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [t1.v1, t1.v2, t1.v3], predicate: (t1.v3 < 1:Int32) }
     └─LogicalScan { table: t2, columns: [t2.v1, t2.v2] }
+- name: project set
+  sql: |
+    create table t(v1 int, v2 int, v3 int, v4 int, arr int[]);
+    with cte as (select v1, v2, v3, unnest(arr) as arr_unnested from t) select * from cte where v1=10 AND v2=20 AND v3=30 AND arr_unnested=30;
+  logical_plan: |
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($4)] }
+    └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (Unnest($4) = 30:Int32) }
+      └─LogicalShare { id = 3 }
+        └─LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($4)] }
+          └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($4)] }
+            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.arr, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($3)] }
+    └─LogicalFilter { predicate: (Unnest($3) = 30:Int32) }
+      └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($3)] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.arr], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
+- name: overagg
+  sql: |
+    create table t(x int, y int, z int, w int);
+    SELECT rank FROM (
+        SELECT x, y, z, row_number() OVER (PARTITION BY x ORDER BY y) AS rank FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and rank <= 3;
+  logical_plan: |
+    LogicalProject { exprs: [row_number] }
+    └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) AND (row_number <= 3:Int32) }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
+        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+          └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [row_number] }
+    └─LogicalFilter { predicate: (row_number <= 3:Int32) }
+      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalScan { table: t, output_columns: [t.x, t.y], required_columns: [t.x, t.y, t.z], predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
 - name: mixed
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);

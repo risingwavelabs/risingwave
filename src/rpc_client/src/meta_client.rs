@@ -51,6 +51,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -137,12 +138,14 @@ impl MetaClient {
         connection_name: String,
         database_id: u32,
         schema_id: u32,
+        owner_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest {
             name: connection_name,
             database_id,
             schema_id,
+            owner_id,
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
@@ -204,7 +207,7 @@ impl MetaClient {
         meta_addr: &str,
         worker_type: WorkerType,
         addr: &HostAddr,
-        worker_node_parallelism: usize,
+        property: Property,
         meta_config: &MetaConfig,
     ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
@@ -223,7 +226,7 @@ impl MetaClient {
                 .add_worker_node(AddWorkerNodeRequest {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
-                    worker_node_parallelism: worker_node_parallelism as u64,
+                    property: Some(property.clone()),
                 })
                 .await?;
 
@@ -236,7 +239,6 @@ impl MetaClient {
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
-
         let worker_node = add_worker_resp
             .node
             .expect("AddWorkerNodeResponse::node is empty");

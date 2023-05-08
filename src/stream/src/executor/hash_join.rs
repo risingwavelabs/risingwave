@@ -913,7 +913,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .entry(side_update.join_key_indices.len() + inequality_index)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             let mut input_watermark = watermark.clone();
-            if *need_offset && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref() {
+            if *need_offset
+                && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref()
+            {
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
@@ -926,7 +928,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             self.ctx.on_compute_error(err, self.identity.as_str());
                         }
                         continue;
-                    },
+                    }
                 }
             };
             if let Some(selected_watermark) = buffers.handle_watermark(side, input_watermark) {
@@ -1119,7 +1121,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
                             side_match.ht.delete(key, row);
                         } else if side_update.need_degree_table {
-                            side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
+                            side_update
+                                .ht
+                                .insert(key, JoinRow::new(row, degree))
+                                .await?;
                         } else {
                             side_update.ht.insert_row(key, row).await?;
                         }

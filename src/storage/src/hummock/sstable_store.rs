@@ -242,10 +242,11 @@ impl SstableStore {
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
-                if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(object_id, block_index as u64))
-                    .await
-                    .map_err(HummockError::tiered_cache)?
+                if use_tiered_cache
+                    && let Some(holder) = tiered_cache
+                        .get(&(object_id, block_index as u64))
+                        .await
+                        .map_err(HummockError::tiered_cache)?
                 {
                     // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
                     return Ok(holder.into_owned());
@@ -537,6 +538,16 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
+impl Default for SstableWriterOptions {
+    fn default() -> Self {
+        Self {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::NotFill,
+        }
+    }
+}
+
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
@@ -779,40 +790,6 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
             uploader,
             options,
         ))
-    }
-}
-
-pub struct CompactorMemoryCollector {
-    uploading_memory_limiter: Arc<MemoryLimiter>,
-    data_memory_limiter: Arc<MemoryLimiter>,
-    sstable_store: SstableStoreRef,
-}
-
-impl CompactorMemoryCollector {
-    pub fn new(
-        uploading_memory_limiter: Arc<MemoryLimiter>,
-        sstable_store: SstableStoreRef,
-        data_memory_limiter: Arc<MemoryLimiter>,
-    ) -> Self {
-        Self {
-            uploading_memory_limiter,
-            data_memory_limiter,
-            sstable_store,
-        }
-    }
-}
-
-impl MemoryCollector for CompactorMemoryCollector {
-    fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
-    }
-
-    fn get_data_memory_usage(&self) -> u64 {
-        self.data_memory_limiter.get_memory_usage()
-    }
-
-    fn get_uploading_memory_usage(&self) -> u64 {
-        self.uploading_memory_limiter.get_memory_usage()
     }
 }
 

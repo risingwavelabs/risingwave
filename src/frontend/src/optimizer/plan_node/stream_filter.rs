@@ -17,6 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
@@ -32,19 +33,14 @@ pub struct StreamFilter {
 
 impl StreamFilter {
     pub fn new(logical: generic::Filter<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let input = logical.input.clone();
-        let pk_indices = base.logical_pk;
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            base.schema,
-            pk_indices,
-            base.functional_dependency,
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }

@@ -15,12 +15,8 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::common::AwsPrivateLinkItem;
-use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -42,7 +38,7 @@ use crate::manager::{
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::ddl_controller::{DdlCommand, DdlController, StreamingJobId};
 use crate::storage::MetaStore;
-use crate::stream::{visit_fragment, GlobalStreamManagerRef, SourceManagerRef};
+use crate::stream::{GlobalStreamManagerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
@@ -85,38 +81,6 @@ where
             aws_client,
         }
     }
-}
-
-#[inline(always)]
-fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
-}
-
-#[inline(always)]
-fn kafka_props_broker_key(with_properties: &HashMap<String, String>) -> &str {
-    if with_properties.contains_key(KAFKA_PROPS_BROKER_KEY) {
-        KAFKA_PROPS_BROKER_KEY
-    } else {
-        KAFKA_PROPS_BROKER_KEY_ALIAS
-    }
-}
-
-#[inline(always)]
-fn get_property_required(
-    with_properties: &HashMap<String, String>,
-    property: &str,
-) -> MetaResult<String> {
-    with_properties
-        .get(property)
-        .map(|s| s.to_lowercase())
-        .ok_or(MetaError::from(anyhow!(
-            "Required property \"{property}\" is not provided"
-        )))
 }
 
 #[async_trait::async_trait]
@@ -204,10 +168,9 @@ where
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let mut source = request.into_inner().get_source()?.clone();
 
-        // resolve private links before starting the DDL procedure
+        // validate connection before starting the DDL procedure
         if let Some(connection_id) = source.connection_id {
-            self.resolve_private_link_info(connection_id, &mut source.properties)
-                .await?;
+            self.validate_connection(connection_id).await?;
         }
 
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -249,6 +212,11 @@ where
         let req = request.into_inner();
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+
+        // validate connection before starting the DDL procedure
+        if let Some(connection_id) = sink.connection_id {
+            self.validate_connection(connection_id).await?;
+        }
 
         let mut stream_job = StreamingJob::Sink(sink);
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -650,6 +618,7 @@ where
                     schema_id: req.schema_id,
                     database_id: req.database_id,
                     name: req.name,
+                    owner: req.owner_id,
                     info: Some(connection::Info::PrivateLinkService(private_link_svc)),
                 };
 
@@ -720,39 +689,17 @@ where
         Ok(id)
     }
 
-    async fn resolve_private_link_info(
-        &self,
-        connection_id: ConnectionId,
-        properties: &mut HashMap<String, String>,
-    ) -> MetaResult<()> {
-        let mut broker_rewrite_map = HashMap::new();
-        const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
-        let conn = self
+    async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
+        let connection = self
             .catalog_manager
             .get_connection_by_id(connection_id)
             .await?;
-        if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-            if !is_kafka_connector(properties) {
-                return Err(MetaError::from(anyhow!(
-                    "Private link is only supported for Kafka connector",
-                )));
-            }
+        if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info {
             // skip all checks for mock connection
             if svc.get_provider()? == PrivateLinkProvider::Mock {
                 return Ok(());
             }
-            let link_target_value = get_property_required(properties, PRIVATE_LINK_TARGETS_KEY)?;
-            let servers = get_property_required(properties, kafka_props_broker_key(properties))?;
-            let broker_addrs = servers.split(',').collect_vec();
-            let link_targets: Vec<AwsPrivateLinkItem> =
-                serde_json::from_str(link_target_value.as_str()).map_err(|e| anyhow!(e))?;
-            if broker_addrs.len() != link_targets.len() {
-                return Err(MetaError::from(anyhow!(
-                    "The number of broker addrs {} does not match the number of private link targets {}",
-                    broker_addrs.len(),
-                    link_targets.len()
-                )));
-            }
+
             // check whether private link is ready
             let cli = self.aws_client.as_ref().unwrap();
             if !cli.is_vpc_endpoint_ready(&svc.endpoint_id).await? {
@@ -761,29 +708,6 @@ where
                     svc.endpoint_id
                 )));
             }
-
-            for (link, broker) in link_targets.iter().zip_eq_fast(broker_addrs.into_iter()) {
-                if let Some(connection::Info::PrivateLinkService(svc)) = &conn.info {
-                    if svc.dns_entries.is_empty() {
-                        return Err(MetaError::from(anyhow!(
-                            "No available private link endpoints for Kafka broker {}",
-                            broker
-                        )));
-                    }
-                    // rewrite the broker address to the dns name w/o az
-                    // requires the NLB has enabled the cross-zone load balancing
-                    broker_rewrite_map.insert(
-                        broker.to_string(),
-                        format!("{}:{}", &svc.endpoint_dns_name, link.port),
-                    );
-                }
-            }
-
-            // save private link dns names into source properties, which
-            // will be extracted into KafkaProperties
-            let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
-            const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
-            properties.insert(BROKER_REWRITE_MAP_KEY.to_string(), json);
         }
         Ok(())
     }

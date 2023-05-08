@@ -30,12 +30,15 @@ use serde::{Deserialize, Serialize};
 use to_text::ToText;
 
 use crate::array::ArrayResult;
+use crate::estimate_size::EstimateSize;
 use crate::types::to_binary::ToBinary;
 use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 
+/// A 256-bit signed integer.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Int256(Box<i256>);
 
+/// A reference to an `Int256` value.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Int256Ref<'a>(pub &'a i256);
 
@@ -360,6 +363,12 @@ impl<'a> From<Int256Ref<'a>> for arrow_buffer::i256 {
     }
 }
 
+impl EstimateSize for Int256 {
+    fn estimated_heap_size(&self) -> usize {
+        mem::size_of::<i128>() * 2
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,5 +576,11 @@ mod tests {
             .unwrap(),
             Int256::min_value(),
         );
+    }
+
+    #[test]
+    fn test_num256_estimate_size() {
+        let num256 = Int256::min_value();
+        assert_eq!(num256.estimated_size(), 40);
     }
 }

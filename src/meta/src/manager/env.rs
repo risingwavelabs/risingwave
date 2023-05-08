@@ -114,6 +114,14 @@ pub struct MetaOpts {
 
     ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
     pub max_compactor_task_multiplier: u32,
+
+    /// Schedule split_compaction_group for all compaction groups with this interval.
+    pub periodic_split_compact_group_interval_sec: u64,
+
+    /// The size limit to split a large compaction group.
+    pub split_group_size_limit: u64,
+    /// The size limit to move a state-table to other group.
+    pub move_table_size_limit: u64,
 }
 
 impl MetaOpts {
@@ -139,7 +147,10 @@ impl MetaOpts {
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            periodic_split_compact_group_interval_sec: 60,
             max_compactor_task_multiplier: 2,
+            split_group_size_limit: 5 * 1024 * 1024 * 1024,
+            move_table_size_limit: 2 * 1024 * 1024 * 1024,
         }
     }
 }
@@ -245,7 +256,7 @@ impl MetaSrvEnv<MemStore> {
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                risingwave_common::system_param::default_system_params(),
+                risingwave_common::system_param::system_params_for_test(),
             )
             .await
             .unwrap(),

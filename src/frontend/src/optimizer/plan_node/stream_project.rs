@@ -20,7 +20,8 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::stream::StreamPlanRef;
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -30,7 +31,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
     pub base: PlanBase,
-    logical: LogicalProject,
+    logical: generic::Project<PlanRef>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: Vec<(usize, usize)>,
@@ -39,7 +40,8 @@ pub struct StreamProject {
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamProject");
-        self.logical.fmt_fields_with_builder(&mut builder);
+        self.logical
+            .fmt_fields_with_builder(&mut builder, self.schema());
         if !self.watermark_derivations.is_empty() {
             builder.field(
                 "output_watermarks",
@@ -55,18 +57,15 @@ impl fmt::Display for StreamProject {
 }
 
 impl StreamProject {
-    pub fn new(logical: LogicalProject) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let pk_indices = logical.base.logical_pk.to_vec();
-        let schema = logical.schema().clone();
+    pub fn new(logical: generic::Project<PlanRef>) -> Self {
+        let input = logical.input.clone();
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
 
         let mut watermark_derivations = vec![];
-        let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-        for (expr_idx, expr) in logical.exprs().iter().enumerate() {
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.exprs.len());
+        for (expr_idx, expr) in logical.exprs.iter().enumerate() {
             if let Some(input_idx) = try_derive_watermark(expr) {
                 if input.watermark_columns().contains(input_idx) {
                     watermark_derivations.push((input_idx, expr_idx));
@@ -76,13 +75,11 @@ impl StreamProject {
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             distribution,
-            logical.input().append_only(),
+            input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamProject {
@@ -92,22 +89,24 @@ impl StreamProject {
         }
     }
 
-    pub fn as_logical(&self) -> &LogicalProject {
+    pub fn as_logical(&self) -> &generic::Project<PlanRef> {
         &self.logical
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {
-        self.logical.exprs()
+        &self.logical.exprs
     }
 }
 
 impl PlanTreeNodeUnary for StreamProject {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
@@ -117,7 +116,7 @@ impl StreamNode for StreamProject {
         PbNodeBody::Project(ProjectNode {
             select_list: self
                 .logical
-                .exprs()
+                .exprs
                 .iter()
                 .map(|x| x.to_expr_proto())
                 .collect(),
@@ -141,13 +140,8 @@ impl ExprRewritable for StreamProject {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_project()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

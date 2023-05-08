@@ -61,7 +61,8 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
+    build_multi_compaction_filter, estimate_state_for_compaction, estimate_task_memory_capacity,
+    generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -128,34 +129,38 @@ impl Compactor {
             .filter(|level| level.level_idx == compact_task.target_level)
             .flat_map(|level| level.table_infos.iter())
             .collect_vec();
+        let select_size = select_table_infos
+            .iter()
+            .map(|table| table.file_size)
+            .sum::<u64>();
         context
             .compactor_metrics
             .compact_read_current_level
             .with_label_values(&[&group_label, &cur_level_label])
-            .inc_by(
-                select_table_infos
-                    .iter()
-                    .map(|table| table.file_size)
-                    .sum::<u64>(),
-            );
+            .inc_by(select_size);
         context
             .compactor_metrics
             .compact_read_sstn_current_level
             .with_label_values(&[&group_label, &cur_level_label])
             .inc_by(select_table_infos.len() as u64);
 
-        let sec_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
+        let target_level_read_bytes = target_table_infos.iter().map(|t| t.file_size).sum::<u64>();
         let next_level_label = compact_task.target_level.to_string();
         context
             .compactor_metrics
             .compact_read_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
-            .inc_by(sec_level_read_bytes);
+            .inc_by(target_level_read_bytes);
         context
             .compactor_metrics
             .compact_read_sstn_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(target_table_infos.len() as u64);
+        context
+            .compactor_metrics
+            .compact_task_size
+            .with_label_values(&[&group_label, next_level_label.as_str()])
+            .observe((select_size + target_level_read_bytes) as f64);
 
         let timer = context
             .compactor_metrics
@@ -178,10 +183,24 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
-        let existing_table_ids = HashSet::from_iter(compact_task.existing_table_ids.clone());
+        let existing_table_ids: HashSet<u32> =
+            HashSet::from_iter(compact_task.existing_table_ids.clone());
+        let mut compact_table_ids = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .flat_map(|sst| sst.table_ids.clone())
+            .collect_vec();
+        compact_table_ids.sort();
+        compact_table_ids.dedup();
+        let compact_table_ids = HashSet::from_iter(
+            compact_table_ids
+                .into_iter()
+                .filter(|table_id| existing_table_ids.contains(table_id)),
+        );
         let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
-            .acquire(existing_table_ids.clone())
+            .acquire(compact_table_ids.clone())
             .await
         {
             Err(e) => {
@@ -195,12 +214,12 @@ impl Compactor {
 
         if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
             let found_tables = multi.get_exsting_table_ids();
-            let removed_tables = existing_table_ids
+            let removed_tables = compact_table_ids
                 .iter()
                 .filter(|table_id| !found_tables.contains(table_id))
                 .collect_vec();
             if !removed_tables.is_empty() {
-                tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", existing_table_ids, removed_tables);
+                tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
                 let task_status = TaskStatus::ExecuteFailed;
                 Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
                 return task_status;
@@ -239,6 +258,28 @@ impl Compactor {
             }
         };
 
+        let task_memory_capacity_with_parallelism =
+            estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+
+        // If the task does not have enough memory, it should cancel the task and let the meta
+        // reschedule it, so that it does not occupy the compactor's resources.
+        let memory_detector = context
+            .output_memory_limiter
+            .try_require_memory(task_memory_capacity_with_parallelism as u64);
+        if memory_detector.is_none() {
+            tracing::warn!(
+                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+                compact_task.task_id,
+                task_memory_capacity_with_parallelism,
+                context.output_memory_limiter.get_memory_usage(),
+                context.output_memory_limiter.quota()
+            );
+            task_status = TaskStatus::NoAvailResourceCanceled;
+            Self::compact_done(&mut compact_task, context.clone(), output_ssts, task_status).await;
+            return task_status;
+        }
+
+        drop(memory_detector);
         context.compactor_metrics.compact_task_pending_num.inc();
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let filter = multi_filter.clone();
@@ -630,7 +671,7 @@ impl Compactor {
             }
 
             let earliest_range_delete_which_can_see_iter_key =
-                del_iter.earliest_delete_which_can_see_key(&iter_key.user_key, epoch);
+                del_iter.earliest_delete_which_can_see_key(iter_key.user_key, epoch);
 
             // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`.
             // If there is no keys whose epoch is equal or greater than `watermark`, keep the latest
@@ -837,7 +878,7 @@ impl Compactor {
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
             sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
-            limiter: self.context.read_memory_limiter.clone(),
+            limiter: self.context.output_memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),

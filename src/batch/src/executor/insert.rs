@@ -14,16 +14,21 @@
 
 use std::iter::repeat;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use itertools::Itertools;
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
@@ -43,6 +48,7 @@ pub struct InsertExecutor {
     schema: Schema,
     identity: String,
     column_indices: Vec<usize>,
+    sorted_default_columns: Vec<(usize, BoxedExpression)>,
 
     row_id_index: Option<usize>,
     returning: bool,
@@ -58,6 +64,7 @@ impl InsertExecutor {
         chunk_size: usize,
         identity: String,
         column_indices: Vec<usize>,
+        sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -77,6 +84,7 @@ impl InsertExecutor {
             },
             identity,
             column_indices,
+            sorted_default_columns,
             row_id_index,
             returning,
         }
@@ -110,14 +118,26 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-            // No need to check for duplicate columns. This is already validated in binder.
-            if !&self.column_indices.is_sorted() {
-                let mut ordered_cols = columns.clone();
-                for (i, idx) in self.column_indices.iter().enumerate() {
-                    ordered_cols[*idx] = columns[i].clone()
-                }
-                columns = ordered_cols
+            let dummy_chunk = DataChunk::new_dummy(cap);
+
+            let mut ordered_columns = self
+                .column_indices
+                .iter()
+                .enumerate()
+                .map(|(i, idx)| (*idx, columns[i].clone()))
+                .collect_vec();
+            ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
+
+            for (idx, expr) in &self.sorted_default_columns {
+                let column = Column::new(expr.eval(&dummy_chunk).await?);
+                ordered_columns.push((*idx, column));
             }
+
+            ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
+            columns = ordered_columns
+                .into_iter()
+                .map(|(_, column)| column)
+                .collect_vec();
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -188,6 +208,24 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .iter()
             .map(|&i| i as usize)
             .collect();
+        let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
+            let mut default_columns = default_columns
+                .get_default_columns()
+                .iter()
+                .cloned()
+                .map(|IndexAndExpr { index: i, expr: e }| {
+                    Ok((
+                        i as usize,
+                        build_from_prost(&e.ok_or_else(|| anyhow!("expression is None"))?)
+                            .map_err(|e| anyhow!("failed to build expression: {}", e))?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            default_columns.sort_unstable_by_key(|(i, _)| *i);
+            default_columns
+        } else {
+            vec![]
+        };
 
         Ok(Box::new(Self::new(
             table_id,
@@ -197,6 +235,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
+            sorted_default_columns,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
@@ -289,7 +328,8 @@ mod tests {
             Box::new(mock_executor),
             1024,
             "InsertExecutor".to_string(),
-            vec![], // Ignoring insertion order
+            vec![0, 1, 2], // Ignoring insertion order
+            vec![],
             row_id_index,
             false,
         ));

@@ -185,7 +185,7 @@ pub(crate) mod tests {
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-            read_memory_limiter: MemoryLimiter::unlimit(),
+            output_memory_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),
@@ -960,7 +960,7 @@ pub(crate) mod tests {
                 .meta
                 .key_count;
         }
-        let expect_count = kv_count as u32 - retention_seconds_expire_second;
+        let expect_count = kv_count as u32 - retention_seconds_expire_second + 1;
         assert_eq!(expect_count, key_count); // retention_seconds will clean the key (which epoch < epoch - retention_seconds)
 
         // 5. get compact task and there should be none

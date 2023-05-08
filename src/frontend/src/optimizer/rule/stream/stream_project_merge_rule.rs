@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary, StreamProject};
+use crate::optimizer::plan_node::{generic, PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::{BoxedRule, PlanRef, Rule};
 use crate::utils::Substitute;
 
@@ -34,7 +34,7 @@ impl Rule for StreamProjectMergeRule {
             .cloned()
             .map(|expr| subst.rewrite_expr(expr))
             .collect();
-        let logical_project = LogicalProject::new(inner_project.input(), exprs);
+        let logical_project = generic::Project::new(exprs, inner_project.input());
         Some(StreamProject::new(logical_project).into())
     }
 }

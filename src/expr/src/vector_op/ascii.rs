@@ -16,7 +16,7 @@ use risingwave_expr_macro::function;
 
 #[function("ascii(varchar) -> int32")]
 pub fn ascii(s: &str) -> i32 {
-    s.as_bytes().first().map(|x| *x as i32).unwrap_or(0)
+    s.chars().next().map(|x| x as i32).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn test_ascii() {
-        let cases = [("hello", 104), ("你好", 228), ("", 0)];
+        let cases = [("hello", 104), ("你好", 20320), ("", 0)];
         for (s, expected) in cases {
             assert_eq!(ascii(s), expected)
         }

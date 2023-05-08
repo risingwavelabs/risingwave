@@ -20,7 +20,6 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
-use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -462,7 +461,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id && let Some(security_group_id) = &env.opts.security_group_id {
+    if let Some(my_vpc_id) = &env.opts.vpc_id
+        && let Some(security_group_id) = &env.opts.security_group_id
+    {
         let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
         aws_cli = Some(cli);
     }
@@ -602,8 +603,8 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     }
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
-        if system_params_reader.telemetry_enabled(){
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
             mgr.start_telemetry_reporting().await;
         }
         sub_tasks.push(mgr.watch_params_change());

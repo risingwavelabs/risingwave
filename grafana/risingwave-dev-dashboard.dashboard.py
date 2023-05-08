@@ -302,62 +302,39 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "KBs Read from Next Level",
+                    "KBs Read/Write by Level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Read from Current Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Current Level",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Written to Next Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Count of SSTs Written to Next Level",
+                    "Count of SSTs Read/Write by level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Next Level",
-                    "num of SSTs read from next level during history compactions to next level",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
+                        ),
+
+                        panels.target(
+                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
                     ],
                 ),
@@ -397,6 +374,21 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
                             "avg_epoch_count - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compact Task Size Distribution",
+                    "the size of each compact task",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_compact_task_size_bucket')}[$__rate_interval])) by (le, job, group, level))",
+                                f"p{legend}" +
+                                " - {{group}} @ {{level}}",
+                                ),
+                            [90, "max"],
                         ),
                     ],
                 ),
@@ -642,6 +634,16 @@ def section_streaming(panels):
             ]
         ),
         panels.timeseries_rowsps(
+            "Sink Throughput(rows/s)",
+            "The figure shows the number of rows output by each sink per second.",
+            [
+                panels.target(
+                    f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
+                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
             "Backfill Snapshot Read Throughput(rows)",
             "Total number of rows that have been read from the backfill snapshot",
             [
@@ -856,156 +858,6 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Fast Poll Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Fast Poll Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Fast Poll Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Slow Poll Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Slow Poll Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Slow Poll Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Poll Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Poll Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Poll Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Idle Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Idle Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Idle Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Scheduled Total Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops_small(
-                    "Tokio: Actor Scheduled Count",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency_small(
-                    "Tokio: Actor Scheduled Avg Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
                 panels.timeseries_actor_ops(
                     "Join Executor Cache",
                     "",
@@ -1165,6 +1017,165 @@ def section_streaming_actors(outer_panels):
         )
     ]
 
+def section_streaming_actors_tokio(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming Actors (Tokio)",
+            [
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Fast Poll Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops_small(
+                    "Tokio: Actor Fast Poll Count",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Fast Poll Avg Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_fast_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_fast_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Slow Poll Total Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops_small(
+                    "Tokio: Actor Slow Poll Count",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Slow Poll Avg Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_slow_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_slow_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Poll Total Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops_small(
+                    "Tokio: Actor Poll Count",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Poll Avg Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_poll_duration')}[$__rate_interval]) / rate({metric('stream_actor_poll_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Idle Total Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops_small(
+                    "Tokio: Actor Idle Count",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Idle Avg Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_idle_duration')}[$__rate_interval]) / rate({metric('stream_actor_idle_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Scheduled Total Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops_small(
+                    "Tokio: Actor Scheduled Count",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_latency_small(
+                    "Tokio: Actor Scheduled Avg Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_scheduled_duration')}[$__rate_interval]) / rate({metric('stream_actor_scheduled_cnt')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+            ]
+        )
+    ]
 
 def section_streaming_exchange(outer_panels):
     panels = outer_panels.sub_panel()
@@ -1228,7 +1239,7 @@ def section_streaming_errors(outer_panels):
     ]
 
 
-def section_batch_exchange(outer_panels):
+def section_batch(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1239,7 +1250,7 @@ def section_batch_exchange(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_task_exchange_recv_row_number')}",
+                            f"{metric('batch_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
                         ),
                     ],
@@ -1250,6 +1261,16 @@ def section_batch_exchange(outer_panels):
                     [
                         panels.target(
                             f"{metric('batch_task_num')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mem Usage",
+                    "All memory usage of batch executors in bytes",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1387,16 +1408,26 @@ def section_hummock(panels):
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
+                    f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, instance, type)",
+                    "total_meta_miss_count - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
+            ],
+        ),
+        panels.timeseries_ops(
+            "File Cache Ops",
+            "",
+            [
+                panels.target(
                     f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                     "file cache {{op}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
-                    "preload iops",
                 ),
             ],
         ),
@@ -1728,8 +1759,8 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job)",
-                    "uploading memory - {{job}}",
+                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2339,11 +2370,21 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
-                    "The memory allocated by jemalloc",
+                    "The allocated memory of jemalloc",
                     "",
                     [
                         panels.target(
                             f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_active_bytes')}",
                             "",
                         ),
                     ],
@@ -2366,6 +2407,16 @@ def section_connector_node(outer_panels):
                         panels.target(
                             f"rate({metric('connector_source_rows_received')}[$__interval])",
                             "{{source_type}} @ {{source_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_rowsps(
+                    "Connector Sink Throughput(rows)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
+                            "{{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),
@@ -2417,9 +2468,10 @@ dashboard = Dashboard(
         *section_recovery_node(panels),
         *section_streaming(panels),
         *section_streaming_actors(panels),
+        *section_streaming_actors_tokio(panels),
         *section_streaming_exchange(panels),
         *section_streaming_errors(panels),
-        *section_batch_exchange(panels),
+        *section_batch(panels),
         *section_hummock(panels),
         *section_compaction(panels),
         *section_object_storage(panels),

@@ -15,12 +15,12 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::{Serial, SerialArrayBuilder};
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, Op, SerialArrayBuilder, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
