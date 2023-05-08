@@ -788,7 +788,7 @@ mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
-            1 << 10
+            10
         }
 
         pub fn stream_chunk_size() -> usize {
