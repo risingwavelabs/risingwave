@@ -29,8 +29,9 @@ use risingwave_common::array::{
     StructArray, TimeArray, TimestampArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_expr::*;
 pub use row_count::*;
 
@@ -61,7 +62,9 @@ trait StreamingAggOutput<B: ArrayBuilder>: Send + Sync + 'static {
 
 /// `StreamingAggImpl` erases the associated type information of `StreamingAggInput` and
 /// `StreamingAggOutput`. You should manually implement this trait for necessary types.
-pub trait StreamingAggImpl: Any + std::fmt::Debug + DynClone + Send + Sync + 'static {
+pub trait StreamingAggImpl:
+    Any + std::fmt::Debug + DynClone + EstimateSize + Send + Sync + 'static
+{
     /// Apply a batch to the state
     fn apply_batch(
         &mut self,
@@ -97,6 +100,9 @@ type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::Owned
 
 /// `StreamingMaxAgg` get maximum data of the same type.
 type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
+
+/// `StreamingBitXor`
+type StreamingBitXorAgg<S> = StreamingFoldAgg<S, S, BitXorable<<S as Array>::OwnedItem>>;
 
 /// [postgresql specification of aggregate functions](https://www.postgresql.org/docs/13/functions-aggregate.html)
 /// Most of the general-purpose aggregate functions have one input except for:
@@ -226,6 +232,10 @@ pub fn create_streaming_agg_impl(
                     (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
+                    // BitXor
+                    (BitXor, int16, int16, StreamingBitXorAgg::<I16Array>),
+                    (BitXor, int32, int32, StreamingBitXorAgg::<I32Array>),
+                    (BitXor, int64, int64, StreamingBitXorAgg::<I64Array>),
                 ]
             )
         }

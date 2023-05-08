@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod agg;
 pub mod arithmetic_op;
 pub mod array_access;
+pub mod array_range_access;
 pub mod ascii;
 pub mod bitwise_op;
 pub mod cast;
@@ -22,9 +22,11 @@ pub mod cmp;
 pub mod concat_op;
 pub mod conjunction;
 pub mod date_trunc;
+pub mod encdec;
 pub mod exp;
 pub mod extract;
 pub mod format_type;
+pub mod int256;
 pub mod jsonb_info;
 pub mod length;
 pub mod like;
@@ -37,6 +39,7 @@ pub mod replace;
 pub mod round;
 pub mod split_part;
 pub mod string;
+pub mod string_to_array;
 pub mod substr;
 pub mod timestamptz;
 pub mod to_char;

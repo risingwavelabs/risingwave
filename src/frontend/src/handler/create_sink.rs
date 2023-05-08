@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{DatabaseId, SchemaId, UserId};
+use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -26,6 +26,8 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
+use crate::handler::create_source::CONNECTION_NAME_KEY;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -39,7 +41,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
-        for_system_time_as_of_now: false,
+        for_system_time_as_of_proctime: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -76,7 +78,7 @@ pub fn gen_sink_plan(
     };
 
     let (sink_database_id, sink_schema_id) =
-        session.get_database_and_schema_id_for_create(sink_schema_name)?;
+        session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -92,14 +94,28 @@ pub fn gen_sink_plan(
     // If column names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.with_options().clone();
+    let mut with_options = context.with_options().clone();
+    let properties = with_options.inner_mut();
+    let connection_id = {
+        if let Some(connection_name) = properties
+            .get(CONNECTION_NAME_KEY)
+            .map(|s| s.to_lowercase())
+        {
+            let conn = session.get_connection_by_name(sink_schema_name, &connection_name)?;
+            resolve_private_link_connection(&conn, properties)?;
+            tracing::debug!("Create sink with connection {:?}", conn.id);
+            Some(ConnectionId(conn.id))
+        } else {
+            None
+        }
+    };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options)?;
     let sink_desc = sink_plan.sink_desc().clone();
     let sink_plan: PlanRef = sink_plan.into();
 
@@ -117,6 +133,7 @@ pub fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
+        connection_id,
         dependent_relations.into_iter().collect_vec(),
     );
 

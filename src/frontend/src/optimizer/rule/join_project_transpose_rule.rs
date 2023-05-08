@@ -51,10 +51,22 @@ impl Rule for JoinProjectTransposeRule {
         let mut has_new_right: bool = false;
 
         // prepare for pull up left child.
-        let new_left = if let Some(project) = left.as_logical_project() && left_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::RightAnti && join_type != JoinType::RightSemi && join_type != JoinType::RightOuter && join_type != JoinType::FullOuter {
-            let (exprs,child) = project.clone().decompose();
+        let new_left = if let Some(project) = left.as_logical_project()
+            && left_input_index_on_condition
+                .iter()
+                .all(|index| project.exprs()[*index].as_input_ref().is_some())
+            && join_type != JoinType::RightAnti
+            && join_type != JoinType::RightSemi
+            && join_type != JoinType::RightOuter
+            && join_type != JoinType::FullOuter
+        {
+            let (exprs, child) = project.clone().decompose();
 
-            old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type().composite(&project.o2i_col_mapping()));
+            old_i2new_i = old_i2new_i.union(
+                &join
+                    .i2l_col_mapping_ignore_join_type()
+                    .composite(&project.o2i_col_mapping()),
+            );
 
             full_proj_exprs.extend(exprs);
 
@@ -65,29 +77,65 @@ impl Rule for JoinProjectTransposeRule {
             old_i2new_i = old_i2new_i.union(&join.i2l_col_mapping_ignore_join_type());
 
             for i in 0..left_output_len {
-                full_proj_exprs.push(InputRef{index:i,data_type:left.schema().data_types()[i].clone()}.into());
+                full_proj_exprs.push(
+                    InputRef {
+                        index: i,
+                        data_type: left.schema().data_types()[i].clone(),
+                    }
+                    .into(),
+                );
             }
 
             left
         };
 
         // prepare for pull up right child.
-        let new_right = if let Some(project) = right.as_logical_project() && right_input_index_on_condition.iter().all(|index| project.exprs()[*index].as_input_ref().is_some()) && join_type != JoinType::LeftAnti && join_type != JoinType::LeftSemi && join_type != JoinType::LeftOuter && join_type != JoinType::FullOuter {
-            let (exprs,child) = project.clone().decompose();
+        let new_right = if let Some(project) = right.as_logical_project()
+            && right_input_index_on_condition
+                .iter()
+                .all(|index| project.exprs()[*index].as_input_ref().is_some())
+            && join_type != JoinType::LeftAnti
+            && join_type != JoinType::LeftSemi
+            && join_type != JoinType::LeftOuter
+            && join_type != JoinType::FullOuter
+        {
+            let (exprs, child) = project.clone().decompose();
 
-            old_i2new_i = old_i2new_i.union(&join.i2r_col_mapping_ignore_join_type().composite(&project.o2i_col_mapping()).clone_with_offset(new_left.schema().len()));
+            old_i2new_i = old_i2new_i.union(
+                &join
+                    .i2r_col_mapping_ignore_join_type()
+                    .composite(&project.o2i_col_mapping())
+                    .clone_with_offset(new_left.schema().len()),
+            );
 
-            let mut index_writer = IndexRewriter::new(ColIndexMapping::identity(child.schema().len()).clone_with_offset(new_left.schema().len()));
-            full_proj_exprs.extend(exprs.into_iter().map(|expr| index_writer.rewrite_expr(expr)));
+            let mut index_writer = IndexRewriter::new(
+                ColIndexMapping::identity(child.schema().len())
+                    .clone_with_offset(new_left.schema().len()),
+            );
+            full_proj_exprs.extend(
+                exprs
+                    .into_iter()
+                    .map(|expr| index_writer.rewrite_expr(expr)),
+            );
 
             has_new_right = true;
 
             child
         } else {
-            old_i2new_i = old_i2new_i.union(&join.i2r_col_mapping_ignore_join_type().clone_with_offset(new_left.schema().len()));
+            old_i2new_i = old_i2new_i.union(
+                &join
+                    .i2r_col_mapping_ignore_join_type()
+                    .clone_with_offset(new_left.schema().len()),
+            );
 
             for i in 0..right_output_len {
-                full_proj_exprs.push(InputRef{index:i+new_left.schema().len(),data_type:right.schema().data_types()[i].clone()}.into());
+                full_proj_exprs.push(
+                    InputRef {
+                        index: i + new_left.schema().len(),
+                        data_type: right.schema().data_types()[i].clone(),
+                    }
+                    .into(),
+                );
             }
 
             right

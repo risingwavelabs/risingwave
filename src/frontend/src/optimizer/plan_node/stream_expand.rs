@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,9 +32,8 @@ pub struct StreamExpand {
 
 impl StreamExpand {
     pub fn new(logical: generic::Expand<PlanRef>) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
         let input = logical.input.clone();
-        let schema = base.schema;
+        let schema = input.schema();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -51,13 +51,11 @@ impl StreamExpand {
                 .map(|idx| idx + input.schema().len()),
         );
 
-        let base = PlanBase::new_stream(
-            base.ctx,
-            schema,
-            base.logical_pk,
-            base.functional_dependency,
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamExpand { base, logical }

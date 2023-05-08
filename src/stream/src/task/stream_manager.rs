@@ -642,9 +642,6 @@ impl LocalStreamManagerCore {
 
             let monitor = tokio_metrics::TaskMonitor::new();
 
-            let metrics = self.streaming_metrics.clone();
-            let actor_id_str = actor_id.to_string();
-
             let handle = {
                 let context = self.context.clone();
                 let actor = async move {
@@ -665,19 +662,28 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let allocation_stated = task_stats_alloc::allocation_stat(
-                    instrumented,
-                    Duration::from_millis(1000),
-                    move |bytes| {
-                        metrics
-                            .actor_memory_usage
-                            .with_label_values(&[&actor_id_str])
-                            .set(bytes as i64);
+                #[cfg(enable_task_local_alloc)]
+                {
+                    let metrics = self.streaming_metrics.clone();
+                    let actor_id_str = actor_id.to_string();
+                    let allocation_stated = task_stats_alloc::allocation_stat(
+                        instrumented,
+                        Duration::from_millis(1000),
+                        move |bytes| {
+                            metrics
+                                .actor_memory_usage
+                                .with_label_values(&[&actor_id_str])
+                                .set(bytes as i64);
 
-                        actor_context.store_mem_usage(bytes);
-                    },
-                );
-                self.runtime.spawn(allocation_stated)
+                            actor_context.store_mem_usage(bytes);
+                        },
+                    );
+                    self.runtime.spawn(allocation_stated)
+                }
+                #[cfg(not(enable_task_local_alloc))]
+                {
+                    self.runtime.spawn(instrumented)
+                }
             };
             self.handles.insert(actor_id, handle);
 
@@ -763,7 +769,7 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor{
+            if let Some(prev_actor) = ret && actor != &prev_actor {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

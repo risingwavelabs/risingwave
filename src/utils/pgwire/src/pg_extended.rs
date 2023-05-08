@@ -49,10 +49,9 @@ where
         row_limit: usize,
         msg_stream: &mut Conn<S>,
     ) -> PsqlResult<bool> {
-        if let Some(notice) = self.result.get_notice() {
-            msg_stream.write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+        for notice in self.result.get_notices() {
+            msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
         }
-
         if self.result.is_empty() {
             // Run the callback before sending the response.
             self.result.run_callback().await?;

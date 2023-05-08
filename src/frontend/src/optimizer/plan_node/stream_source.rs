@@ -13,13 +13,15 @@
 // limitations under the License.
 
 use std::fmt;
+use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
-use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -27,37 +29,31 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
-    logical: LogicalSource,
+    logical: generic::Source,
 }
 
 impl StreamSource {
-    pub fn new(logical: LogicalSource) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
-        if let Some(catalog) = logical.source_catalog() {
+    pub fn new(logical: generic::Source) -> Self {
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.column_catalog.len());
+        if let Some(catalog) = &logical.catalog {
             catalog
                 .watermark_descs
                 .iter()
                 .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
         }
 
-        let base = PlanBase::new_stream(
-            logical.ctx(),
-            logical.schema().clone(),
-            logical.logical_pk().to_vec(),
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             Distribution::SomeShard,
-            logical
-                .core
-                .catalog
-                .as_ref()
-                .map_or(true, |s| s.append_only),
+            logical.catalog.as_ref().map_or(true, |s| s.append_only),
+            false,
             watermark_columns,
         );
         Self { base, logical }
     }
 
-    pub fn logical(&self) -> &LogicalSource {
-        &self.logical
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+        self.logical.catalog.clone()
     }
 
     pub fn column_names(&self) -> Vec<String> {
@@ -74,7 +70,7 @@ impl_plan_tree_node_for_leaf! { StreamSource }
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamSource");
-        if let Some(catalog) = self.logical.source_catalog() {
+        if let Some(catalog) = self.source_catalog() {
             builder
                 .field("source", &catalog.name)
                 .field("columns", &self.column_names());
@@ -85,21 +81,19 @@ impl fmt::Display for StreamSource {
 
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        let source_catalog = self.logical.source_catalog();
+        let source_catalog = self.source_catalog();
         let source_inner = source_catalog.map(|source_catalog| PbStreamSource {
             source_id: source_catalog.id,
             source_name: source_catalog.name.clone(),
             state_table: Some(
-                self.logical
-                    .infer_internal_table_catalog()
+                generic::Source::infer_internal_table_catalog()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: self.logical.core.row_id_index.map(|index| index as _),
+            row_id_index: self.logical.row_id_index.map(|index| index as _),
             columns: self
                 .logical
-                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())

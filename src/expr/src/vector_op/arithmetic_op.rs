@@ -16,14 +16,18 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Float, Signed, Zero};
-use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use risingwave_common::types::{
+    CheckedAdd, Date, Decimal, FloatExt, Interval, Time, Timestamp, F64,
+};
 use risingwave_expr_macro::function;
 use rust_decimal::MathematicalOps;
 
 use crate::{ExprError, Result};
 
-#[function("add(*number, *number) -> auto")]
+#[function("add(*int, *int) -> auto")]
+#[function("add(*numeric, *numeric) -> auto")]
+#[function("add(*float, *float) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -37,7 +41,9 @@ where
     })
 }
 
-#[function("subtract(*number, *number) -> auto")]
+#[function("subtract(*int, *int) -> auto")]
+#[function("subtract(*numeric, *numeric) -> auto")]
+#[function("subtract(*float, *float) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
 pub fn general_sub<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -51,7 +57,9 @@ where
     })
 }
 
-#[function("multiply(*number, *number) -> auto")]
+#[function("multiply(*int, *int) -> auto")]
+#[function("multiply(*numeric, *numeric) -> auto")]
+#[function("multiply(*float, *float) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -64,8 +72,12 @@ where
     })
 }
 
-#[function("divide(*number, *number) -> auto")]
+#[function("divide(*int, *int) -> auto")]
+#[function("divide(*numeric, *numeric) -> auto")]
+#[function("divide(*float, *float) -> auto")]
 #[function("divide(int256, int256) -> int256")]
+#[function("divide(int256, float64) -> float64")]
+#[function("divide(int256, *int) -> int256")]
 pub fn general_div<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
     T1: Into<T3> + Debug,
@@ -83,7 +95,8 @@ where
     })
 }
 
-#[function("modulus(*number, *number) -> auto")]
+#[function("modulus(*int, *int) -> auto")]
+#[function("modulus(*numeric, *numeric) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -329,7 +342,9 @@ pub fn time_interval_add(l: Time, r: Interval) -> Result<Time> {
     }
 }
 
-#[function("divide(interval, *number) -> interval")]
+#[function("divide(interval, *int) -> interval")]
+#[function("divide(interval, *numeric) -> interval")]
+#[function("divide(interval, *float) -> interval")]
 pub fn interval_float_div<T2>(l: Interval, r: T2) -> Result<Interval>
 where
     T2: TryInto<F64> + Debug,
@@ -394,8 +409,11 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
 mod tests {
     use std::str::FromStr;
 
+    use num_traits::Float;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Timestamp, F32, F64};
+    use risingwave_common::types::{
+        Date, Decimal, Int256, Int256Ref, Interval, Scalar, Timestamp, F32, F64,
+    };
 
     use super::*;
 
@@ -437,26 +455,6 @@ mod tests {
         assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
         assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
-        assert_eq!(
-            general_add::<Decimal, f32, Decimal>(dec("1.0"), -1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_sub::<Decimal, f32, Decimal>(dec("1.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_div::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_mul::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_mod::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
         assert!(general_add::<i32, F32, F64>(-1i32, 1f32.into())
             .unwrap()
             .is_zero());
@@ -526,6 +524,29 @@ mod tests {
         assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
         assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
         assert!(sqrt_decimal(dec("-inf")).is_err());
+    }
+
+    #[test]
+    fn test_arithmetic_int256() {
+        let tuples = vec![
+            (0, 1, "0"),
+            (0, -1, "0"),
+            (1, 1, "1"),
+            (1, -1, "-1"),
+            (1, 2, "0.5"),
+            (1, -2, "-0.5"),
+            (9007199254740991i64, 2, "4503599627370495.5"),
+        ];
+
+        for (i, j, k) in tuples {
+            let lhs = Int256::from(i);
+            let rhs = F64::from(j);
+            let res = F64::from_str(k).unwrap();
+            assert_eq!(
+                general_div::<Int256Ref<'_>, F64, F64>(lhs.as_scalar_ref(), rhs).unwrap(),
+                res,
+            );
+        }
     }
 
     fn dec(s: &str) -> Decimal {

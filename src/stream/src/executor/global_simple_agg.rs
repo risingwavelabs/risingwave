@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -26,7 +27,7 @@ use super::aggregation::{
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -335,11 +336,10 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::expr::*;
+    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::*;
@@ -378,14 +378,12 @@ mod tests {
         tx.push_barrier(4, false);
 
         // This is local simple aggregation, so we add another row count state
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -394,7 +392,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -403,7 +400,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -412,7 +408,6 @@ mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -422,6 +417,7 @@ mod tests {
             ActorContext::create(123),
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             vec![2],

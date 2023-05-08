@@ -42,14 +42,11 @@ impl BatchHopWindow {
         window_start_exprs: Vec<ExprImpl>,
         window_end_exprs: Vec<ExprImpl>,
     ) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input.distribution());
-        let base = PlanBase::new_batch(
-            ctx,
-            base.schema,
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
             distribution,
             logical.get_out_column_index_order(),
         );

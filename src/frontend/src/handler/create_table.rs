@@ -25,7 +25,8 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
-use risingwave_pb::plan_common::GeneratedColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
@@ -38,7 +39,9 @@ use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl};
-use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
+use crate::handler::create_source::{
+    bind_source_watermark, check_source_schema, UPSTREAM_SOURCE_KEY,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -163,7 +166,7 @@ pub fn bind_sql_columns(
             name: name.real_value(),
             field_descs,
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         });
     }
 
@@ -192,6 +195,21 @@ fn check_generated_column_constraints(
     Ok(())
 }
 
+fn check_default_column_constraints(
+    expr: &ExprImpl,
+    column_catalogs: &[ColumnCatalog],
+) -> Result<()> {
+    let input_refs = expr.collect_input_refs(column_catalogs.len());
+    if input_refs.count_ones(..) > 0 {
+        return Err(ErrorCode::BindError(
+            "Default can not reference another column, and you should try generated column instead."
+                .to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 /// Binds constraints that can be only specified in column definitions.
 pub fn bind_sql_column_constraints(
     session: &SessionImpl,
@@ -214,6 +232,7 @@ pub fn bind_sql_column_constraints(
 
     let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
+
     for column in columns {
         for option_def in column.options {
             match option_def.option {
@@ -229,9 +248,23 @@ pub fn bind_sql_column_constraints(
                         &generated_column_names,
                     )?;
 
-                    column_catalogs[idx].column_desc.generated_column = Some(GeneratedColumnDesc {
-                        expr: Some(expr_impl.to_expr_proto()),
-                    });
+                    column_catalogs[idx].column_desc.generated_or_default_column = Some(
+                        GeneratedOrDefaultColumn::GeneratedColumn(GeneratedColumnDesc {
+                            expr: Some(expr_impl.to_expr_proto()),
+                        }),
+                    );
+                }
+                ColumnOption::DefaultColumns(expr) => {
+                    let idx = binder
+                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                    let expr_impl = binder.bind_expr(expr)?;
+
+                    check_default_column_constraints(&expr_impl, column_catalogs)?;
+
+                    column_catalogs[idx].column_desc.generated_or_default_column =
+                        Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                            expr: Some(expr_impl.to_expr_proto()),
+                        }));
                 }
                 ColumnOption::Unique { is_primary: true } => {
                     // Bind primary key in `bind_sql_table_column_constraints`
@@ -278,7 +311,7 @@ pub fn bind_sql_table_column_constraints(
                     }
                     pk_column_names.push(column.name.real_value());
                 }
-                ColumnOption::GeneratedColumns(_) => {
+                ColumnOption::GeneratedColumns(_) | ColumnOption::DefaultColumns(_) => {
                     // Bind generated columns in `bind_sql_column_constraints`
                 }
                 _ => {
@@ -400,6 +433,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
     bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
+    check_source_schema(&properties, row_id_index, &columns)?;
+
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source
         return Err(ErrorCode::BindError(
@@ -512,7 +547,7 @@ fn gen_table_plan_inner(
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
-    let session = context.session_ctx();
+    let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -533,6 +568,7 @@ fn gen_table_plan_inner(
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
         definition: "".to_string(),
+        connection_id: None,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
@@ -574,6 +610,7 @@ fn gen_table_plan_inner(
     }
 
     let materialize = plan_root.gen_table_plan(
+        context,
         name,
         columns,
         definition,
@@ -614,7 +651,7 @@ pub async fn handle_create_table(
         }
     }
 
-    let (graph, source, table) = {
+    let (graph, source, table, notices) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
@@ -643,12 +680,16 @@ pub async fn handle_create_table(
                 append_only,
             )?,
         };
+
+        let context = plan.plan_base().ctx.clone();
+        let notices = context.take_warnings();
+
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
             .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table)
+        (graph, source, table, notices)
     };
 
     tracing::trace!(
@@ -660,7 +701,10 @@ pub async fn handle_create_table(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+    Ok(PgResponse::empty_result_with_notices(
+        StatementType::CREATE_TABLE,
+        notices,
+    ))
 }
 
 pub fn check_create_table_with_source(
@@ -803,10 +847,12 @@ mod tests {
         ] {
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
-                    columns,
-                    constraints,
-                    ..
-                } = ast.remove(0) else { panic!("test case should be create table") };
+                columns,
+                constraints,
+                ..
+            } = ast.remove(0) else {
+                panic!("test case should be create table")
+            };
             let actual: Result<_> = (|| {
                 let column_descs =
                     bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;

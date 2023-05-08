@@ -16,6 +16,14 @@ Data in RisingWave can be output to external targets such as message brokers, da
 
 Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
+## RisingWave Cloud
+
+RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](https://risingwave.com/cloud).
+
+## Notes on telemetry
+
+RisingWave collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. These statistics are related to system resource usage, OS versions and system uptime. RisingWave doesn't have access to any user data or metadata running on RisingWave clusters including source and sink connection parameters, sources, sinks, materialized views, and tables. Users have an option to opt out of this collection using a system parameter. Please refer to the RisingWave user documentation for more details.
+
 ## Quick Start
 
 ### Installation
@@ -40,20 +48,16 @@ tar xvf risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
 docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.18.0 playground
 ```
 
-**Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**
+**Compile from Source (Linux and macOS)**
+
+You will need to first [set up the development environment](docs/developer-guide.md#set-up-the-development-environment). Then, you can run the following command in the project root:
 
 ```shell
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-# Clone the repo
-git clone https://github.com/risingwavelabs/risingwave.git && cd risingwave
 # Compile and start the playground
 ./risedev playground
 ```
 
-To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to the [developer guide](docs/developer-guide.md) for more information.
-
-You can launch a RisingWave cluster and process streaming data in a distributed manner, and enable other features like metrics collection and data persistence. Please refer to the [developer guide](docs/developer-guide.md) for more information.
+You may use `./risedev configure` to configure compile settings. You can launch a RisingWave cluster and process streaming data in a distributed manner, and enable other features like metrics collection and data persistence. Please refer to the [developer guide](docs/developer-guide.md) for more information.
 
 ### Your First Query
 
@@ -102,7 +106,7 @@ To learn about how to use RisingWave, refer to [RisingWave docs](https://www.ris
 
 ## License
 
-RisingWave is under the Apache License 2.0. Please refer to [LICENSE](LICENSE) for more information.
+RisingWave is distributed under the Apache License (Version 2.0). Please refer to [LICENSE](LICENSE) for more information.
 
 ## Contributing
 

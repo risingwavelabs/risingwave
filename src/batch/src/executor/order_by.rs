@@ -140,7 +140,9 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, Date, Interval, Scalar, Time, Timestamp, F32};
+    use risingwave_common::types::{
+        DataType, Date, Interval, Scalar, StructType, Time, Timestamp, F32,
+    };
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -532,24 +534,18 @@ mod tests {
                     vec![DataType::Varchar, DataType::Float32],
                     vec![],
                 )),
-                Field::unnamed(DataType::List {
-                    datatype: Box::new(DataType::Int64),
-                }),
+                Field::unnamed(DataType::List(Box::new(DataType::Int64))),
             ],
         };
-        let mut struct_builder = StructArrayBuilder::with_meta(
+        let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            ArrayMeta::Struct {
-                children: Arc::new([DataType::Varchar, DataType::Float32]),
-                children_names: vec![].into(),
-            },
+            DataType::Struct(Arc::new(StructType::unnamed(vec![
+                DataType::Varchar,
+                DataType::Float32,
+            ]))),
         );
-        let mut list_builder = ListArrayBuilder::with_meta(
-            0,
-            ArrayMeta::List {
-                datatype: Box::new(DataType::Int64),
-            },
-        );
+        let mut list_builder =
+            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
         // {abcd, -1.2}   .
         // {c, 0}         [1, ., 3]
         // {c, .}         .
@@ -603,19 +599,15 @@ mod tests {
             ],
             5,
         );
-        let mut struct_builder = StructArrayBuilder::with_meta(
+        let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            ArrayMeta::Struct {
-                children: Arc::new([DataType::Varchar, DataType::Float32]),
-                children_names: vec![].into(),
-            },
+            DataType::Struct(Arc::new(StructType::unnamed(vec![
+                DataType::Varchar,
+                DataType::Float32,
+            ]))),
         );
-        let mut list_builder = ListArrayBuilder::with_meta(
-            0,
-            ArrayMeta::List {
-                datatype: Box::new(DataType::Int64),
-            },
-        );
+        let mut list_builder =
+            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
         // {abcd, -1.2}   .
         // {c, 0}         [2]
         // {c, 0}         [1, ., 3]

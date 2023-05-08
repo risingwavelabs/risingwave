@@ -100,6 +100,7 @@ impl CompactionInput {
 
 pub struct CompactionTask {
     pub input: CompactionInput,
+    pub base_level: usize,
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
@@ -163,6 +164,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
+            base_level: ret.base_level as u32,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group.group_id,
             existing_table_ids: vec![],
@@ -379,6 +381,7 @@ pub fn create_compaction_task(
             base_level,
             input.target_level,
         ),
+        base_level,
         input,
         target_file_size,
         compaction_task_type,

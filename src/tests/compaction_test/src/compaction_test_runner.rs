@@ -149,7 +149,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
     // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(
         CHECKPOINT_FREQ_FOR_REPLAY,
-        config.system.checkpoint_frequency
+        config.system.checkpoint_frequency.unwrap()
     );
     assert!(
         config.meta.enable_compaction_deterministic,
@@ -239,7 +239,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, 0, &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
             (meta_client, _) = ret.unwrap();
         },
     }
@@ -253,7 +253,7 @@ async fn init_metadata_for_replay(
         new_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
-        0,
+        Default::default(),
         &meta_config,
     )
     .await?;
@@ -285,7 +285,7 @@ async fn pull_version_deltas(
         cluster_meta_endpoint,
         WorkerType::RiseCtl,
         advertise_addr,
-        0,
+        Default::default(),
         &MetaConfig::default(),
     )
     .await?;
@@ -339,7 +339,7 @@ async fn start_replay(
         &opts.meta_address,
         WorkerType::RiseCtl,
         &advertise_addr,
-        0,
+        Default::default(),
         &config.meta,
     )
     .await?;

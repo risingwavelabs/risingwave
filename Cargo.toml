@@ -66,6 +66,8 @@ aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+hytra = "0.1"
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha" }
 
 [profile.dev]
 lto = 'off'
@@ -98,6 +100,7 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
+debug = 1 # line tables only
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -116,13 +119,13 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
+debug = 1 # line tables only
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
-tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "52adb98" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }

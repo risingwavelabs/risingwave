@@ -119,10 +119,11 @@ macro_rules! implement_using_ryu {
             $(
             impl ToText for $scalar_type {
                 fn write<W: Write>(&self, f: &mut W) -> Result {
-                    match self.classify() {
-                        FpCategory::Infinite if self.is_sign_negative() => write!(f, "-Infinity"),
+                    let inner = self.0;
+                    match inner.classify() {
+                        FpCategory::Infinite if inner.is_sign_negative() => write!(f, "-Infinity"),
                         FpCategory::Infinite => write!(f, "Infinity"),
-                        FpCategory::Zero if self.is_sign_negative() => write!(f, "-0"),
+                        FpCategory::Zero if inner.is_sign_negative() => write!(f, "-0"),
                         FpCategory::Nan => write!(f, "NaN"),
                         _ => {
                             let mut buf = ryu::Buffer::new();
@@ -258,7 +259,7 @@ impl ToText for DatumRef<'_> {
 #[cfg(test)]
 mod tests {
     use crate::types::ordered_float::OrderedFloat;
-    use crate::types::to_text::ToText;
+    use crate::types::ToText;
 
     #[test]
     fn test_float_to_text() {

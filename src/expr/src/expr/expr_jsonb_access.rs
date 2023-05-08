@@ -15,10 +15,10 @@
 use either::Either;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, JsonbArray, JsonbArrayBuilder,
-    JsonbRef, Utf8Array, Utf8ArrayBuilder,
+    Utf8Array, Utf8ArrayBuilder,
 };
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarRef};
+use risingwave_common::types::{DataType, Datum, JsonbRef, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::build_function;
 

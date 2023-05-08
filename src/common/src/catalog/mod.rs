@@ -89,7 +89,7 @@ pub fn row_id_column_desc() -> ColumnDesc {
         name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
-        generated_column: None,
+        generated_or_default_column: None,
     }
 }
 
@@ -366,6 +366,41 @@ impl From<&u32> for UserId {
 impl From<UserId> for u32 {
     fn from(id: UserId) -> Self {
         id.user_id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct ConnectionId(pub u32);
+
+impl ConnectionId {
+    pub const fn new(id: u32) -> Self {
+        ConnectionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        ConnectionId(u32::MAX - 1)
+    }
+
+    pub fn connection_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for ConnectionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for ConnectionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<ConnectionId> for u32 {
+    fn from(id: ConnectionId) -> Self {
+        id.0
     }
 }
 

@@ -19,15 +19,17 @@
 
 use std::collections::BTreeMap;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
+    LogicalAgg, LogicalFilter, LogicalScan, LogicalTopN, PlanAggCall, PlanTreeNodeUnary,
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
@@ -105,9 +107,9 @@ impl MinMaxOnIndexRule {
                     .into(),
                 );
 
-                let limit = LogicalLimit::create(non_null_filter, 1, 0);
+                let topn = LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone());
 
-                let formatting_agg = LogicalAgg::new(
+                let formatting_agg = Agg::new(
                     vec![PlanAggCall {
                         agg_kind: logical_agg.agg_calls().first()?.agg_kind,
                         return_type: logical_agg.schema().fields[0].data_type.clone(),
@@ -121,8 +123,8 @@ impl MinMaxOnIndexRule {
                             conjunctions: vec![],
                         },
                     }],
-                    vec![],
-                    limit,
+                    FixedBitSet::new(),
+                    topn.into(),
                 );
 
                 return Some(formatting_agg.into());
@@ -174,9 +176,9 @@ impl MinMaxOnIndexRule {
                 .into(),
             );
 
-            let limit = LogicalLimit::create(non_null_filter, 1, 0);
+            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone());
 
-            let formatting_agg = LogicalAgg::new(
+            let formatting_agg = Agg::new(
                 vec![PlanAggCall {
                     agg_kind: logical_agg.agg_calls().first()?.agg_kind,
                     return_type: logical_agg.schema().fields[0].data_type.clone(),
@@ -190,8 +192,8 @@ impl MinMaxOnIndexRule {
                         conjunctions: vec![],
                     },
                 }],
-                vec![],
-                limit,
+                FixedBitSet::new(),
+                topn.into(),
             );
 
             Some(formatting_agg.into())

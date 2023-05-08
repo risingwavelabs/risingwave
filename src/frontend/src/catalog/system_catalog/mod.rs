@@ -131,7 +131,7 @@ macro_rules! def_sys_catalog {
                         name: col.1.to_string(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     },
                     is_hidden: false,
                 })
@@ -208,4 +208,5 @@ prepare_sys_catalog! {
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
     { RW_CATALOG, RW_DDL_PROGRESS, vec![], read_ddl_progress await },
+    { RW_CATALOG, RW_RELATION_INFO, vec![], read_relation_info await },
 }

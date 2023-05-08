@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -131,7 +131,18 @@ steps:
     timeout_in_minutes: 15
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-it-test.sh scale::"
+    depends_on: "build-simulation"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 70
+
+  - label: "recovery integration test (deterministic simulation)"
+    command: "TEST_NUM=60 timeout 70m ci/scripts/deterministic-it-test.sh recovery::"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -240,3 +251,32 @@ steps:
           environment:
             - S3_SOURCE_TEST_CONF
     timeout_in_minutes: 20
+
+  - label: "pulsar source check"
+    command: "ci/scripts/pulsar-source-test.sh -p ci-release"
+    depends_on:
+      - build
+      - build-other
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            ASTRA_STREAMING_TEST_TOKEN: astra_streaming_test_token
+            STREAMNATIVE_CLOUD_TEST_CONF: streamnative_cloud_test_conf
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - ASTRA_STREAMING_TEST_TOKEN
+            - STREAMNATIVE_CLOUD_TEST_CONF
+    timeout_in_minutes: 20
+
+  - label: "micro benchmark"
+    command: "ci/scripts/run-micro-benchmarks.sh"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 35

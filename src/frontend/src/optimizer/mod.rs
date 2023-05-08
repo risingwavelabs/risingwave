@@ -44,8 +44,9 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
-    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    generic, stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject,
+    LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
+    StreamWatermarkFilter, ToStreamContext,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -54,6 +55,7 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::expr::InputRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -217,7 +219,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -254,7 +256,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -267,17 +269,11 @@ impl PlanRoot {
     }
 
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(&mut self) -> Result<PlanRef> {
+    fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let mut plan = self.gen_stream_plan()?;
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
+        let mut plan = self.gen_stream_plan(emit_on_window_close)?;
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
@@ -325,7 +321,7 @@ impl PlanRoot {
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(&mut self) -> Result<PlanRef> {
+    fn gen_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
@@ -374,7 +370,11 @@ impl PlanRoot {
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
-                plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
+                let plan = plan.to_stream_with_dist_required(
+                    &self.required_dist,
+                    &mut ToStreamContext::new(emit_on_window_close),
+                )?;
+                stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)
             }
             _ => unreachable!(),
         }?;
@@ -390,6 +390,7 @@ impl PlanRoot {
     #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         &mut self,
+        context: OptimizerContextRef,
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -399,7 +400,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
-        let mut stream_plan = self.gen_optimized_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan(false)?;
 
         // Add DML node.
         stream_plan = StreamDml::new(
@@ -417,7 +418,7 @@ impl PlanRoot {
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )?;
         if let Some(exprs) = exprs {
-            let logical_project = LogicalProject::new(stream_plan, exprs);
+            let logical_project = generic::Project::new(exprs, stream_plan);
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -456,6 +457,8 @@ impl PlanRoot {
             RequiredDist::ShardByKey(bitset)
         };
 
+        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
+
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
@@ -475,8 +478,9 @@ impl PlanRoot {
         &mut self,
         mv_name: String,
         definition: String,
+        emit_on_window_close: bool,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_optimized_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -496,7 +500,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_optimized_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan(false)?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -517,7 +521,7 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let mut stream_plan = self.gen_optimized_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan(false)?;
 
         // Add a project node if there is hidden column(s).
         let input_fields = stream_plan.schema().fields();
@@ -533,7 +537,7 @@ impl PlanRoot {
                     }
                 })
                 .collect_vec();
-            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+            stream_plan = StreamProject::new(generic::Project::new(exprs, stream_plan)).into();
         }
 
         StreamSink::create(

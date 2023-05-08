@@ -41,7 +41,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
@@ -51,6 +51,7 @@ use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -135,10 +136,16 @@ impl MetaClient {
     pub async fn create_connection(
         &self,
         connection_name: String,
+        database_id: u32,
+        schema_id: u32,
+        owner_id: u32,
         req: create_connection_request::Payload,
     ) -> Result<(ConnectionId, CatalogVersion)> {
         let request = CreateConnectionRequest {
             name: connection_name,
+            database_id,
+            schema_id,
+            owner_id,
             payload: Some(req),
         };
         let resp = self.inner.create_connection(request).await?;
@@ -151,10 +158,8 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
-    pub async fn drop_connection(&self, connection_name: &str) -> Result<CatalogVersion> {
-        let request = DropConnectionRequest {
-            connection_name: connection_name.to_string(),
-        };
+    pub async fn drop_connection(&self, connection_id: ConnectionId) -> Result<CatalogVersion> {
+        let request = DropConnectionRequest { connection_id };
         let resp = self.inner.drop_connection(request).await?;
         Ok(resp.version)
     }
@@ -202,7 +207,7 @@ impl MetaClient {
         meta_addr: &str,
         worker_type: WorkerType,
         addr: &HostAddr,
-        worker_node_parallelism: usize,
+        property: Property,
         meta_config: &MetaConfig,
     ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
@@ -221,7 +226,7 @@ impl MetaClient {
                 .add_worker_node(AddWorkerNodeRequest {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
-                    worker_node_parallelism: worker_node_parallelism as u64,
+                    property: Some(property.clone()),
                 })
                 .await?;
 
@@ -234,7 +239,6 @@ impl MetaClient {
         .await;
 
         let (add_worker_resp, system_params_resp, grpc_meta_client) = init_result?;
-
         let worker_node = add_worker_resp
             .node
             .expect("AddWorkerNodeResponse::node is empty");
@@ -877,6 +881,14 @@ impl MetaClient {
         let resp = self.inner.split_compaction_group(req).await?;
         Ok(resp.new_group_id)
     }
+
+    pub async fn get_tables(&self, table_ids: &[u32]) -> Result<HashMap<u32, Table>> {
+        let req = GetTablesRequest {
+            table_ids: table_ids.to_vec(),
+        };
+        let resp = self.inner.get_tables(req).await?;
+        Ok(resp.tables)
+    }
 }
 
 #[async_trait]
@@ -1428,7 +1440,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
-             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
+            ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1452,6 +1464,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
+            ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

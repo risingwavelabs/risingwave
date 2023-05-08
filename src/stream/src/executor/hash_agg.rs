@@ -14,22 +14,20 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
-use std::ptr::NonNull;
 use std::sync::Arc;
 
-use futures::{stream, Stream, StreamExt};
+use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
@@ -42,17 +40,17 @@ use super::{
     expect_first_barrier, ActorContextRef, ExecutorInfo, PkIndicesRef, StreamExecutorResult,
     Watermark,
 };
-use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
+use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Executor, Message};
 use crate::task::AtomicU64Ref;
 
 type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
-type AggGroupCache<K, S> = ExecutorCache<K, AggGroup<S>, PrecomputedBuildHasher>;
+type AggGroupCache<K, S> = ManagedLruCache<K, AggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -128,115 +126,7 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
     }
 }
 
-trait Emitter {
-    type StateStore: StateStore;
-
-    fn new(result_table: &StateTable<Self::StateStore>) -> Self;
-
-    fn emit_from_changes<'a>(
-        &'a mut self,
-        chunk_builder: &'a mut ChunkBuilder,
-        result_table: &'a mut StateTable<Self::StateStore>,
-        watermark: Option<&'a ScalarImpl>,
-        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a;
-
-    fn emit_from_result_table<'a>(
-        &'a mut self,
-        chunk_builder: &'a mut ChunkBuilder,
-        result_table: &'a mut StateTable<Self::StateStore>,
-        watermark: Option<&'a ScalarImpl>,
-    ) -> impl Stream<Item = StreamExecutorResult<StreamChunk>> + 'a;
-}
-
-struct EmitOnUpdates<S: StateStore> {
-    _phantom: PhantomData<S>,
-}
-
-impl<S: StateStore> Emitter for EmitOnUpdates<S> {
-    type StateStore = S;
-
-    fn new(_result_table: &StateTable<Self::StateStore>) -> Self {
-        Self {
-            _phantom: PhantomData,
-        }
-    }
-
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn emit_from_changes<'a>(
-        &'a mut self,
-        chunk_builder: &'a mut ChunkBuilder,
-        result_table: &'a mut StateTable<Self::StateStore>,
-        _watermark: Option<&'a ScalarImpl>,
-        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
-    ) {
-        for change in changes {
-            // For EOU, write change to result table and directly yield the change.
-            result_table.write_record(change.as_ref());
-            if let Some(chunk) = chunk_builder.append_record(change) {
-                yield chunk;
-            }
-        }
-    }
-
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn emit_from_result_table<'a>(
-        &'a mut self,
-        _chunk_builder: &'a mut ChunkBuilder,
-        _result_table: &'a mut StateTable<Self::StateStore>,
-        _watermark: Option<&'a ScalarImpl>,
-    ) {
-        // do nothing
-    }
-}
-
-struct EmitOnWindowClose<S: StateStore> {
-    buffer: SortBuffer<S>,
-}
-
-impl<S: StateStore> Emitter for EmitOnWindowClose<S> {
-    type StateStore = S;
-
-    fn new(result_table: &StateTable<Self::StateStore>) -> Self {
-        Self {
-            buffer: SortBuffer::new(0, result_table),
-        }
-    }
-
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn emit_from_changes<'a>(
-        &'a mut self,
-        _chunk_builder: &'a mut ChunkBuilder,
-        result_table: &'a mut StateTable<Self::StateStore>,
-        _watermark: Option<&'a ScalarImpl>,
-        changes: impl IntoIterator<Item = Record<OwnedRow>> + 'a,
-    ) {
-        for change in changes {
-            // For EOWC, write change to the sort buffer.
-            self.buffer.apply_change(change, result_table);
-        }
-    }
-
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn emit_from_result_table<'a>(
-        &'a mut self,
-        chunk_builder: &'a mut ChunkBuilder,
-        result_table: &'a mut StateTable<Self::StateStore>,
-        watermark: Option<&'a ScalarImpl>,
-    ) {
-        if let Some(watermark) = watermark {
-            #[for_await]
-            for row in self.buffer.consume(watermark.clone(), result_table) {
-                let row = row?;
-                if let Some(chunk) = chunk_builder.append_row(Op::Insert, row) {
-                    yield chunk;
-                }
-            }
-        }
-    }
-}
-
-struct ExecutionVars<K: HashKey, S: StateStore, E: Emitter<StateStore = S>> {
+struct ExecutionVars<K: HashKey, S: StateStore> {
     stats: ExecutionStats,
 
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
@@ -257,8 +147,7 @@ struct ExecutionVars<K: HashKey, S: StateStore, E: Emitter<StateStore = S>> {
     /// Stream chunk builder.
     chunk_builder: ChunkBuilder,
 
-    /// Emitter for emit-on-updates/emit-on-window-close semantics.
-    chunk_emitter: E,
+    buffer: SortBuffer<S>,
 }
 
 struct ExecutionStats {
@@ -285,11 +174,7 @@ impl ExecutionStats {
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        if self.inner.emit_on_window_close {
-            self.execute_inner::<EmitOnWindowClose<S>>().boxed()
-        } else {
-            self.execute_inner::<EmitOnUpdates<S>>().boxed()
-        }
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -413,9 +298,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    async fn apply_chunk<E: Emitter<StateStore = S>>(
+    async fn apply_chunk(
         this: &mut ExecutorInner<K, S>,
-        vars: &mut ExecutionVars<K, S, E>,
+        vars: &mut ExecutionVars<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
@@ -471,7 +356,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
+            let mut agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
@@ -497,9 +382,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn flush_data<'a, E: Emitter<StateStore = S>>(
+    async fn flush_data<'a>(
         this: &'a mut ExecutorInner<K, S>,
-        vars: &'a mut ExecutionVars<K, S, E>,
+        vars: &'a mut ExecutionVars<K, S>,
         epoch: EpochPair,
     ) {
         // Update metrics.
@@ -547,20 +432,24 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .drain()
             .map(|key| {
                 // Get agg group of the key.
-                let mut ptr: NonNull<_> = vars
-                    .agg_group_cache
-                    .get_mut(&key)
+                vars.agg_group_cache
+                    .get_mut_unsafe(&key)
                     .expect("changed group must have corresponding AggGroup")
-                    .into();
-                // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
-                // from `group_change_set` which is a set.
-                unsafe { ptr.as_mut() }
             })
-            .map(|agg_group| async {
-                // Get agg outputs and build change.
-                let curr_outputs = agg_group.get_outputs(&this.storages).await?;
-                let change = agg_group.build_change(curr_outputs);
-                Ok::<_, StreamExecutorError>(change)
+            .map(|mut agg_group| {
+                let storages = &this.storages;
+                // SAFETY:
+                // 1. `key`s in `keys_in_batch` are unique by nature, because they're
+                // from `group_change_set` which is a set.
+                //
+                // 2. `MutGuard` should not be sent to other tasks.
+                let mut agg_group = unsafe { agg_group.as_mut_guard() };
+                async move {
+                    // Get agg outputs and build change.
+                    let curr_outputs = agg_group.get_outputs(storages).await?;
+                    let change = agg_group.build_change(curr_outputs);
+                    Ok::<_, StreamExecutorError>(change)
+                }
             });
 
         // TODO(rc): figure out a more reasonable concurrency limit.
@@ -569,25 +458,38 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         while let Some(futs) = futs_batches.next() {
             // Compute agg result changes for each group, and emit changes accordingly.
             let changes = futures::future::try_join_all(futs).await?;
-            #[for_await]
-            for chunk in vars.chunk_emitter.emit_from_changes(
-                &mut vars.chunk_builder,
-                &mut this.result_table,
-                window_watermark.as_ref(),
-                changes.into_iter().flatten(),
-            ) {
-                yield chunk?;
+
+            // Emit from changes
+            if this.emit_on_window_close {
+                for change in changes.into_iter().flatten() {
+                    // For EOWC, write change to the sort buffer.
+                    vars.buffer.apply_change(change, &mut this.result_table);
+                }
+            } else {
+                for change in changes.into_iter().flatten() {
+                    // For EOU, write change to result table and directly yield the change.
+                    this.result_table.write_record(change.as_ref());
+                    if let Some(chunk) = vars.chunk_builder.append_record(change) {
+                        yield chunk;
+                    }
+                }
             }
         }
 
         // Emit remaining results from result table.
-        #[for_await]
-        for chunk in vars.chunk_emitter.emit_from_result_table(
-            &mut vars.chunk_builder,
-            &mut this.result_table,
-            window_watermark.as_ref(),
-        ) {
-            yield chunk?;
+        if this.emit_on_window_close {
+            if let Some(watermark) = window_watermark.as_ref() {
+                #[for_await]
+                for row in vars
+                    .buffer
+                    .consume(watermark.clone(), &mut this.result_table)
+                {
+                    let row = row?;
+                    if let Some(chunk) = vars.chunk_builder.append_row(Op::Insert, row) {
+                        yield chunk;
+                    }
+                }
+            }
         }
 
         // Yield the remaining rows in chunk builder.
@@ -622,7 +524,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner<E: Emitter<StateStore = S>>(self) {
+    async fn execute_inner(self) {
         let HashAggExecutor {
             input,
             inner: mut this,
@@ -630,16 +532,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: AggGroupCache::new(new_with_hasher(
-                this.watermark_epoch.clone(),
-                PrecomputedBuildHasher,
-            )),
+            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            chunk_emitter: E::new(&this.result_table),
+            buffer: SortBuffer::new(0, &this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
@@ -667,6 +566,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
+            vars.agg_group_cache.evict_except_cur_epoch();
             match msg {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
@@ -737,11 +637,10 @@ pub mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::*;
+    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
-    use crate::executor::aggregation::{AggArgs, AggCall};
     use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
     use crate::executor::test_utils::*;
     use crate::executor::{Message, PkIndices, Watermark};
@@ -791,14 +690,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -807,7 +704,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -816,7 +712,6 @@ pub mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -825,6 +720,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             keys,
@@ -897,14 +793,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another sum state
         let key_indices = vec![0];
-        let append_only = false;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -913,7 +807,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -923,7 +816,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -932,6 +824,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             key_indices,
@@ -1012,7 +905,6 @@ pub mod tests {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only: false,
                 filter: None,
                 distinct: false,
             },
@@ -1021,7 +913,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only: false,
                 filter: None,
                 distinct: false,
             },
@@ -1030,6 +921,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             keys,
@@ -1108,14 +1000,12 @@ pub mod tests {
 
         // This is local hash aggregation, so we add another row count state
         let keys = vec![0];
-        let append_only = true;
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -1124,7 +1014,6 @@ pub mod tests {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -1133,6 +1022,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            true, // is append only
             agg_calls,
             0,
             keys,
@@ -1192,13 +1082,11 @@ pub mod tests {
         };
         let input_window_col = 1;
         let group_key_indices = vec![input_window_col];
-        let append_only = false;
         let agg_calls = vec![AggCall {
             kind: AggKind::Count, // as row count, index: 0
             args: AggArgs::None,
             return_type: DataType::Int64,
             column_orders: vec![],
-            append_only,
             filter: None,
             distinct: false,
         }];
@@ -1207,6 +1095,7 @@ pub mod tests {
         let hash_agg = new_boxed_hash_agg_executor(
             store,
             Box::new(source),
+            false,
             agg_calls,
             0,
             group_key_indices,

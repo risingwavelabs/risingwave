@@ -65,8 +65,6 @@ pub struct StreamHashJoin {
 
 impl StreamHashJoin {
     pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
-        let base = PlanBase::new_logical_with_core(&logical);
-        let ctx = base.ctx;
         // Inner join won't change the append-only behavior of the stream. The rest might.
         let append_only = match logical.join_type {
             JoinType::Inner => logical.left.append_only() && logical.right.append_only(),
@@ -82,6 +80,17 @@ impl StreamHashJoin {
         let mut inequality_pairs = vec![];
         let mut clean_left_state_conjunction_idx = None;
         let mut clean_right_state_conjunction_idx = None;
+
+        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
+        let mut reorder_idx = vec![];
+        for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
+            if logical.left.watermark_columns().contains(*left_key)
+                && logical.right.watermark_columns().contains(*right_key)
+            {
+                reorder_idx.push(i);
+            }
+        }
+        let eq_join_predicate = eq_join_predicate.reorder(&reorder_idx);
 
         let watermark_columns = {
             let l2i = logical.l2i_col_mapping();
@@ -180,13 +189,11 @@ impl StreamHashJoin {
         };
 
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            base.schema,
-            base.logical_pk,
-            base.functional_dependency,
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             append_only,
+            false, // TODO(rc): derive EOWC property from input
             watermark_columns,
         );
 

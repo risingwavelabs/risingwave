@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
     DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::config::{load_config, BatchConfig};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -59,6 +59,7 @@ use tracing::info;
 
 use crate::binder::{Binder, BoundStatement};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
+use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
@@ -189,7 +190,7 @@ impl FrontendEnv {
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
-            0,
+            Default::default(),
             &config.meta,
         )
         .await?;
@@ -280,7 +281,7 @@ impl FrontendEnv {
         // change because if any of configs disable telemetry, we should never start it
         if config.server.telemetry_enabled && telemetry_env_enabled() {
             if telemetry_enabled {
-                telemetry_manager.start_telemetry_reporting();
+                telemetry_manager.start_telemetry_reporting().await;
             }
             let (telemetry_join_handle, telemetry_shutdown_sender) =
                 telemetry_manager.watch_params_change();
@@ -496,8 +497,9 @@ impl SessionImpl {
     pub fn check_relation_name_duplicated(&self, name: ObjectName) -> Result<()> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
-        let (schema_name, view_name) = {
-            let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+        let (schema_name, relation_name) = {
+            let (schema_name, relation_name) =
+                Binder::resolve_schema_qualified_name(db_name, name)?;
             let search_path = self.config().get_search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
@@ -506,10 +508,31 @@ impl SessionImpl {
                     .first_valid_schema(db_name, &search_path, user_name)?
                     .name(),
             };
-            (schema_name, table_name)
+            (schema_name, relation_name)
         };
         catalog_reader
-            .check_relation_name_duplicated(db_name, &schema_name, &view_name)
+            .check_relation_name_duplicated(db_name, &schema_name, &relation_name)
+            .map_err(RwError::from)
+    }
+
+    pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
+        let db_name = self.database();
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let (schema_name, connection_name) = {
+            let (schema_name, connection_name) =
+                Binder::resolve_schema_qualified_name(db_name, name)?;
+            let search_path = self.config().get_search_path();
+            let user_name = &self.auth_context().user_name;
+            let schema_name = match schema_name {
+                Some(schema_name) => schema_name,
+                None => catalog_reader
+                    .first_valid_schema(db_name, &search_path, user_name)?
+                    .name(),
+            };
+            (schema_name, connection_name)
+        };
+        catalog_reader
+            .check_connection_name_duplicated(db_name, &schema_name, &connection_name)
             .map_err(RwError::from)
     }
 
@@ -540,6 +563,30 @@ impl SessionImpl {
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
+    }
+
+    pub fn get_connection_by_name(
+        &self,
+        schema_name: Option<String>,
+        connection_name: &str,
+    ) -> Result<Arc<ConnectionCatalog>> {
+        let db_name = self.database();
+        let search_path = self.config().get_search_path();
+        let user_name = &self.auth_context().user_name;
+
+        let catalog_reader = self.env().catalog_reader().read_guard();
+        let schema = match schema_name {
+            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
+            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
+        };
+        let schema = catalog_reader.get_schema_by_name(db_name, schema.name().as_str())?;
+        let connection = schema
+            .get_connection_by_name(connection_name)
+            .ok_or(RwError::from(ErrorCode::ItemNotFound(format!(
+                "connection {} not found",
+                connection_name
+            ))))?;
+        Ok(connection.clone())
     }
 
     pub fn clear_cancel_query_flag(&self) {

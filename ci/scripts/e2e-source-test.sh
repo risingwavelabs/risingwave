@@ -39,7 +39,6 @@ cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
 cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 
 
-
 echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 
 # import data to mysql
@@ -53,29 +52,33 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 node_port=50051
 node_timeout=10
 
+wait_for_connector_node_start() {
+  start_time=$(date +%s)
+  while :
+  do
+      if nc -z localhost $node_port; then
+          echo "Port $node_port is listened! Connector Node is up!"
+          break
+      fi
+
+      current_time=$(date +%s)
+      elapsed_time=$((current_time - start_time))
+      if [ $elapsed_time -ge $node_timeout ]; then
+          echo "Timeout waiting for port $node_port to be listened!"
+          exit 1
+      fi
+      sleep 0.1
+  done
+  sleep 2
+}
+
 echo "--- starting risingwave cluster with connector node"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
 echo "waiting for connector node to start"
-start_time=$(date +%s)
-while :
-do
-    if nc -z localhost $node_port; then
-        echo "Port $node_port is listened! Connector Node is up!"
-        break
-    fi
-
-    current_time=$(date +%s)
-    elapsed_time=$((current_time - start_time))
-    if [ $elapsed_time -ge $node_timeout ]; then
-        echo "Timeout waiting for port $node_port to be listened!"
-        exit 1
-    fi
-    sleep 0.1
-done
-sleep 2
+wait_for_connector_node_start
 
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
@@ -87,16 +90,25 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
-# kill cluster
+# kill cluster and the connector node
 cargo make kill
+pkill -f connector-node
+echo "cluster killed "
+
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+touch .risingwave/log/connector-node.log
+./connector-node/start-service.sh -p $node_port >> .risingwave/log/connector-node.log 2>&1 &
+echo "(recovery) waiting for connector node to start"
+wait_for_connector_node_start
+
 cargo make dev ci-1cn-1fe-with-recovery
-echo "wait for recovery finish"
+echo "wait for cluster recovery finish"
 sleep 20
 echo "check mviews after cluster recovery"
 # check results

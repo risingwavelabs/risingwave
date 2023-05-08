@@ -17,19 +17,16 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::default_level_selector;
@@ -163,12 +160,8 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
             }),
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: 2,
-            min_epoch: 0,
-            max_epoch: 0,
+            ..Default::default()
         });
     }
     sst_info
@@ -224,32 +217,6 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
         .unregister_table_ids(table_ids)
         .await
         .unwrap();
-}
-
-pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    table_ids: &[u32],
-) {
-    for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
-            *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
-        )
-    }
-}
-
-pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[PbTable],
-) {
-    for table in tables {
-        filter_key_extractor_manager_ref.update(
-            table.id,
-            Arc::new(FilterKeyExtractorImpl::from_table(table)),
-        )
-    }
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
@@ -325,7 +292,15 @@ pub async fn setup_compute_env_with_config(
     };
     let fake_parallelism = 4;
     let worker_node = cluster_manager
-        .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address,
+            Property {
+                worker_node_parallelism: fake_parallelism as _,
+                is_streaming: true,
+                is_serving: true,
+            },
+        )
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
@@ -342,6 +317,8 @@ pub async fn setup_compute_env(
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
         .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
         .build();
     setup_compute_env_with_config(port, config).await
 }

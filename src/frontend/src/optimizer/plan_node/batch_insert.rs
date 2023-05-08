@@ -14,13 +14,16 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
+use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
 use super::{
     ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -79,10 +82,27 @@ impl ToBatchPb for BatchInsert {
             .iter()
             .map(|&i| i as u32)
             .collect();
+
+        let default_columns = self.logical.default_columns();
+        let has_default_columns = !default_columns.is_empty();
+        let default_columns = DefaultColumns {
+            default_columns: default_columns
+                .into_iter()
+                .map(|(i, expr)| IndexAndExpr {
+                    index: i as u32,
+                    expr: Some(expr.to_expr_proto()),
+                })
+                .collect_vec(),
+        };
         NodeBody::Insert(InsertNode {
             table_id: self.logical.table_id().table_id(),
             table_version_id: self.logical.table_version_id(),
             column_indices,
+            default_columns: if has_default_columns {
+                Some(default_columns)
+            } else {
+                None
+            },
             row_id_index: self.logical.row_id_index().map(|index| index as _),
             returning: self.logical.has_returning(),
         })

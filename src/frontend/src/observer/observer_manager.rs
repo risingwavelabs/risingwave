@@ -238,7 +238,7 @@ impl FrontendObserverNode {
                                     // FIXME: the frontend node delete its fragment for the update
                                     // operation by itself.
                                     self.worker_node_manager
-                                        .remove_fragment_mapping(&old_fragment_id);
+                                        .remove_streaming_fragment_mapping(&old_fragment_id);
                                 }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
@@ -293,7 +293,11 @@ impl FrontendObserverNode {
             },
             Info::Connection(connection) => match resp.operation() {
                 Operation::Add => catalog_guard.create_connection(connection),
-                Operation::Delete => catalog_guard.drop_connection(connection.get_name().as_str()),
+                Operation::Delete => catalog_guard.drop_connection(
+                    connection.database_id,
+                    connection.schema_id,
+                    connection.id,
+                ),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),
@@ -349,15 +353,15 @@ impl FrontendObserverNode {
                 match resp.operation() {
                     Operation::Add => {
                         self.worker_node_manager
-                            .insert_fragment_mapping(fragment_id, mapping());
+                            .insert_streaming_fragment_mapping(fragment_id, mapping());
                     }
                     Operation::Delete => {
                         self.worker_node_manager
-                            .remove_fragment_mapping(&fragment_id);
+                            .remove_streaming_fragment_mapping(&fragment_id);
                     }
                     Operation::Update => {
                         self.worker_node_manager
-                            .update_fragment_mapping(fragment_id, mapping());
+                            .update_streaming_fragment_mapping(fragment_id, mapping());
                     }
                     _ => panic!("receive an unsupported notify {:?}", resp),
                 }

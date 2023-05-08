@@ -35,7 +35,7 @@ impl Binder {
         }: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
         let order_type = OrderType::from_bools(asc, nulls_first);
-        let expr = self.bind_expr(expr)?;
+        let expr = self.bind_expr_inner(expr)?;
         Ok(BoundOrderByExpr { expr, order_type })
     }
 }

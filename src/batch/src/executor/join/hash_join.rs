@@ -72,6 +72,7 @@ pub struct HashJoinExecutor<K> {
     null_matched: Vec<bool>,
     identity: String,
     chunk_size: usize,
+
     _phantom: PhantomData<K>,
 }
 
@@ -1785,7 +1786,6 @@ impl<K> HashJoinExecutor<K> {
 
 #[cfg(test)]
 mod tests {
-
     use futures::StreamExt;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};

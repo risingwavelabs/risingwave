@@ -24,12 +24,13 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::expr::{Expr, ExprImpl, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
@@ -46,7 +47,7 @@ pub(crate) fn gen_create_index_plan(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<(PlanRef, PbTable, PbIndex)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -85,41 +86,25 @@ pub(crate) fn gen_create_index_plan(
     for column in columns {
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
         let expr_impl = binder.bind_expr(column.expr)?;
-        match &expr_impl {
+        match expr_impl {
             ExprImpl::InputRef(_) => {}
-            ExprImpl::FunctionCall(func) => {
-                match func.get_expr_type() {
-                    // TODO: support more functions after verification
-                    ExprType::Lower
-                    | ExprType::Upper
-                    | ExprType::JsonbAccessInner
-                    | ExprType::JsonbAccessStr => {}
-                    _ => {
-                        return Err(ErrorCode::NotSupported(
-                            "this function is not supported for indexes".into(),
-                            "use other functions instead".into(),
-                        )
-                        .into())
-                    }
-                };
-                if !func.inputs().iter().all(|input| {
-                    matches!(input, ExprImpl::InputRef(_)) || matches!(input, ExprImpl::Literal(_))
-                }) {
+            ExprImpl::FunctionCall(_) => {
+                if expr_impl.is_impure() {
                     return Err(ErrorCode::NotSupported(
-                        "complex arguments for functions are not supported".into(),
-                        "use columns or literals instead".into(),
+                        "this expression is impure".into(),
+                        "use a pure expression instead".into(),
                     )
                     .into());
                 }
             }
             _ => {
                 return Err(ErrorCode::NotSupported(
-                    "index columns should be columns or functions".into(),
-                    "use columns or functions instead".into(),
+                    "index columns should be columns or expressions".into(),
+                    "use columns or expressions instead".into(),
                 )
                 .into())
             }
-        };
+        }
         index_columns_ordered_expr.push((expr_impl, order_type));
     }
 
@@ -143,7 +128,7 @@ pub(crate) fn gen_create_index_plan(
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+        let expr_impl = binder.bind_expr(column)?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -175,6 +160,7 @@ pub(crate) fn gen_create_index_plan(
         .into_iter()
         .filter(|expr| match expr {
             ExprImpl::InputRef(input_ref) => set.insert(input_ref.index),
+            ExprImpl::FunctionCall(_) => true,
             _ => unreachable!(),
         })
         .collect_vec();
@@ -410,7 +396,7 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 

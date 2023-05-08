@@ -320,7 +320,7 @@ pub async fn handle(
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
             }
             ObjectType::Connection => {
-                drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
+                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
             }
         },
         Statement::DropFunction {
@@ -348,15 +348,8 @@ pub async fn handle(
                 )
                 .into());
             }
-            if emit_mode == Some(EmitMode::OnWindowClose) {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
-                    None.into(),
-                )
-                .into());
-            }
             if materialized {
-                create_mv::handle_create_mv(handler_args, name, *query, columns).await
+                create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode).await
             } else {
                 create_view::handle_create_view(handler_args, name, columns, *query).await
             }

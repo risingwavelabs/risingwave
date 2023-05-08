@@ -14,9 +14,10 @@
 
 package com.risingwave.connector;
 
+import com.risingwave.connector.source.SourceRequestHandler;
+import com.risingwave.connector.source.SourceValidateHandler;
 import com.risingwave.proto.ConnectorServiceGrpc;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.sourcenode.SourceRequestHandler;
 import io.grpc.stub.StreamObserver;
 
 public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceImplBase {
@@ -39,5 +40,12 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
             ConnectorServiceProto.GetEventStreamRequest request,
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
         new SourceRequestHandler(responseObserver).handle(request);
+    }
+
+    @Override
+    public void validateSource(
+            ConnectorServiceProto.ValidateSourceRequest request,
+            StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver) {
+        new SourceValidateHandler(responseObserver).handle(request);
     }
 }

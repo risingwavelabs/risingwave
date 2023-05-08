@@ -104,7 +104,7 @@ async fn build_table(
         let end = start + 8;
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
-            .add(
+            .add_for_test(
                 full_key.to_ref(),
                 HummockValue::put(&value[start..end]),
                 true,
@@ -185,6 +185,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
+        is_target_l0_or_lbase: false,
         split_by_table: false,
     };
     Compactor::compact_and_build_sst(

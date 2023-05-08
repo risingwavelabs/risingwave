@@ -16,15 +16,17 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
+use risingwave_common_proc_macro::EstimateSize;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::table::TableState;
 use super::value::ValueState;
-use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
@@ -60,6 +62,7 @@ fn verify_chunk(ops: Ops<'_>, visibility: Option<&Bitmap>, columns: &[&ArrayImpl
 
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
+#[derive(EstimateSize)]
 pub enum AggState<S: StateStore> {
     /// State as single scalar value, e.g. `count`, `sum`, append-only `min`/`max`.
     Value(ValueState),

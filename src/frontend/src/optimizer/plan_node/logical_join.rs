@@ -24,10 +24,10 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanRef,
 };
@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -393,11 +393,16 @@ impl LogicalJoin {
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(at_least_prefix_len);
         for order_col_id in order_col_ids {
+            let mut found = false;
             for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
                 if order_col_id == output_column_ids[eq_idx] {
                     reorder_idx.push(i);
+                    found = true;
                     break;
                 }
+            }
+            if !found {
+                break;
             }
         }
         if reorder_idx.len() < at_least_prefix_len {
@@ -649,17 +654,6 @@ impl ExprRewritable for LogicalJoin {
     }
 }
 
-fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
-    match expr {
-        ExprImpl::Literal(_) => true,
-        ExprImpl::FunctionCall(inner) => {
-            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
-        }
-        ExprImpl::InputRef(_) => true,
-        _ => false,
-    }
-}
-
 /// We are trying to derive a predicate to apply to the other side of a join if all
 /// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
 /// with the corresponding eq condition columns of the other side.
@@ -683,7 +677,7 @@ fn derive_predicate_from_eq_condition(
     col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
-    if !is_pure_fn_except_for_input_ref(expr) {
+    if expr.is_impure() {
         return None;
     }
     let eq_indices = if expr_is_left {
@@ -944,7 +938,7 @@ impl LogicalJoin {
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
-                let logical_project = LogicalProject::with_mapping(
+                let logical_project = generic::Project::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
                         self.output_indices(),
@@ -963,7 +957,7 @@ impl LogicalJoin {
     fn should_be_temporal_join(&self) -> bool {
         let right = self.right();
         if let Some(logical_scan) = right.as_logical_scan() {
-            logical_scan.for_system_time_as_of_now()
+            logical_scan.for_system_time_as_of_proctime()
         } else {
             false
         }
@@ -996,10 +990,10 @@ impl LogicalJoin {
             )));
         };
 
-        if !logical_scan.for_system_time_as_of_now() {
+        if !logical_scan.for_system_time_as_of_proctime() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
             )));
         }
 
@@ -1118,7 +1112,7 @@ impl LogicalJoin {
         }
 
         // Check if right side is a scalar
-        if !MaxOneRowVisitor.visit(self.right()) {
+        if !self.right().max_one_row() {
             return Ok(None);
         }
         if self.right().schema().len() != 1 {
@@ -1181,7 +1175,7 @@ impl LogicalJoin {
         {
             // The schema of dynamic filter is always the same as the left side now, and we have
             // checked that all output columns are from the left side before.
-            let logical_project = LogicalProject::with_mapping(
+            let logical_project = generic::Project::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
                     self.output_indices(),
