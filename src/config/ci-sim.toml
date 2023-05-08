@@ -1,5 +1,0 @@
-[server]
-telemetry_enabled = false
-
-[system]
-telemetry_enabled = false

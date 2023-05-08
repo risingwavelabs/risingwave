@@ -1,8 +1,2 @@
-[server]
-telemetry_enabled = false
-
 [meta]
 vacuum_interval_sec = 10
-
-[system]
-telemetry_enabled = false

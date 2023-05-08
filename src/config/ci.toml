@@ -1,6 +1,3 @@
-[server]
-telemetry_enabled = false
-
 [meta]
 disable_recovery = true
 enable_committed_sst_sanity_check = true
@@ -18,4 +15,3 @@ imm_merge_threshold = 2
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 5
-telemetry_enabled = false

@@ -105,7 +105,7 @@ pub struct Args {
     kafka_datadir: Option<String>,
 
     /// Path to configuration file.
-    #[clap(long, default_value = "src/config/ci-sim.toml")]
+    #[clap(long)]
     config_path: Option<String>,
 
     /// The number of sqlsmith test cases to generate.

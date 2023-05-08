@@ -1,6 +1,3 @@
-[server]
-telemetry_enabled = false
-
 [meta]
 min_sst_retention_time_sec = 0
 collect_gc_watermark_spin_interval_sec = 1
@@ -9,4 +6,3 @@ vacuum_interval_sec = 10
 [system]
 backup_storage_url = "minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
 backup_storage_directory = "backup"
-telemetry_enabled = false

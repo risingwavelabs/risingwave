@@ -1,6 +1,3 @@
-[server]
-telemetry_enabled = false
-
 [meta]
 enable_compaction_deterministic = true
 max_heartbeat_interval_secs = 600
@@ -30,4 +27,3 @@ data_directory = "hummock_001"
 # to commit new epochs to avoid bumping the hummock version during version log replay.
 checkpoint_frequency = 99999999
 barrier_interval_ms = 250
-telemetry_enabled = false
