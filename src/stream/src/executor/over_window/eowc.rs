@@ -14,7 +14,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -35,7 +34,7 @@ use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::state::{create_window_state, WindowState};
+use super::state::{create_window_state, EstimatedVecDeque, WindowState};
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
@@ -49,7 +48,7 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: Vec<Box<dyn WindowState + Send>>,
-    curr_row_buffer: VecDeque<OwnedRow>,
+    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
 }
 
 impl Partition {
@@ -89,7 +88,11 @@ impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
         // FIXME: implement correct size
         // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        let mut total_size = self.curr_row_buffer.estimated_heap_size();
+        for state in self.states {
+            total_size += state.estimate_heap_size();
+        }
+        total_size
     }
 }
 

@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 
 use futures::FutureExt;
 use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
@@ -98,6 +99,14 @@ impl WindowState for AggregateState {
                 StateEvictHint::CanEvict(removed_keys)
             },
         })
+    }
+}
+
+impl EstimateSize for AggregateState {
+    fn estimated_heap_size(&self) -> usize {
+        // `factory` is not estimated because it should be moved out of `AggregateState`
+        // https://github.com/risingwavelabs/risingwave/issues/9643
+        0
     }
 }
 

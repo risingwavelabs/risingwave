@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::estimate_size::VecWithKvSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -366,7 +367,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
-        let mut all_rows = vec![];
+        let mut all_rows = VecWithKvSize::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {
@@ -403,11 +404,10 @@ impl<S: StateStore> LookupExecutor<S> {
             }
         }
 
-        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
+        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows.inner());
 
-        self.lookup_cache
-            .batch_update(lookup_row, all_rows.iter().cloned());
+        self.lookup_cache.batch_update(lookup_row, all_rows.clone());
 
-        Ok(all_rows)
+        Ok(all_rows.into_inner())
     }
 }

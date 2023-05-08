@@ -49,7 +49,7 @@ impl JoinEntryState {
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
         self.kv_heap_size = self
             .kv_heap_size
-            .saturating_add(key.estimated_size() + value.estimated_size());
+            .saturating_add(key.estimated_heap_size() + value.estimated_heap_size());
         self.cached.try_insert(key, value).unwrap();
     }
 
@@ -58,7 +58,7 @@ impl JoinEntryState {
         if let Some(value) = self.cached.remove(&pk) {
             self.kv_heap_size = self
                 .kv_heap_size
-                .saturating_sub(pk.estimated_size() + value.estimated_size());
+                .saturating_sub(pk.estimated_heap_size() + value.estimated_heap_size());
         } else {
             panic!("pk {:?} should be in the cache", pk);
         }
