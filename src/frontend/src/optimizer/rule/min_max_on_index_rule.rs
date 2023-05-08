@@ -23,13 +23,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::function::aggregate::AggKind;
+use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
+    LogicalAgg, LogicalFilter, LogicalScan, LogicalTopN, PlanAggCall, PlanTreeNodeUnary,
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
@@ -107,7 +107,7 @@ impl MinMaxOnIndexRule {
                     .into(),
                 );
 
-                let limit = LogicalLimit::create(non_null_filter, 1, 0);
+                let topn = LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone());
 
                 let formatting_agg = Agg::new(
                     vec![PlanAggCall {
@@ -124,7 +124,7 @@ impl MinMaxOnIndexRule {
                         },
                     }],
                     FixedBitSet::new(),
-                    limit,
+                    topn.into(),
                 );
 
                 return Some(formatting_agg.into());
@@ -176,7 +176,7 @@ impl MinMaxOnIndexRule {
                 .into(),
             );
 
-            let limit = LogicalLimit::create(non_null_filter, 1, 0);
+            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone());
 
             let formatting_agg = Agg::new(
                 vec![PlanAggCall {
@@ -193,7 +193,7 @@ impl MinMaxOnIndexRule {
                     },
                 }],
                 FixedBitSet::new(),
-                limit,
+                topn.into(),
             );
 
             Some(formatting_agg.into())

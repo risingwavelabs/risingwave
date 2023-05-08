@@ -169,7 +169,8 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         // For upsert Kafka sink, the primary key must be defined.
         if !APPEND_ONLY && pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for upsert kafka sink (please define in `primary_key` field)"
+                "primary key not defined for {} kafka sink (please define in `primary_key` field)",
+                config.r#type
             )));
         }
 

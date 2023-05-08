@@ -18,6 +18,7 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
 use crate::expr::{CorrelatedId, SessionTimezone};
@@ -50,6 +51,8 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
+    /// warning messages
+    warning_messages: RefCell<Vec<String>>,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -78,6 +81,7 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+            warning_messages: RefCell::new(vec![]),
         }
     }
 
@@ -97,6 +101,7 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
+            warning_messages: RefCell::new(vec![]),
         }
         .into()
     }
@@ -140,8 +145,12 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn explain_type(&self) -> ExplainType {
+        self.explain_options.explain_type.clone()
+    }
+
     pub fn is_explain_logical(&self) -> bool {
-        self.explain_options.explain_type == ExplainType::Logical
+        self.explain_type() == ExplainType::Logical
     }
 
     pub fn trace(&self, str: impl Into<String>) {
@@ -156,6 +165,13 @@ impl OptimizerContext {
         optimizer_trace.push("\n".to_string());
     }
 
+    pub fn warn(&self, str: impl Into<String>) {
+        let mut warnings = self.warning_messages.borrow_mut();
+        let string = str.into();
+        tracing::trace!("warn to user:{}", string);
+        warnings.push(string);
+    }
+
     pub fn store_logical(&self, str: impl Into<String>) {
         *self.logical_explain.borrow_mut() = Some(str.into())
     }
@@ -166,6 +182,14 @@ impl OptimizerContext {
 
     pub fn take_trace(&self) -> Vec<String> {
         self.optimizer_trace.borrow_mut().drain(..).collect()
+    }
+
+    pub fn take_warnings(&self) -> Vec<String> {
+        let mut warnings = self.warning_messages.borrow_mut().drain(..).collect_vec();
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            warnings.push(warning);
+        };
+        warnings
     }
 
     pub fn with_options(&self) -> &WithOptions {
@@ -188,13 +212,6 @@ impl OptimizerContext {
 
     pub fn session_timezone(&self) -> RefMut<'_, SessionTimezone> {
         self.session_timezone.borrow_mut()
-    }
-
-    /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE
-    pub fn append_notice(&self, notice: &mut String) {
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            notice.push_str(&warning);
-        }
     }
 
     pub fn get_session_timezone(&self) -> String {

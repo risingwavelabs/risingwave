@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
@@ -91,6 +91,17 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let default_columns_from_catalog =
+            table_catalog.default_columns().collect::<BTreeMap<_, _>>();
+
+        // TODO(yuhao): update a table with generated columns
+        if table_catalog.has_generated_column() {
+            return Err(ErrorCode::BindError(
+                "Update a table with generated columns is not supported.".to_string(),
+            )
+            .into());
+        }
+
         let pk_indices = table_catalog
             .pk()
             .iter()
@@ -138,7 +149,7 @@ impl Binder {
 
             for (id, value) in assignments {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
-                if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
+                let id_index = if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
                     let id_index = id_input_ref.index;
                     for &pk in &pk_indices {
                         if id_index == pk {
@@ -148,14 +159,19 @@ impl Binder {
                             .into());
                         }
                     }
-                }
+                    id_index
+                } else {
+                    unreachable!()
+                };
 
                 let value_expr = match value {
                     AssignmentValue::Expr(expr) => {
                         self.bind_expr(expr)?.cast_assign(id_expr.return_type())?
                     }
-                    // TODO: specify default expression after we support non-`NULL` default values.
-                    AssignmentValue::Default => ExprImpl::literal_null(id_expr.return_type()),
+                    AssignmentValue::Default => default_columns_from_catalog
+                        .get(&id_index)
+                        .cloned()
+                        .unwrap_or_else(|| ExprImpl::literal_null(id_expr.return_type())),
                 };
 
                 match assignment_exprs.entry(id_expr) {

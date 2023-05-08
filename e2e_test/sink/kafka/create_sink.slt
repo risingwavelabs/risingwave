@@ -97,6 +97,35 @@ create sink si_kafka_debezium from t_kafka with (
     primary_key = 'id',
 );
 
+statement error primary key not defined for debezium kafka sink
+create sink debezium_without_pk from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+);
+
+statement ok
+create sink multiple_pk from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+    primary_key = 'id,v_varchar'
+);
+
+statement ok
+drop sink multiple_pk;
+
+statement error Sink primary key column not found: invalid.
+create sink invalid_pk_column from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+    primary_key = 'id,invalid'
+);
+
 statement ok
 insert into t_kafka values
     (1, '8DfUFencLe', 31031, 1872, 1872, 26261.416, 23956.39329760601, '2023-04-14 06:27:14.104742'),

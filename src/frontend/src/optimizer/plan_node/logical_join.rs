@@ -24,10 +24,10 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanRef,
 };

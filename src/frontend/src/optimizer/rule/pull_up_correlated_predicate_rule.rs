@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::{Either, Itertools};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -36,7 +37,14 @@ impl Rule for PullUpCorrelatedPredicateRule {
             return None;
         }
 
-        let project = apply_right.as_logical_project()?;
+        let project = if let Some(project) = apply_right.as_logical_project() {
+            project.clone()
+        } else {
+            LogicalProject::with_mapping(
+                apply_right.clone(),
+                ColIndexMapping::identity(apply_right.schema().len()),
+            )
+        };
         let (mut proj_exprs, _) = project.clone().decompose();
 
         let input = project.input();

@@ -21,8 +21,10 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::ExprError;
 
 use super::{StreamingAggImpl, StreamingAggInput, StreamingAggOutput};
@@ -56,7 +58,7 @@ pub trait StreamingFoldable<R: Scalar, I: Scalar>: std::fmt::Debug + Send + Sync
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
 /// `S`: Sum function.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -83,7 +85,7 @@ where
 
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct PrimitiveSummable<S, I>
 where
     I: Scalar + Into<S> + std::ops::Neg<Output = I>,

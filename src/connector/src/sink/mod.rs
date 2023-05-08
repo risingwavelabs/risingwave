@@ -27,8 +27,7 @@ use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
@@ -328,10 +327,11 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
+            let elems = list_ref.iter_elems_ref();
+            let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in list_ref.values_ref() {
+            for sub_datum_ref in elems {
                 let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
@@ -339,7 +339,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
                 st.fields
                     .iter()
                     .zip_eq_fast(st.field_names.iter())
@@ -363,8 +363,8 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 #[cfg(test)]
 mod tests {
 
+    use risingwave_common::cast::str_with_time_zone_to_timestamptz;
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]

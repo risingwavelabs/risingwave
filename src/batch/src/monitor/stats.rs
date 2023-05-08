@@ -426,6 +426,9 @@ impl BatchManagerMetrics {
         .unwrap();
 
         registry.register(Box::new(task_num.clone())).unwrap();
+        registry
+            .register(Box::new(batch_total_mem.clone()))
+            .unwrap();
         Self {
             task_num,
             batch_total_mem,

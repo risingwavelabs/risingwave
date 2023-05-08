@@ -72,6 +72,9 @@ pub enum ExprError {
 
     #[error("Context not found")]
     Context,
+
+    #[error("field name must not be null")]
+    FieldNameNull,
 }
 
 impl From<ExprError> for RwError {

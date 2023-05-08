@@ -26,7 +26,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
-    factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
+    collect_input_refs, factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
     FunctionCall, InequalityInputPair, InputRef,
 };
@@ -144,12 +144,12 @@ impl Condition {
         .unwrap()
     }
 
+    /// Collect all `InputRef`s' indexes in the expressions.
+    ///
+    /// # Panics
+    /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        let mut input_bits = FixedBitSet::with_capacity(input_col_num);
-        for expr in &self.conjunctions {
-            input_bits.union_with(&expr.collect_input_refs(input_col_num));
-        }
-        input_bits
+        collect_input_refs(input_col_num, &self.conjunctions)
     }
 
     /// Split the condition expressions into (N choose 2) + 1 groups: those containing two columns
@@ -456,7 +456,7 @@ impl Condition {
                         }
                     };
 
-                    let Some(new_cond) = new_expr.eval_row_const()? else {
+                    let Some(new_cond) = new_expr.fold_const()? else {
                         // column = NULL, the result is always NULL.
                         return Ok(false_cond());
                     };
@@ -479,7 +479,7 @@ impl Condition {
                         let const_expr = const_expr
                             .cast_implicit(input_ref.data_type.clone())
                             .unwrap();
-                        let value = const_expr.eval_row_const()?;
+                        let value = const_expr.fold_const()?;
                         let Some(value) = value else {
                             continue;
                         };
@@ -537,7 +537,7 @@ impl Condition {
                             }
                         }
                     };
-                    let Some(value) = new_expr.eval_row_const()? else {
+                    let Some(value) = new_expr.fold_const()? else {
                         // column compare with NULL, the result is always  NULL.
                         return Ok(false_cond());
                     };
@@ -849,7 +849,7 @@ mod cast_compare {
             }
             _ => unreachable!(),
         };
-        match const_expr.eval_row_const().map_err(|_| ())? {
+        match const_expr.fold_const().map_err(|_| ())? {
             Some(scalar) => {
                 let value = scalar.as_integral();
                 if value > upper_bound {

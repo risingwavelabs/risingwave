@@ -36,6 +36,7 @@ use risingwave_pb::hummock::{
     CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::{
     default_level_selector, LevelSelector, ManualCompactionOption, SpaceReclaimCompactionSelector,
@@ -397,7 +398,11 @@ async fn test_release_context_resource() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();
@@ -479,7 +484,11 @@ async fn test_hummock_manager_basic() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();

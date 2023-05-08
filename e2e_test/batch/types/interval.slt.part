@@ -152,9 +152,38 @@ statement error
 select '-2562047788:00:54.775809'::interval;
 
 query T
+values
+	('12:34:56.1234564'::interval),
+	('12:34:56.1234566'::interval),
+	('12:34:56.1234565'::interval),
+	('12:34:56.1234555'::interval);
+----
+12:34:56.123456
+12:34:56.123457
+12:34:56.123456
+12:34:56.123456
+
+query T
 select interval '3 mons -3 days' / 2;
 ----
 1 mon 14 days -12:00:00
+
+query T
+with t(v, d) as (values
+	('00:00:00.000003'::interval, 2),
+	('00:00:00.000005', 2),
+	('1 day', 16384),
+	('3 day', 16384),
+	('1 month', 32768),
+	('3 month', 32768))
+select v / d from t;
+----
+00:00:00.000002
+00:00:00.000002
+00:00:05.273438
+00:00:15.820312
+00:01:19.101562
+00:03:57.304688
 
 # The following is an overflow bug present in PostgreSQL 15.2
 # Their `days` overflows to a negative value, leading to the latter smaller

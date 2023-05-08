@@ -294,8 +294,7 @@ impl ObjectStore for DiskObjectStore {
         // `DiskObjectStore::delete()` behaves the same way as `S3ObjectStore::delete()`.
         if let Err(e) = &result && e.kind() == ErrorKind::NotFound {
             Ok(())
-        }
-        else {
+        } else {
             result.map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))
         }
     }

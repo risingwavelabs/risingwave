@@ -372,7 +372,7 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
             }
-            ExprType::Now | ExprType::Proctime => {
+            ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)
             }
             _ => {

@@ -25,3 +25,23 @@
 
     Caused by:
       Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?
+- name: proctime cast to without timezone
+  sql: |
+    explain create table t1 (proc_time TIMESTAMP AS proctime());
+  explain_output: |
+    StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "Overwrite" }
+    └─StreamExchange { dist: HashShard(_row_id) }
+      └─StreamRowIdGen { row_id_index: 1 }
+        └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id] }
+          └─StreamDml { columns: [_row_id] }
+            └─StreamSource
+- name: watermark on generated column
+  sql: |
+    explain create table t (v int, w int as v+1, watermark for w as w) append only
+  explain_output: |
+    StreamMaterialize { columns: [v, w, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck", watermark_columns: [w] }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamWatermarkFilter { watermark_descs: [idx: 1, expr: $expr1] }
+        └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
+          └─StreamDml { columns: [v, _row_id] }
+            └─StreamSource

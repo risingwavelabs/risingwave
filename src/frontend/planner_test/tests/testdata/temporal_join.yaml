@@ -58,9 +58,9 @@
   stream_plan: |
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamTemporalJoin { type: Inner, predicate: stream.id1 = version.id2 AND (version.a2 < 10:Int32), output: [stream._row_id, stream.id1, version.id2] }
               ├─StreamExchange { dist: HashShard(stream.id1) }
               | └─StreamTableScan { table: stream, columns: [stream.id1, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }

@@ -22,10 +22,10 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::array::{JsonbVal, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
-use risingwave_common::types::Scalar;
+use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -116,10 +116,13 @@ impl SourceContext {
             return Err(e);
         }
         let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor &&
-            suppressor.lock().suppress_error(&err_str)
+        if let Some(suppressor) = &self.error_suppressor
+            && suppressor.lock().suppress_error(&err_str)
         {
-            err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                suppressor.lock().max()
+            );
         }
         self.metrics
             .user_source_error_count
