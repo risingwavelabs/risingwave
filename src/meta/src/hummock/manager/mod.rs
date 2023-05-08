@@ -767,6 +767,9 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
 
+        // When the last table of a compaction group is deleted, the compaction group (and its
+        // config) is destroyed as well. Then a compaction task for this group may come later and
+        // cannot find its config.
         let group_config = match self
             .compaction_group_manager
             .read()

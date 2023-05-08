@@ -539,18 +539,12 @@ impl<S: MetaStore> HummockManager<S> {
                     .id_gen_manager()
                     .generate::<{ IdCategory::CompactionGroup }>()
                     .await?;
+                // The new config will be persisted later.
                 let mut config = self
                     .compaction_group_manager
-                    .write()
+                    .read()
                     .await
-                    .get_or_insert_compaction_group_config(
-                        new_compaction_group_id,
-                        self.env.meta_store(),
-                    )
-                    .await?
-                    .compaction_config
-                    .as_ref()
-                    .clone();
+                    .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
 
                 new_version_delta.group_deltas.insert(
