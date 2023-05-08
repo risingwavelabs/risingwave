@@ -89,8 +89,9 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,                   // Keyword::JSON
-    DebeziumJson,           // Keyword::DEBEZIUM_JSON
+    Json,         // Keyword::JSON
+    DebeziumJson, // Keyword::DEBEZIUM_JSON
+    DebeziumMongoJson,
     UpsertJson,             // Keyword::UPSERT_JSON
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
@@ -113,6 +114,7 @@ impl ParseTo for SourceSchema {
                 SourceSchema::Protobuf(protobuf_schema)
             }
             "DEBEZIUM_JSON" => SourceSchema::DebeziumJson,
+            "DEBEZIUM_MONGO_JSON" => SourceSchema::DebeziumMongoJson,
             "AVRO" => {
                 impl_parse_to!(avro_schema: AvroSchema, p);
                 SourceSchema::Avro(avro_schema)
@@ -148,6 +150,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
+            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM MONGO JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),

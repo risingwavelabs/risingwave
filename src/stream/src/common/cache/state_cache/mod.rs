@@ -14,15 +14,16 @@
 
 pub use ordered::*;
 use risingwave_common::array::Op;
+use risingwave_common::estimate_size::EstimateSize;
 pub use top_n::*;
 
 mod ordered;
 mod top_n;
 
 /// A common interface for state table cache.
-pub trait StateCache {
-    type Key: Ord;
-    type Value;
+pub trait StateCache: EstimateSize {
+    type Key: Ord + EstimateSize;
+    type Value: EstimateSize;
 
     /// Type of state cache filler, for syncing the cache with the state table.
     type Filler<'a>: StateCacheFiller<Key = Self::Key, Value = Self::Value> + 'a

@@ -28,6 +28,12 @@ use tracing::Level;
 #[cfg(enable_task_local_alloc)]
 enable_task_local_jemalloc_on_unix!();
 
+#[cfg(not(enable_task_local_alloc))]
+use risingwave_common::enable_jemalloc_on_unix;
+
+#[cfg(not(enable_task_local_alloc))]
+enable_jemalloc_on_unix!();
+
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
 #[cfg_attr(coverage, no_coverage)]

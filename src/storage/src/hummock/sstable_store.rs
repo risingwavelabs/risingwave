@@ -242,10 +242,11 @@ impl SstableStore {
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
-                if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(object_id, block_index as u64))
-                    .await
-                    .map_err(HummockError::tiered_cache)?
+                if use_tiered_cache
+                    && let Some(holder) = tiered_cache
+                        .get(&(object_id, block_index as u64))
+                        .await
+                        .map_err(HummockError::tiered_cache)?
                 {
                     // TODO(MrCroxx): `into_owned()` may perform buffer copy, eliminate it later.
                     return Ok(holder.into_owned());
@@ -536,6 +537,17 @@ pub struct SstableWriterOptions {
     pub tracker: Option<MemoryTracker>,
     pub policy: CachePolicy,
 }
+
+impl Default for SstableWriterOptions {
+    fn default() -> Self {
+        Self {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::NotFill,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait SstableWriterFactory: Send + Sync {
     type Writer: SstableWriter<Output = UploadJoinHandle>;

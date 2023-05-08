@@ -68,11 +68,10 @@ pub fn handle_parse(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_parse(handler_args, statement, specific_param_types),
-        Statement::CreateView {
-            query,
-            ..
-        } => {
+        | Statement::Update { .. } => {
+            query::handle_parse(handler_args, statement, specific_param_types)
+        }
+        Statement::CreateView { query, .. } => {
             if have_parameter_in_query(query) {
                 return Err(ErrorCode::NotImplemented(
                     "CREATE VIEW with parameters".to_string(),
@@ -82,15 +81,13 @@ pub fn handle_parse(
             }
             Ok(PrepareStatement::PureStatement(statement))
         }
-        Statement::CreateTable {
-            query,
-            ..
-        } => {
+        Statement::CreateTable { query, .. } => {
             if let Some(query) = query && have_parameter_in_query(query) {
                 Err(ErrorCode::NotImplemented(
                     "CREATE TABLE AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }
@@ -100,7 +97,8 @@ pub fn handle_parse(
                 Err(ErrorCode::NotImplemented(
                     "CREATE SINK AS SELECT with parameters".to_string(),
                     None.into(),
-                ).into())
+                )
+                .into())
             } else {
                 Ok(PrepareStatement::PureStatement(statement))
             }

@@ -20,11 +20,10 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::utils::*;
-use super::{TopNCache, TopNCacheTrait};
+use super::{ManagedTopNState, TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -32,9 +31,9 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 pub type TopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerTopNExecutor<S, WITH_TIES>>;
 
-impl<S: StateStore> TopNExecutor<S, false> {
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_without_ties(
+    pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
         storage_key: Vec<ColumnOrder>,
@@ -61,32 +60,6 @@ impl<S: StateStore> TopNExecutor<S, false> {
 }
 
 impl<S: StateStore> TopNExecutor<S, true> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_ties(
-        input: Box<dyn Executor>,
-        ctx: ActorContextRef,
-        storage_key: Vec<ColumnOrder>,
-        offset_and_limit: (usize, usize),
-        order_by: Vec<ColumnOrder>,
-        executor_id: u64,
-        state_table: StateTable<S>,
-    ) -> StreamResult<Self> {
-        let info = input.info();
-
-        Ok(TopNExecutorWrapper {
-            input,
-            ctx,
-            inner: InnerTopNExecutor::new(
-                info,
-                storage_key,
-                offset_and_limit,
-                order_by,
-                executor_id,
-                state_table,
-            )?,
-        })
-    }
-
     /// It only has 1 capacity for high cache. Used to test the case where the last element in high
     /// has ties.
     #[allow(clippy::too_many_arguments)]
@@ -340,7 +313,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -436,7 +409,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -544,7 +517,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_with_ties(
+                TopNExecutor::<_, true>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -651,7 +624,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -878,7 +851,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -956,7 +929,7 @@ mod tests {
             )
             .await;
             let top_n_executor = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     create_source_new_before_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),
@@ -1010,7 +983,7 @@ mod tests {
 
             // recovery
             let top_n_executor_after_recovery = Box::new(
-                TopNExecutor::new_without_ties(
+                TopNExecutor::<_, false>::new(
                     create_source_new_after_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
                     storage_key(),

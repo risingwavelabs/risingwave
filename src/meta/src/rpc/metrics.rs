@@ -25,6 +25,7 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -33,7 +34,6 @@ use tokio::task::JoinHandle;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef};
 use crate::rpc::server::ElectionClientRef;
 use crate::storage::MetaStore;
-use crate::stream::visit_stream_node_internal_tables;
 
 pub struct MetaMetrics {
     pub registry: Registry,
@@ -525,14 +525,19 @@ pub async fn start_worker_info_monitor<S: MetaStore>(
                     .with_label_values(&[(worker_type.as_str_name())])
                     .set(worker_num as i64);
             }
-            if let Some(client) = &election_client && let Ok(meta_members) = client.get_members().await {
+            if let Some(client) = &election_client
+                && let Ok(meta_members) = client.get_members().await
+            {
                 meta_metrics
                     .worker_num
                     .with_label_values(&[WorkerType::Meta.as_str_name()])
                     .set(meta_members.len() as i64);
                 meta_members.into_iter().for_each(|m| {
-                    let role = if m.is_leader {"leader"} else {"follower"};
-                    meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
+                    let role = if m.is_leader { "leader" } else { "follower" };
+                    meta_metrics
+                        .meta_type
+                        .with_label_values(&[&m.id, role])
+                        .set(1);
                 });
             }
         }

@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::compaction_utils::estimate_task_memory_capacity;
@@ -115,27 +115,22 @@ impl CompactorRunner {
             if level.table_infos.is_empty() {
                 continue;
             }
-
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let range_tombstone_list = table
-                    .value()
-                    .meta
-                    .range_tombstone_list
-                    .iter()
-                    .filter(|tombstone| {
-                        !filter.should_delete(FullKey::from_user_key(
-                            tombstone.start_user_key.as_ref(),
-                            tombstone.sequence,
-                        ))
-                    })
-                    .cloned()
-                    .collect_vec();
-                builder.add_tombstone(range_tombstone_list);
+                let mut range_tombstone_list =
+                    table.value().meta.monotonic_tombstone_events.clone();
+                range_tombstone_list.iter_mut().for_each(|tombstone| {
+                    if filter.should_delete(FullKey::from_user_key(
+                        tombstone.event_key.left_user_key.as_ref(),
+                        tombstone.new_epoch,
+                    )) {
+                        tombstone.new_epoch = HummockEpoch::MAX;
+                    }
+                });
+                builder.add_delete_events(range_tombstone_list);
             }
         }
-        let aggregator =
-            builder.build_for_compaction(compact_task.watermark, compact_task.gc_delete_keys);
+        let aggregator = builder.build_for_compaction(compact_task.gc_delete_keys);
         Ok(aggregator)
     }
 
@@ -198,15 +193,25 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::DeleteRangeTombstone;
+    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
         let range_tombstones = vec![
-            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
-            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(1),
+                b"abc".to_vec(),
+                b"cde".to_vec(),
+                1,
+            ),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(2),
+                b"abc".to_vec(),
+                b"def".to_vec(),
+                1,
+            ),
         ];
         let sstable_info = gen_test_sstable_with_range_tombstone(
             default_builder_opt_for_test(),
@@ -237,10 +242,12 @@ mod tests {
         .await
         .unwrap();
         let ret = collector.get_tombstone_between(
-            &UserKey::<Bytes>::default().as_ref(),
-            &UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
         );
-        assert_eq!(ret.len(), 1);
-        assert_eq!(ret[0], range_tombstones[1]);
+        assert_eq!(
+            ret,
+            create_monotonic_events(vec![range_tombstones[1].clone()])
+        );
     }
 }

@@ -584,8 +584,8 @@
     create index idx1 on t1(a);
     select * from t1 order by a limit 1
   batch_plan: |
-    BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [idx1.a ASC], dist: Single }
+    BatchTopN { order: "[idx1.a ASC]", limit: 1, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
 - name: topn on primary key
@@ -594,8 +594,8 @@
     create index idx1 on t1(a);
     select * from t1 order by a limit 1
   batch_plan: |
-    BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [t1.a ASC], dist: Single }
+    BatchTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: UpstreamHashShard(t1.a) }
 - name: topn on index with descending ordering
@@ -604,8 +604,8 @@
     create index idx1 on t1(a desc);
     select * from t1 order by a desc limit 1
   batch_plan: |
-    BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [idx1.a DESC], dist: Single }
+    BatchTopN { order: "[idx1.a DESC]", limit: 1, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
 - name: topn on pk streaming case, should NOT optimized
@@ -706,6 +706,14 @@
 - sql: |
     create table people (first_name varchar, last_name varchar, info varchar);
     create index people_names ON people ((first_name || ' ' || last_name));
+    select * from people where (first_name || ' ' || last_name) = 'John Smith';
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: people_names, columns: [people_names.first_name, people_names.last_name, people_names.info], scan_ranges: [people_names.CONCAT_OP = Utf8("John Smith")], distribution: SomeShard }
+- name: test distributed by columns for functional indexes
+  sql: |
+    create table people (first_name varchar, last_name varchar, info varchar);
+    create index people_names ON people ((first_name || ' ' || last_name), info) distributed by ((first_name || ' ' || last_name));
     select * from people where (first_name || ' ' || last_name) = 'John Smith';
   batch_plan: |
     BatchExchange { order: [], dist: Single }

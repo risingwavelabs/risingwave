@@ -24,10 +24,10 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanRef,
 };
@@ -38,7 +38,7 @@ use crate::optimizer::plan_node::{
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
+use crate::optimizer::plan_visitor::LogicalCardinalityExt;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -938,7 +938,7 @@ impl LogicalJoin {
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
-                let logical_project = LogicalProject::with_mapping(
+                let logical_project = generic::Project::with_mapping(
                     plan,
                     ColIndexMapping::with_remaining_columns(
                         self.output_indices(),
@@ -1112,7 +1112,7 @@ impl LogicalJoin {
         }
 
         // Check if right side is a scalar
-        if !MaxOneRowVisitor.visit(self.right()) {
+        if !self.right().max_one_row() {
             return Ok(None);
         }
         if self.right().schema().len() != 1 {
@@ -1175,7 +1175,7 @@ impl LogicalJoin {
         {
             // The schema of dynamic filter is always the same as the left side now, and we have
             // checked that all output columns are from the left side before.
-            let logical_project = LogicalProject::with_mapping(
+            let logical_project = generic::Project::with_mapping(
                 plan,
                 ColIndexMapping::with_remaining_columns(
                     self.output_indices(),

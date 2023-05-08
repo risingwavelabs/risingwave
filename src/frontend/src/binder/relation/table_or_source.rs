@@ -241,7 +241,8 @@ impl Binder {
         let Statement::Query(query) = ast
             .into_iter()
             .exactly_one()
-            .expect("a view should contain only one statement") else {
+            .expect("a view should contain only one statement")
+        else {
             unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {

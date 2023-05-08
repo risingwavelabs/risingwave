@@ -29,8 +29,7 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
-    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall,
-    InputRef,
+    CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
@@ -70,10 +69,7 @@ impl LogicalScan {
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
         let mut required_col_idx = output_col_idx.clone();
-        let mut visitor =
-            CollectInputRef::new(FixedBitSet::with_capacity(table_desc.columns.len()));
-        predicate.visit_expr(&mut visitor);
-        let predicate_col_idx: FixedBitSet = visitor.into();
+        let predicate_col_idx = predicate.collect_input_refs(table_desc.columns.len());
         predicate_col_idx.ones().for_each(|idx| {
             if !required_col_idx.contains(&idx) {
                 required_col_idx.push(idx);
@@ -639,7 +635,7 @@ impl LogicalScan {
                 plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
             }
             if let Some(exprs) = project_expr {
-                plan = BatchProject::new(LogicalProject::new(plan, exprs)).into()
+                plan = BatchProject::new(generic::Project::new(exprs, plan)).into()
             }
             assert_eq!(plan.schema(), self.schema());
             required_order.enforce_if_not_satisfies(plan)

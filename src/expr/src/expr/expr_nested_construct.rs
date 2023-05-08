@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue,
-    StructArrayBuilder, StructValue,
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
+    StructValue,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
@@ -46,25 +46,15 @@ impl Expression for NestedConstructExpression {
             columns.push(e.eval_checked(input).await?);
         }
 
-        if let DataType::Struct(t) = &self.data_type {
-            let mut builder = StructArrayBuilder::with_meta(
-                input.capacity(),
-                ArrayMeta::Struct {
-                    children: t.fields.clone().into(),
-                    children_names: vec![].into(),
-                },
-            );
+        if let DataType::Struct(_) = &self.data_type {
+            let mut builder =
+                StructArrayBuilder::with_type(input.capacity(), self.data_type.clone());
             builder.append_array_refs(columns, input.capacity());
             Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
-        } else if let DataType::List { datatype } = &self.data_type {
+        } else if let DataType::List { .. } = &self.data_type {
             let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
-            let mut builder = ListArrayBuilder::with_meta(
-                input.capacity(),
-                ArrayMeta::List {
-                    datatype: datatype.clone(),
-                },
-            );
+            let mut builder = ListArrayBuilder::with_type(input.capacity(), self.data_type.clone());
             for row in chunk.rows_with_holes() {
                 if let Some(row) = row {
                     builder.append_row_ref(row);
@@ -87,7 +77,7 @@ impl Expression for NestedConstructExpression {
         }
         if let DataType::Struct { .. } = &self.data_type {
             Ok(Some(StructValue::new(datums).to_scalar_value()))
-        } else if let DataType::List { datatype: _ } = &self.data_type {
+        } else if let DataType::List(_) = &self.data_type {
             Ok(Some(ListValue::new(datums).to_scalar_value()))
         } else {
             Err(ExprError::UnsupportedFunction(
@@ -137,9 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
@@ -150,9 +138,7 @@ mod tests {
     #[tokio::test]
     async fn test_eval_row_array_expr() {
         let expr = NestedConstructExpression {
-            data_type: DataType::List {
-                datatype: DataType::Int32.into(),
-            },
+            data_type: DataType::List(DataType::Int32.into()),
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 

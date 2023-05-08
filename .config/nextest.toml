@@ -9,7 +9,7 @@ retries = 0
 failure-output = "immediate-final"
 fail-fast = false
 
-[profile.ci-scaling]
+[profile.ci-sim]
 retries = 0
 slow-timeout = { period = "400s" }
 status-level = "all"

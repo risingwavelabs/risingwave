@@ -27,6 +27,10 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
         true
     }
 
+    fn visit_now(&mut self, _: &super::Now) -> bool {
+        true
+    }
+
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
         match func_call.get_expr_type() {
             expr_node::Type::Unspecified
@@ -130,6 +134,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Field
             | expr_node::Type::Array
             | expr_node::Type::ArrayAccess
+            | expr_node::Type::ArrayRangeAccess
             | expr_node::Type::Row
             | expr_node::Type::ArrayToString
             | expr_node::Type::ArrayCat
@@ -139,17 +144,21 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayDistinct
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
+            | expr_node::Type::TrimArray
             | expr_node::Type::ArrayRemove
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbAccessInner
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
-            | expr_node::Type::Pi
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
+            | expr_node::Type::Cotd
+            | expr_node::Type::Decode
+            | expr_node::Type::Encode
             | expr_node::Type::Tand
-            | expr_node::Type::ArrayPositions =>
+            | expr_node::Type::ArrayPositions
+            | expr_node::Type::StringToArray =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
@@ -161,10 +170,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode
-            | expr_node::Type::Now
-            | expr_node::Type::Proctime
-            | expr_node::Type::Udf => true,
+            expr_node::Type::Vnode | expr_node::Type::Proctime | expr_node::Type::Udf => true,
         }
     }
 }
@@ -211,7 +217,7 @@ mod tests {
             Type::GreaterThan,
             vec![
                 InputRef::new(0, DataType::Timestamptz).into(),
-                FunctionCall::new(Type::Now, vec![]).unwrap().into(),
+                FunctionCall::new(Type::Proctime, vec![]).unwrap().into(),
             ],
         )
         .unwrap()

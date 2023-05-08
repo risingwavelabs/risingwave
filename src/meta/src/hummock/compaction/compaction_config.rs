@@ -27,8 +27,10 @@ const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = u32::MAX as u64;
+const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
 const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
+const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
+const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -71,6 +73,9 @@ impl CompactionConfigBuilder {
                 //    level0_max_compact_file_number * target_file_size_base >
                 // max_bytes_for_level_base
                 level0_max_compact_file_number: DEFAULT_MAX_COMPACTION_FILE_COUNT,
+                level0_sub_level_compact_level_count: DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT,
+                level0_overlapping_sub_level_compact_level_count:
+                    DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT,
             },
         }
     }
@@ -134,4 +139,6 @@ builder_field! {
     max_space_reclaim_bytes: u64,
     level0_stop_write_threshold_sub_level_number: u64,
     level0_max_compact_file_number: u64,
+    level0_sub_level_compact_level_count: u32,
+    level0_overlapping_sub_level_compact_level_count: u32,
 }

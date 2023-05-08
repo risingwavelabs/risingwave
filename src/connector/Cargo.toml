@@ -41,7 +41,7 @@ enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 globset = "0.4.8"
-google-cloud-pubsub = "0.7.0"
+google-cloud-pubsub = "0.14"
 hex = "0.4"
 http = "0.2"
 http-serde = "1.1.0"
@@ -62,14 +62,14 @@ pulsar = { version = "4.2", default-features = false, features = [
     "telemetry",
     "auth-oauth2",
 ] }
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
+rdkafka = { workspace = true, features = [
     "cmake-build",
-    "ssl-vendored",
+    "ssl",
     "gssapi",
+    "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
-risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 rust_decimal = "1"
@@ -77,7 +77,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "2", features = ["json"] }
-simd-json = "0.8"
+simd-json = "0.9.1"
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -103,7 +103,6 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
-wiremock = "0.5"
 
 [[bench]]
 name = "parser"

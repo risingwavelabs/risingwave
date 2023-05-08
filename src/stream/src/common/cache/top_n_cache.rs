@@ -14,21 +14,32 @@
 
 use std::collections::BTreeMap;
 
+use risingwave_common::estimate_size::EstimateSize;
+
 /// Inner top-N cache structure for [`super::TopNStateCache`].
-pub struct TopNCache<K: Ord, V> {
+pub struct TopNCache<K: Ord + EstimateSize, V: EstimateSize> {
     /// The capacity of the cache.
     capacity: usize,
     /// Ordered cache entries.
     entries: BTreeMap<K, V>,
+    kv_heap_size: usize,
 }
 
-impl<K: Ord, V> TopNCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> EstimateSize for TopNCache<K, V> {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add btreemap internal size.
+        self.kv_heap_size
+    }
+}
+
+impl<K: Ord + EstimateSize, V: EstimateSize> TopNCache<K, V> {
     /// Create a new cache with specified capacity and order requirements.
     /// To create a cache with unlimited capacity, use `usize::MAX` for `capacity`.
     pub fn new(capacity: usize) -> Self {
         Self {
             capacity,
             entries: Default::default(),
+            kv_heap_size: 0,
         }
     }
 
@@ -51,21 +62,41 @@ impl<K: Ord, V> TopNCache<K, V> {
     /// Clear the cache.
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.kv_heap_size = 0;
     }
 
     /// Insert an entry into the cache.
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
+        let key_size = key.estimated_heap_size();
+        self.kv_heap_size = self
+            .kv_heap_size
+            .saturating_add(key_size + value.estimated_heap_size());
         let old_val = self.entries.insert(key, value);
+        if let Some(old_val) = &old_val {
+            self.kv_heap_size = self
+                .kv_heap_size
+                .saturating_sub(key_size + old_val.estimated_heap_size());
+        }
         // evict if capacity is reached
         while self.entries.len() > self.capacity {
-            self.entries.pop_last();
+            if let Some((key, val)) = self.entries.pop_last() {
+                self.kv_heap_size = self
+                    .kv_heap_size
+                    .saturating_sub(key.estimated_heap_size() + val.estimated_heap_size());
+            }
         }
         old_val
     }
 
     /// Remove an entry from the cache.
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        self.entries.remove(key)
+        let old_val = self.entries.remove(key);
+        if let Some(val) = &old_val {
+            self.kv_heap_size = self
+                .kv_heap_size
+                .saturating_sub(key.estimated_heap_size() + val.estimated_heap_size());
+        }
+        old_val
     }
 
     /// Get the first (smallest) key-value pair in the cache.

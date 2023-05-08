@@ -55,15 +55,11 @@
       ├─StreamProject { exprs: [t.id, max(t.v)] }
       | └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }
       |   └─StreamExchange { dist: HashShard(t.id) }
-      |     └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-      |       └─StreamShare { id = 1 }
-      |         └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      |     └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamProject { exprs: [t.id, min(t.v)] }
         └─StreamHashAgg { group_key: [t.id], aggs: [min(t.v), count] }
           └─StreamExchange { dist: HashShard(t.id) }
-            └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-              └─StreamShare { id = 1 }
-                └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
