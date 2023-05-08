@@ -1,3 +1,6 @@
+[server]
+telemetry_enabled = false
+
 [meta]
 enable_compaction_deterministic = true
 max_heartbeat_interval_secs = 600
@@ -25,3 +28,4 @@ bloom_false_positive = 0.001
 data_directory = "hummock_001"
 checkpoint_frequency = 10
 barrier_interval_ms = 250
+telemetry_enabled = false
