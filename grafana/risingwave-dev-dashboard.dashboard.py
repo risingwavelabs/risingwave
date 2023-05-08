@@ -177,6 +177,39 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_count(
+                    "Compaction Task L0 Select Level Count",
+                    "Count of L0 compact task.",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
+                            "cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Compaction Task File Count",
+                    "File count of compact task.",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
+                            "cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compaction Task Size",
+                    "Size of compact task.",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_compact_task_size_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_size_count')}[$__rate_interval]))",
+                            "cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Compactor Running Task Count",
                     "The number of compactions from one level to another level that are running.",

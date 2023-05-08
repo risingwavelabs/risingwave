@@ -25,7 +25,7 @@ use function_name::named;
 use itertools::Itertools;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
@@ -887,11 +887,58 @@ where
                 (count, size)
             };
 
+            let (compact_task_size, compact_task_file_count) =
+                estimate_state_for_compaction(&compact_task);
+
             if compact_task.input_ssts[0].level_idx == 0 {
+                let level_type_label = if compact_task.input_ssts.len() == 2
+                    && compact_task.input_ssts[1].table_infos.is_empty()
+                {
+                    "l0_trivial_move".to_string()
+                } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
+                    "l0_overlapping".to_string()
+                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                    "l0_intra".to_string()
+                } else {
+                    let is_trival_move = if compact_task
+                        .input_ssts
+                        .last()
+                        .unwrap()
+                        .table_infos
+                        .is_empty()
+                    {
+                        "trivial-move"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "L0->L{} {}",
+                        compact_task.input_ssts.last().unwrap().level_idx,
+                        is_trival_move
+                    )
+                };
+
+                let level_count = compact_task.input_ssts.len();
+
+                self.metrics
+                    .l0_compact_level_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(level_count as _);
+
+                self.metrics
+                    .compact_task_size
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_size as _);
+
+                self.metrics
+                    .compact_task_file_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_file_count as _);
+
                 tracing::trace!(
                     "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
                     compaction_group_id,
-                    compact_task.input_ssts.len(),
+                    level_count,
                     compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
                     file_count,
@@ -900,6 +947,27 @@ where
                     start_time.elapsed()
                 );
             } else {
+                let level_type_label = format!(
+                    "L{}->L{} {}",
+                    compact_task.input_ssts[0].level_idx,
+                    compact_task.input_ssts[1].level_idx,
+                    if CompactStatus::is_trivial_move_task(&compact_task) {
+                        "trivial-move"
+                    } else {
+                        ""
+                    }
+                );
+
+                self.metrics
+                    .compact_task_size
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_size as _);
+
+                self.metrics
+                    .compact_task_file_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_file_count as _);
+
                 tracing::trace!(
                     "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
                     compaction_group_id,

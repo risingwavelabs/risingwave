@@ -124,6 +124,9 @@ pub struct MetaMetrics {
     /// Per level number of running compaction task
     pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: AtomicU64,
+    pub l0_compact_level_count: HistogramVec,
+    pub compact_task_size: HistogramVec,
+    pub compact_task_file_count: HistogramVec,
 
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -439,6 +442,40 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        // let opts = histogram_opts!(
+        //     "storage_l0_compact_level_count",
+        //     "level_count of l0 compact task",
+        //     exponential_buckets(0.1, 1.5, 20).unwrap()
+        // );
+        let l0_compact_level_count = register_histogram_vec_with_registry!(
+            "storage_l0_compact_level_count",
+            "level_count of l0 compact task",
+            &["group", "type"],
+            registry
+        )
+        .unwrap();
+
+        // let opts = histogram_opts!(
+        //     "storage_compact_task_size",
+        //     "size of compact task",
+        //     exponential_buckets(0.1, 1.5, 20).unwrap() // max 52s
+        // );
+        let compact_task_size = register_histogram_vec_with_registry!(
+            "storage_compact_task_size",
+            "size of compact task",
+            &["group", "type"],
+            registry
+        )
+        .unwrap();
+
+        let compact_task_file_count = register_histogram_vec_with_registry!(
+            "storage_compact_task_file_count",
+            "file count of compact task",
+            &["group", "type"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -485,6 +522,9 @@ impl MetaMetrics {
             source_is_up,
             actor_info,
             table_info,
+            l0_compact_level_count,
+            compact_task_size,
+            compact_task_file_count,
         }
     }
 
