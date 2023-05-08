@@ -107,6 +107,7 @@ mach2 = "0.4"
 [dev-dependencies]
 criterion = "0.4"
 more-asserts = "0.3"
+pretty_assertions = "1"
 rand = "0.8"
 tempfile = "3"
 

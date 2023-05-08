@@ -5652,6 +5652,7 @@ dependencies = [
  "parse-display",
  "paste",
  "postgres-types",
+ "pretty_assertions",
  "procfs 0.12.0",
  "prometheus",
  "prost",
