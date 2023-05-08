@@ -126,6 +126,7 @@ pub struct TaskConfig {
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
