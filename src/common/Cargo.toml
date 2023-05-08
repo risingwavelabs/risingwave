@@ -77,6 +77,7 @@ strum = "0.24"
 strum_macros = "0.24"
 sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
+tinyvec = { version = "1", features = ["rustc_1_55"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

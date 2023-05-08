@@ -5652,6 +5652,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "toml 0.7.3",
  "tracing",
  "twox-hash",
