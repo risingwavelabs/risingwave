@@ -640,10 +640,7 @@ mod default {
         }
 
         pub fn telemetry_enabled() -> bool {
-            #[cfg(debug_assertions)]
-            return false;
-            #[cfg(not(debug_assertions))]
-            return true;
+            true
         }
     }
 
