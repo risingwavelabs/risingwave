@@ -23,6 +23,7 @@ struct MonitoredAlloc<A: Allocator> {
 }
 
 impl<A: Allocator> MonitoredAlloc<A> {
+    #[allow(dead_code)]
     pub fn new(ctx: MemoryContextRef, alloc: A) -> Self {
         Self { ctx, alloc }
     }
@@ -37,6 +38,6 @@ unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         self.alloc.deallocate(ptr, layout);
-        self.ctx.add(-1 * (layout.size() as i64))
+        self.ctx.add(-(layout.size() as i64))
     }
 }
