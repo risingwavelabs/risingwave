@@ -54,10 +54,10 @@ pub struct SimpleAggExecutorExtraArgs {}
 impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 
 /// Extra arguments needed to construct an `HashAggExecutor`.
-pub struct GroupAggExecutorExtraArgs {
+pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
     pub emit_on_window_close: bool,
     pub metrics: Arc<StreamingMetrics>,
 }
-impl AggExecutorExtraArgs for GroupAggExecutorExtraArgs {}
+impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

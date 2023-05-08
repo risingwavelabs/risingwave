@@ -25,19 +25,19 @@ use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// Streaming local simple agg.
+/// Streaming stateless simple agg.
 ///
 /// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
 ///
-/// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
-/// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
+/// The output of `StreamStatelessSimpleAgg` doesn't have pk columns, so the result can only be used
+/// by `StreamSimpleAgg`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamLocalSimpleAgg {
+pub struct StreamStatelessSimpleAgg {
     pub base: PlanBase,
     logical: generic::Agg<PlanRef>,
 }
 
-impl StreamLocalSimpleAgg {
+impl StreamStatelessSimpleAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
         let input = logical.input.clone();
         let input_dist = input.distribution();
@@ -58,7 +58,7 @@ impl StreamLocalSimpleAgg {
             input.emit_on_window_close(),
             watermark_columns,
         );
-        StreamLocalSimpleAgg { base, logical }
+        StreamStatelessSimpleAgg { base, logical }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -66,14 +66,13 @@ impl StreamLocalSimpleAgg {
     }
 }
 
-impl fmt::Display for StreamLocalSimpleAgg {
+impl fmt::Display for StreamStatelessSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical
-            .fmt_with_name(f, "StreamStatelessLocalSimpleAgg")
+        self.logical.fmt_with_name(f, "StreamStatelessSimpleAgg")
     }
 }
 
-impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
+impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
     }
@@ -84,12 +83,12 @@ impl PlanTreeNodeUnary for StreamLocalSimpleAgg {
         Self::new(logical)
     }
 }
-impl_plan_tree_node_for_unary! { StreamLocalSimpleAgg }
+impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
 
-impl StreamNode for StreamLocalSimpleAgg {
+impl StreamNode for StreamStatelessSimpleAgg {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::LocalSimpleAgg(SimpleAggNode {
+        PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -110,7 +109,7 @@ impl StreamNode for StreamLocalSimpleAgg {
     }
 }
 
-impl ExprRewritable for StreamLocalSimpleAgg {
+impl ExprRewritable for StreamStatelessSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
