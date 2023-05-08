@@ -25,8 +25,8 @@ use risingwave_expr::agg::AggKind;
 use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
-    StreamSimpleAgg, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
+    StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -78,7 +78,7 @@ impl LogicalAgg {
         debug_assert!(self.group_key().is_empty());
         let mut logical = self.core.clone();
         logical.input = stream_input;
-        let local_agg = StreamLocalSimpleAgg::new(logical);
+        let local_agg = StreamStatelessSimpleAgg::new(logical);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(

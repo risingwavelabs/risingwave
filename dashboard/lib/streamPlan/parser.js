@@ -68,7 +68,7 @@ class StreamNode extends Node {
       "projectSet",
       "filter",
       "materialize",
-      "localSimpleAgg",
+      "statelessSimpleAgg",
       "simpleAgg",
       "hashAgg",
       "appendOnlyTopN",

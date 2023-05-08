@@ -133,7 +133,7 @@ pub async fn create_executor(
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorBuilder::<false>,
         NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
-        NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
+        NodeBody::StatelessSimpleAgg => StatelessSimpleAggExecutorBuilder,
         NodeBody::SimpleAgg => SimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,

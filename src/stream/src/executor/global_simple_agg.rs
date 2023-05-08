@@ -377,7 +377,6 @@ mod tests {
         ));
         tx.push_barrier(4, false);
 
-        // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0

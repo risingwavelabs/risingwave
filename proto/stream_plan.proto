@@ -559,7 +559,7 @@ message StreamNode {
     ProjectNode project = 101;
     FilterNode filter = 102;
     MaterializeNode materialize = 103;
-    SimpleAggNode local_simple_agg = 104;
+    SimpleAggNode stateless_simple_agg = 104;
     SimpleAggNode simple_agg = 105;
     HashAggNode hash_agg = 106;
     TopNNode append_only_top_n = 107;

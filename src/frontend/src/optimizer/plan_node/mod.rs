@@ -754,7 +754,7 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_local_simple_agg::StreamLocalSimpleAgg;
+pub use stream_local_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
@@ -850,7 +850,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Exchange }
             , { Stream, HashAgg }
             , { Stream, SimpleAgg }
-            , { Stream, LocalSimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -954,7 +954,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Source }
             , { Stream, HashAgg }
             , { Stream, SimpleAgg }
-            , { Stream, LocalSimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }

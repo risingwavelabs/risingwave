@@ -121,7 +121,7 @@ pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
-pub use local_simple_agg::LocalSimpleAggExecutor;
+pub use local_simple_agg::StatelessSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;

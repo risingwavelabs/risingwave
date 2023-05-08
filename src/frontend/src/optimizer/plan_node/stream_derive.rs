@@ -371,7 +371,7 @@ impl StreamPlanNode for IndexScan {
     }
 }
 
-impl GenericPlanNode for LocalSimpleAgg {
+impl GenericPlanNode for StatelessSimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -389,7 +389,7 @@ impl GenericPlanNode for LocalSimpleAgg {
     }
 }
 
-impl StreamPlanNode for LocalSimpleAgg {
+impl StreamPlanNode for StatelessSimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }
