@@ -341,13 +341,14 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
+        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
+            return Some(ret);
+        }
+
         if let Some(ret) = self.pick_trivial_move_file(l0, level_handlers) {
             return Some(ret);
         }
 
-        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
-            return Some(ret);
-        }
         self.pick_multi_level(l0, &level_handlers[0], stats)
     }
 }
@@ -382,7 +383,7 @@ pub mod tests {
         let levels_handler = vec![LevelHandler::new(0)];
         let config = Arc::new(
             CompactionConfigBuilder::new()
-                .level0_tier_compact_file_number(2)
+                .level0_tier_compact_file_number(4)
                 .target_file_size_base(30)
                 .level0_sub_level_compact_level_count(2)
                 .level0_overlapping_sub_level_compact_level_count(4)
