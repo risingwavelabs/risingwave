@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 

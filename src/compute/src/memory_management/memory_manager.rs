@@ -105,6 +105,9 @@ impl GlobalMemoryManager {
             self.metrics
                 .jemalloc_allocated_bytes
                 .set(memory_control_stats.jemalloc_allocated_mib as i64);
+            self.metrics
+                .jemalloc_active_bytes
+                .set(memory_control_stats.jemalloc_active_mib as i64);
         }
     }
 }

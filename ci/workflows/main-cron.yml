@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

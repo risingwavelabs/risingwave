@@ -46,6 +46,7 @@ impl StreamValues {
             logical.functional_dependency().clone(),
             Distribution::Single,
             false,
+            false,
             watermark_columns,
         );
         Self { base, logical }

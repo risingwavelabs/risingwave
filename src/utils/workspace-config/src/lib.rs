@@ -16,6 +16,8 @@
 #[cfg(all(
     not(debug_assertions), // if release build...
     any(
+        // ...and enabled below features
+        feature = "rw-dynamic-link",
         // ...and not enabled below features
         not(feature = "rw-static-link"),
         // add more features here

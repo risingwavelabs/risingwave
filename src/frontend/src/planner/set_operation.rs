@@ -14,7 +14,7 @@
 use risingwave_common::error::{ErrorCode, Result};
 
 use crate::binder::{BoundSetExpr, BoundSetOperation};
-use crate::optimizer::plan_node::LogicalUnion;
+use crate::optimizer::plan_node::{LogicalIntersect, LogicalUnion};
 use crate::planner::Planner;
 use crate::PlanRef;
 
@@ -32,7 +32,12 @@ impl Planner {
                 let right = self.plan_set_expr(right, vec![], &[])?;
                 Ok(LogicalUnion::create(all, vec![left, right]))
             }
-            BoundSetOperation::Except | BoundSetOperation::Intersect => {
+            BoundSetOperation::Intersect => {
+                let left = self.plan_set_expr(left, vec![], &[])?;
+                let right = self.plan_set_expr(right, vec![], &[])?;
+                Ok(LogicalIntersect::create(all, vec![left, right]))
+            }
+            BoundSetOperation::Except => {
                 Err(ErrorCode::NotImplemented(format!("set expr: {:?}", op), None.into()).into())
             }
         }

@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::info_in_release;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
@@ -402,7 +402,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::types::ScalarImpl::{self};
-    use risingwave_common::util::ordered::OrderedRowSerde;
+    use risingwave_common::util::row_serde::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
     use risingwave_pb::catalog::table::TableType;

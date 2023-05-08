@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
 
@@ -80,7 +81,7 @@ pub struct Binder {
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
-    bind_timestamp_ms: u64,
+    epoch: Epoch,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -197,18 +198,18 @@ impl ParameterTypes {
 
 impl Binder {
     fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
-        let now_ms = session
+        let epoch = session
             .env()
             .hummock_snapshot_manager()
-            .latest_snapshot_current_epoch()
-            .as_unix_millis();
+            .latest_snapshot_current_epoch();
+
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
-            bind_timestamp_ms: now_ms,
+            epoch,
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,

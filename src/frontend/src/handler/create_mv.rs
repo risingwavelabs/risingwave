@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
+use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
@@ -79,6 +79,7 @@ pub fn gen_create_mv_plan(
     query: Query,
     name: ObjectName,
     columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
@@ -98,11 +99,17 @@ pub fn gen_create_mv_plan(
 
     let col_names = get_column_names(&bound, session, columns)?;
 
+    let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
+    if emit_on_window_close {
+        context.warn("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+    }
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     }
-    let materialize = plan_root.gen_materialize_plan(table_name, definition)?;
+    let materialize =
+        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -137,6 +144,7 @@ pub async fn handle_create_mv(
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -146,7 +154,8 @@ pub async fn handle_create_mv(
 
     let (table, graph, mut notices) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
+        let (plan, table) =
+            gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
         let context = plan.plan_base().ctx.clone();
         let mut graph = build_graph(plan);
         graph.parallelism = session
@@ -183,6 +192,7 @@ pub async fn handle_create_mv(
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_string());
     }
+
     Ok(PgResponse::empty_result_with_notices(
         StatementType::CREATE_MATERIALIZED_VIEW,
         notices,

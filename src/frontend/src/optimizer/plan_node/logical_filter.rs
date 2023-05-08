@@ -21,8 +21,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -127,10 +127,8 @@ impl fmt::Display for LogicalFilter {
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
-
-        let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
-        self.predicate().visit_expr(&mut visitor);
-        let predicate_required_cols: FixedBitSet = visitor.into();
+        let input_col_num = self.input().schema().len();
+        let predicate_required_cols = self.predicate().collect_input_refs(input_col_num);
 
         let mut predicate = self.predicate().clone();
         let input_required_cols = {
@@ -138,10 +136,8 @@ impl ColPrunable for LogicalFilter {
             tmp.union_with(&required_cols_bitset);
             tmp.ones().collect_vec()
         };
-        let mut mapping = ColIndexMapping::with_remaining_columns(
-            &input_required_cols,
-            self.input().schema().len(),
-        );
+        let mut mapping =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_col_num);
         predicate = predicate.rewrite_expr(&mut mapping);
 
         let filter =

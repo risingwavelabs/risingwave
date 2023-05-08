@@ -4,13 +4,13 @@
     select lag(x) over() from t;
   logical_plan: |
     LogicalProject { exprs: [lag] }
-    └─LogicalOverAgg { window_functions: [lag() OVER(ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverWindow { window_functions: [lag(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int);
@@ -25,13 +25,13 @@
     select lead(x, 2) over() from t;
   logical_plan: |
     LogicalProject { exprs: [lead] }
-    └─LogicalOverAgg { window_functions: [lead() OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [lead(t.x) OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int);
@@ -53,33 +53,33 @@
     select sum(x) over() from t;
   logical_plan: |
     LogicalProject { exprs: [sum] }
-    └─LogicalOverAgg { window_functions: [sum() OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [sum(t.x) OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, min] }
-    └─LogicalOverAgg { window_functions: [min() OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, min] }
-    └─LogicalOverAgg { window_functions: [min() OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [min(t.x) OVER(PARTITION BY t.y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
@@ -94,13 +94,13 @@
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, lag] }
-    └─LogicalOverAgg { window_functions: [lag() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    └─LogicalOverWindow { window_functions: [lag(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
@@ -116,13 +116,13 @@
     select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [row_number, rank] }
-    └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int);
@@ -134,7 +134,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.x] }
     └─LogicalProject { exprs: [t.x, row_number] }
-      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -178,7 +178,7 @@
     LogicalProject { exprs: [t.x, row_number] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) }
       └─LogicalProject { exprs: [t.x, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - name: TopN without rank output
   sql: |
@@ -190,7 +190,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number < 3:Int32) AND (t.x > t.y) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[t.x ASC]", limit: 2, offset: 0, group_key: [1] }
@@ -242,13 +242,13 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, rank] }
-        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int, y int);
@@ -332,13 +332,13 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (3:Int32 < row_number) AND (row_number = 6:Int32) AND (row_number <= 5:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: OverAgg to batch
+    Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - id: create_bid
   sql: |
@@ -421,7 +421,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (row_number = 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }

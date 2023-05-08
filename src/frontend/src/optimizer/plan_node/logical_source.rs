@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use super::stream_watermark_filter::StreamWatermarkFilter;
@@ -129,7 +130,7 @@ impl LogicalSource {
     pub fn gen_optional_generated_column_project_exprs(
         column_descs: Vec<ColumnDesc>,
     ) -> Result<Option<Vec<ExprImpl>>> {
-        if !column_descs.iter().any(|c| c.generated_column.is_some()) {
+        if !column_descs.iter().any(|c| c.is_generated()) {
             return Ok(None);
         }
 
@@ -137,7 +138,7 @@ impl LogicalSource {
             let mut mapping = vec![None; column_descs.len()];
             let mut cur = 0;
             for (idx, column_desc) in column_descs.iter().enumerate() {
-                if column_desc.generated_column.is_none() {
+                if !column_desc.is_generated() {
                     mapping[idx] = Some(cur);
                     cur += 1;
                 } else {
@@ -152,12 +153,19 @@ impl LogicalSource {
         let mut cur = 0;
         for column_desc in column_descs {
             let ret_data_type = column_desc.data_type.clone();
-            if let Some(generated_column) = column_desc.generated_column {
-                let GeneratedColumnDesc { expr } = generated_column;
-                // TODO(yuhao): avoid this `from_expr_proto`.
-                let proj_expr = rewriter.rewrite_expr(ExprImpl::from_expr_proto(&expr.unwrap())?);
-                let casted_expr = proj_expr.cast_assign(column_desc.data_type)?;
-                exprs.push(casted_expr);
+            if column_desc.is_generated() {
+                if let GeneratedOrDefaultColumn::GeneratedColumn(generated_column) =
+                    column_desc.generated_or_default_column.unwrap()
+                {
+                    let GeneratedColumnDesc { expr } = generated_column;
+                    // TODO(yuhao): avoid this `from_expr_proto`.
+                    let proj_expr =
+                        rewriter.rewrite_expr(ExprImpl::from_expr_proto(&expr.unwrap())?);
+                    let casted_expr = proj_expr.cast_assign(column_desc.data_type)?;
+                    exprs.push(casted_expr);
+                } else {
+                    unreachable!()
+                }
             } else {
                 let input_ref = InputRef {
                     data_type: ret_data_type,
@@ -363,24 +371,24 @@ fn expr_to_kafka_timestamp_range(
             ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2 => {
                 match (&function_call.inputs()[0], &function_call.inputs()[1]) {
                     (ExprImpl::InputRef(input_ref), literal)
-                        if literal.is_const()
+                        if let Some(datum) = literal.try_fold_const().transpose()?
                             && schema.fields[input_ref.index].name
                                 == KAFKA_TIMESTAMP_COLUMN_NAME
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_int64() / 1000,
                             false,
                         )))
                     }
                     (literal, ExprImpl::InputRef(input_ref))
-                        if literal.is_const()
+                        if let Some(datum) = literal.try_fold_const().transpose()?
                             && schema.fields[input_ref.index].name
                                 == KAFKA_TIMESTAMP_COLUMN_NAME
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
+                            datum.unwrap().into_int64() / 1000,
                             true,
                         )))
                     }

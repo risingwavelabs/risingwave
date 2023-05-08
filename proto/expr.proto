@@ -168,15 +168,11 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
 
-    // Functions that return a constant value
-    PI = 610;
-
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
-    NOW = 2022;
     PROCTIME = 2023;
     // User defined functions
     UDF = 3000;

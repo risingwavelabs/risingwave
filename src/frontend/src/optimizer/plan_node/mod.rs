@@ -384,6 +384,10 @@ impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
 }
 
 impl BatchPlanRef for PlanRef {
@@ -640,11 +644,12 @@ mod logical_expand;
 mod logical_filter;
 mod logical_hop_window;
 mod logical_insert;
+mod logical_intersect;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
 mod logical_now;
-mod logical_over_agg;
+mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
@@ -720,11 +725,12 @@ pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
+pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
-pub use logical_over_agg::LogicalOverAgg;
+pub use logical_over_window::LogicalOverWindow;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -806,10 +812,11 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
+            , { Logical, Intersect }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -891,10 +898,11 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
+            , { Logical, Intersect }
         }
     };
 }

@@ -155,7 +155,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
-                generated_column: None,
+                generated_or_default_column: None,
             })
         } else {
             *index += 1;
