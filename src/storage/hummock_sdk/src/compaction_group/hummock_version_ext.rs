@@ -332,6 +332,9 @@ impl HummockVersionUpdateExt for HummockVersion {
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let target_l0 = cur_levels.l0.as_mut().unwrap();
+                // When `insert_hint` is `Ok(idx)`, it means that the sub level `idx` in `target_l0`
+                // will extend these SSTs. When `insert_hint` is `Err(idx)`, it
+                // means that we will add a new sub level `idx` into `target_l0`.
                 let mut insert_hint = Err(target_l0.sub_levels.len());
                 for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
                     match other.sub_level_id.cmp(&sub_level.sub_level_id) {
@@ -363,13 +366,20 @@ impl HummockVersionUpdateExt for HummockVersion {
                         l0.total_file_size -= sst_info.file_size;
                         l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                     });
-                add_ssts_to_sub_level(
-                    target_l0,
-                    insert_hint,
-                    sub_level.sub_level_id,
-                    sub_level.level_type(),
-                    insert_table_infos,
-                );
+                match insert_hint {
+                    Ok(idx) => {
+                        add_ssts_to_sub_level(target_l0, idx, insert_table_infos);
+                    }
+                    Err(idx) => {
+                        insert_new_sub_level(
+                            target_l0,
+                            sub_level.sub_level_id,
+                            sub_level.level_type(),
+                            insert_table_infos,
+                            Some(idx),
+                        );
+                    }
+                }
             }
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
@@ -786,39 +796,27 @@ pub fn new_sub_level(
 
 pub fn add_ssts_to_sub_level(
     l0: &mut OverlappingLevel,
-    sub_level_insert_hint: Result<usize, usize>,
-    insert_sub_level_id: u64,
-    level_type: LevelType,
+    sub_level_idx: usize,
     insert_table_infos: Vec<SstableInfo>,
 ) {
-    if let Ok(sub_level_idx) = sub_level_insert_hint {
-        insert_table_infos.iter().for_each(|sst| {
-            l0.sub_levels[sub_level_idx].total_file_size += sst.file_size;
-            l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
-            l0.total_file_size += sst.file_size;
-            l0.uncompressed_file_size += sst.uncompressed_file_size;
-        });
+    insert_table_infos.iter().for_each(|sst| {
+        l0.sub_levels[sub_level_idx].total_file_size += sst.file_size;
+        l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
+        l0.total_file_size += sst.file_size;
+        l0.uncompressed_file_size += sst.uncompressed_file_size;
+    });
+    l0.sub_levels[sub_level_idx]
+        .table_infos
+        .extend(insert_table_infos);
+    if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping as i32 {
         l0.sub_levels[sub_level_idx]
             .table_infos
-            .extend(insert_table_infos);
-        if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping as i32 {
-            l0.sub_levels[sub_level_idx]
-                .table_infos
-                .sort_by(|sst1, sst2| {
-                    let a = sst1.key_range.as_ref().unwrap();
-                    let b = sst2.key_range.as_ref().unwrap();
-                    a.compare(b)
-                });
-        }
-        return;
+            .sort_by(|sst1, sst2| {
+                let a = sst1.key_range.as_ref().unwrap();
+                let b = sst2.key_range.as_ref().unwrap();
+                a.compare(b)
+            });
     }
-    insert_new_sub_level(
-        l0,
-        insert_sub_level_id,
-        level_type,
-        insert_table_infos,
-        Some(sub_level_insert_hint.unwrap_err()),
-    );
 }
 
 /// `None` value of `sub_level_insert_hint` means append.
