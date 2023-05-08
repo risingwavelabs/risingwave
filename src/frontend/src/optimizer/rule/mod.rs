@@ -129,7 +129,7 @@ macro_rules! for_all_rules {
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
             , { IndexSelectionRule }
-            , { OverAggToTopNRule }
+            , { OverWindowToTopNRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
