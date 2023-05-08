@@ -214,8 +214,7 @@
 - sql: |
     select * from generate_series(1, 10000000, 1) where Now() is null;
   batch_plan: |
-    BatchFilter { predicate: IsNull(Now) }
-    └─BatchTableFunction { Generate(1:Int32, 10000000:Int32, 1:Int32) }
+    BatchValues { rows: [] }
 - sql: |
     create table t (v int);
     select * from t natural join (select * from t where 1=0);

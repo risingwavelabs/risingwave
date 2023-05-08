@@ -34,5 +34,4 @@
 - sql: |
     select current_timestamp > now() - interval '10 minutes';
   batch_plan: |
-    BatchProject { exprs: [(Now > (AtTimeZone((AtTimeZone(Now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:10:00':Interval)) as $expr1] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[true:Boolean]] }
