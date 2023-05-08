@@ -4,7 +4,7 @@
 set -euo pipefail
 
 if [[ "$RUN_SQLSMITH_ALL" -eq "1" ]]; then
-  RUN_SQLSMITH_PRE_GEN=1
+  RUN_SQLSMITH_FRONTEND=1
   RUN_SQLSMITH=1
 fi
 
