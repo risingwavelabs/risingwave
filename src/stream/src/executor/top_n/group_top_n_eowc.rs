@@ -26,23 +26,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::{Group, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
+use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{ChunkBuilder, ColumnDeduplicater};
@@ -218,7 +216,7 @@ impl<S: StateStore, const WITH_TIES: bool> Inner<S, WITH_TIES> {
         self.state_table.commit(epoch).await?;
     }
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.state_table.init_epoch(epoch);
         Ok(())
     }
@@ -235,7 +233,7 @@ impl<S: StateStore, const WITH_TIES: bool> EowcGroupTopNExecutor<S, WITH_TIES> {
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        inner.init(barrier.epoch).await?;
+        inner.init(barrier.epoch)?;
 
         yield Message::Barrier(barrier);
 
@@ -346,7 +344,7 @@ impl<S: StateStore> GroupKeys<S> {
 
     /// Consume all group keys under `watermark`.
     #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
-    pub async fn consume<'a>(&'a mut self, watermark: ScalarImpl) {
+    pub async fn consume(&mut self, watermark: ScalarImpl) {
         #[for_await]
         for row in self
             .sort_buffer
