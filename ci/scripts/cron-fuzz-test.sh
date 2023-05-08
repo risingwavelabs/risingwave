@@ -5,7 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 export RUN_SQLSMITH=0
-export RUN_SQLSMITH_ALL=0
 export RUN_SQLSMITH_FRONTEND=1
 export SQLSMITH_COUNT=1000
 export TEST_NUM=100
