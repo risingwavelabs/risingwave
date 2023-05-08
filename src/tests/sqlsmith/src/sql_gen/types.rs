@@ -217,7 +217,13 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
                 func.inputs_type
                     .iter()
                     .all(|t| *t != DataTypeName::Timestamptz)
-                && ![AggKind::BitAnd, AggKind::BitOr, AggKind::BoolAnd, AggKind::BoolOr].contains(&func.func)
+                    && ![
+                        AggKind::BitAnd,
+                        AggKind::BitOr,
+                        AggKind::BoolAnd,
+                        AggKind::BoolOr,
+                    ]
+                    .contains(&func.func)
             })
             .filter_map(|func| func.try_into().ok())
             .for_each(|func: AggFuncSig| {
