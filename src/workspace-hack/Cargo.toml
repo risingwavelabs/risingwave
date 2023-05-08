@@ -55,7 +55,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
@@ -84,7 +84,6 @@ serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
-strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
@@ -142,7 +141,7 @@ lexical-write-integer = { version = "0.8", default-features = false, features = 
 libc = { version = "0.2", features = ["extra_traits"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
 log = { version = "0.4", default-features = false, features = ["kv_unstable", "std"] }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl-vendored", "zstd"] }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9", features = ["cmake-build", "gssapi", "ssl", "zstd"] }
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2" }
 miniz_oxide = { version = "0.6", default-features = false, features = ["with-alloc"] }
@@ -172,7 +171,6 @@ serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
 serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
-strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }

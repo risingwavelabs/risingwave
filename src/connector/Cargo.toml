@@ -62,15 +62,14 @@ pulsar = { version = "4.2", default-features = false, features = [
     "telemetry",
     "auth-oauth2",
 ] }
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
+rdkafka = { workspace = true, features = [
     "cmake-build",
-    "ssl-vendored",
+    "ssl",
     "gssapi",
     "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
-risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 rust_decimal = "1"

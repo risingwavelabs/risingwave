@@ -595,12 +595,8 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
-            min_epoch: 0,
-            max_epoch: 0,
+            ..Default::default()
         }
     }
 
@@ -625,12 +621,10 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids,
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch,
             max_epoch,
+            ..Default::default()
         }
     }
 

@@ -72,7 +72,7 @@
   stream_plan: |
     StreamMaterialize { columns: [agg], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v2)) * sum0(count(t.v3)))) as $expr2] }
-      └─StreamGlobalSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum0(count(t.v3)), count] }
+      └─StreamSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v2)), sum0(count(t.v3)), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), max(t.v2), count(t.v3), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
@@ -172,9 +172,9 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt, sum], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count($expr1)), sum(sum($expr1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count($expr1)), sum(sum($expr1)), count] }
+      └─StreamSimpleAgg { aggs: [sum0(count($expr1)), sum(sum($expr1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count($expr1), sum($expr1)] }
+          └─StreamStatelessSimpleAgg { aggs: [count($expr1), sum($expr1)] }
             └─StreamProject { exprs: [(t.v1 + t.v2) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -442,7 +442,7 @@
   stream_plan: |
     StreamMaterialize { columns: [agg], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [(min(min(t.v1)) + (max(max(t.v3)) * sum0(count(t.v2)))) as $expr2] }
-      └─StreamGlobalSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum0(count(t.v2)), count] }
+      └─StreamSimpleAgg { aggs: [min(min(t.v1)), max(max(t.v3)), sum0(count(t.v2)), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), max(t.v3), count(t.v2), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t.v3, t._row_id, Vnode(t._row_id) as $expr1] }
@@ -499,9 +499,9 @@
   stream_plan: |
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by other columns
   sql: |
@@ -518,9 +518,9 @@
   stream_plan: |
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by ASC/DESC and default
   sql: |
@@ -537,9 +537,9 @@
   stream_plan: |
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: filter clause
   sql: |
@@ -556,9 +556,9 @@
   stream_plan: |
     StreamMaterialize { columns: [sa], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1) filter((t.v1 > 0:Int32))), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v1) filter((t.v1 > 0:Int32))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: |
     filter clause
@@ -591,7 +591,7 @@
   stream_plan: |
     StreamMaterialize { columns: [sab], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [max(max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
-      └─StreamGlobalSimpleAgg { aggs: [max(max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))), count] }
+      └─StreamSimpleAgg { aggs: [max(max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr2], aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))), count] }
             └─StreamProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1, t._row_id, Vnode(t._row_id) as $expr2] }
@@ -630,9 +630,9 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt_agb], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count filter((t.a > t.b)))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count filter((t.a > t.b))), count] }
+      └─StreamSimpleAgg { aggs: [sum0(count filter((t.a > t.b))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count filter((t.a > t.b))] }
+          └─StreamStatelessSimpleAgg { aggs: [count filter((t.a > t.b))] }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: filter clause + non-boolean function
   sql: |
@@ -684,9 +684,9 @@
   stream_plan: |
     StreamMaterialize { columns: [b], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32))), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
+          └─StreamStatelessSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: only distinct agg
   sql: |
@@ -786,9 +786,9 @@
   stream_plan: |
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             └─StreamProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -1078,9 +1078,9 @@
   stream_plan: |
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)) / sum0(count(t.v1))::Decimal)) as $expr3] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
+      └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
             └─StreamProject { exprs: [t.v1, (t.v1 * t.v1) as $expr1, t._row_id] }
               └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: stddev_samp with other columns
@@ -1135,7 +1135,7 @@
   stream_plan: |
     StreamMaterialize { columns: [min, sum], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [min(min(t.v1)), sum(sum(t.v2))] }
-      └─StreamGlobalSimpleAgg { aggs: [min(min(t.v1)), sum(sum(t.v2)), count] }
+      └─StreamSimpleAgg { aggs: [min(min(t.v1)), sum(sum(t.v2)), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(t.v1), sum(t.v2), count] }
             └─StreamProject { exprs: [t.v1, t.v2, t._row_id, Vnode(t._row_id) as $expr1] }
@@ -1153,7 +1153,7 @@
   stream_plan: |
     StreamMaterialize { columns: [min, sum], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [min(t.v1), sum(t.v2)] }
-      └─StreamGlobalSimpleAgg { aggs: [min(t.v1), sum(t.v2), count] }
+      └─StreamSimpleAgg { aggs: [min(t.v1), sum(t.v2), count] }
         └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: force two phase agg with different distributions on inner and outer agg should have exchange

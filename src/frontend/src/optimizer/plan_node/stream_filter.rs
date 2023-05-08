@@ -17,6 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
@@ -39,6 +40,7 @@ impl StreamFilter {
             &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }

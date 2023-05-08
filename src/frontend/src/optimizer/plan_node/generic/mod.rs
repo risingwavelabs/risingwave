@@ -46,7 +46,9 @@ mod share;
 pub use share::*;
 mod dedup;
 pub use dedup::*;
+mod intersect;
 mod over_window;
+pub use intersect::*;
 pub use over_window::*;
 
 pub trait GenericPlanRef {

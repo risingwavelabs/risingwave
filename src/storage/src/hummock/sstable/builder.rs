@@ -463,6 +463,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
+            range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
