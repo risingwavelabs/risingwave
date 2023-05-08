@@ -3,11 +3,6 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-if [[ "$RUN_SQLSMITH_ALL" -eq "1" ]]; then
-  RUN_SQLSMITH_FRONTEND=1
-  RUN_SQLSMITH=1
-fi
-
 if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
     echo "--- Run sqlsmith frontend tests"
     NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);

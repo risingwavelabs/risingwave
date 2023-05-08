@@ -103,7 +103,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    soft_fail: true
 
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
