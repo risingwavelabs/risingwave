@@ -900,7 +900,7 @@ where
                 } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
                     "l0_intra".to_string()
                 } else {
-                    let is_trival_move = if compact_task
+                    let is_trivial_move = if compact_task
                         .input_ssts
                         .last()
                         .unwrap()
@@ -914,7 +914,7 @@ where
                     format!(
                         "L0->L{} {}",
                         compact_task.input_ssts.last().unwrap().level_idx,
-                        is_trival_move
+                        is_trivial_move
                     )
                 };
 
