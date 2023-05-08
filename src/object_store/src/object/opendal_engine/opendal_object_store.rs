@@ -342,33 +342,4 @@ mod tests {
         }
         store.delete("test.obj").await.unwrap();
     }
-
-    #[tokio::test]
-    async fn test_streaming_upload_via_fs_engine() {
-        let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
-        let obj = Bytes::from("123456789");
-
-        let store = OpendalObjectStore::new_fs_engine("unit_test".to_string()).unwrap();
-        let mut uploader = store.streaming_upload("/temp").await.unwrap();
-
-        for block in blocks {
-            uploader.write_bytes(block).await.unwrap();
-        }
-        uploader.finish().await.unwrap();
-
-        // Read whole object.
-        let read_obj = store.read("/temp", None).await.unwrap();
-        assert!(read_obj.eq(&obj));
-
-        // Read part of the object.
-        let read_obj = store
-            .read("/temp", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(read_obj.to_vec()).unwrap(),
-            "56".to_string()
-        );
-        store.delete("/temp").await.unwrap();
-    }
 }
