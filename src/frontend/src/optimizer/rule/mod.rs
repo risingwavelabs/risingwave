@@ -105,6 +105,8 @@ mod apply_offset_rewriter;
 use apply_offset_rewriter::ApplyOffsetRewriter;
 mod intersect_to_semi_join_rule;
 pub use intersect_to_semi_join_rule::*;
+mod except_to_anti_join_rule;
+pub use except_to_anti_join_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -148,6 +150,7 @@ macro_rules! for_all_rules {
             , { LimitPushDownRule }
             , { PullUpHopRule }
             , { IntersectToSemiJoinRule }
+            , { ExceptToAntiJoinRule }
         }
     };
 }

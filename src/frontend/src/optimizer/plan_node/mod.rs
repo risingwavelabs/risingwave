@@ -641,6 +641,7 @@ mod logical_filter;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
+mod logical_except;
 mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
@@ -689,6 +690,7 @@ mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
 
+
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
@@ -722,6 +724,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
+pub use logical_except::LogicalExcept;
 pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -813,6 +816,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Now }
             , { Logical, Dedup }
             , { Logical, Intersect }
+            , { Logical, Except }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -899,6 +903,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Now }
             , { Logical, Dedup }
             , { Logical, Intersect }
+            , { Logical, Except }
         }
     };
 }
