@@ -18,3 +18,4 @@ imm_merge_threshold = 2
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 5
+telemetry_enabled = false
