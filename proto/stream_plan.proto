@@ -217,7 +217,7 @@ message AggCallState {
 
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  // Only used for local simple agg, not used for global simple agg.
+  // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table result_table = 4;
@@ -560,7 +560,7 @@ message StreamNode {
     FilterNode filter = 102;
     MaterializeNode materialize = 103;
     SimpleAggNode local_simple_agg = 104;
-    SimpleAggNode global_simple_agg = 105;
+    SimpleAggNode simple_agg = 105;
     HashAggNode hash_agg = 106;
     TopNNode append_only_top_n = 107;
     HashJoinNode hash_join = 108;

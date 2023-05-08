@@ -749,7 +749,7 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
-pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
+pub use stream_global_simple_agg::StreamSimpleAgg;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
@@ -849,8 +849,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
+            , { Stream, SimpleAgg }
             , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -953,8 +953,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
+            , { Stream, SimpleAgg }
             , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }

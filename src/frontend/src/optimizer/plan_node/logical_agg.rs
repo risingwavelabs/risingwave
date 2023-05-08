@@ -25,8 +25,8 @@ use risingwave_expr::agg::AggKind;
 use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamLocalSimpleAgg, StreamProject,
+    StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -81,7 +81,7 @@ impl LogicalAgg {
         let local_agg = StreamLocalSimpleAgg::new(logical);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = new_stream_global_simple_agg(Agg::new(
+        let global_agg = new_stream_simple_agg(Agg::new(
             self.agg_calls()
                 .iter()
                 .enumerate()
@@ -147,7 +147,7 @@ impl LogicalAgg {
         if self.group_key().count_ones(..) == 0 {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = new_stream_global_simple_agg(Agg::new(
+            let global_agg = new_stream_simple_agg(Agg::new(
                 self.agg_calls()
                     .iter()
                     .enumerate()
@@ -187,7 +187,7 @@ impl LogicalAgg {
         let mut logical = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
         logical.input = input;
-        Ok(new_stream_global_simple_agg(logical).into())
+        Ok(new_stream_simple_agg(logical).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -1112,7 +1112,7 @@ impl ToBatch for LogicalAgg {
 }
 
 fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) {
-    // `HashAgg`/`GlobalSimpleAgg` executors require a `count(*)` to correctly build changes, so
+    // `HashAgg`/`SimpleAgg` executors require a `count(*)` to correctly build changes, so
     // append a `count(*)` if not exists.
     let count_star = PlanAggCall::count_star();
     let row_count_idx = if let Some((idx, _)) = logical
@@ -1129,9 +1129,9 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_global_simple_agg(logical: Agg<PlanRef>) -> StreamGlobalSimpleAgg {
+fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
-    StreamGlobalSimpleAgg::new(logical, row_count_idx)
+    StreamSimpleAgg::new(logical, row_count_idx)
 }
 
 fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
@@ -1143,12 +1143,12 @@ impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let stream_agg = self.gen_dist_stream_agg_plan(self.input().to_stream(ctx)?)?;
 
-        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_global_simple_agg() {
+        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_simple_agg() {
             final_agg.agg_calls()
         } else if let Some(final_agg) = stream_agg.as_stream_hash_agg() {
             final_agg.agg_calls()
         } else {
-            panic!("the root PlanNode must be either StreamHashAgg or StreamGlobalSimpleAgg");
+            panic!("the root PlanNode must be either StreamHashAgg or StreamSimpleAgg");
         };
         if self.agg_calls().len() == final_agg_calls.len() {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`

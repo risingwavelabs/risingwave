@@ -179,7 +179,7 @@ impl StreamPlanNode for Filter {
     }
 }
 
-impl GenericPlanNode for GlobalSimpleAgg {
+impl GenericPlanNode for SimpleAgg {
     fn schema(&self) -> Schema {
         self.core.schema()
     }
@@ -197,7 +197,7 @@ impl GenericPlanNode for GlobalSimpleAgg {
     }
 }
 
-impl StreamPlanNode for GlobalSimpleAgg {
+impl StreamPlanNode for SimpleAgg {
     fn distribution(&self) -> Distribution {
         todo!()
     }

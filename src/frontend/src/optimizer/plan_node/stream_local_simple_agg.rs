@@ -29,8 +29,8 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 ///
 /// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
 ///
-/// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only
-/// be used by `StreamGlobalSimpleAgg` with `ManagedValueState`s.
+/// The output of `StreamLocalSimpleAgg` doesn't have pk columns, so the result can only be used by
+/// `StreamSimpleAgg`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamLocalSimpleAgg {
     pub base: PlanBase,

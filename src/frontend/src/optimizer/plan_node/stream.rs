@@ -196,12 +196,12 @@ pub struct Filter {
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GlobalSimpleAgg {
+pub struct SimpleAgg {
     pub core: generic::Agg<PlanRef>,
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
 }
-impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(SimpleAgg, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupTopN {
@@ -418,7 +418,7 @@ impl_node!(
     DeltaJoin,
     Expand,
     Filter,
-    GlobalSimpleAgg,
+    SimpleAgg,
     GroupTopN,
     HashAgg,
     HashJoin,
@@ -559,12 +559,12 @@ pub fn to_stream_prost_body(
                 search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
-        Node::GlobalSimpleAgg(me) => {
+        Node::SimpleAgg(me) => {
             let result_table = me.core.infer_result_table(base, None);
             let agg_states = me.core.infer_stream_agg_state(base, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
-            PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
+            PbNodeBody::SimpleAgg(SimpleAggNode {
                 agg_calls: me
                     .core
                     .agg_calls

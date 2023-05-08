@@ -69,7 +69,7 @@ class StreamNode extends Node {
       "filter",
       "materialize",
       "localSimpleAgg",
-      "globalSimpleAgg",
+      "simpleAgg",
       "hashAgg",
       "appendOnlyTopN",
       "hashJoin",

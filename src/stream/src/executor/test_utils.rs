@@ -264,8 +264,8 @@ pub mod agg_executor {
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
-        HashAggExecutor, PkIndices,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, HashAggExecutor, PkIndices,
+        SimpleAggExecutor,
     };
 
     /// Create state storage for the given agg call.
@@ -479,7 +479,7 @@ pub mod agg_executor {
         )
         .await;
 
-        GlobalSimpleAggExecutor::new(AggExecutorArgs {
+        SimpleAggExecutor::new(AggExecutorArgs {
             input,
             actor_ctx,
             pk_indices,
