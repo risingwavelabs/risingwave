@@ -5,7 +5,7 @@ set -euo pipefail
 
 if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
     echo "--- Run sqlsmith frontend tests"
-    NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);
+     NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test" 2> >(tee);
 fi
 
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
