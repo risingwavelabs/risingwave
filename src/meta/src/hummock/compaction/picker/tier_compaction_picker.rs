@@ -241,7 +241,6 @@ impl TierCompactionPicker {
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let l0_level_count = l0.sub_levels.len();
         let overlapping_type = LevelType::Overlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type != overlapping_type {
@@ -309,10 +308,9 @@ impl TierCompactionPicker {
             // levels to ensure that we can merge as many sub_levels as possible
             let tier_sub_level_compact_level_count =
                 self.config.level0_overlapping_sub_level_compact_level_count as usize;
-            let min_level0_compact_file_number = self.config.level0_tier_compact_file_number
-                * std::cmp::max(1, l0_level_count / tier_sub_level_compact_level_count) as u64;
-
-            if compact_file_count < min_level0_compact_file_number && waiting_enough_files {
+            if select_level_inputs.len() < tier_sub_level_compact_level_count
+                && waiting_enough_files
+            {
                 stats.skip_by_count_limit += 1;
                 continue;
             }
@@ -383,7 +381,7 @@ pub mod tests {
         let levels_handler = vec![LevelHandler::new(0)];
         let config = Arc::new(
             CompactionConfigBuilder::new()
-                .level0_tier_compact_file_number(4)
+                .level0_tier_compact_file_number(2)
                 .target_file_size_base(30)
                 .level0_sub_level_compact_level_count(2)
                 .level0_overlapping_sub_level_compact_level_count(4)
