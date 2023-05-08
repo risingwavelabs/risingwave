@@ -708,10 +708,7 @@ impl CompactionGroupManager {
         compaction_groups.commit();
         let r = compaction_group_ids
             .iter()
-            .map(|id| {
-                let group = self.compaction_groups.get(id).cloned().unwrap();
-                (*id, group)
-            })
+            .map(|id| (*id, self.compaction_groups[id].clone()))
             .collect();
         Ok(r)
     }

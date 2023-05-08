@@ -2024,8 +2024,8 @@ where
         let compaction = read_lock!(self, compaction).await;
         for (group_id, status) in &compaction.compaction_statuses {
             if let Some(levels) = version.levels.get(group_id) {
-                let cg = configs.get(group_id).unwrap();
-                let info = status.get_compaction_info(levels, cg.compaction_config());
+                let info =
+                    status.get_compaction_info(levels, configs[group_id].compaction_config());
                 global_info.add(&info);
                 tracing::debug!("cg {} info {:?}", group_id, info);
             }
@@ -2080,8 +2080,7 @@ where
                     let compaction_group_ids_from_version =
                         get_compaction_group_ids(&current_version);
                     for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config =
-                            id_to_config.get(compaction_group_id).cloned().unwrap();
+                        let compaction_group_config = &id_to_config[compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),
@@ -2130,7 +2129,7 @@ where
         let mut slowdown_groups: HashMap<u64, u64> = HashMap::default();
         {
             for (group_id, l0_file_size) in groups {
-                let group = configs.get(&group_id).unwrap();
+                let group = &configs[&group_id];
                 if l0_file_size
                     > MAX_COMPACTION_L0_MULTIPLIER
                         * group.compaction_config.max_bytes_for_level_base
