@@ -844,6 +844,17 @@ pub fn insert_new_sub_level(
         }
         l0.sub_levels.len()
     };
+    #[cfg(debug_assertions)]
+    {
+        if insert_pos > 0 {
+            if let Some(smaller_level) = l0.sub_levels.get(insert_pos - 1) {
+                debug_assert!(smaller_level.get_sub_level_id() < insert_sub_level_id);
+            }
+        }
+        if let Some(larger_level) = l0.sub_levels.get(insert_pos) {
+            debug_assert!(larger_level.get_sub_level_id() > insert_sub_level_id);
+        }
+    }
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
