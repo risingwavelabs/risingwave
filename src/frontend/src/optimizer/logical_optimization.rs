@@ -124,6 +124,7 @@ lazy_static! {
         vec![
             UnionMergeRule::create(),
             IntersectMergeRule::create(),
+            ExceptMergeRule::create(),
         ],
         ApplyOrder::BottomUp,
     );
