@@ -17,14 +17,14 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::cast::{
+    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    str_with_time_zone_to_timestamptz,
+};
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
-    str_with_time_zone_to_timestamptz,
-};
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
@@ -86,7 +86,7 @@ fn do_parse_simd_json_value(
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         // debezium converts date to i32 for mysql and postgres
         DataType::Date => match v {
-            BorrowedValue::String(s) => str_to_date(s)?.into(),
+            BorrowedValue::String(s) => str_to_date(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => {
                 Date::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
             }
@@ -94,7 +94,7 @@ fn do_parse_simd_json_value(
         },
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
-            BorrowedValue::String(s) => str_to_time(s)?.into(),
+            BorrowedValue::String(s) => str_to_time(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => Time::with_milli(
                 ensure_i64!(v, i64)
                     .try_into()
@@ -104,13 +104,19 @@ fn do_parse_simd_json_value(
             _ => anyhow::bail!("expect time, but found {v}"),
         },
         DataType::Timestamp => match v {
-            BorrowedValue::String(s) => str_to_timestamp(s)?.into(),
-            BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))?.into(),
+            BorrowedValue::String(s) => str_to_timestamp(s).map_err(|e| anyhow!(e))?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))
+                .map_err(|e| anyhow!(e))?
+                .into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestamptz => match v {
-            BorrowedValue::String(s) => str_with_time_zone_to_timestamptz(s)?.into(),
-            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_i64!(v, i64))?.into(),
+            BorrowedValue::String(s) => str_with_time_zone_to_timestamptz(s)
+                .map_err(|e| anyhow!(e))?
+                .into(),
+            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_i64!(v, i64))
+                .map_err(|e| anyhow!(e))?
+                .into(),
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Jsonb => {

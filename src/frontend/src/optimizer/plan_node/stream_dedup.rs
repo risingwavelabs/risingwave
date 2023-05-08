@@ -43,6 +43,7 @@ impl StreamDedup {
             &logical,
             input.distribution().clone(),
             true,
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamDedup { base, logical }

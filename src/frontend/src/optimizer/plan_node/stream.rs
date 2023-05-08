@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derivative::Derivative;
+use educe::Educe;
 use generic::PlanAggCall;
 use itertools::Itertools;
 use pb::stream_node as pb_node;
@@ -69,6 +69,7 @@ macro_rules! impl_node {
 pub trait StreamPlanNode: GenericPlanNode {
     fn distribution(&self) -> Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
     fn to_stream_base(&self) -> PlanBase {
         let ctx = self.ctx();
         PlanBase {
@@ -78,6 +79,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             logical_pk: self.logical_pk().unwrap_or_default(),
             dist: self.distribution(),
             append_only: self.append_only(),
+            emit_on_window_close: self.emit_on_window_close(),
         }
     }
 }
@@ -85,6 +87,7 @@ pub trait StreamPlanNode: GenericPlanNode {
 pub trait StreamPlanRef: GenericPlanRef {
     fn distribution(&self) -> &Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
 }
 
 impl generic::GenericPlanRef for PlanRef {
@@ -131,6 +134,10 @@ impl StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
         self.append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -140,6 +147,10 @@ impl StreamPlanRef for PlanRef {
 
     fn append_only(&self) -> bool {
         self.0.append_only
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.0.emit_on_window_close
     }
 }
 
@@ -382,21 +393,22 @@ pub struct TopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub dist: Distribution,
     pub append_only: bool,
+    pub emit_on_window_close: bool,
 }
 
 impl_node!(

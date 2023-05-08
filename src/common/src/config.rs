@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use clap::ValueEnum;
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -40,8 +40,8 @@ pub const NO_OVERRIDE: Option<NoOverride> = None;
 /// error messages.
 ///
 /// The current implementation will log warnings if there are unrecognized fields.
-#[derive(Derivative)]
-#[derivative(Clone, Default)]
+#[derive(Educe)]
+#[educe(Clone, Default)]
 pub struct Unrecognized<T: 'static> {
     inner: BTreeMap<String, Value>,
     _marker: std::marker::PhantomData<&'static T>,
@@ -120,8 +120,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
-#[derivative(Debug)]
+#[derive(Educe, Clone, Serialize, Deserialize, Default)]
+#[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -139,7 +139,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    #[derivative(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     pub system: SystemConfig,
 
     #[serde(flatten)]
@@ -788,7 +788,7 @@ mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
-            1 << 10
+            10
         }
 
         pub fn stream_chunk_size() -> usize {
