@@ -8716,6 +8716,7 @@ dependencies = [
  "smallvec",
  "subtle",
  "syn 1.0.109",
+ "syn 2.0.15",
  "time 0.3.17",
  "time-macros",
  "tokio",
