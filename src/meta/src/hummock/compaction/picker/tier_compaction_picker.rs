@@ -177,6 +177,7 @@ impl TierCompactionPicker {
                 0,
                 0,
                 self.config.sub_level_max_compaction_bytes,
+                false,
                 self.overlap_strategy.clone(),
             );
 
