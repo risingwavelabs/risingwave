@@ -12,7 +12,8 @@ MATCHES="ci/scripts/cron-fuzz-test.sh\
 \|ci/scripts/pr-fuzz-test.sh\
 \|ci/scripts/run-fuzz-test.sh\
 \|src/tests/sqlsmith"
-CHANGED=$(git diff --name-only origin/main | grep -v "README.md" | grep "$MATCHES")
+NOT_MATCHES="\.md"
+CHANGED=$(git diff --name-only origin/main | grep -v "$NOT_MATCHES" | grep "$MATCHES")
 set -e
 
 # Always run sqlsmith frontend tests
