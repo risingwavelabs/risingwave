@@ -19,8 +19,8 @@ if [[ -n "$CHANGED" ]]; then
     echo "origin/main SHA: $(git rev-parse origin/main)"
     echo "Changes to Sqlsmith source files detected:"
     echo "$CHANGED"
-
-    export RUN_SQLSMITH_ALL=1
+    export RUN_SQLSMITH_FRONTEND=1
+    export RUN_SQLSMITH=1
     export SQLSMITH_COUNT=100
     export TEST_NUM=32
     echo "Enabled Sqlsmith tests."
