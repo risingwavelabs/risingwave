@@ -35,7 +35,7 @@ pub(super) struct AggregateState {
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
-        if !call.frame.is_valid() || call.frame.end_is_unbounded() {
+        if !call.frame.bounds.is_valid() || call.frame.bounds.end_is_unbounded() {
             bail!("the window frame must be valid and end-bounded");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);

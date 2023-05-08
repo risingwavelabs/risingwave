@@ -131,7 +131,7 @@ impl LogicalOverWindow {
         let frame = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
                 // ignore user-defined frame for rank functions
-                Frame::Rows(
+                Frame::rows(
                     FrameBound::UnboundedPreceding,
                     FrameBound::UnboundedFollowing,
                 )
@@ -160,21 +160,21 @@ impl LogicalOverWindow {
                 // override the frame
                 // TODO(rc): We can only do the optimization for constant offset.
                 if window_function.kind == WindowFuncKind::Lag {
-                    Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
+                    Frame::rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {
-                    Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
+                    Frame::rows(FrameBound::CurrentRow, FrameBound::Following(offset))
                 }
             }
             WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
                 // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
                 // CurrentRow)` but we don't support yet.
                 if order_by.is_empty() {
-                    Frame::Rows(
+                    Frame::rows(
                         FrameBound::UnboundedPreceding,
                         FrameBound::UnboundedFollowing,
                     )
                 } else {
-                    Frame::Rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                    Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
                 }
             }),
         };

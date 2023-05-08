@@ -560,13 +560,13 @@ mod tests {
                 kind: WindowFuncKind::Lag,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+                frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(1)),
+                frame: Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
             },
         ];
 
@@ -648,7 +648,7 @@ mod tests {
             kind: WindowFuncKind::Aggregate(AggKind::Sum),
             args: AggArgs::Unary(DataType::Int32, 3),
             return_type: DataType::Int64,
-            frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::Following(1)),
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
         }];
 
         let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
