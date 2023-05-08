@@ -31,6 +31,7 @@ thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
+tokio-retry = "0.3"
 tracing = "0.1"
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...
 #

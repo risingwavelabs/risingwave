@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -103,7 +103,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    soft_fail: true
 
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
