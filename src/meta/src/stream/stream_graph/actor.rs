@@ -224,6 +224,10 @@ impl ActorBuilder {
             .into_values()
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
+        #[cfg(not(debug_assertions))]
+        let mview_definition = "";
+        #[cfg(debug_assertions)]
+        let mview_definition = job.definition();
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
@@ -232,7 +236,7 @@ impl ActorBuilder {
             dispatcher: self.downstreams.into_values().collect(),
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition: job.mview_definition(),
+            mview_definition,
         })
     }
 }
