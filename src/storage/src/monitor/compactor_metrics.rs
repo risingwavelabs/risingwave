@@ -32,7 +32,6 @@ pub struct CompactorMetrics {
     pub compact_sst_duration: Histogram,
     pub compact_task_duration: HistogramVec,
     pub compact_task_pending_num: IntGauge,
-    pub compact_task_size: HistogramVec,
     pub write_build_l0_sst_duration: Histogram,
     pub shared_buffer_to_sstable_size: Histogram,
     pub get_table_id_total_time_duration: Histogram,
@@ -78,13 +77,7 @@ impl CompactorMetrics {
         );
         let compact_task_duration =
             register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
-        let opts = histogram_opts!(
-            "compactor_compact_task_size",
-            "Total size of compact that have been issued to state store",
-            exponential_buckets(4096.0, 1.6, 28).unwrap() // max 52000s
-        );
-        let compact_task_size =
-            register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
+
         let opts = histogram_opts!(
             "compactor_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",
@@ -240,7 +233,6 @@ impl CompactorMetrics {
             compact_sst_duration,
             compact_task_duration,
             compact_task_pending_num,
-            compact_task_size,
             write_build_l0_sst_duration,
             shared_buffer_to_sstable_size,
             get_table_id_total_time_duration,
