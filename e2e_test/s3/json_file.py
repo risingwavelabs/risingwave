@@ -64,7 +64,7 @@ def do_test(client, config, N,  prefix):
     print(result)
 
     assert result[0] == total_row
-    assert result[1] == int(((N - 1) * N / 2) )
+    assert result[1] == int(((N - 1) * N / 2))
     assert result[2] == int(N / 2)
     assert result[3] == 0
 
@@ -81,14 +81,14 @@ if __name__ == "__main__":
 
     for i in range(N):
         with open(f"data_{i}.json", "w") as f:
-            f.write(
+            f.write(json.dumps(
                 {
                     "id": i,
                     "name": str(i),
                     "sex": i % 2,
                     "mark": -1 if i % 2 else 1,
                 }
-            )
+            ))
             os.fsync(f.fileno())
 
     client = Minio(
