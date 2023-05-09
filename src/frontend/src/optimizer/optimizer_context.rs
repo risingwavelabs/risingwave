@@ -55,6 +55,15 @@ pub struct OptimizerContext {
     warning_messages: RefCell<Vec<String>>,
 }
 
+// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
+impl Drop for OptimizerContext {
+    fn drop(&mut self) {
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            self.warn(warning);
+        };
+    }
+}
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -166,10 +175,7 @@ impl OptimizerContext {
     }
 
     pub fn warn(&self, str: impl Into<String>) {
-        let mut warnings = self.warning_messages.borrow_mut();
-        let string = str.into();
-        tracing::trace!("warn to user:{}", string);
-        warnings.push(string);
+        self.session_ctx().notice_to_user(str);
     }
 
     pub fn store_logical(&self, str: impl Into<String>) {
@@ -182,14 +188,6 @@ impl OptimizerContext {
 
     pub fn take_trace(&self) -> Vec<String> {
         self.optimizer_trace.borrow_mut().drain(..).collect()
-    }
-
-    pub fn take_warnings(&self) -> Vec<String> {
-        let mut warnings = self.warning_messages.borrow_mut().drain(..).collect_vec();
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            warnings.push(warning);
-        };
-        warnings
     }
 
     pub fn with_options(&self) -> &WithOptions {

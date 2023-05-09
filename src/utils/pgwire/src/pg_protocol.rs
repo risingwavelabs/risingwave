@@ -350,6 +350,7 @@ where
 
             // execute query
             let mut res = session
+                .clone()
                 .run_one_query(stmt, Format::Text)
                 .await
                 .map_err(|err| PsqlError::QueryError(err))?;
@@ -357,6 +358,11 @@ where
             for notice in res.get_notices() {
                 self.stream
                     .write_no_flush(&BeMessage::NoticeResponse(notice))?;
+            }
+
+            for notice in session.take_notices() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
             }
 
             if res.is_query() {
