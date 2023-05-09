@@ -21,11 +21,14 @@ use educe::Educe;
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
+use super::dispatcher::{hash_key_size, HashKeySize};
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
-use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
+use crate::for_all_type_pairs;
+use crate::hash::HashKeySerDe;
 use crate::row::OwnedRow;
-use crate::types::{DataType, Datum, ScalarRef, ScalarRefImpl};
+use crate::types::{DataType, Datum, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -36,14 +39,8 @@ pub trait KeyStorage: 'static {
     type Buffer: Buffer<Self::Key>;
 }
 
-pub trait Buffer<K>: 'static {
-    type BufMut<'a>: BufMut
-    where
-        Self: 'a;
-
+pub trait Buffer<K>: BufMut + 'static {
     fn with_capacity(cap: impl FnOnce() -> usize) -> Self;
-
-    fn buf_mut(&mut self) -> Self::BufMut<'_>;
 
     fn seal(self) -> K;
 }
@@ -51,26 +48,33 @@ pub trait Buffer<K>: 'static {
 pub struct StackStorage<const N: usize>;
 
 impl<const N: usize> KeyStorage for StackStorage<N> {
-    type Buffer = ArrayVec<[u8; N]>;
+    type Buffer = StackBuffer<N>;
     type Key = [u8; N];
 }
 
-impl<const N: usize> Buffer<[u8; N]> for ArrayVec<[u8; N]> {
-    type BufMut<'a> = &'a mut [u8]
-    where
-        Self: 'a;
+pub struct StackBuffer<const N: usize>(ArrayVec<[u8; N]>);
 
-    fn with_capacity(_cap: impl FnOnce() -> usize) -> Self {
-        Self::new()
+unsafe impl<const N: usize> BufMut for StackBuffer<N> {
+    fn remaining_mut(&self) -> usize {
+        self.0.grab_spare_slice().len()
     }
 
-    fn buf_mut(&mut self) -> Self::BufMut<'_> {
-        let len = self.len();
-        &mut self.as_mut_slice()[len..]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        self.0.set_len(self.0.len() + cnt);
+    }
+
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        unsafe { &mut *(self.0.grab_spare_slice_mut().chunk_mut() as *mut _) }
+    }
+}
+
+impl<const N: usize> Buffer<[u8; N]> for StackBuffer<N> {
+    fn with_capacity(_cap: impl FnOnce() -> usize) -> Self {
+        Self(ArrayVec::new())
     }
 
     fn seal(self) -> [u8; N] {
-        self.into_inner()
+        self.0.into_inner()
     }
 }
 
@@ -82,16 +86,8 @@ impl KeyStorage for HeapStorage {
 }
 
 impl Buffer<Box<[u8]>> for Vec<u8> {
-    type BufMut<'a> = &'a mut Vec<u8>
-    where
-        Self: 'a;
-
     fn with_capacity(cap: impl FnOnce() -> usize) -> Self {
         Self::with_capacity(cap())
-    }
-
-    fn buf_mut(&mut self) -> Self::BufMut<'_> {
-        self
     }
 
     fn seal(self) -> Box<[u8]> {
@@ -116,17 +112,26 @@ impl<S: KeyStorage, N: NullBitmap> HashKeySerializer<S, N> {
         }
     }
 
-    fn push<'a>(&mut self, scalar: Option<impl ScalarRef<'a>>) {
-        match scalar {
+    fn serialize(&mut self, data_type: &DataType, datum: impl ToDatumRef) {
+        match datum.to_datum_ref() {
             Some(scalar) => {
-                let scalar: ScalarRefImpl<'_> = scalar.into();
-                let mut serializer = memcomparable::Serializer::new(self.buffer.buf_mut());
-                memcmp_encoding::serialize_datum(
-                    Some(scalar),
-                    OrderType::ascending(),
-                    &mut serializer,
-                )
-                .expect("ser fail"); // TODO: error handling
+                match hash_key_size(data_type) {
+                    HashKeySize::Fixed(_) => {
+                        dispatch_all_variants!(scalar, ScalarRefImpl, scalar, {
+                            let bytes = HashKeySerDe::serialize(scalar);
+                            self.buffer.put_slice(bytes.as_ref());
+                        })
+                    }
+                    HashKeySize::Variable => {
+                        let mut serializer = memcomparable::Serializer::new(&mut self.buffer);
+                        memcmp_encoding::serialize_datum(
+                            Some(scalar),
+                            OrderType::ascending(),
+                            &mut serializer,
+                        )
+                        .expect("ser fail"); // TODO: error handling
+                    }
+                }
             }
             None => self.null_bitmap.set_true(self.idx),
         }
@@ -160,17 +165,36 @@ impl<'a, S: KeyStorage, N: NullBitmap> HashKeyDeserializer<'a, S, N> {
     }
 
     fn deserialize(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
-        let datum = if self.null_bitmap.contains(self.idx) {
-            let mut deserializer = memcomparable::Deserializer::new(&mut self.key);
-            let datum = memcmp_encoding::deserialize_datum(
-                data_type,
-                OrderType::ascending(),
-                &mut deserializer,
-            )
-            .expect("de fail"); // TODO: error handling
+        let datum = if !self.null_bitmap.contains(self.idx) {
+            match hash_key_size(data_type) {
+                HashKeySize::Fixed(_) => {
+                    macro_rules! deserialize {
+                        ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                            match data_type {
+                                $(
+                                    DataType::$DataType { .. } => ScalarRefImpl::$PhysicalType(
+                                        HashKeySerDe::deserialize(&mut self.key)
+                                    ),
+                                )*
+                            }
+                        }
+                    }
 
-            debug_assert!(datum.is_some());
-            datum
+                    Some(for_all_type_pairs! { deserialize }).to_owned_datum()
+                }
+                HashKeySize::Variable => {
+                    let mut deserializer = memcomparable::Deserializer::new(&mut self.key);
+                    let datum = memcmp_encoding::deserialize_datum(
+                        data_type,
+                        OrderType::ascending(),
+                        &mut deserializer,
+                    )
+                    .expect("de fail"); // TODO: error handling
+
+                    debug_assert!(datum.is_some());
+                    datum
+                }
+            }
         } else {
             None
         };
@@ -271,13 +295,12 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         };
 
         for &i in column_indices {
-            let array_impl = data_chunk.column_at(i).array_ref();
+            let array = data_chunk.column_at(i).array_ref();
+            let data_type = array.data_type();
 
-            dispatch_all_variants!(array_impl, ArrayImpl, array, {
-                for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
-                    serializer.push(scalar);
-                }
-            });
+            for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
+                serializer.serialize(&data_type, scalar);
+            }
         }
 
         let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
