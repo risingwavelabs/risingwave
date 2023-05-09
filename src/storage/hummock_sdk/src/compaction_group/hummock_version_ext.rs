@@ -96,6 +96,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     }
 }
 
+#[derive(Clone, Default)]
 pub struct TableGroupInfo {
     pub group_id: CompactionGroupId,
     pub group_size: u64,
