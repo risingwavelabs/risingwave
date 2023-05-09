@@ -24,7 +24,8 @@ use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use super::{GroupKey, ManagedTopNState};
+use super::topn_cache_state::TopNCacheState;
+use super::{CacheKey, GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
@@ -42,17 +43,17 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 /// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
-    pub low: BTreeMap<CacheKey, CompactedRow>,
+    pub low: TopNCacheState,
     /// Rows in the range `[offset, offset+limit)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `limit`.
-    pub middle: BTreeMap<CacheKey, CompactedRow>,
+    pub middle: TopNCacheState,
     /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `high_capacity`.
-    pub high: BTreeMap<CacheKey, CompactedRow>,
+    pub high: TopNCacheState,
     pub high_capacity: usize,
     pub offset: usize,
     /// Assumption: `limit != 0`
@@ -102,19 +103,16 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
         }
 
         writeln!(f, "  low:")?;
-        format_cache(f, &self.low, &self.data_types)?;
+        format_cache(f, self.low.inner(), &self.data_types)?;
         writeln!(f, "\n  middle:")?;
-        format_cache(f, &self.middle, &self.data_types)?;
+        format_cache(f, self.middle.inner(), &self.data_types)?;
         writeln!(f, "\n  high:")?;
-        format_cache(f, &self.high, &self.data_types)?;
+        format_cache(f, self.high.inner(), &self.data_types)?;
 
         write!(f, "\n}}")?;
         Ok(())
     }
 }
-
-/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
-pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
 /// `TopNCache::<true>::f` and `TopNCache::<false>::f`
@@ -164,9 +162,9 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             assert!(offset == 0, "OFFSET is not supported with WITH TIES");
         }
         Self {
-            low: BTreeMap::new(),
-            middle: BTreeMap::new(),
-            high: BTreeMap::new(),
+            low: TopNCacheState::new(),
+            middle: TopNCacheState::new(),
+            high: TopNCacheState::new(),
             high_capacity: offset
                 .checked_add(limit)
                 .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
