@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -122,7 +122,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// (2): additional delay (already able to output) for some window
 /// ```
 ///
-/// - State table schema = input schema, pk = `partition key | order key | input pk`.
+/// - State table schema = input schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
 /// - Rows in range (`curr evict row`, `curr input row`] are in state table.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
@@ -143,6 +143,7 @@ struct ExecutorInner<S: StateStore> {
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
+    state_table_schema_len: usize,
     watermark_epoch: AtomicU64Ref,
 }
 
@@ -217,6 +218,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
+                state_table_schema_len: input_info.schema.len(),
                 watermark_epoch: args.watermark_epoch,
             },
         }
@@ -386,9 +388,17 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         let state_row_pk = (&partition_key)
                             .chain(row::once(Some(key.order_key)))
                             .chain(pk);
+                        let state_row = {
+                            // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
+                            let mut state_row = vec![None; this.state_table_schema_len];
+                            for (i_in_pk, &i) in this.state_table.pk_indices().iter().enumerate() {
+                                state_row[i] = state_row_pk.datum_at(i_in_pk).to_owned_datum();
+                            }
+                            OwnedRow::new(state_row)
+                        };
                         // NOTE: We don't know the value of the row here, so the table must allow
                         // inconsistent ops.
-                        this.state_table.delete(state_row_pk);
+                        this.state_table.delete(state_row);
                     }
                 }
             }
