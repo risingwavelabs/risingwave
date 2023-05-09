@@ -100,6 +100,8 @@ impl Display for MetaSnapshot {
         writeln!(f, "{:#?}", self.metadata.function)?;
         writeln!(f, "system_param:")?;
         writeln!(f, "{:#?}", self.metadata.system_param)?;
+        writeln!(f, "cluster_id:")?;
+        writeln!(f, "{:#?}", self.metadata.cluster_id)?;
         Ok(())
     }
 }
@@ -126,7 +128,7 @@ pub struct ClusterMetadata {
     pub function: Vec<Function>,
     pub connection: Vec<Connection>,
     pub system_param: SystemParams,
-    pub tracking_id: String,
+    pub cluster_id: String,
 }
 
 impl ClusterMetadata {
@@ -150,7 +152,7 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.function.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.connection.iter().collect_vec(), buf);
         Self::encode_prost_message(&self.system_param, buf);
-        Self::encode_prost_message(&self.tracking_id, buf);
+        Self::encode_prost_message(&self.cluster_id, buf);
     }
 
     pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
@@ -175,7 +177,7 @@ impl ClusterMetadata {
         let function: Vec<Function> = Self::decode_prost_message_list(&mut buf)?;
         let connection: Vec<Connection> = Self::decode_prost_message_list(&mut buf)?;
         let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
-        let tracking_id: String = Self::decode_prost_message(&mut buf)?;
+        let cluster_id: String = Self::decode_prost_message(&mut buf)?;
 
         Ok(Self {
             default_cf,
@@ -194,7 +196,7 @@ impl ClusterMetadata {
             function,
             connection,
             system_param,
-            tracking_id,
+            cluster_id,
         })
     }
 

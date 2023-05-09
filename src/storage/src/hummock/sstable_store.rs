@@ -547,13 +547,12 @@ impl Default for SstableWriterOptions {
         }
     }
 }
-
 #[async_trait::async_trait]
-pub trait SstableWriterFactory: Send + Sync {
+pub trait SstableWriterFactory: Send {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
     async fn create_sst_writer(
-        &self,
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
@@ -574,7 +573,7 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
     async fn create_sst_writer(
-        &self,
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
@@ -781,7 +780,7 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
     async fn create_sst_writer(
-        &self,
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {

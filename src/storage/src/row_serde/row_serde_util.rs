@@ -16,7 +16,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::error::Result;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 
 pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Bytes {
     let mut buf = BytesMut::with_capacity(pk.len());

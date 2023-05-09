@@ -33,16 +33,16 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalOverAgg` performs `OVER` window aggregates ([`WindowFunction`]) to its input.
+/// `LogicalOverWindow` performs `OVER` window functions to its input.
 ///
 /// The output schema is the input schema plus the window functions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalOverAgg {
+pub struct LogicalOverWindow {
     pub base: PlanBase,
     core: OverWindow<PlanRef>,
 }
 
-impl LogicalOverAgg {
+impl LogicalOverWindow {
     fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
         let core = OverWindow::new(calls, input);
         let base = PlanBase::new_logical_with_core(&core);
@@ -97,8 +97,7 @@ impl LogicalOverAgg {
             .map(Self::convert_window_function)
             .try_collect()?;
 
-        let over_agg = Self::new(plan_window_funcs, input);
-        Ok((over_agg.into(), select_exprs))
+        Ok((Self::new(plan_window_funcs, input).into(), select_exprs))
     }
 
     fn convert_window_function(window_function: WindowFunction) -> Result<PlanWindowFunction> {
@@ -232,7 +231,7 @@ impl LogicalOverAgg {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalOverAgg {
+impl PlanTreeNodeUnary for LogicalOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -264,15 +263,15 @@ impl PlanTreeNodeUnary for LogicalOverAgg {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalOverAgg }
+impl_plan_tree_node_for_unary! { LogicalOverWindow }
 
-impl fmt::Display for LogicalOverAgg {
+impl fmt::Display for LogicalOverWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalOverAgg")
+        self.core.fmt_with_name(f, "LogicalOverWindow")
     }
 }
 
-impl ColPrunable for LogicalOverAgg {
+impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_cnt = self.input().schema().len();
         let raw_required_cols = {
@@ -309,13 +308,13 @@ impl ColPrunable for LogicalOverAgg {
         };
         let input_col_change =
             ColIndexMapping::with_remaining_columns(&input_required_cols, input_cnt);
-        let new_over_agg = {
+        let new_self = {
             let input = self.input().prune_col(&input_required_cols, ctx);
             self.rewrite_with_input_and_window(input, &window_functions, input_col_change)
         };
-        if new_over_agg.schema().len() == required_cols.len() {
+        if new_self.schema().len() == required_cols.len() {
             // current schema perfectly fit the required columns
-            new_over_agg.into()
+            new_self.into()
         } else {
             // some columns are not needed so we did a projection to remove the columns.
             let mut new_output_cols = input_required_cols.clone();
@@ -326,9 +325,9 @@ impl ColPrunable for LogicalOverAgg {
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
-            let src_size = new_over_agg.schema().len();
+            let src_size = new_self.schema().len();
             LogicalProject::with_mapping(
-                new_over_agg.into(),
+                new_self.into(),
                 ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
             )
             .into()
@@ -336,9 +335,9 @@ impl ColPrunable for LogicalOverAgg {
     }
 }
 
-impl ExprRewritable for LogicalOverAgg {}
+impl ExprRewritable for LogicalOverWindow {}
 
-impl PredicatePushdown for LogicalOverAgg {
+impl PredicatePushdown for LogicalOverWindow {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -351,13 +350,17 @@ impl PredicatePushdown for LogicalOverAgg {
     }
 }
 
-impl ToBatch for LogicalOverAgg {
+impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("OverAgg to batch".to_string(), 9124.into()).into())
+        Err(ErrorCode::NotImplemented(
+            "Batch over window is not implemented yet".to_string(),
+            9124.into(),
+        )
+        .into())
     }
 }
 
-impl ToStream for LogicalOverAgg {
+impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let stream_input = self.core.input.to_stream(ctx)?;
         stream_input.watermark_columns();
@@ -408,7 +411,11 @@ impl ToStream for LogicalOverAgg {
             return Ok(StreamEowcOverWindow::new(logical).into());
         }
 
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
+        Err(ErrorCode::NotImplemented(
+            "General version of streaming over window is not implemented yet".to_string(),
+            9124.into(),
+        )
+        .into())
     }
 
     fn logical_rewrite_for_stream(

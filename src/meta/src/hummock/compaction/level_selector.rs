@@ -34,10 +34,10 @@ use super::{
     TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
-    LocalSelectorStatistic, MinOverlappingPicker,
+use crate::hummock::compaction::picker::{
+    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
 };
+use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
