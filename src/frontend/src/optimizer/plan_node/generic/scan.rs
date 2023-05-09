@@ -23,7 +23,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, CollectInputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
@@ -97,13 +97,7 @@ impl Scan {
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
         self.output_col_idx
             .iter()
-            .map(|&i| {
-                format!(
-                    "{}.{}",
-                    self.table_name,
-                    self.table_desc.columns[i].name
-                )
-            })
+            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
             .collect()
     }
 
@@ -126,13 +120,7 @@ impl Scan {
         self.table_desc
             .order_column_indices()
             .iter()
-            .map(|&i| {
-                format!(
-                    "{}.{}",
-                    self.table_name,
-                    self.table_desc.columns[i].name
-                )
-            })
+            .map(|&i| format!("{}.{}", self.table_name, self.table_desc.columns[i].name))
             .collect()
     }
 
