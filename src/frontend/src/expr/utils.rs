@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
+use super::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
@@ -498,15 +498,32 @@ impl WatermarkAnalyzer {
                 }
                 _ => WatermarkDerivation::None,
             },
-            ExprType::Subtract
+            ty @ (ExprType::Subtract
             | ExprType::Divide
             | ExprType::TumbleStart
-            | ExprType::AtTimeZone => match self.visit_binary_op(func_call.inputs()) {
+            | ExprType::AtTimeZone) => match self.visit_binary_op(func_call.inputs()) {
                 (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
                     WatermarkDerivation::Constant
                 }
                 (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
-                    WatermarkDerivation::Watermark(idx)
+                    if ty == ExprType::AtTimeZone
+                        && !(func_call.return_type() == DataType::Timestamptz
+                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
+                        && func_call.inputs()[1]
+                            .as_literal()
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map_or(true, |time_zone| {
+                                if let ScalarImpl::Utf8(time_zone_str) = time_zone {
+                                    !time_zone_str.eq_ignore_ascii_case("UTC")
+                                } else {
+                                    true
+                                }
+                            })
+                    {
+                        WatermarkDerivation::None
+                    } else {
+                        WatermarkDerivation::Watermark(idx)
+                    }
                 }
                 _ => WatermarkDerivation::None,
             },

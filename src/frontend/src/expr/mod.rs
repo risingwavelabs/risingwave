@@ -772,7 +772,14 @@ impl ExprImpl {
                     ExprType::Add | ExprType::Subtract => {
                         let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
                         if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
-                            Some((input_ref.index(), Some((expr_type, rhs))))
+                            if rhs.return_type() == DataType::Interval && rhs.as_literal().map_or(true, |literal| literal.get_data().as_ref().map_or(false, |scalar| {
+                                let interval = scalar.as_interval();
+                                interval.months() != 0 || interval.days() != 0
+                            })) {
+                                None
+                            } else {
+                                Some((input_ref.index(), Some((expr_type, rhs))))
+                            }
                         } else {
                             None
                         }
