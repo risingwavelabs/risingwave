@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    generic, ColumnPruningContext, LogicalFilter, PlanTreeNode, PredicatePushdownContext,
+    generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
@@ -97,10 +97,9 @@ impl PredicatePushdown for LogicalExcept {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.predicate_pushdown(Condition::true_cond(), ctx))
+            .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
             .collect_vec();
-        let new_node = self.clone_with_inputs(&new_inputs);
-        LogicalFilter::create(new_node, predicate)
+        self.clone_with_inputs(&new_inputs)
     }
 }
 
