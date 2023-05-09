@@ -67,8 +67,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
-    PredicatePushdown, PredicatePushdownContext, generic,
+    generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
+    PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;

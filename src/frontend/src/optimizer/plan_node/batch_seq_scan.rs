@@ -27,7 +27,7 @@ use risingwave_pb::plan_common::PbColumnDesc;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::{ToLocalBatch};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
