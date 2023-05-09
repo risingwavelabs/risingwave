@@ -103,6 +103,10 @@ mod pull_up_hop_rule;
 pub use pull_up_hop_rule::*;
 mod apply_offset_rewriter;
 use apply_offset_rewriter::ApplyOffsetRewriter;
+mod intersect_to_semi_join_rule;
+pub use intersect_to_semi_join_rule::*;
+mod intersect_merge_rule;
+pub use intersect_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -127,7 +131,7 @@ macro_rules! for_all_rules {
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
             , { IndexSelectionRule }
-            , { OverAggToTopNRule }
+            , { OverWindowToTopNRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -145,6 +149,8 @@ macro_rules! for_all_rules {
             , { JoinProjectTransposeRule }
             , { LimitPushDownRule }
             , { PullUpHopRule }
+            , { IntersectToSemiJoinRule }
+            , { IntersectMergeRule }
         }
     };
 }

@@ -75,9 +75,15 @@ impl UserFunctionAttr {
 /// Check if the last argument is `&mut dyn Write`.
 fn last_arg_is_write(item: &syn::ItemFn) -> bool {
     let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false };
-    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else { return false };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else {
+        return false;
+    };
+    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
+        return false;
+    };
     path.segments.last().map_or(false, |s| s.ident == "Write")
 }
 

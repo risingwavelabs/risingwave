@@ -21,11 +21,9 @@ use risingwave_common::types::DataType;
 use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{
-    CollectInputRef, LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall,
-};
+use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -281,6 +279,8 @@ impl DistinctAggRule {
                     AggKind::BitAnd
                     | AggKind::BitOr
                     | AggKind::BitXor
+                    | AggKind::BoolAnd
+                    | AggKind::BoolOr
                     | AggKind::Min
                     | AggKind::Max
                     | AggKind::Sum
@@ -288,6 +288,8 @@ impl DistinctAggRule {
                     | AggKind::Avg
                     | AggKind::StringAgg
                     | AggKind::ArrayAgg
+                    | AggKind::JsonbAgg
+                    | AggKind::JsonbObjectAgg
                     | AggKind::FirstValue
                     | AggKind::StddevPop
                     | AggKind::StddevSamp

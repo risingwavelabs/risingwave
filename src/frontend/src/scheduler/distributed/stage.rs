@@ -50,14 +50,14 @@ use tracing::{error, warn};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::TableId;
+use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
@@ -113,7 +113,7 @@ struct TaskStatusHolder {
 pub struct StageExecution {
     epoch: BatchQueryEpoch,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
     shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
@@ -132,7 +132,7 @@ struct StageRunner {
     epoch: BatchQueryEpoch,
     state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     // Send message to `QueryRunner` to notify stage state change.
     msg_sender: Sender<QueryMessage>,
@@ -165,7 +165,7 @@ impl StageExecution {
     pub fn new(
         epoch: BatchQueryEpoch,
         stage: QueryStageRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         msg_sender: Sender<QueryMessage>,
         children: Vec<Arc<StageExecution>>,
         compute_client_pool: ComputeClientPoolRef,
@@ -326,15 +326,16 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
+            && let Some(vnode_bitmaps) = table_scan_info.partitions()
+        {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-
+            let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
@@ -346,7 +347,8 @@ impl StageRunner {
                     task_id: i as u32,
                 };
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
-                let plan_fragment = self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
+                let plan_fragment =
+                    self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
@@ -356,12 +358,13 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
-                let plan_fragment = self.create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
-                let worker = self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
+                let plan_fragment = self
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                let worker =
+                    self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
-        }
-        else {
+        } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
@@ -638,13 +641,23 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
+    fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
+        self.catalog_reader
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| table.fragment_id)
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))
+    }
+
+    #[inline(always)]
+    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
             .map(|table| {
                 self.worker_node_manager
-                    .get_fragment_mapping(&table.fragment_id)
+                    .manager
+                    .get_streaming_fragment_mapping(&table.fragment_id)
             })
             .ok()
             .flatten()
@@ -658,27 +671,29 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => self.get_vnode_mapping(&table_id),
+            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
                 {
-                    // Choose worker for distributed lookup join based on inner side vnode_mapping
+                    let fragment_id = self.get_fragment_id(
+                        &distributed_lookup_join_node
+                            .inner_side_table_desc
+                            .as_ref()
+                            .unwrap()
+                            .table_id
+                            .into(),
+                    )?;
                     let id2pu_vec = self
-                        .get_vnode_mapping(&TableId::new(
-                            distributed_lookup_join_node
-                                .inner_side_table_desc
-                                .as_ref()
-                                .unwrap()
-                                .table_id,
-                        ))
-                        .unwrap()
+                        .worker_node_manager
+                        .fragment_mapping(fragment_id)?
                         .iter_unique()
                         .collect_vec();
 
                     let pu = id2pu_vec[task_id as usize];
                     let candidates = self
                         .worker_node_manager
+                        .manager
                         .get_workers_by_parallel_unit_ids(&[pu])?;
                     return Ok(Some(candidates[0].clone()));
                 } else {
@@ -692,6 +707,7 @@ impl StageRunner {
                 let parallel_unit_ids = mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
+                    .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 Some(candidates.choose(&mut rand::thread_rng()).unwrap().clone())
             }
@@ -811,7 +827,7 @@ impl StageRunner {
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random()?)
+            .unwrap_or(self.worker_node_manager.next_random_worker()?)
             .host
             .unwrap();
 

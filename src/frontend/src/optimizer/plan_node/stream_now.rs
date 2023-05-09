@@ -51,6 +51,7 @@ impl StreamNow {
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,
+            false, // TODO(rc): derive EOWC property from input
             watermark_columns,
         );
         Self { base }

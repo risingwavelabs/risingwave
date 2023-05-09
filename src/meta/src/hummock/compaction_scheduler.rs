@@ -669,6 +669,7 @@ mod tests {
         );
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
         assert_matches!(

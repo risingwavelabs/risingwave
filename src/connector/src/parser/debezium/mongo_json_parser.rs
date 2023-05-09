@@ -77,32 +77,30 @@ fn parse_bson_value(
             )),
             _ => Err(RwError::from(ProtocolError(format!(
                 "Can not convert bson {:?} to {:?}",
-                id_field,
-                id_type
+                id_field, id_type
             ))))?,
         },
         DataType::Int32 => {
-            if let serde_json::Value::Object(ref obj) = id_field  && obj.contains_key("$numberInt"){
-                    let int_str = obj["$numberInt"].as_str().unwrap_or_default();
-                    Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
-                } else {
-                    Err(RwError::from(ProtocolError(format!(
-                        "Can not convert bson {:?} to {:?}",
-                        id_field,
-                        id_type
-                    ))))?
+            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberInt") {
+                let int_str = obj["$numberInt"].as_str().unwrap_or_default();
+                Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
+            } else {
+                Err(RwError::from(ProtocolError(format!(
+                    "Can not convert bson {:?} to {:?}",
+                    id_field, id_type
+                ))))?
             }
         }
         DataType::Int64 => {
-            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberLong") {
-                    let int_str = obj["$numberLong"].as_str().unwrap_or_default();
-                    Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
-                } else {
-                    Err(RwError::from(ProtocolError(format!(
-                        "Can not convert bson {:?} to {:?}",
-                        id_field,
-                        id_type
-                    ))))?
+            if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberLong")
+            {
+                let int_str = obj["$numberLong"].as_str().unwrap_or_default();
+                Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
+            } else {
+                Err(RwError::from(ProtocolError(format!(
+                    "Can not convert bson {:?} to {:?}",
+                    id_field, id_type
+                ))))?
             }
         }
         _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),

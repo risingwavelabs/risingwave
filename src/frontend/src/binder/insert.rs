@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
@@ -101,12 +101,16 @@ impl Binder {
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
+        let default_columns_from_catalog =
+            table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
         let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
 
-        let generated_column_names: HashSet<_> = table_catalog.generated_column_names().collect();
+        let generated_column_names = table_catalog
+            .generated_column_names()
+            .collect::<HashSet<_>>();
         for col in &cols_to_insert_by_user {
             let query_col_name = col.real_value();
             if generated_column_names.contains(query_col_name.as_str()) {
@@ -249,7 +253,12 @@ impl Binder {
             .map(|i| {
                 (
                     i,
-                    ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone()),
+                    default_columns_from_catalog
+                        .get(&i)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
+                        }),
                 )
             })
             .collect_vec();

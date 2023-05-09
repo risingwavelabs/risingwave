@@ -41,6 +41,7 @@ pub struct ComputeNodeConfig {
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
+    pub role: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

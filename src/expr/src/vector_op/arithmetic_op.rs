@@ -410,9 +410,10 @@ mod tests {
     use std::str::FromStr;
 
     use num_traits::Float;
-    use risingwave_common::types::num256::{Int256, Int256Ref};
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
+    use risingwave_common::types::{
+        Date, Decimal, Int256, Int256Ref, Interval, Scalar, Timestamp, F32, F64,
+    };
 
     use super::*;
 

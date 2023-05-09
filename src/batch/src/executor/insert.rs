@@ -19,15 +19,16 @@ use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::SerialArray;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::IndexAndExpr;
+use risingwave_pb::plan_common::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
@@ -209,7 +210,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .collect();
         let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
             let mut default_columns = default_columns
-                .get_default_column()
+                .get_default_columns()
                 .iter()
                 .cloned()
                 .map(|IndexAndExpr { index: i, expr: e }| {

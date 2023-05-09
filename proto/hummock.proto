@@ -21,6 +21,7 @@ message SstableInfo {
   uint64 min_epoch = 9;
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
+  uint64 range_tombstone_count = 12;
 }
 
 enum LevelType {
@@ -266,6 +267,8 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
+  // Lbase in LSM
+  uint32 base_level = 8;
   TaskStatus task_status = 9;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
@@ -546,6 +549,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 max_sub_compaction = 9;
       uint64 level0_stop_write_threshold_sub_level_number = 10;
       uint32 level0_sub_level_compact_level_count = 11;
+      uint32 level0_overlapping_sub_level_compact_level_count = 12;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -634,6 +638,9 @@ message CompactionConfig {
   uint64 level0_stop_write_threshold_sub_level_number = 15;
   uint64 level0_max_compact_file_number = 16;
   uint32 level0_sub_level_compact_level_count = 17;
+
+  // for tier compaction pick overlapping level
+  uint32 level0_overlapping_sub_level_compact_level_count = 18;
 }
 
 message TableStats {

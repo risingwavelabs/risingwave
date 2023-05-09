@@ -389,6 +389,21 @@ impl Extend<usize> for CollectInputRef {
     }
 }
 
+/// Collect all `InputRef`s' indexes in the expressions.
+///
+/// # Panics
+/// Panics if `input_ref >= input_col_num`.
+pub fn collect_input_refs<'a>(
+    input_col_num: usize,
+    exprs: impl IntoIterator<Item = &'a ExprImpl>,
+) -> FixedBitSet {
+    let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
+    for expr in exprs {
+        input_ref_collector.visit_expr(expr);
+    }
+    input_ref_collector.into()
+}
+
 /// Count `Now`s in the expression.
 #[derive(Clone, Default)]
 pub struct CountNow {}
@@ -398,17 +413,8 @@ impl ExprVisitor<usize> for CountNow {
         a + b
     }
 
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
-        if func_call.get_expr_type() == ExprType::Now {
-            1
-        } else {
-            func_call
-                .inputs()
-                .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
-                .unwrap_or_default()
-        }
+    fn visit_now(&mut self, _: &super::Now) -> usize {
+        1
     }
 }
 
@@ -447,7 +453,8 @@ impl WatermarkAnalyzer {
             | ExprImpl::AggCall(_)
             | ExprImpl::CorrelatedInputRef(_)
             | ExprImpl::WindowFunction(_)
-            | ExprImpl::Parameter(_) => unreachable!(),
+            | ExprImpl::Parameter(_)
+            | ExprImpl::Now(_) => unreachable!(),
             ExprImpl::UserDefinedFunction(_) => WatermarkDerivation::None,
         }
     }

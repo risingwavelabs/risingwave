@@ -16,7 +16,7 @@
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
-        <module>connector-node/risingwave-source-test</module>
+        <module>connector-node/risingwave-connector-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
@@ -39,7 +39,7 @@
         <debezium.version>1.9.7.Final</debezium.version>
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
-        <hadoop.version>3.3.2</hadoop.version>
+        <hadoop.version>3.3.3</hadoop.version>
     </properties>
 
     <dependencyManagement>

@@ -57,9 +57,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 })
                 .collect(),
         ),
-        DataType::List { datatype: ref typ } => {
-            AstDataType::Array(Box::new(data_type_to_ast_data_type(typ)))
-        }
+        DataType::List(ref typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
     }
 }
 
@@ -96,7 +94,8 @@ impl TryFrom<RwCastSig> for CastSig {
 
     fn try_from(value: RwCastSig) -> Result<Self, Self::Error> {
         if let Some(from_type) = data_type_name_to_ast_data_type(&value.from_type)
-            && let Some(to_type) = data_type_name_to_ast_data_type(&value.to_type) {
+            && let Some(to_type) = data_type_name_to_ast_data_type(&value.to_type)
+        {
             Ok(CastSig {
                 from_type,
                 to_type,
@@ -120,8 +119,13 @@ impl TryFrom<&RwFuncSig> for FuncSig {
     type Error = String;
 
     fn try_from(value: &RwFuncSig) -> Result<Self, Self::Error> {
-        if let Some(inputs_type) = value.inputs_type.iter().map(data_type_name_to_ast_data_type).collect()
-            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type) {
+        if let Some(inputs_type) = value
+            .inputs_type
+            .iter()
+            .map(data_type_name_to_ast_data_type)
+            .collect()
+            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type)
+        {
             Ok(FuncSig {
                 inputs_type,
                 ret_type,
@@ -145,8 +149,13 @@ impl TryFrom<&RwAggFuncSig> for AggFuncSig {
     type Error = String;
 
     fn try_from(value: &RwAggFuncSig) -> Result<Self, Self::Error> {
-        if let Some(inputs_type) = value.inputs_type.iter().map(data_type_name_to_ast_data_type).collect()
-            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type) {
+        if let Some(inputs_type) = value
+            .inputs_type
+            .iter()
+            .map(data_type_name_to_ast_data_type)
+            .collect()
+            && let Some(ret_type) = data_type_name_to_ast_data_type(&value.ret_type)
+        {
             Ok(AggFuncSig {
                 inputs_type,
                 ret_type,
@@ -208,6 +217,13 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
                 func.inputs_type
                     .iter()
                     .all(|t| *t != DataTypeName::Timestamptz)
+                    && ![
+                        AggKind::BitAnd,
+                        AggKind::BitOr,
+                        AggKind::BoolAnd,
+                        AggKind::BoolOr,
+                    ]
+                    .contains(&func.func)
             })
             .filter_map(|func| func.try_into().ok())
             .for_each(|func: AggFuncSig| {

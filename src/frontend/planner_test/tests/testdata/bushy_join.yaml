@@ -9,9 +9,9 @@
   stream_plan: |
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamHashJoin { type: Inner, predicate: t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id, output: [t._row_id, t._row_id, t.id, t._row_id, t._row_id, t.id, t.id, t.id, t._row_id, t._row_id, t.id, t._row_id, t._row_id, t.id, t.id] }
               ├─StreamExchange { dist: HashShard(t.id) }
               | └─StreamHashJoin { type: Inner, predicate: t.id = t.id AND t.id = t.id AND t.id = t.id AND t.id = t.id, output: [t.id, t.id, t.id, t.id, t._row_id, t._row_id, t._row_id, t._row_id] }
