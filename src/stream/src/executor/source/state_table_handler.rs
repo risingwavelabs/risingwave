@@ -159,6 +159,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
+    fn delete(&mut self, key: SplitId) {
+        self.state_store
+            .delete(row::once(Some(Self::string_to_scalar(key.deref()))));
+    }
+
     /// This function provides the ability to persist the source state
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
@@ -177,6 +182,15 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             }
         }
         Ok(())
+    }
+
+    pub fn trim_state<SS>(&mut self, to_trim: Vec<SS>)
+    where
+        SS: SplitMetaData,
+    {
+        for split in to_trim {
+            self.delete(split.id());
+        }
     }
 
     ///
