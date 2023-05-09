@@ -224,7 +224,7 @@ impl ActorBuilder {
             .into_values()
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
-        // Only fill the definition when debug assertions enabled, otherwise using name instead.
+        // Only fill the definition when debug assertions enabled, otherwise use name instead.
         #[cfg(not(debug_assertions))]
         let mview_definition = job.name();
         #[cfg(debug_assertions)]
