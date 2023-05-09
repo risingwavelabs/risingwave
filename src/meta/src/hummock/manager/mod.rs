@@ -20,6 +20,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
@@ -65,7 +66,8 @@ use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, IdCategory, LocalNotification, MetaSrvEnv, META_NODE_ID,
 };
 use crate::model::{
-    BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
+    BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
+    VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MetaStore, Transaction};
@@ -166,7 +168,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreRef};
+use risingwave_object_store::object::{parse_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -283,9 +285,10 @@ where
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
         catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
-        let sys_params = env.system_params_manager().get_params().await;
+        let sys_params_manager = env.system_params_manager();
+        let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
-        let state_store_dir = sys_params.data_directory();
+        let state_store_dir: &str = sys_params.data_directory();
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -294,6 +297,16 @@ where
             )
             .await,
         );
+
+        // Make sure data dir is not used by another cluster.
+        if env.cluster_first_launch() {
+            write_exclusive_cluster_id(
+                state_store_dir,
+                env.cluster_id().clone(),
+                object_store.clone(),
+            )
+            .await?;
+        }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
@@ -2270,4 +2283,31 @@ fn gen_version_delta<'a>(
     }
 
     version_delta
+}
+
+async fn write_exclusive_cluster_id(
+    state_store_dir: &str,
+    cluster_id: ClusterId,
+    object_store: ObjectStoreRef,
+) -> Result<()> {
+    const CLUSTER_ID_DIR: &str = "cluster_id";
+    const CLUSTER_ID_NAME: &str = "0";
+
+    let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
+    let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    let metadata = object_store.list(&cluster_id_dir).await?;
+
+    if metadata.is_empty() {
+        object_store
+            .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
+            .await?;
+        Ok(())
+    } else {
+        let cluster_id = object_store.read(&cluster_id_full_path, None).await?;
+        Err(ObjectError::internal(format!(
+            "data directory is already used by another cluster with id {:?}",
+            String::from_utf8(cluster_id.to_vec()).unwrap()
+        ))
+        .into())
+    }
 }
