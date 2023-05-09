@@ -87,7 +87,6 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
-            warning_messages: RefCell::new(vec![]),
         }
     }
 
@@ -107,7 +106,6 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
-            warning_messages: RefCell::new(vec![]),
         }
         .into()
     }
