@@ -278,7 +278,11 @@ where
                         })
                         .collect();
 
-                    if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
+                    if let Some(change) = diff_splits(
+                        prev_actor_splits,
+                        &discovered_splits,
+                        SplitDiffOptions::default(),
+                    ) {
                         split_assignment.insert(*fragment_id, change);
                     }
                 }
@@ -380,15 +384,35 @@ impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     }
 }
 
+#[derive(Debug)]
+struct SplitDiffOptions {
+    enable_scale_in: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for SplitDiffOptions {
+    fn default() -> Self {
+        SplitDiffOptions {
+            enable_scale_in: false,
+        }
+    }
+}
+
 fn diff_splits<T>(
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
+    opts: SplitDiffOptions,
 ) -> Option<HashMap<ActorId, Vec<T>>>
 where
     T: SplitMetaData + Clone,
 {
+    // if no actors, return
     if actor_splits.is_empty() {
         return None;
+    }
+
+    if discovered_splits.is_empty() {
+        tracing::warn!("no splits discovered");
     }
 
     let prev_split_ids: HashSet<_> = actor_splits
@@ -396,18 +420,58 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    let new_discovered_splits: HashSet<_> = discovered_splits
-        .keys()
-        .filter(|split_id| !prev_split_ids.contains(*split_id))
+    tracing::debug!("previous splits {:?}", prev_split_ids);
+    tracing::debug!("discovered splits {:?}", discovered_splits.keys());
+
+    let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
+
+    let dropped_splits: HashSet<_> = prev_split_ids
+        .difference(&discovered_split_ids)
         .cloned()
         .collect();
 
-    if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
-        return None;
+    if !dropped_splits.is_empty() {
+        if opts.enable_scale_in {
+            tracing::debug!("dropping splits {:?}", dropped_splits);
+        } else {
+            tracing::warn!(
+                "dropping splits {:?} happened, but it is not allowed",
+                dropped_splits
+            );
+        }
+    }
+
+    let new_discovered_splits: HashSet<_> = discovered_split_ids
+        .into_iter()
+        .filter(|split_id| !prev_split_ids.contains(split_id))
+        .collect();
+
+    tracing::debug!("new created splits {:?}", new_discovered_splits);
+
+    if opts.enable_scale_in {
+        // if we support scale in, no more splits are discovered, and no splits are dropped, return
+        // we need to check if discovered_split_ids is empty, because if it is empty, we need to
+        // handle the case of scale in to zero (like deleting all objects from s3)
+        if dropped_splits.is_empty()
+            && new_discovered_splits.is_empty()
+            && !discovered_splits.is_empty()
+        {
+            return None;
+        }
+    } else {
+        // if we do not support scale in, and no more splits are discovered, return
+        if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
+            return None;
+        }
     }
 
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
-    for (actor_id, splits) in actor_splits {
+
+    for (actor_id, mut splits) in actor_splits {
+        if opts.enable_scale_in {
+            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+        }
+
         heap.push(ActorSplitsAssignment { actor_id, splits })
     }
 
@@ -541,7 +605,10 @@ where
             .map(|actor_id| (actor_id, vec![]))
             .collect();
 
-        Ok(diff_splits(empty_actor_splits, &splits).unwrap_or_default())
+        Ok(
+            diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
+                .unwrap_or_default(),
+        )
     }
 
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
@@ -588,7 +655,9 @@ where
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
 
-                if let Some(diff) = diff_splits(empty_actor_splits, &splits) {
+                if let Some(diff) =
+                    diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
+                {
                     assigned.insert(fragment_id, diff);
                 }
             }
@@ -748,7 +817,7 @@ mod tests {
     use serde::{Deserialize, Serialize};
 
     use crate::model::ActorId;
-    use crate::stream::source_manager::diff_splits;
+    use crate::stream::source_manager::{diff_splits, SplitDiffOptions};
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -785,14 +854,83 @@ mod tests {
     }
 
     #[test]
+    fn test_drop_splits() {
+        let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
+        actor_splits.insert(0, vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
+        actor_splits.insert(1, vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
+        actor_splits.insert(2, vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
+
+        let mut prev_split_to_actor = HashMap::new();
+        for (actor_id, splits) in &actor_splits {
+            for split in splits {
+                prev_split_to_actor.insert(split.id(), *actor_id);
+            }
+        }
+
+        let discovered_splits: BTreeMap<SplitId, TestSplit> = (1..5)
+            .map(|i| {
+                let split = TestSplit { id: i };
+                (split.id(), split)
+            })
+            .collect();
+
+        let opts = SplitDiffOptions {
+            enable_scale_in: true,
+        };
+
+        let prev_split_ids: HashSet<_> = actor_splits
+            .values()
+            .flat_map(|splits| splits.iter().map(|split| split.id()))
+            .collect();
+
+        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+        check_all_splits(&discovered_splits, &diff);
+
+        let mut after_split_to_actor = HashMap::new();
+        for (actor_id, splits) in &diff {
+            for split in splits {
+                after_split_to_actor.insert(split.id(), *actor_id);
+            }
+        }
+
+        let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
+
+        let retained_split_ids: HashSet<_> =
+            prev_split_ids.intersection(&discovered_split_ids).collect();
+
+        for retained_split_id in retained_split_ids {
+            assert_eq!(
+                prev_split_to_actor.get(retained_split_id),
+                after_split_to_actor.get(retained_split_id)
+            )
+        }
+    }
+
+    #[test]
+    fn test_drop_splits_to_empty() {
+        let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
+        actor_splits.insert(0, vec![TestSplit { id: 0 }]);
+
+        let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
+
+        let opts = SplitDiffOptions {
+            enable_scale_in: true,
+        };
+
+        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+
+        assert!(!diff.is_empty())
+    }
+
+    #[test]
     fn test_diff_splits() {
         let actor_splits = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        assert!(diff_splits(actor_splits, &discovered_splits).is_none());
+        assert!(diff_splits(actor_splits, &discovered_splits, Default::default()).is_none());
 
         let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert!(splits.is_empty())
@@ -806,7 +944,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);
@@ -822,7 +960,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             let len = splits.len();
@@ -843,7 +981,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 5);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);

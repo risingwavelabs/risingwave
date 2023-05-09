@@ -408,7 +408,7 @@ where
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
-            definition: stream_job.mview_definition(),
+            definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
         };
 
