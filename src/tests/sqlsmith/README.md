@@ -33,7 +33,7 @@ cargo make sslt-build-all --profile ci-sim
 # The target bin can be found here:
 # target/sim/ci-sim/risingwave_simulation
 # Run fuzzing
-./target/sim/ci-sim/risingwave_simulation
+RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
 ```
 
 ## E2E
