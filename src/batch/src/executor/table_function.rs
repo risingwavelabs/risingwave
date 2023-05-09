@@ -52,14 +52,14 @@ impl TableFunctionExecutor {
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
-        let list_array = self.table_function.eval(&dummy_chunk).await?;
-        let flatten_array = list_array.flatten();
-        let len = flatten_array.len();
-
-        yield match flatten_array {
-            ArrayImpl::Struct(s) => DataChunk::from(s),
-            array => DataChunk::new(vec![array.into()], len),
-        };
+        #[for_await]
+        for chunk in self.table_function.eval(&dummy_chunk).await {
+            let chunk = chunk?;
+            yield match chunk.column_at(1).array_ref() {
+                ArrayImpl::Struct(s) => DataChunk::from(s),
+                _ => chunk.reorder_columns(&[1]),
+            };
+        }
     }
 }
 

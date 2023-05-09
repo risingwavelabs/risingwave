@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
+use risingwave_common::array::{Array, DataChunk, ListArray};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::*;
@@ -27,12 +26,25 @@ pub struct Unnest {
 }
 
 impl Unnest {
-    fn eval_row(&self, list: ListRef<'_>) -> Result<ArrayRef> {
-        let mut builder = self.return_type.create_array_builder(self.chunk_size);
-        for d in &list.flatten() {
-            builder.append_datum(*d);
+    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+        let ret_list = self.list.eval_checked(input).await?;
+        let arr_list: &ListArray = ret_list.as_ref().into();
+
+        let mut builder =
+            DataChunkBuilder::new(vec![DataType::Int64, self.return_type()], self.chunk_size);
+        for (i, (list, visible)) in arr_list.iter().zip_eq_fast(input.vis().iter()).enumerate() {
+            if let Some(list) = list && visible {
+                for value in list.flatten() {
+                    if let Some(chunk) = builder.append_one_row([Some((i as i64).into()), value]) {
+                        yield chunk;
+                    }
+                }
+            }
         }
-        Ok(Arc::new(builder.finish()))
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
+        }
     }
 }
 
@@ -42,49 +54,12 @@ impl TableFunction for Unnest {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
-        let ret_list = self.list.eval_checked(input).await?;
-        let arr_list: &ListArray = ret_list.as_ref().into();
-
-        let bitmap = input.visibility();
-        let mut builder = ListArrayBuilder::with_type(
-            self.chunk_size,
-            DataType::List(Box::new(self.return_type())),
-        );
-
-        match bitmap {
-            Some(bitmap) => {
-                for (list, visible) in arr_list.iter().zip_eq_fast(bitmap.iter()) {
-                    if let Some(list) = list && visible {
-                        let array = self.eval_row(list)?;
-                        for value in array.iter() {
-                            builder.append_sub(value);
-                        }
-                        builder.finish_sub(true);
-                    } else {
-                        builder.append_null();
-                    }
-                }
-            }
-            None => {
-                for list in arr_list.iter() {
-                    if let Some(list) = list {
-                        let array = self.eval_row(list)?;
-                        for value in array.iter() {
-                            builder.append_sub(value);
-                        }
-                        builder.finish_sub(true);
-                    } else {
-                        builder.append_null();
-                    }
-                }
-            }
-        }
-        Ok(builder.finish())
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+        self.eval_inner(input)
     }
 }
 
-pub fn new_unnest(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
+pub fn new_unnest(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [list]: [_; 1] = args.try_into().unwrap();

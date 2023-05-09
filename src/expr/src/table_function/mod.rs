@@ -13,13 +13,19 @@
 // limitations under the License.
 
 use either::Either;
+use futures_async_stream::try_stream;
+use futures_util::stream::BoxStream;
+use futures_util::StreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilder, ArrayRef, DataChunk, ListArray, ListArrayBuilder};
-use risingwave_common::types::DataType;
+use risingwave_common::array::{
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder,
+};
+use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::expr::project_set_select_item::SelectItem;
-use risingwave_pb::expr::{ProjectSetSelectItem as SelectItemPb, TableFunction as TableFunctionPb};
+use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
 
-use super::Result;
+use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
@@ -40,7 +46,7 @@ use self::user_defined::*;
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
-    async fn eval(&self, input: &DataChunk) -> Result<ListArray>;
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>>;
 
     fn boxed(self) -> BoxedTableFunction
     where
@@ -52,7 +58,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
-pub fn build_from_prost(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
+pub fn build_from_prost(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {
@@ -68,38 +74,44 @@ pub fn build_from_prost(prost: &TableFunctionPb, chunk_size: usize) -> Result<Bo
 /// Used for tests. Repeat an expression n times
 pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
     #[derive(Debug)]
-    struct Mock {
+    struct RepeatN {
         expr: BoxedExpression,
         n: usize,
     }
 
     #[async_trait::async_trait]
-    impl TableFunction for Mock {
+    impl TableFunction for RepeatN {
         fn return_type(&self) -> DataType {
             self.expr.return_type()
         }
 
-        async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
-            let array = self.expr.eval(input).await?;
-
-            let mut builder = ListArrayBuilder::with_type(
-                array.len(),
-                DataType::List(Box::new(self.return_type())),
-            );
-            for datum_ref in array.iter() {
-                for _ in 0..self.n {
-                    builder.append_sub(datum_ref);
-                }
-                builder.finish_sub(true);
-            }
-            Ok(builder.finish())
+        async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+            self.eval_inner(input)
         }
     }
 
-    Mock { expr, n }.boxed()
+    impl RepeatN {
+        #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+        async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+            let array = self.expr.eval(input).await?;
+
+            let mut index_builder = I64ArrayBuilder::new(0x100);
+            let mut value_builder = self.return_type().create_array_builder(0x100);
+            for (i, value) in array.iter().enumerate() {
+                index_builder.append_n(self.n, Some(i as i64));
+                value_builder.append_datum_n(self.n, value);
+            }
+            let len = index_builder.len();
+            let index_array: ArrayImpl = index_builder.finish().into();
+            let value_array = value_builder.finish();
+            yield DataChunk::new(vec![index_array.into(), value_array.into()], len);
+        }
+    }
+
+    RepeatN { expr, n }.boxed()
 }
 
-/// See also [`SelectItemPb`]
+/// See also [`PbProjectSetSelectItem`]
 #[derive(Debug)]
 pub enum ProjectSetSelectItem {
     TableFunction(BoxedTableFunction),
@@ -119,7 +131,7 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
 }
 
 impl ProjectSetSelectItem {
-    pub fn from_prost(prost: &SelectItemPb, chunk_size: usize) -> Result<Self> {
+    pub fn from_prost(prost: &PbProjectSetSelectItem, chunk_size: usize) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
             SelectItem::Expr(expr) => expr_build_from_prost(expr).map(Into::into),
             SelectItem::TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
@@ -133,10 +145,58 @@ impl ProjectSetSelectItem {
         }
     }
 
-    pub async fn eval(&self, input: &DataChunk) -> Result<Either<ListArray, ArrayRef>> {
+    pub async fn eval<'a>(
+        &'a self,
+        input: &'a DataChunk,
+    ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
         match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.eval(input).await.map(Either::Left),
-            ProjectSetSelectItem::Expr(expr) => expr.eval(input).await.map(Either::Right),
+            Self::TableFunction(tf) => Ok(Either::Left(
+                TableFunctionOutputIter::new(tf.eval(input).await).await?,
+            )),
+            Self::Expr(expr) => expr.eval(input).await.map(Either::Right),
         }
+    }
+}
+
+/// A wrapper over the output of table function that allows iteration by rows.
+pub struct TableFunctionOutputIter<'a> {
+    stream: BoxStream<'a, Result<DataChunk>>,
+    chunk: Option<DataChunk>,
+    index: usize,
+}
+
+impl<'a> TableFunctionOutputIter<'a> {
+    pub async fn new(
+        mut stream: BoxStream<'a, Result<DataChunk>>,
+    ) -> Result<TableFunctionOutputIter<'a>> {
+        Ok(Self {
+            chunk: stream.next().await.transpose()?,
+            stream,
+            index: 0,
+        })
+    }
+
+    pub fn peek(&'a self) -> Option<(usize, DatumRef<'a>)> {
+        let chunk = self.chunk.as_ref()?;
+        let index = chunk
+            .column_at(0)
+            .array_ref()
+            .as_int64()
+            .value_at(self.index)
+            .unwrap() as usize;
+        let value = chunk.column_at(1).array_ref().value_at(self.index);
+        Some((index, value))
+    }
+
+    pub async fn next(&mut self) -> Result<()> {
+        let Some(chunk) = &self.chunk else {
+            return Ok(());
+        };
+        self.index += 1;
+        if self.index == chunk.capacity() {
+            self.chunk = self.stream.next().await.transpose()?;
+            self.index = 0;
+        }
+        Ok(())
     }
 }

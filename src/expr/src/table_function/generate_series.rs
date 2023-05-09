@@ -16,10 +16,9 @@ use anyhow::anyhow;
 use itertools::multizip;
 use num_traits::Zero;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, DataChunk, I32Array, IntervalArray, ListArrayBuilder,
-    TimestampArray,
+    Array, ArrayImpl, DataChunk, I32Array, IntervalArray, TimestampArray,
 };
-use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
+use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
 use super::*;
@@ -39,6 +38,8 @@ where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
     for<'a> S::RefItem<'a>: IsNegative,
+    for<'a> &'a T: From<&'a ArrayImpl>,
+    for<'a> &'a S: From<&'a ArrayImpl>,
 {
     fn new(
         start: BoxedExpression,
@@ -55,20 +56,19 @@ where
         }
     }
 
-    fn eval_row(
-        &self,
-        start: T::RefItem<'_>,
-        stop: T::RefItem<'_>,
-        step: S::RefItem<'_>,
-    ) -> Result<T> {
+    #[try_stream(ok = T::OwnedItem, error = ExprError)]
+    async fn eval_row<'a>(
+        &'a self,
+        start: T::RefItem<'a>,
+        stop: T::RefItem<'a>,
+        step: S::RefItem<'a>,
+    ) {
         if step.is_zero() {
             return Err(ExprError::InvalidParam {
                 name: "step",
                 reason: "must be non-zero".to_string(),
             });
         }
-
-        let mut builder = T::Builder::new(self.chunk_size);
 
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
@@ -83,11 +83,40 @@ where
         } else {
             cur < stop
         } {
-            builder.append(Some(cur.as_scalar_ref()));
+            yield cur.clone();
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
         }
+    }
 
-        Ok(builder.finish())
+    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+        let ret_start = self.start.eval_checked(input).await?;
+        let arr_start: &T = ret_start.as_ref().into();
+        let ret_stop = self.stop.eval_checked(input).await?;
+        let arr_stop: &T = ret_stop.as_ref().into();
+        let ret_step = self.step.eval_checked(input).await?;
+        let arr_step: &S = ret_step.as_ref().into();
+
+        let mut builder =
+            DataChunkBuilder::new(vec![DataType::Int64, self.return_type()], self.chunk_size);
+        for (i, ((start, stop, step), visible)) in
+            multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
+                .zip_eq_debug(input.vis().iter())
+                .enumerate()
+        {
+            if let (Some(start), Some(stop), Some(step)) = (start, stop, step) && visible {
+                #[for_await]
+                for res in self.eval_row(start, stop, step) {
+                    let value = res?;
+                    if let Some(chunk) = builder.append_one_row([Some(ScalarRefImpl::Int64(i as i64)), Some(value.as_scalar_ref().into())]) {
+                        yield chunk;
+                    }
+                }
+            }
+        }
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
+        }
     }
 }
 
@@ -105,61 +134,13 @@ where
         self.start.return_type()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ListArray> {
-        let ret_start = self.start.eval_checked(input).await?;
-        let arr_start: &T = ret_start.as_ref().into();
-        let ret_stop = self.stop.eval_checked(input).await?;
-        let arr_stop: &T = ret_stop.as_ref().into();
-
-        let ret_step = self.step.eval_checked(input).await?;
-        let arr_step: &S = ret_step.as_ref().into();
-
-        let bitmap = input.visibility();
-        let mut builder = ListArrayBuilder::with_type(
-            self.chunk_size,
-            DataType::List(Box::new(self.return_type())),
-        );
-
-        match bitmap {
-            Some(bitmap) => {
-                for ((start, stop, step), visible) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                        .zip_eq_debug(bitmap.iter())
-                {
-                    if let (Some(start), Some(stop), Some(step)) = (start, stop, step) && visible {
-                        let array = self.eval_row(start, stop, step)?;
-                        for value in array.iter() {
-                            builder.append_sub(value.map(|v| v.into()));
-                        }
-                        builder.finish_sub(true);
-                    } else {
-                        builder.append_null();
-                    }
-                }
-            }
-            None => {
-                for (start, stop, step) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                {
-                    if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        let array = self.eval_row(start, stop, step)?;
-                        for value in array.iter() {
-                            builder.append_sub(value.map(|v| v.into()));
-                        }
-                        builder.finish_sub(true);
-                    } else {
-                        builder.append_null();
-                    }
-                }
-            }
-        }
-
-        Ok(builder.finish())
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+        self.eval_inner(input)
     }
 }
 
 pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
-    prost: &TableFunctionPb,
+    prost: &PbTableFunction,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
@@ -217,9 +198,12 @@ mod tests {
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let array = function.eval(&dummy_chunk).await.unwrap();
-
-        assert_eq!(array.flatten_len(), expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
@@ -254,9 +238,12 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let array = function.eval(&dummy_chunk).await.unwrap();
-
-        assert_eq!(array.flatten_len(), expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
@@ -282,9 +269,12 @@ mod tests {
         let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let array = function.eval(&dummy_chunk).await.unwrap();
-
-        assert_eq!(array.flatten_len(), expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
@@ -318,8 +308,11 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let array = function.eval(&dummy_chunk).await.unwrap();
-
-        assert_eq!(array.flatten_len(), expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 }
