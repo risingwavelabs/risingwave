@@ -466,8 +466,21 @@ impl HashKeyDe for Time {
 impl<'a> HashKeySer<'a> for Int256Ref<'a> {}
 impl HashKeyDe for Int256 {}
 
-impl<'a> HashKeySer<'a> for &'a str {}
-impl HashKeyDe for Box<str> {}
+impl<'a> HashKeySer<'a> for &'a str {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        buf.put_u64_ne(self.len() as u64);
+        buf.put_slice(self.as_bytes());
+    }
+}
+
+impl HashKeyDe for Box<str> {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let len = buf.get_u64_ne() as usize;
+        let mut value = vec![0; len];
+        buf.copy_to_slice(&mut value);
+        unsafe { String::from_utf8_unchecked(value) }.into_boxed_str()
+    }
+}
 
 impl<'a> HashKeySer<'a> for &'a [u8] {}
 impl HashKeyDe for Box<[u8]> {}

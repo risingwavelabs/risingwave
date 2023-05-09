@@ -37,7 +37,9 @@ pub trait KeyStorage: 'static {
 }
 
 pub trait Buffer<K>: BufMut + 'static {
-    fn with_capacity(cap: impl FnOnce() -> usize) -> Self;
+    fn alloc() -> bool;
+
+    fn with_capacity(cap: usize) -> Self;
 
     fn seal(self) -> K;
 }
@@ -66,7 +68,11 @@ unsafe impl<const N: usize> BufMut for StackBuffer<N> {
 }
 
 impl<const N: usize> Buffer<[u8; N]> for StackBuffer<N> {
-    fn with_capacity(_cap: impl FnOnce() -> usize) -> Self {
+    fn alloc() -> bool {
+        false
+    }
+
+    fn with_capacity(_cap: usize) -> Self {
         Self(ArrayVec::new())
     }
 
@@ -83,8 +89,12 @@ impl KeyStorage for HeapStorage {
 }
 
 impl Buffer<Box<[u8]>> for Vec<u8> {
-    fn with_capacity(cap: impl FnOnce() -> usize) -> Self {
-        Self::with_capacity(cap())
+    fn alloc() -> bool {
+        true
+    }
+
+    fn with_capacity(cap: usize) -> Self {
+        Self::with_capacity(cap)
     }
 
     fn seal(self) -> Box<[u8]> {
@@ -239,22 +249,26 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
-            let mut estimated_key_sizes = None;
+            if S::Buffer::alloc() {
+                let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_indices);
+                let buffers = estimated_key_sizes
+                    .into_iter()
+                    .map(|cap| S::Buffer::with_capacity(cap));
 
-            let buffers = (0..data_chunk.capacity()).map(|i| {
-                S::Buffer::with_capacity(|| {
-                    let estimated_key_sizes = estimated_key_sizes.get_or_insert_with(|| {
-                        data_chunk.compute_key_sizes_by_columns(column_indices)
-                    });
-                    estimated_key_sizes[i]
-                })
-            });
+                hash_codes
+                    .into_iter()
+                    .zip_eq_fast(buffers)
+                    .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
+                    .collect_vec()
+            } else {
+                let buffers = (0..data_chunk.capacity()).map(|_| S::Buffer::with_capacity(0));
 
-            hash_codes
-                .into_iter()
-                .zip_eq_fast(buffers)
-                .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
-                .collect_vec()
+                hash_codes
+                    .into_iter()
+                    .zip_eq_fast(buffers)
+                    .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
+                    .collect_vec()
+            }
         };
 
         for &i in column_indices {
