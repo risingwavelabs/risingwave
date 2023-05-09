@@ -510,10 +510,8 @@ impl WatermarkAnalyzer {
                     if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
                         && func_call.inputs()[1]
                             .as_literal()
-                            .unwrap()
-                            .get_data()
-                            .as_ref()
-                            .map_or(false, |time_zone| *time_zone != String::from("UTC").into())
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map_or(true, |time_zone| *time_zone != String::from("UTC").into())
                     {
                         WatermarkDerivation::None
                     } else {

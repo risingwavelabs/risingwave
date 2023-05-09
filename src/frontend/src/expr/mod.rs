@@ -758,10 +758,8 @@ impl ExprImpl {
                     if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
                         && rhs
                             .as_literal()
-                            .unwrap()
-                            .get_data()
-                            .as_ref()
-                            .map_or(false, |time_zone| *time_zone != String::from("UTC").into())
+                            .and_then(|literal| literal.get_data().as_ref())
+                            .map_or(true, |time_zone| *time_zone != String::from("UTC").into())
                     {
                         false
                     } else {
