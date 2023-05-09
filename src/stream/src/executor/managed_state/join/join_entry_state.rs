@@ -40,6 +40,7 @@ pub struct JoinEntryState {
 impl EstimateSize for JoinEntryState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.kv_heap_size
     }
 }

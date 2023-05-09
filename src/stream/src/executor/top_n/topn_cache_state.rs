@@ -33,6 +33,7 @@ pub struct TopNCacheState {
 impl EstimateSize for TopNCacheState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.kv_heap_size
     }
 }

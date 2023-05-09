@@ -122,6 +122,8 @@ impl EstimateSize for AggregateState {
     fn estimated_heap_size(&self) -> usize {
         // `factory` is not estimated because it should be moved out of `AggregateState`
         // https://github.com/risingwavelabs/risingwave/issues/9643
+        // estimate `VecDeque` of `StreamWindowBuffer` internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.arg_data_types.estimated_heap_size() + self.buffer_heap_size
     }
 }

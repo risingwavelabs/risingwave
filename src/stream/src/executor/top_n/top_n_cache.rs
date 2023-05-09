@@ -67,9 +67,9 @@ pub struct TopNCache<const WITH_TIES: bool> {
 
 impl<const WITH_TIES: bool> EstimateSize for TopNCache<WITH_TIES> {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        self.low.estimated_heap_size()
+            + self.middle.estimated_heap_size()
+            + self.high.estimated_heap_size()
     }
 }
 

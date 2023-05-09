@@ -84,6 +84,7 @@ pub struct LookupEntryState {
 impl EstimateSize for LookupEntryState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add hashset internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.kv_heap_size
     }
 }
