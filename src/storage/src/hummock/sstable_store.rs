@@ -45,6 +45,7 @@ const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CacheableEntry<HummockSstableObjectId, Box<Sstable>>;
+pub type SstableMetaResponse = LookupResponse<HummockSstableObjectId, Box<Sstable>, HummockError>;
 
 // BEGIN section for tiered cache
 
@@ -355,13 +356,13 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
+    /// Returns `LookupResponse` of sstable, `local_cache_meta_block_miss` (1 if cache miss) and
     /// `local_cache_meta_block_unhit` (1 if not cache hit).
-    pub async fn sstable_syncable(
+    pub fn sstable_lookup_response(
         &self,
         sst: &SstableInfo,
         stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64, u64)> {
+    ) -> (SstableMetaResponse, u64, u64) {
         let mut local_cache_meta_block_miss = 0;
         let mut local_cache_meta_block_unhit = 0;
         let object_id = sst.get_object_id();
@@ -398,6 +399,34 @@ impl SstableStore {
         if !matches!(lookup_response, LookupResponse::Cached(..)) {
             local_cache_meta_block_unhit += 1;
         }
+
+        (
+            lookup_response,
+            local_cache_meta_block_miss,
+            local_cache_meta_block_unhit,
+        )
+    }
+
+    pub fn get_sstable_response(
+        &self,
+        sst: &SstableInfo,
+        stats: &mut StoreLocalStatistic,
+    ) -> SstableMetaResponse {
+        let (lookup_response, local_cache_meta_block_miss, _) =
+            self.sstable_lookup_response(sst, stats);
+        stats.apply_meta_fetch(local_cache_meta_block_miss);
+        lookup_response
+    }
+
+    /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
+    /// `local_cache_meta_block_unhit` (1 if not cache hit).
+    pub async fn sstable_syncable(
+        &self,
+        sst: &SstableInfo,
+        stats: &StoreLocalStatistic,
+    ) -> HummockResult<(TableHolder, u64, u64)> {
+        let (lookup_response, local_cache_meta_block_miss, local_cache_meta_block_unhit) =
+            self.sstable_lookup_response(sst, stats);
         let result = lookup_response
             .verbose_instrument_await("meta_cache_lookup")
             .await;

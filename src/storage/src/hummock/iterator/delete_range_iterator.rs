@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeSet, BinaryHeap};
 use std::future::Future;
+use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -21,6 +22,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::concat_delete_range_iterator::ConcatDeleteRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
+use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockResult, SstableDeleteRangeIterator};
 
@@ -249,11 +251,17 @@ impl ForwardMergeRangeIterator {
         self.unused_iters.push(RangeIteratorTyped::Sst(iter));
     }
 
-    pub fn add_concat_iter(&mut self, sstables: Vec<SstableInfo>, sstable_store: SstableStoreRef) {
+    pub fn add_concat_iter(
+        &mut self,
+        sstables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        options: Arc<SstableIteratorReadOptions>,
+    ) {
         self.unused_iters
             .push(RangeIteratorTyped::Concat(ConcatDeleteRangeIterator::new(
                 sstables,
                 sstable_store,
+                options,
             )))
     }
 }

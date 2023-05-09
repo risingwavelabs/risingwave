@@ -12,33 +12,166 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::future::Future;
+use std::ops::Bound;
+use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::DeleteRangeIterator;
-use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockResult, SstableDeleteRangeIterator};
+use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::{
+    HummockResult, SstableDeleteRangeIterator, SstableMetaResponse, SstableStore,
+};
 use crate::monitor::StoreLocalStatistic;
+
+enum MetaFetcher {
+    Simple,
+    Prefetch(PrefetchContext),
+}
+
+impl MetaFetcher {
+    async fn get_meta(
+        &mut self,
+        sstables: &[SstableInfo],
+        sst_idx: usize,
+        sstable_store: &SstableStore,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        match self {
+            MetaFetcher::Simple => sstable_store.sstable(&sstables[sst_idx], stats).await,
+            MetaFetcher::Prefetch(context) => {
+                context
+                    .get_meta(sstables, sst_idx, sstable_store, stats)
+                    .await
+            }
+        }
+    }
+}
+
+struct PrefetchContext {
+    prefetched_metas: VecDeque<(usize, SstableMetaResponse)>,
+
+    /// sst[idx..=dest_idx] will definitely be visited in the future.
+    dest_idx: usize,
+}
+
+const DEFAULT_PREFETCH_META_NUM: usize = 1;
+
+impl PrefetchContext {
+    fn new(dest_idx: usize) -> Self {
+        Self {
+            prefetched_metas: VecDeque::with_capacity(DEFAULT_PREFETCH_META_NUM + 1),
+            dest_idx,
+        }
+    }
+
+    async fn get_meta(
+        &mut self,
+        sstables: &[SstableInfo],
+        idx: usize,
+        sstable_store: &SstableStore,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        let is_empty = if let Some((prefetched_idx, _)) = self.prefetched_metas.front() {
+            if *prefetched_idx == idx {
+                false
+            } else {
+                tracing::warn!(
+                    "prefetch mismatch: sst_idx = {}, prefetched_sst_idx = {}",
+                    idx,
+                    *prefetched_idx
+                );
+                self.prefetched_metas.clear();
+                true
+            }
+        } else {
+            true
+        };
+        if is_empty {
+            self.prefetched_metas.push_back((
+                idx,
+                sstable_store.get_sstable_response(&sstables[idx], stats),
+            ));
+        }
+        let sstable_response = self.prefetched_metas.pop_front().unwrap().1;
+
+        let next_prefetch_idx = self
+            .prefetched_metas
+            .back()
+            .map_or(idx, |(latest_idx, _)| *latest_idx)
+            + 1;
+        if next_prefetch_idx <= self.dest_idx {
+            self.prefetched_metas.push_back((
+                next_prefetch_idx,
+                sstable_store.get_sstable_response(&sstables[next_prefetch_idx], stats),
+            ));
+        }
+
+        sstable_response.await
+    }
+}
 
 pub struct ConcatDeleteRangeIterator {
     sstables: Vec<SstableInfo>,
     current: Option<SstableDeleteRangeIterator>,
     idx: usize,
+    /// simple or prefetch strategy
+    meta_fetcher: MetaFetcher,
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
+    options: Arc<SstableIteratorReadOptions>,
 }
 
 impl ConcatDeleteRangeIterator {
-    pub fn new(sstables: Vec<SstableInfo>, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(
+        sstables: Vec<SstableInfo>,
+        sstable_store: SstableStoreRef,
+        options: Arc<SstableIteratorReadOptions>,
+    ) -> Self {
         Self {
             sstables,
             sstable_store,
             stats: StoreLocalStatistic::default(),
             idx: 0,
             current: None,
+            options,
+            meta_fetcher: MetaFetcher::Simple,
+        }
+    }
+
+    fn init_meta_fetcher(&mut self, start_idx: usize) {
+        if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
+            let sstables = &self.sstables;
+            let next_to_start_idx = start_idx + 1;
+            if next_to_start_idx < sstables.len() {
+                let dest_idx = match bound {
+                    Bound::Unbounded => sstables.len() - 1, // will not overflow
+                    Bound::Included(dest_key) => {
+                        start_idx
+                            + sstables[next_to_start_idx..].partition_point(|sstable_info| {
+                                FullKey::decode(&sstable_info.key_range.as_ref().unwrap().left)
+                                    .user_key
+                                    <= dest_key.as_ref()
+                            })
+                    }
+                    Bound::Excluded(end_key) => {
+                        start_idx
+                            + sstables[next_to_start_idx..].partition_point(|sstable_info| {
+                                FullKey::decode(&sstable_info.key_range.as_ref().unwrap().left)
+                                    .user_key
+                                    < end_key.as_ref()
+                            })
+                    }
+                };
+                if start_idx < dest_idx {
+                    self.meta_fetcher = MetaFetcher::Prefetch(PrefetchContext::new(dest_idx));
+                }
+            }
         }
     }
 
@@ -107,8 +240,8 @@ impl ConcatDeleteRangeIterator {
                 return Ok(());
             }
             let table = self
-                .sstable_store
-                .sstable(&self.sstables[idx], &mut self.stats)
+                .meta_fetcher
+                .get_meta(&self.sstables, idx, &self.sstable_store, &mut self.stats)
                 .await?;
             let mut sstable_iter = SstableDeleteRangeIterator::new(table);
 
@@ -144,6 +277,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
             let mut idx = 0;
+            self.init_meta_fetcher(idx);
             self.seek_idx(idx, None).await?;
             while idx + 1 < self.sstables.len() && !self.is_valid() {
                 self.seek_idx(idx + 1, None).await?;
@@ -163,6 +297,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
                         .le(&target_user_key)
                 })
                 .saturating_sub(1); // considering the boundary of 0
+            self.init_meta_fetcher(idx);
             self.seek_idx(idx, Some(target_user_key)).await?;
             while idx + 1 < self.sstables.len() && !self.is_valid() {
                 self.seek_idx(idx + 1, None).await?;
@@ -244,6 +379,7 @@ mod tests {
         let mut concat_iterator = ConcatDeleteRangeIterator::new(
             vec![output1.sst_info.sst_info, output2.sst_info.sst_info],
             sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
         );
         concat_iterator.rewind().await.unwrap();
         assert_eq!(concat_iterator.current_epoch(), HummockEpoch::MAX);
