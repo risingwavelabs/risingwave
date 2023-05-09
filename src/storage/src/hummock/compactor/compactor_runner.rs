@@ -151,9 +151,14 @@ impl CompactorRunner {
                 let tables = level
                     .table_infos
                     .iter()
-                    .filter(|info| {
-                        let key_range = KeyRange::from(info.key_range.as_ref().unwrap());
-                        self.key_range.full_key_overlap(&key_range)
+                    .filter(|table_info| {
+                        let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                        let table_ids = &table_info.table_ids;
+                        let exist_table = table_ids.iter().any(|table_id| {
+                            self.compact_task.existing_table_ids.contains(table_id)
+                        });
+
+                        self.key_range.full_key_overlap(&key_range) && exist_table
                     })
                     .cloned()
                     .collect_vec();
@@ -166,7 +171,12 @@ impl CompactorRunner {
             } else {
                 for table_info in &level.table_infos {
                     let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
-                    if !self.key_range.full_key_overlap(&key_range) {
+                    let table_ids = &table_info.table_ids;
+                    let exist_table = table_ids
+                        .iter()
+                        .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
+
+                    if !self.key_range.full_key_overlap(&key_range) || !exist_table {
                         continue;
                     }
                     table_iters.push(ConcatSstableIterator::new(
