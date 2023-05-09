@@ -34,7 +34,7 @@ enum ObjectErrorInner {
         inner: io::Error,
     },
     #[error(transparent)]
-    Opendal(BoxedError),
+    Opendal(opendal::Error),
     #[error(transparent)]
     Mem(crate::object::mem::Error),
     #[error("Internal error: {0}")]
@@ -90,9 +90,7 @@ impl ObjectError {
                 }
             }
             ObjectErrorInner::Opendal(e) => {
-                if let Some(e) = e.downcast_ref::<opendal::Error>() {
-                    return matches!(e.kind(), opendal::ErrorKind::NotFound);
-                }
+                return matches!(e.kind(), opendal::ErrorKind::NotFound);
             }
             ObjectErrorInner::Disk { msg: _msg, inner } => {
                 return matches!(inner.kind(), io::ErrorKind::NotFound);
@@ -122,13 +120,7 @@ impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
 }
 impl From<opendal::Error> for ObjectError {
     fn from(e: opendal::Error) -> Self {
-        ObjectErrorInner::Opendal(e.into()).into()
-    }
-}
-
-impl From<io::Error> for ObjectError {
-    fn from(e: io::Error) -> Self {
-        ObjectErrorInner::Opendal(e.into()).into()
+        ObjectErrorInner::Opendal(e).into()
     }
 }
 
