@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use either::Either;
-use risingwave_expr::function::window::{Frame, FrameBounds};
+use risingwave_expr::function::window::{Frame, FrameBounds, FrameExclusion};
 
 /// Actually with `VecDeque` as internal buffer, we don't need split key and value here. Just in
 /// case we want to switch to `BTreeMap` later, so that the general version of `OverWindow` executor
@@ -117,18 +118,27 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
     }
 
     /// Iterate over values in the current window.
-    pub fn curr_window_values(&self) -> impl ExactSizeIterator<Item = &V> {
+    pub fn curr_window_values(&self) -> impl Iterator<Item = &V> {
         assert!(self.left_idx <= self.right_excl_idx);
         assert!(self.right_excl_idx <= self.buffer.len());
-        if self.left_idx == self.right_excl_idx {
-            Either::Left(std::iter::empty())
-        } else {
-            Either::Right(
-                self.buffer
-                    .range(self.left_idx..self.right_excl_idx)
-                    .map(|Entry { value, .. }| value),
-            )
+
+        let selection = self.left_idx..self.right_excl_idx;
+        if selection.is_empty() {
+            return Either::Left(std::iter::empty());
         }
+
+        let exclusion = match self.frame.exclusion {
+            FrameExclusion::CurrentRow => self.curr_idx..self.curr_idx + 1,
+            FrameExclusion::NoOthers => self.curr_idx..self.curr_idx,
+        };
+        let (left, right) = range_except(selection, exclusion);
+
+        Either::Right(
+            self.buffer
+                .range(left)
+                .chain(self.buffer.range(right))
+                .map(|Entry { value, .. }| value),
+        )
     }
 
     fn recalculate_left_right(&mut self) {
@@ -196,6 +206,36 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
         self.buffer
             .drain(0..min_needed_idx)
             .map(|Entry { key, .. }| key)
+    }
+}
+
+/// Calculate range (A - B).
+fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
+    if a.end <= b.start || b.end <= a.start {
+        // a: [   )
+        // b:        [   )
+        // or
+        // a:        [   )
+        // b: [   )
+        (a, 0..0)
+    } else if b.start <= a.start && a.end <= b.end {
+        // a:  [   )
+        // b: [       )
+        (0..0, 0..0)
+    } else if a.start < b.start && b.end < a.end {
+        // a: [       )
+        // b:   [   )
+        (a.start..b.start, b.end..a.end)
+    } else if a.end <= b.end {
+        // a: [   )
+        // b:   [   )
+        (a.start..b.start, 0..0)
+    } else if b.start <= a.start {
+        // a:   [   )
+        // b: [   )
+        (b.end..a.end, 0..0)
+    } else {
+        unreachable!()
     }
 }
 
