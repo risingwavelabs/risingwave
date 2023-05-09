@@ -19,7 +19,7 @@ use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
 
 /// A consumer of SST data.
 #[async_trait::async_trait]
-pub trait SstableWriter: Send + Sync {
+pub trait SstableWriter: Send {
     type Output;
 
     /// Write an SST block to the writer.
