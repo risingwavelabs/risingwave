@@ -166,7 +166,7 @@ impl S3StreamingUploader {
                 .content_length(len as i64)
                 .send()
                 .await
-                .map_err(ObjectError::s3);
+                .map_err(Into::into);
             try_update_failure_metric(&metrics, &upload_output_res, operation_type);
             Ok((part_id, upload_output_res?))
         }));
