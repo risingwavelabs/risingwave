@@ -906,10 +906,18 @@ where
                 fragment_actors_after_reschedule.get(fragment_id).unwrap();
 
             if ctx.stream_source_fragment_ids.contains(fragment_id) {
+                let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+                let prev_actor_ids = fragment
+                    .actors
+                    .iter()
+                    .map(|actor| actor.actor_id)
+                    .collect_vec();
+
                 let actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
                 let actor_splits = self
                     .source_manager
-                    .reallocate_splits(fragment_id, &actor_ids)
+                    .reallocate_splits(&prev_actor_ids,  &actor_ids)
                     .await?;
 
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
