@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::{AllocError, Allocator, Layout};
+use std::alloc::{AllocError, Allocator, Global, Layout};
 use std::ptr::NonNull;
 
 use crate::memory::MemoryContext;
 
-struct MonitoredAlloc<A: Allocator> {
+pub type MonitoredGlobalAlloc = MonitoredAlloc<Global>;
+
+pub struct MonitoredAlloc<A: Allocator> {
     ctx: MemoryContext,
     alloc: A,
 }
