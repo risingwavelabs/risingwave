@@ -291,7 +291,10 @@ impl AvroParser {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::fs::{File, OpenOptions};
+    use std::io::Write;
     use std::ops::Sub;
+    use std::path::{Path, PathBuf};
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
@@ -300,7 +303,8 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
+    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, ScalarRef};
+    use serde::__private::from_utf8_lossy;
     use url::Url;
 
     use super::{
@@ -314,6 +318,17 @@ mod test {
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
         curr_dir.into_string().unwrap() + "/src/test_data/" + file_name
+    }
+
+    fn e2e_file_path(file_name: &str) -> String {
+        let curr_dir = env::current_dir().unwrap().into_os_string();
+        let binding = PathBuf::from(curr_dir);
+        let dir = binding.parent().unwrap().parent().unwrap();
+        dir.join("scripts/source/test_data/")
+            .join(file_name)
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     #[tokio::test]
@@ -540,7 +555,7 @@ mod test {
             .await
             .unwrap();
         let columns = conf.map_to_columns().unwrap();
-        assert_eq!(columns.len(), 10);
+        assert_eq!(columns.len(), 11);
         println!("{:?}", columns);
     }
 
@@ -619,5 +634,29 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    // run this script when updating `simple-schema.avsc`, the script will generate new value in
+    // `avro_bin.1`
+    #[ignore]
+    #[tokio::test]
+    async fn update_avro_payload() {
+        let conf = new_avro_conf_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
+        let mut writer = Writer::new(&conf.schema, Vec::new());
+        let record = build_avro_data(&conf.schema);
+        writer.append(record).unwrap();
+        let encoded = writer.into_inner().unwrap();
+        println!("path = {:?}", e2e_file_path("avro_bin.1"));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(e2e_file_path("avro_bin.1"))
+            .unwrap();
+        file.write(encoded.as_slice()).unwrap();
+        println!("encoded = {:?}", from_utf8_lossy(encoded.as_slice()));
     }
 }

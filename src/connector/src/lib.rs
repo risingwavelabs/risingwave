@@ -27,6 +27,8 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
+extern crate core;
+
 use std::time::Duration;
 
 use duration_str::parse_std;
