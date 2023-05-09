@@ -25,16 +25,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{
-    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
-};
+use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, GetScaleCompactorResponse, InputLevel, KeyRange, LevelType,
+    CompactTask, CompactionConfig, GetScaleCompactorResponse, KeyRange, LevelType,
 };
 
 pub use crate::hummock::compaction::level_selector::{
@@ -42,6 +40,7 @@ pub use crate::hummock::compaction::level_selector::{
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -76,24 +75,6 @@ impl Clone for CompactStatus {
         Self {
             compaction_group_id: self.compaction_group_id,
             level_handlers: self.level_handlers.clone(),
-        }
-    }
-}
-
-pub struct CompactionInput {
-    pub input_levels: Vec<InputLevel>,
-    pub target_level: usize,
-    pub target_sub_level_id: u64,
-}
-
-impl CompactionInput {
-    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
-        for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_pending_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
         }
     }
 }
@@ -270,14 +251,6 @@ impl Default for ManualCompactionOption {
 }
 
 #[derive(Default)]
-pub struct LocalPickerStatistic {
-    skip_by_write_amp_limit: u64,
-    skip_by_count_limit: u64,
-    skip_by_pending_files: u64,
-    skip_by_overlapping: u64,
-}
-
-#[derive(Default)]
 pub struct LocalSelectorStatistic {
     skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
 }
@@ -316,15 +289,6 @@ impl LocalSelectorStatistic {
                 .inc();
         }
     }
-}
-
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput>;
 }
 
 #[derive(Default, Clone, Debug)]

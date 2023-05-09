@@ -126,7 +126,7 @@ impl BlockLocation {
 }
 
 #[async_trait::async_trait]
-pub trait StreamingUploader: Send + Sync {
+pub trait StreamingUploader: Send {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;

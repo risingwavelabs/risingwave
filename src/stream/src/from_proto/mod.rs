@@ -24,12 +24,10 @@ mod dynamic_filter;
 mod eowc_over_window;
 mod expand;
 mod filter;
-mod global_simple_agg;
 mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
-mod local_simple_agg;
 mod lookup;
 mod lookup_union;
 mod merge;
@@ -39,9 +37,11 @@ mod now;
 mod project;
 mod project_set;
 mod row_id_gen;
+mod simple_agg;
 mod sink;
 mod sort;
 mod source;
+mod stateless_simple_agg;
 mod temporal_join;
 mod top_n;
 mod union;
@@ -63,12 +63,10 @@ use self::dynamic_filter::*;
 use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
-use self::global_simple_agg::*;
 use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
-use self::local_simple_agg::*;
 use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
@@ -78,9 +76,11 @@ use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
 use self::row_id_gen::RowIdGenExecutorBuilder;
+use self::simple_agg::*;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
+use self::stateless_simple_agg::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
@@ -133,8 +133,8 @@ pub async fn create_executor(
         NodeBody::Project => ProjectExecutorBuilder,
         NodeBody::TopN => TopNExecutorBuilder::<false>,
         NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
-        NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
-        NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
+        NodeBody::StatelessSimpleAgg => StatelessSimpleAggExecutorBuilder,
+        NodeBody::SimpleAgg => SimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
