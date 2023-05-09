@@ -225,7 +225,7 @@ impl ActorBuilder {
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
         #[cfg(not(debug_assertions))]
-        let mview_definition = "";
+        let mview_definition = "".to_string();
         #[cfg(debug_assertions)]
         let mview_definition = job.definition();
 
