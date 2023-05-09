@@ -101,7 +101,7 @@ pub fn gen_create_mv_plan(
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
-        context.warn("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+        context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
@@ -155,7 +155,7 @@ pub async fn handle_create_mv(
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
-            context.warn(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_string());
         }

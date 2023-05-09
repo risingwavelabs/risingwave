@@ -56,7 +56,7 @@ pub struct OptimizerContext {
 impl Drop for OptimizerContext {
     fn drop(&mut self) {
         if let Some(warning) = self.session_timezone.borrow().warning() {
-            self.warn(warning);
+            self.warn_to_user(warning);
         };
     }
 }
@@ -169,7 +169,7 @@ impl OptimizerContext {
         optimizer_trace.push("\n".to_string());
     }
 
-    pub fn warn(&self, str: impl Into<String>) {
+    pub fn warn_to_user(&self, str: impl Into<String>) {
         self.session_ctx().notice_to_user(str);
     }
 
