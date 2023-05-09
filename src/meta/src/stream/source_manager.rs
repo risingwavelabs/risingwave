@@ -578,37 +578,53 @@ where
     pub async fn reallocate_splits(
         &self,
         fragment_id: &FragmentId,
-        actor_ids: impl IntoIterator<Item = ActorId>,
+        actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-        let source_id = core.fragment_sources.get(fragment_id).unwrap();
-        let handle = core.managed_sources.get(source_id).unwrap();
+        todo!("old actor ids ");
 
-        if handle.splits.lock().await.splits.is_none() {
-            // force refresh source
-            let (tx, rx) = oneshot::channel();
-            handle
-                .sync_call_tx
-                .send(tx)
-                .map_err(|e| anyhow!(e.to_string()))?;
-            rx.await.map_err(|e| anyhow!(e.to_string()))??;
-        }
+        // for actor_id in actor_ids {
+        //     let split = core.actor_splits.get(actor_id).unwrap();
+        // }
 
-        let splits = handle.discovered_splits().await.unwrap();
-        if splits.is_empty() {
-            tracing::warn!("no splits detected for source {}", source_id);
-            return Ok(Default::default());
-        }
-
-        let empty_actor_splits = actor_ids
-            .into_iter()
-            .map(|actor_id| (actor_id, vec![]))
+        let prev_splits = actor_ids
+            .iter()
+            .flat_map(|actor_id| core.actor_splits.get(actor_id))
+            .flatten()
+            .cloned()
+            .map(|split| (split.id(), split))
             .collect();
 
-        Ok(
-            diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
-                .unwrap_or_default(),
+        // let source_id = core.fragment_sources.get(fragment_id).unwrap();
+        // let handle = core.managed_sources.get(source_id).unwrap();
+        //
+        // if handle.splits.lock().await.splits.is_none() {
+        //     // force refresh source
+        //     let (tx, rx) = oneshot::channel();
+        //     handle
+        //         .sync_call_tx
+        //         .send(tx)
+        //         .map_err(|e| anyhow!(e.to_string()))?;
+        //     rx.await.map_err(|e| anyhow!(e.to_string()))??;
+        // }
+        //
+        // let splits = handle.discovered_splits().await.unwrap();
+        // if splits.is_empty() {
+        //     tracing::warn!("no splits detected for source {}", source_id);
+        //     return Ok(Default::default());
+        // }
+
+        let empty_actor_splits = actor_ids
+            .iter()
+            .map(|actor_id| (*actor_id, vec![]))
+            .collect();
+
+        Ok(diff_splits(
+            empty_actor_splits,
+            &prev_splits,
+            SplitDiffOptions::default(),
         )
+        .unwrap_or_default())
     }
 
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
