@@ -15,16 +15,16 @@
 use std::alloc::{AllocError, Allocator, Layout};
 use std::ptr::NonNull;
 
-use crate::memory::MemoryContextRef;
+use crate::memory::MemoryContext;
 
 struct MonitoredAlloc<A: Allocator> {
-    ctx: MemoryContextRef,
+    ctx: MemoryContext,
     alloc: A,
 }
 
 impl<A: Allocator> MonitoredAlloc<A> {
     #[allow(dead_code)]
-    pub fn new(ctx: MemoryContextRef, alloc: A) -> Self {
+    pub fn new(ctx: MemoryContext, alloc: A) -> Self {
         Self { ctx, alloc }
     }
 }

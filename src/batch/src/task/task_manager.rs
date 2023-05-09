@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
-use risingwave_common::memory::{MemoryContext, MemoryContextRef};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
@@ -53,7 +53,7 @@ pub struct BatchManager {
     total_mem_val: Arc<TrAdder<i64>>,
 
     /// Memory context used for batch tasks in cn.
-    mem_context: MemoryContextRef,
+    mem_context: MemoryContext,
 
     /// Metrics for batch manager.
     metrics: BatchManagerMetrics,
@@ -73,7 +73,7 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = Arc::new(MemoryContext::new(None, metrics.batch_total_mem.clone()));
+        let mem_context = MemoryContext::new(None, metrics.batch_total_mem.clone());
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),
@@ -84,7 +84,7 @@ impl BatchManager {
         }
     }
 
-    pub fn memory_context_ref(&self) -> MemoryContextRef {
+    pub fn memory_context_ref(&self) -> MemoryContext {
         self.mem_context.clone()
     }
 
