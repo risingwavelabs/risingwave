@@ -364,7 +364,7 @@ steps:
   #   timeout_in_minutes: 60 # ~3-4 queries can run
 
   - label: "S3 source check on AWS (json parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file"
+    command: "ci/scripts/s3-source-test.sh -p ci-dev -s json_file"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
