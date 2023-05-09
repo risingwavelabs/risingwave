@@ -18,7 +18,6 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
 use crate::expr::{CorrelatedId, SessionTimezone};
@@ -51,8 +50,6 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
-    /// warning messages
-    warning_messages: RefCell<Vec<String>>,
 }
 
 // Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
