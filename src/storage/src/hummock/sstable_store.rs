@@ -548,7 +548,7 @@ impl Default for SstableWriterOptions {
     }
 }
 
-pub trait SstableWriterFactory: Send + Sync {
+pub trait SstableWriterFactory: Send {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
     fn create_sst_writer(
