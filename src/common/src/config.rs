@@ -788,7 +788,7 @@ mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
-            1 << 10
+            10
         }
 
         pub fn stream_chunk_size() -> usize {
@@ -896,5 +896,29 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// This test ensures that `config/example.toml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-example-config` to update it if this
+    /// test fails.
+    #[test]
+    fn test_example_up_to_date() {
+        let actual = {
+            let content = include_str!("../../config/example.toml");
+            toml::from_str::<toml::Value>(content).expect("parse example.toml failed")
+        };
+        let expected =
+            toml::Value::try_from(RwConfig::default()).expect("serialize default config failed");
+
+        // Compare the `Value` representation instead of string for normalization.
+        pretty_assertions::assert_eq!(
+            actual, expected,
+            "\n`config/example.toml` is not up-to-date with the default values specified in `config.rs`.\nPlease run `./risedev generate-example-config` to update it."
+        );
     }
 }

@@ -649,7 +649,7 @@ mod logical_join;
 mod logical_limit;
 mod logical_multi_join;
 mod logical_now;
-mod logical_over_agg;
+mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
@@ -668,20 +668,20 @@ mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
-mod stream_global_simple_agg;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_now;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
+mod stream_simple_agg;
 mod stream_sink;
 mod stream_sort;
 mod stream_source;
+mod stream_stateless_simple_agg;
 mod stream_table_scan;
 mod stream_topn;
 mod stream_values;
@@ -730,7 +730,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_now::LogicalNow;
-pub use logical_over_agg::LogicalOverAgg;
+pub use logical_over_window::LogicalOverWindow;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
@@ -749,21 +749,21 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
-pub use stream_global_simple_agg::StreamGlobalSimpleAgg;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
 pub use stream_share::StreamShare;
+pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::StreamSink;
 pub use stream_sort::StreamSort;
 pub use stream_source::StreamSource;
+pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -812,7 +812,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
@@ -849,8 +849,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, HashAgg }
-            , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }
@@ -898,7 +898,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Expand }
             , { Logical, ProjectSet }
             , { Logical, Union }
-            , { Logical, OverAgg }
+            , { Logical, OverWindow }
             , { Logical, Share }
             , { Logical, Now }
             , { Logical, Dedup }
@@ -953,8 +953,8 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
-            , { Stream, LocalSimpleAgg }
-            , { Stream, GlobalSimpleAgg }
+            , { Stream, SimpleAgg }
+            , { Stream, StatelessSimpleAgg }
             , { Stream, Materialize }
             , { Stream, TopN }
             , { Stream, HopWindow }

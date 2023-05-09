@@ -678,7 +678,7 @@
     LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
@@ -1085,7 +1085,7 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1135,7 +1135,7 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, rank] }
-        └─LogicalOverAgg { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1188,7 +1188,7 @@
     LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
           └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:
@@ -1429,7 +1429,7 @@
       |       └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
-          └─StreamGlobalSimpleAgg { aggs: [sum0(count), count(bid.auction), count] }
+          └─StreamSimpleAgg { aggs: [sum0(count), count(bid.auction), count] }
             └─StreamExchange { dist: Single }
               └─StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [count] }
                 └─StreamExchange { dist: HashShard(bid.auction) }
@@ -1458,7 +1458,7 @@
 
     Fragment 3
     StreamProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
-    └── StreamGlobalSimpleAgg { aggs: [sum0(count), count(bid.auction), count] } { result table: 7, state tables: [], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [sum0(count), count(bid.auction), count] } { result table: 7, state tables: [], distinct tables: [] }
         └──  StreamExchange Single from 4
 
     Fragment 4
@@ -1835,7 +1835,7 @@
   stream_plan: |
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [min(min(max(bid.price)))] }
-      └─StreamGlobalSimpleAgg { aggs: [min(min(max(bid.price))), count] }
+      └─StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
             └─StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
@@ -1852,7 +1852,7 @@
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [min(min(max(bid.price)))] }
-        └── StreamGlobalSimpleAgg { aggs: [min(min(max(bid.price))), count] }
+        └── StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
             ├── result table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []

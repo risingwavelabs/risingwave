@@ -32,20 +32,20 @@ use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-/// `GlobalSimpleAggExecutor` is the aggregation operator for streaming system.
+/// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
 /// constructor.
 ///
-/// `GlobalSimpleAggExecutor` maintain multiple states together. If there are `n`
-/// states and `n` expressions, there will be `n` columns as output.
+/// `SimpleAggExecutor` maintain multiple states together. If there are `n` states and `n`
+/// expressions, there will be `n` columns as output.
 ///
 /// As the engine processes data in chunks, it is possible that multiple update
 /// messages could consolidate to a single row update. For example, our source
 /// emits 1000 inserts in one chunk, and we aggregates count function on that.
-/// Current `GlobalSimpleAggExecutor` will only emit one row for a whole chunk.
+/// Current `SimpleAggExecutor` will only emit one row for a whole chunk.
 /// Therefore, we "automatically" implemented a window function inside
-/// `GlobalSimpleAggExecutor`.
-pub struct GlobalSimpleAggExecutor<S: StateStore> {
+/// `SimpleAggExecutor`.
+pub struct SimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     inner: ExecutorInner<S>,
 }
@@ -108,7 +108,7 @@ struct ExecutionVars<S: StateStore> {
     state_changed: bool,
 }
 
-impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
+impl<S: StateStore> Executor for SimpleAggExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -126,7 +126,7 @@ impl<S: StateStore> Executor for GlobalSimpleAggExecutor<S> {
     }
 }
 
-impl<S: StateStore> GlobalSimpleAggExecutor<S> {
+impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
@@ -137,7 +137,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 info: ExecutorInfo {
                     schema,
                     pk_indices: args.pk_indices,
-                    identity: format!("GlobalSimpleAggExecutor-{:X}", args.executor_id),
+                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
                 },
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
@@ -272,7 +272,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let GlobalSimpleAggExecutor {
+        let Self {
             input,
             inner: mut this,
         } = self;
@@ -345,11 +345,11 @@ mod tests {
     use crate::executor::*;
 
     #[tokio::test]
-    async fn test_local_simple_aggregation_in_memory() {
-        test_local_simple_aggregation(MemoryStateStore::new()).await
+    async fn test_simple_aggregation_in_memory() {
+        test_simple_aggregation(MemoryStateStore::new()).await
     }
 
-    async fn test_local_simple_aggregation<S: StateStore>(store: S) {
+    async fn test_simple_aggregation<S: StateStore>(store: S) {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
@@ -377,7 +377,6 @@ mod tests {
         ));
         tx.push_barrier(4, false);
 
-        // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count, // as row count, index: 0

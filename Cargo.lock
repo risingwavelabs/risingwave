@@ -5652,6 +5652,7 @@ dependencies = [
  "parse-display",
  "paste",
  "postgres-types",
+ "pretty_assertions",
  "procfs 0.12.0",
  "prometheus",
  "prost",
@@ -6183,6 +6184,7 @@ dependencies = [
  "spin 0.9.8",
  "tempfile",
  "thiserror",
+ "tokio-retry",
  "tracing",
 ]
 
