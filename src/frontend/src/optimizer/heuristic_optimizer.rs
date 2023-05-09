@@ -17,9 +17,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use itertools::Itertools;
-#[cfg(debug_assertions)]
-use risingwave_common::util::iter_util::ZipEqFast;
 
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
@@ -91,7 +90,7 @@ impl<'a> HeuristicOptimizer<'a> {
 
     #[cfg(debug_assertions)]
     fn check_equivalent_plan(rule: &BoxedRule, input_plan: &PlanRef, output_plan: &PlanRef) {
-        let fail = || {
+        if !input_plan.schema().type_eq(output_plan.schema()) {
             panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
                    rule.description(),
                    input_plan.schema(),
@@ -99,19 +98,6 @@ impl<'a> HeuristicOptimizer<'a> {
                    output_plan.schema(),
                    output_plan.explain_to_string().unwrap(),
                    output_plan.ctx().sql());
-        };
-        if input_plan.schema().len() != output_plan.schema().len() {
-            fail();
-        }
-        for (a, b) in input_plan
-            .schema()
-            .fields
-            .iter()
-            .zip_eq_fast(output_plan.schema().fields.iter())
-        {
-            if a.data_type != b.data_type {
-                fail();
-            }
         }
     }
 }

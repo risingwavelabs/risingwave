@@ -16,23 +16,20 @@ use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalExcept, PlanTreeNode};
 use crate::optimizer::PlanRef;
 
+/// Different from `UnionMergeRule` and `IntersectMergeRule`, `ExceptMergeRule` can only merge its
+/// left most one input.
 pub struct ExceptMergeRule {}
 impl Rule for ExceptMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_except: &LogicalExcept = plan.as_logical_except()?;
         let top_all = top_except.all();
-        let mut new_inputs = vec![];
-        let mut has_merge = false;
-        for input in top_except.inputs() {
-            if let Some(bottom_except) = input.as_logical_except() && bottom_except.all() == top_all {
-                new_inputs.extend(bottom_except.inputs());
-                has_merge = true;
-            } else {
-                new_inputs.push(input);
-            }
-        }
+        let top_except_inputs = top_except.inputs();
+        let (left_most_input, remain_vec) = top_except_inputs.split_at(1);
 
-        if has_merge {
+        if let Some(bottom_except) = left_most_input[0].as_logical_except() && bottom_except.all() == top_all {
+            let mut new_inputs = vec![];
+            new_inputs.extend(bottom_except.inputs());
+            new_inputs.extend(remain_vec.iter().cloned());
             Some(top_except.clone_with_inputs(&new_inputs))
         } else {
             None

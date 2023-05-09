@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
@@ -34,6 +35,7 @@ pub struct LogicalIntersect {
 
 impl LogicalIntersect {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
+        assert!(Schema::all_type_eq(inputs.iter().map(|x| x.schema())));
         let core = generic::Intersect { all, inputs };
         let base = PlanBase::new_logical_with_core(&core);
         LogicalIntersect { base, core }
@@ -58,9 +60,7 @@ impl LogicalIntersect {
 
 impl PlanTreeNode for LogicalIntersect {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.core.inputs.clone().into_iter());
-        vec
+        self.core.inputs.clone().into_iter().collect()
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {

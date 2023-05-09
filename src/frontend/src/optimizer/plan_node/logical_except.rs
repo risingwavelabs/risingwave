@@ -15,9 +15,11 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalFilter, PlanTreeNode, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
@@ -34,6 +36,7 @@ pub struct LogicalExcept {
 
 impl LogicalExcept {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
+        assert!(Schema::all_type_eq(inputs.iter().map(|x| x.schema())));
         let core = generic::Except { all, inputs };
         let base = PlanBase::new_logical_with_core(&core);
         LogicalExcept { base, core }
@@ -58,9 +61,7 @@ impl LogicalExcept {
 
 impl PlanTreeNode for LogicalExcept {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.core.inputs.clone().into_iter());
-        vec
+        self.core.inputs.clone().into_iter().collect()
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
