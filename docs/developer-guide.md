@@ -78,7 +78,7 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf tmux cyrus-sasl llvm zstd
+brew install postgresql cmake protobuf tmux cyrus-sasl llvm zstd pkg-config
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
