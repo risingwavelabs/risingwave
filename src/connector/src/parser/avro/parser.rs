@@ -377,7 +377,7 @@ mod test {
             .unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
-        assert_eq!(record.fields.len(), 10);
+        assert_eq!(record.fields.len(), 11);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
@@ -428,6 +428,9 @@ mod test {
                     let micros = Some(ScalarImpl::Int64(micros));
                     assert_eq!(row[i], micros);
                 }
+                Value::Bytes(bytes) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                }
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
@@ -456,6 +459,7 @@ mod test {
             SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
             SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
             SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
+            SourceColumnDesc::simple("bytes", DataType::Bytea, ColumnId::from(10)),
         ]
     }
 
@@ -467,6 +471,7 @@ mod test {
             Schema::Float => Some(Value::Float(32_f32)),
             Schema::Double => Some(Value::Double(64_f64)),
             Schema::Boolean => Some(Value::Boolean(true)),
+            Schema::Bytes => Some(Value::Bytes(vec![1, 2, 3, 4, 5])),
 
             Schema::Date => {
                 let original_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
