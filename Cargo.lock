@@ -2147,9 +2147,12 @@ dependencies = [
 
 [[package]]
 name = "dlv-list"
-version = "0.3.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0688c2a7f92e427f44895cd63841bff7b29f8d7a1648b9e7e07a4a365b2e1257"
+checksum = "d529fd73d344663edfd598ccb3f344e46034db51ebd103518eae34338248ad73"
+dependencies = [
+ "const-random",
+]
 
 [[package]]
 name = "downcast-rs"
@@ -4188,9 +4191,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.33.2"
+version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e34a1d6d7b1bfb80850b43609498bf35cfdf90c2724f376ecfde81d991d12f62"
+checksum = "005c877c4f788a7749825bbc61031ccc950217fac6bcf9965641fbf1bdf991b0"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -4380,12 +4383,12 @@ dependencies = [
 
 [[package]]
 name = "ordered-multimap"
-version = "0.4.3"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ccd746e37177e1711c20dd619a1620f34f5c8b569c53590a72dedd5344d8924a"
+checksum = "4ed8acf08e98e744e5384c8bc63ceb0364e68a6854187221c18df61c4797690e"
 dependencies = [
  "dlv-list",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -5456,9 +5459,9 @@ dependencies = [
 
 [[package]]
 name = "reqsign"
-version = "0.9.5"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a16a222894949f891cdfcb0c2c63913a975689fa7f7162d01d85df7837506ab8"
+checksum = "5d36dae58fbc1db90e1cf14ca8fabcba92b7aa3c282d5e46bcdf16b9c28ab04c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5506,7 +5509,6 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
- "mime_guess",
  "native-tls",
  "once_cell",
  "percent-encoding",
@@ -6749,7 +6751,6 @@ dependencies = [
  "pkcs1",
  "pkcs8",
  "rand_core",
- "sha2",
  "signature",
  "subtle",
  "zeroize",
@@ -6757,9 +6758,9 @@ dependencies = [
 
 [[package]]
 name = "rust-ini"
-version = "0.18.0"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6d5f2436026b4f6e79dc829837d467cc7e9a55ee40e750d716713540715a2df"
+checksum = "7e2a3bcec1f113553ef1c88aae6c020a369d03d55b58de9869a0908930385091"
 dependencies = [
  "cfg-if",
  "ordered-multimap",
