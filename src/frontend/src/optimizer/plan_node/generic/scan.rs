@@ -23,9 +23,8 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, CollectInputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
@@ -257,10 +256,7 @@ impl Scan {
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
         let mut required_col_idx = output_col_idx.clone();
-        let mut visitor =
-            CollectInputRef::new(FixedBitSet::with_capacity(table_desc.columns.len()));
-        predicate.visit_expr(&mut visitor);
-        let predicate_col_idx: FixedBitSet = visitor.into();
+        let predicate_col_idx = predicate.collect_input_refs(table_desc.columns.len());
         predicate_col_idx.ones().for_each(|idx| {
             if !required_col_idx.contains(&idx) {
                 required_col_idx.push(idx);
