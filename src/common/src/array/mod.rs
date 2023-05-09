@@ -344,9 +344,8 @@ macro_rules! do_dispatch {
 macro_rules! dispatch_all_variants {
     ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
         for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }
-    }}
+    }};
 }
-
 
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {

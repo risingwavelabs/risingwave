@@ -21,4 +21,8 @@ pub use consistent_hash::bitmap::*;
 pub use consistent_hash::mapping::*;
 pub use consistent_hash::vnode::*;
 pub use dispatcher::{calc_hash_key_kind, HashKeyDispatcher};
-pub use key::*;
+pub use key::{
+    Crc32HashCode, HashCode, HashKeySerDe, HeapNullBitmap, NullBitmap, PrecomputedBuildHasher,
+    PrecomputedHasher, StackNullBitmap, XxHash64HashCode, MAX_GROUP_KEYS_ON_STACK,
+};
+pub use key_v2::*;

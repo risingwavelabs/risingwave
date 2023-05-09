@@ -7,7 +7,7 @@ use educe::Educe;
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
-use super::{NullBitmap, XxHash64HashCode};
+use super::{NullBitmap, StackNullBitmap, XxHash64HashCode};
 use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::row::OwnedRow;
@@ -21,7 +21,7 @@ pub trait Buffer: 'static {
     type BufMut<'a>: BufMut
     where
         Self: 'a;
-    type Sealed: AsRef<[u8]> + EstimateSize + Clone + 'static;
+    type Sealed: AsRef<[u8]> + EstimateSize + Clone + Send + Sync + 'static;
 
     fn with_capacity(cap: impl FnOnce() -> usize) -> Self;
 
@@ -150,10 +150,19 @@ impl<'a, B: Buffer, N: NullBitmap> HashKeyDeserializer<'a, B, N> {
     }
 }
 
-pub trait HashKey: EstimateSize + Clone + Debug + Hash + Eq + Sized + 'static {
-    type NullBitmap: NullBitmap;
+/// Trait for different kinds of hash keys.
+///
+/// Current comparison implementation treats `null == null`. This is consistent with postgresql's
+/// group by implementation, but not join. In pg's join implementation, `null != null`, and the join
+/// executor should take care of this.
+pub trait HashKey:
+    EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
+{
+    // TODO: rename to `NullBitmap`
+    type Bitmap: NullBitmap;
 
-    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
+    // TODO: remove result and rename to `build_many`
+    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
 
@@ -163,7 +172,7 @@ pub trait HashKey: EstimateSize + Clone + Debug + Hash + Eq + Sized + 'static {
         data_types: &[DataType],
     ) -> ArrayResult<()>;
 
-    fn null_bitmap(&self) -> &Self::NullBitmap;
+    fn null_bitmap(&self) -> &Self::Bitmap;
 }
 
 #[derive(Educe)]
@@ -207,9 +216,9 @@ impl<B: Buffer, N: NullBitmap> EstimateSize for GenericHashKey<B, N> {
 }
 
 impl<B: Buffer, N: NullBitmap> HashKey for GenericHashKey<B, N> {
-    type NullBitmap = N;
+    type Bitmap = N;
 
-    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
+    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
@@ -241,7 +250,8 @@ impl<B: Buffer, N: NullBitmap> HashKey for GenericHashKey<B, N> {
             });
         }
 
-        serializers.into_iter().map(|s| s.finish()).collect()
+        let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();
+        Ok(hash_keys)
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
@@ -271,11 +281,18 @@ impl<B: Buffer, N: NullBitmap> HashKey for GenericHashKey<B, N> {
         Ok(())
     }
 
-    fn null_bitmap(&self) -> &Self::NullBitmap {
+    fn null_bitmap(&self) -> &Self::Bitmap {
         &self.null_bitmap
     }
 }
 
-pub type FixedSizeKey<const N: usize, NB> = GenericHashKey<[u8; N], NB>;
+pub type FixedSizeKey<const N: usize, B> = GenericHashKey<ArrayVec<[u8; N]>, B>;
+pub type Key8<B = StackNullBitmap> = FixedSizeKey<1, B>;
+pub type Key16<B = StackNullBitmap> = FixedSizeKey<2, B>;
+pub type Key32<B = StackNullBitmap> = FixedSizeKey<4, B>;
+pub type Key64<B = StackNullBitmap> = FixedSizeKey<8, B>;
+pub type Key128<B = StackNullBitmap> = FixedSizeKey<16, B>;
+pub type Key256<B = StackNullBitmap> = FixedSizeKey<32, B>;
+pub type KeySerialized<B = StackNullBitmap> = SerializedKey<B>;
 
-pub type SerializedKey<NB> = GenericHashKey<Box<[u8]>, NB>;
+pub type SerializedKey<B> = GenericHashKey<Vec<u8>, B>;
