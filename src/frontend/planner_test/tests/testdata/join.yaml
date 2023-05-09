@@ -200,13 +200,13 @@
       └─StreamProject { exprs: [Coalesce(i.x, i.x) as $expr1, i.t._row_id, i.t._row_id, i.x, i.t._row_id, i.t._row_id, i.x] }
         └─StreamFilter { predicate: (((((IsNotNull(i.t._row_id) OR IsNotNull(i.t._row_id)) OR IsNotNull(i.x)) OR IsNotNull(i.t._row_id)) OR IsNotNull(i.t._row_id)) OR IsNotNull(i.x)) }
           └─StreamHashJoin { type: FullOuter, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id, i.t._row_id, i.t._row_id] }
-            ├─StreamShare { id = 5 }
+            ├─StreamShare { id = 4 }
             | └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
             |   ├─StreamExchange { dist: HashShard(i.x) }
             |   | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
             |   └─StreamExchange { dist: HashShard(i.x) }
             |     └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
-            └─StreamShare { id = 5 }
+            └─StreamShare { id = 4 }
               └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.t._row_id, i.t._row_id] }
                 ├─StreamExchange { dist: HashShard(i.x) }
                 | └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], pk: [i.t._row_id], dist: UpstreamHashShard(i.x) }
@@ -283,7 +283,11 @@
     create table b(b1 int);
     create table c(c1 int);
     select * from a, b join c on a1 + b1 = c1;
-  binder_error: 'Item not found: Invalid column: a1'
+  binder_error: |-
+    Bind error: failed to bind expression: a1 + b1 = c1
+
+    Caused by:
+      Item not found: Invalid column: a1
 - sql: |
     create table a(a1 int);
     create table b(b1 int);

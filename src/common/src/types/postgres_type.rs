@@ -48,6 +48,7 @@ impl DataType {
     pub fn from_oid(oid: i32) -> crate::error::Result<Self> {
         match oid {
             16 => Ok(DataType::Boolean),
+            17 => Ok(DataType::Bytea),
             21 => Ok(DataType::Int16),
             23 => Ok(DataType::Int32),
             20 => Ok(DataType::Int64),
@@ -127,8 +128,8 @@ impl DataType {
             DataType::Timestamp => 1114,
             DataType::Timestamptz => 1184,
             DataType::Interval => 1186,
-            // TODO: Support to give a new oid for custom struct type.
-            DataType::Struct(_) => -1,
+            // TODO: Support to give a new oid for custom struct type. #9434
+            DataType::Struct(_) => 1043,
             DataType::Jsonb => 3802,
             DataType::Bytea => 17,
             DataType::List { datatype } => match unnested_list_type(datatype.as_ref().clone()) {

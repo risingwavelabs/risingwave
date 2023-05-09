@@ -326,12 +326,16 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
 
     /// Get the Mapping of columnIndex from left column index to internal column index.
     pub fn l2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2l_col_mapping().inverse()
+        self.i2l_col_mapping()
+            .inverse()
+            .expect("must be invertible")
     }
 
     /// Get the Mapping of columnIndex from right column index to internal column index.
     pub fn r2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2r_col_mapping().inverse()
+        self.i2r_col_mapping()
+            .inverse()
+            .expect("must be invertible")
     }
 
     /// Get the Mapping of columnIndex from internal column index to output column index

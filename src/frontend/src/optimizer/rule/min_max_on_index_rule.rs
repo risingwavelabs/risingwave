@@ -19,10 +19,11 @@
 
 use std::collections::BTreeMap;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
@@ -122,7 +123,7 @@ impl MinMaxOnIndexRule {
                             conjunctions: vec![],
                         },
                     }],
-                    vec![],
+                    FixedBitSet::new(),
                     limit,
                 );
 
@@ -191,7 +192,7 @@ impl MinMaxOnIndexRule {
                         conjunctions: vec![],
                     },
                 }],
-                vec![],
+                FixedBitSet::new(),
                 limit,
             );
 

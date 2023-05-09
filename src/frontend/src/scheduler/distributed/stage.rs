@@ -27,7 +27,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_batch::task::TaskId as TaskIdBatch;
+use risingwave_batch::task::{ShutdownMsg, TaskId as TaskIdBatch};
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -561,11 +561,15 @@ impl StageRunner {
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
+        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // Refactor later to make use it.
+        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
             self.epoch.clone(),
+            rx,
         );
 
         let executor = executor.build().await?;

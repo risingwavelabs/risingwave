@@ -16,6 +16,14 @@ Data in RisingWave can be output to external targets such as message brokers, da
 
 Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
+## RisingWave Cloud
+
+RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](https://risingwave.com/cloud).
+
+## Notes on telemetry
+
+RisingWave collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. These statistics are related to system resource usage, OS versions and system uptime. RisingWave doesn't have access to any user data or metadata running on RisingWave clusters including source and sink connection parameters, sources, sinks, materialized views, and tables. Users have an option to opt out of this collection using a system parameter. Please refer to the RisingWave user documentation for more details.
+
 ## Quick Start
 
 ### Installation

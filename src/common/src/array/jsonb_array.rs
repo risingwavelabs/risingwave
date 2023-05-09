@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::hash::Hash;
 use std::mem::size_of;
 
 use postgres_types::{FromSql as _, ToSql as _, Type};
@@ -20,8 +21,8 @@ use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::collection::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef};
+use crate::estimate_size::EstimateSize;
+use crate::types::{DataType, Scalar, ScalarRef};
 use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,13 @@ pub struct JsonbVal(Box<Value>); // The `Box` is just to keep `size_of::<ScalarI
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(&'a Value);
+
+impl EstimateSize for JsonbVal {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: correctly handle jsonb size
+        0
+    }
+}
 
 /// The display of `JsonbVal` is pg-compatible format which has slightly different from
 /// `serde_json::Value`.
@@ -62,11 +70,22 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash(state)
+    }
+}
+
+impl Hash for JsonbRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // We do not intend to support hashing `jsonb` type.
         // Before #7981 is done, we do not panic but just hash its string representation.
         // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
         // So its string form always have keys sorted.
-        use std::hash::Hash as _;
+        self.0.to_string().hash(state)
+    }
+}
+
+impl Hash for JsonbVal {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.to_string().hash(state)
     }
 }
@@ -329,11 +348,16 @@ pub struct JsonbArray {
 impl ArrayBuilder for JsonbArrayBuilder {
     type ArrayType = JsonbArray;
 
-    fn with_meta(capacity: usize, _meta: super::ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Jsonb);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
@@ -447,9 +471,8 @@ impl Array for JsonbArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> super::ArrayBuilderImpl {
-        let array_builder = Self::Builder::new(capacity);
-        super::ArrayBuilderImpl::Jsonb(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Jsonb
     }
 }
 

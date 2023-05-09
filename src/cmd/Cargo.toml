@@ -8,8 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [features]
-static-link = ["workspace-config/enable-static-link"]
-static-log-level = ["workspace-config/enable-static-log-level"]
+rw-static-link = ["workspace-config/rw-static-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -27,7 +26,6 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -39,8 +37,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "tracing",
 ] }
 
-workspace-config = { path = "../utils/workspace-config", optional = true }
+workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(enable_task_local_alloc)'.dependencies]
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }

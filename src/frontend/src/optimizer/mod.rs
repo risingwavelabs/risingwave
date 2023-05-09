@@ -44,7 +44,7 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    generic, BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
     StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
@@ -217,7 +217,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -254,7 +254,7 @@ impl PlanRoot {
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
             plan =
-                BatchProject::new(LogicalProject::with_out_fields(plan, &self.out_fields)).into();
+                BatchProject::new(generic::Project::with_out_fields(plan, &self.out_fields)).into();
         }
 
         let ctx = plan.ctx();
@@ -272,12 +272,6 @@ impl PlanRoot {
         let _explain_trace = ctx.is_explain_trace();
 
         let mut plan = self.gen_stream_plan()?;
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
@@ -417,7 +411,7 @@ impl PlanRoot {
             columns.iter().map(|c| c.column_desc.clone()).collect(),
         )?;
         if let Some(exprs) = exprs {
-            let logical_project = LogicalProject::new(stream_plan, exprs);
+            let logical_project = generic::Project::new(exprs, stream_plan);
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -533,7 +527,7 @@ impl PlanRoot {
                     }
                 })
                 .collect_vec();
-            stream_plan = StreamProject::new(LogicalProject::new(stream_plan, exprs)).into();
+            stream_plan = StreamProject::new(generic::Project::new(exprs, stream_plan)).into();
         }
 
         StreamSink::create(

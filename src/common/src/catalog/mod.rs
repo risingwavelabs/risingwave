@@ -369,6 +369,41 @@ impl From<UserId> for u32 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct ConnectionId(pub u32);
+
+impl ConnectionId {
+    pub const fn new(id: u32) -> Self {
+        ConnectionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        ConnectionId(u32::MAX - 1)
+    }
+
+    pub fn connection_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for ConnectionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for ConnectionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<ConnectionId> for u32 {
+    fn from(id: ConnectionId) -> Self {
+        id.0
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConflictBehavior {
     #[default]

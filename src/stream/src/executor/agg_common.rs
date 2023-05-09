@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{AggCall, AggStateStorage};
+use super::aggregation::AggStateStorage;
 use super::Executor;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;

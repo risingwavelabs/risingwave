@@ -231,6 +231,8 @@ impl Cluster {
                 "etcd:2388",
                 "--state-store",
                 "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
+                "--data-directory",
+                "hummock_001",
             ]);
             handle
                 .create_node()
@@ -485,7 +487,7 @@ impl Cluster {
             // so that the node is expired and removed from the cluster
             if rand::thread_rng().gen_bool(0.1) {
                 // max_heartbeat_interval_secs = 60
-                t += Duration::from_secs(20);
+                t += Duration::from_secs(opts.restart_delay_secs as u64);
             }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
@@ -590,6 +592,7 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+    pub restart_delay_secs: u32,
 }
 
 impl KillOpts {
@@ -600,5 +603,6 @@ impl KillOpts {
         kill_frontend: true,
         kill_compute: true,
         kill_compactor: true,
+        restart_delay_secs: 20,
     };
 }

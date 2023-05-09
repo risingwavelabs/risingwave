@@ -12,20 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// NOTE: When adding or modifying data types, remember to update the type matrix in
+// src/expr/macro/src/types.rs
+
 use std::convert::TryFrom;
 use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
-use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::data_type::PbTypeName;
 use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
 use crate::error::{BoxedError, ErrorCode};
+use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 mod native_type;
@@ -56,12 +60,12 @@ pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
 pub use ops::{CheckedAdd, IsNegative};
-pub use ordered_float::IntoOrdered;
+pub use ordered_float::{FloatExt, IntoOrdered};
 use paste::paste;
 use postgres_types::{IsNull, ToSql, Type};
 use strum_macros::EnumDiscriminants;
 
-use self::struct_type::StructType;
+pub use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::serial_array::Serial;
@@ -70,7 +74,7 @@ use crate::array::{
     StructValue,
 };
 use crate::error::Result as RwResult;
-use crate::types::num256::{Int256, Int256Ref};
+pub use crate::types::num256::{Int256, Int256Ref};
 
 pub type F32 = ordered_float::OrderedFloat<f32>;
 pub type F64 = ordered_float::OrderedFloat<f64>;
@@ -294,16 +298,8 @@ impl DataType {
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
             DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
-            DataType::Struct(t) => {
-                StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
-            }
-            DataType::List { datatype } => ListArrayBuilder::with_meta(
-                capacity,
-                ArrayMeta::List {
-                    datatype: datatype.clone(),
-                },
-            )
-            .into(),
+            DataType::Struct(_) => StructArrayBuilder::with_type(capacity, self.clone()).into(),
+            DataType::List { .. } => ListArrayBuilder::with_type(capacity, self.clone()).into(),
             DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
         }
     }
@@ -534,7 +530,7 @@ macro_rules! for_all_scalar_variants {
 macro_rules! scalar_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
         /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq, EstimateSize)]
         pub enum ScalarImpl {
             $( $variant_name($scalar) ),*
         }

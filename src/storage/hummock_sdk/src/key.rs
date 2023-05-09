@@ -719,6 +719,47 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PointRange<T: AsRef<[u8]>> {
+    // When comparing `PointRange`, we first compare `left_user_key`, then
+    // `is_exclude_left_key`. Therefore the order of declaration matters.
+    pub left_user_key: UserKey<T>,
+    /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
+    /// while represents the right δ Neighborhood of the left user key if
+    /// `is_exclude_left_key==true`.
+    pub is_exclude_left_key: bool,
+}
+
+impl<T: AsRef<[u8]>> PointRange<T> {
+    pub fn from_user_key(left_user_key: UserKey<T>, is_exclude_left_key: bool) -> Self {
+        Self {
+            left_user_key,
+            is_exclude_left_key,
+        }
+    }
+
+    pub fn as_ref(&self) -> PointRange<&[u8]> {
+        PointRange::from_user_key(self.left_user_key.as_ref(), self.is_exclude_left_key)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.left_user_key.is_empty()
+    }
+}
+
+impl<'a> PointRange<&'a [u8]> {
+    pub fn to_vec(&self) -> PointRange<Vec<u8>> {
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> PointRange<T> {
+        PointRange {
+            left_user_key: self.left_user_key.copy_into(),
+            is_exclude_left_key: self.is_exclude_left_key,
+        }
+    }
+}
+
 pub trait EmptySliceRef {
     fn empty_slice_ref<'a>() -> &'a Self;
 }

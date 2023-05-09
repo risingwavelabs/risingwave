@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use super::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
-use crate::row::Row;
+use crate::row::{OwnedRow, Row};
 use crate::types::num256::Int256;
 use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
 use crate::util::sort_util::{ColumnOrder, OrderType};
@@ -235,6 +235,20 @@ pub fn encode_row(row: impl Row, order_types: &[OrderType]) -> memcomparable::Re
     Ok(serializer.into_inner())
 }
 
+pub fn decode_row(
+    encoded_row: &[u8],
+    data_types: &[DataType],
+    order_types: &[OrderType],
+) -> memcomparable::Result<OwnedRow> {
+    let mut deserializer = memcomparable::Deserializer::new(encoded_row);
+    let row_data = data_types
+        .iter()
+        .zip_eq_debug(order_types)
+        .map(|(dt, ot)| deserialize_datum(dt, *ot, &mut deserializer))
+        .try_collect()?;
+    Ok(OwnedRow::new(row_data))
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Neg;
@@ -245,7 +259,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, ScalarImpl, F32};
+    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]

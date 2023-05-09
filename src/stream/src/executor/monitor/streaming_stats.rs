@@ -46,8 +46,6 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
-    pub stream_total_mem_usage: IntGauge,
-    pub batch_total_mem_usage: IntGauge,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -87,6 +85,7 @@ pub struct StreamingMetrics {
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
+    pub jemalloc_active_bytes: IntGauge,
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
@@ -150,20 +149,6 @@ impl StreamingMetrics {
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
             &["up_fragment_id", "down_fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let stream_total_mem_usage = register_int_gauge_with_registry!(
-            "stream_total_mem_usage",
-            "The memory allocated by streaming jobs, get from TaskLocalAlloc",
-            registry
-        )
-        .unwrap();
-
-        let batch_total_mem_usage = register_int_gauge_with_registry!(
-            "batch_total_mem_usage",
-            "The memory allocated by batch jobs, get from TaskLocalAlloc",
             registry
         )
         .unwrap();
@@ -460,7 +445,14 @@ impl StreamingMetrics {
 
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
-            "The memory jemalloc allocated, got from jemalloc_ctl",
+            "The allocated memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_active_bytes = register_int_gauge_with_registry!(
+            "jemalloc_active_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
             registry
         )
         .unwrap();
@@ -511,8 +503,6 @@ impl StreamingMetrics {
             source_output_row_count,
             source_row_per_barrier,
             exchange_frag_recv_size,
-            stream_total_mem_usage,
-            batch_total_mem_usage,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
@@ -537,6 +527,7 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
             user_compute_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,

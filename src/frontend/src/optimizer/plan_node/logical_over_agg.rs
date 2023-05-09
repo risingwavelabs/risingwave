@@ -16,83 +16,21 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
+use super::generic::{OverWindow, PlanWindowFunction};
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
+use crate::expr::{Expr, ExprImpl, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
-
-/// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PlanWindowFunction {
-    pub function_type: WindowFunctionType,
-    pub return_type: DataType,
-    pub partition_by: Vec<InputRef>,
-    pub order_by: Vec<ColumnOrder>,
-}
-
-struct PlanWindowFunctionDisplay<'a> {
-    pub window_function: &'a PlanWindowFunction,
-    pub input_schema: &'a Schema,
-}
-
-impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let window_function = self.window_function;
-        if f.alternate() {
-            f.debug_struct("WindowFunction")
-                .field("function_type", &window_function.function_type)
-                .field("return_type", &window_function.return_type)
-                .field("partition_by", &window_function.partition_by)
-                .field("order_by", &window_function.order_by)
-                .finish()
-        } else {
-            write!(f, "{}() OVER(", window_function.function_type)?;
-
-            let mut delim = "";
-            if !window_function.partition_by.is_empty() {
-                delim = " ";
-                write!(
-                    f,
-                    "PARTITION BY {}",
-                    window_function
-                        .partition_by
-                        .iter()
-                        .format_with(", ", |input_ref, f| {
-                            f(&InputRefDisplay {
-                                input_ref,
-                                input_schema: self.input_schema,
-                            })
-                        })
-                )?;
-            }
-            if !window_function.order_by.is_empty() {
-                write!(
-                    f,
-                    "{delim}ORDER BY {}",
-                    window_function.order_by.iter().format_with(", ", |o, f| {
-                        f(&ColumnOrderDisplay {
-                            column_order: o,
-                            input_schema: self.input_schema,
-                        })
-                    })
-                )?;
-            }
-            f.write_str(")")?;
-
-            Ok(())
-        }
-    }
-}
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalOverAgg` performs `OVER` window aggregates ([`WindowFunction`]) to its input.
 ///
@@ -100,33 +38,14 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverAgg {
     pub base: PlanBase,
-    pub window_function: PlanWindowFunction,
-    input: PlanRef,
+    core: OverWindow<PlanRef>,
 }
 
 impl LogicalOverAgg {
-    fn new(window_function: PlanWindowFunction, input: PlanRef) -> Self {
-        let ctx = input.ctx();
-        let mut schema = input.schema().clone();
-        schema.fields.push(Field::with_name(
-            window_function.return_type.clone(),
-            window_function.function_type.to_string(),
-        ));
-
-        let logical_pk = input.logical_pk().to_vec();
-
-        let mapping =
-            ColIndexMapping::identity_or_none(input.schema().len(), input.schema().len() + 1);
-        let fd_set = input.functional_dependency().clone();
-        let fd_set = mapping.rewrite_functional_dependency_set(fd_set);
-
-        let base = PlanBase::new_logical(ctx, schema, logical_pk, fd_set);
-
-        Self {
-            base,
-            window_function,
-            input,
-        }
+    fn new(calls: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
+        let core = OverWindow::new(calls, input);
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
     }
 
     pub fn create(
@@ -136,13 +55,14 @@ impl LogicalOverAgg {
         let input_len = input.schema().len();
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
-            if let ExprImpl::WindowFunction(f) = expr {
-                window_funcs.push(*(f.clone()));
-                *expr = InputRef::new(
-                    input_len + window_funcs.len() - 1,
-                    expr.return_type().clone(),
-                )
-                .into();
+            if let ExprImpl::WindowFunction(_) = expr {
+                let new_expr =
+                    InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
+                        .into();
+                let f = std::mem::replace(expr, new_expr)
+                    .into_window_function()
+                    .unwrap();
+                window_funcs.push(*f);
             }
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
@@ -153,7 +73,7 @@ impl LogicalOverAgg {
             }
         }
         for f in &window_funcs {
-            if f.function_type.is_rank_function() {
+            if f.kind.is_rank() {
                 if f.order_by.sort_exprs.is_empty() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window rank function without order by: {:?}",
@@ -161,34 +81,30 @@ impl LogicalOverAgg {
                     ))
                     .into());
                 }
-                if f.function_type == WindowFunctionType::DenseRank {
+                if f.kind == WindowFuncKind::DenseRank {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", f.function_type),
+                        format!("window rank function: {}", f.kind),
                         4847.into(),
                     )
                     .into());
                 }
             }
         }
-        if window_funcs.len() > 1 {
-            return Err(ErrorCode::NotImplemented(
-                "Multiple window functions".to_string(),
-                None.into(),
-            )
-            .into());
-        }
-        let WindowFunction {
-            args,
-            return_type,
-            function_type,
-            partition_by,
-            order_by,
-        } = window_funcs.into_iter().next().unwrap();
-        assert!(args.is_empty());
-        assert!(return_type == DataType::Int64);
 
-        // TODO: rewrite ORDER BY & PARTITION BY expr to InputRef like `LogicalAgg`
-        let order_by = order_by
+        let plan_window_funcs = window_funcs
+            .into_iter()
+            .map(Self::convert_window_function)
+            .try_collect()?;
+
+        let over_agg = Self::new(plan_window_funcs, input);
+        Ok((over_agg.into(), select_exprs))
+    }
+
+    fn convert_window_function(window_function: WindowFunction) -> Result<PlanWindowFunction> {
+        // TODO: rewrite expressions in `ORDER BY`, `PARTITION BY` and arguments to `InputRef` like
+        // in `LogicalAgg`
+        let order_by: Vec<_> = window_function
+            .order_by
             .sort_exprs
             .into_iter()
             .map(|e| match e.expr.as_input_ref() {
@@ -196,42 +112,143 @@ impl LogicalOverAgg {
                 None => Err(ErrorCode::NotImplemented(
                     "ORDER BY expression in window function".to_string(),
                     None.into(),
-                )
-                .into()),
+                )),
             })
-            .collect::<Result<Vec<_>>>()?;
-        let partition_by = partition_by
+            .try_collect()?;
+        let partition_by: Vec<_> = window_function
+            .partition_by
             .into_iter()
             .map(|e| match e.as_input_ref() {
                 Some(i) => Ok(*i.clone()),
                 None => Err(ErrorCode::NotImplemented(
                     "PARTITION BY expression in window function".to_string(),
                     None.into(),
-                )
-                .into()),
+                )),
             })
-            .collect::<Result<Vec<_>>>()?;
+            .try_collect()?;
 
-        let over_agg = Self::new(
-            PlanWindowFunction {
-                function_type,
-                return_type,
-                partition_by,
-                order_by,
-            },
-            input,
-        );
-        Ok((over_agg.into(), select_exprs))
+        let mut args = window_function.args;
+        let frame = match window_function.kind {
+            WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
+                // ignore user-defined frame for rank functions
+                Frame::Rows(
+                    FrameBound::UnboundedPreceding,
+                    FrameBound::UnboundedFollowing,
+                )
+            }
+            WindowFuncKind::Lag | WindowFuncKind::Lead => {
+                let offset = if args.len() > 1 {
+                    let offset_expr = args.remove(1);
+                    if !offset_expr.return_type().is_int() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "the `offset` of `{}` function should be integer",
+                            window_function.kind
+                        ))
+                        .into());
+                    }
+                    offset_expr
+                        .cast_implicit(DataType::Int64)?
+                        .eval_row_const()?
+                        .map(|v| *v.as_int64() as usize)
+                        .unwrap_or(1usize)
+                } else {
+                    1usize
+                };
+
+                // override the frame
+                // TODO(rc): We can only do the optimization for constant offset.
+                if window_function.kind == WindowFuncKind::Lag {
+                    Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
+                } else {
+                    Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
+                }
+            }
+            WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
+                // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
+                // CurrentRow)` but we don't support yet.
+                if order_by.is_empty() {
+                    Frame::Rows(
+                        FrameBound::UnboundedPreceding,
+                        FrameBound::UnboundedFollowing,
+                    )
+                } else {
+                    Frame::Rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                }
+            }),
+        };
+
+        let args = args
+            .into_iter()
+            .map(|e| match e.as_input_ref() {
+                Some(i) => Ok(*i.clone()),
+                None => Err(ErrorCode::NotImplemented(
+                    "expression arguments in window function".to_string(),
+                    None.into(),
+                )),
+            })
+            .try_collect()?;
+
+        Ok(PlanWindowFunction {
+            kind: window_function.kind,
+            return_type: window_function.return_type,
+            args,
+            partition_by,
+            order_by,
+            frame,
+        })
+    }
+
+    pub fn window_functions(&self) -> &[PlanWindowFunction] {
+        &self.core.window_functions
+    }
+
+    #[must_use]
+    fn rewrite_with_input_and_window(
+        &self,
+        input: PlanRef,
+        window_functions: &[PlanWindowFunction],
+        input_col_change: ColIndexMapping,
+    ) -> Self {
+        let window_functions = window_functions
+            .iter()
+            .cloned()
+            .map(|mut window_function| {
+                window_function.args.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                window_function.order_by.iter_mut().for_each(|o| {
+                    o.column_index = input_col_change.map(o.column_index);
+                });
+                window_function.partition_by.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                window_function
+            })
+            .collect();
+        LogicalOverAgg::new(window_functions, input)
     }
 }
 
 impl PlanTreeNodeUnary for LogicalOverAgg {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.window_function.clone(), input)
+        Self::new(self.core.window_functions.clone(), input)
+    }
+
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let over_agg =
+            self.rewrite_with_input_and_window(input, self.window_functions(), input_col_change);
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identity(over_agg.schema().len());
+        (over_agg, out_col_change)
     }
 }
 
@@ -239,27 +256,71 @@ impl_plan_tree_node_for_unary! { LogicalOverAgg }
 
 impl fmt::Display for LogicalOverAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("LogicalOverAgg");
-        builder.field(
-            "window_function",
-            &PlanWindowFunctionDisplay {
-                window_function: &self.window_function,
-                input_schema: self.input.schema(),
-            },
-        );
-        builder.finish()
+        self.core.fmt_with_name(f, "LogicalOverAgg")
     }
 }
 
 impl ColPrunable for LogicalOverAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        let new_input = {
-            let input = self.input();
-            let required = (0..input.schema().len()).collect_vec();
-            input.prune_col(&required, ctx)
+        let input_cnt = self.input().schema().len();
+        let raw_required_cols = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            required_cols
+                .iter()
+                .filter(|&&index| index < input_cnt)
+                .for_each(|&index| tmp.set(index, true));
+            tmp
         };
-        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
+
+        let (window_function_required_cols, window_functions) = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            let new_window_functions = required_cols
+                .iter()
+                .filter(|&&index| index >= input_cnt)
+                .map(|&index| {
+                    let index = index - input_cnt;
+                    let window_function = self.window_functions()[index].clone();
+                    tmp.extend(window_function.args.iter().map(|x| x.index()));
+                    tmp.extend(window_function.partition_by.iter().map(|x| x.index()));
+                    tmp.extend(window_function.order_by.iter().map(|x| x.column_index));
+                    window_function
+                })
+                .collect_vec();
+            (tmp, new_window_functions)
+        };
+
+        let input_required_cols = {
+            let mut tmp = FixedBitSet::with_capacity(input_cnt);
+            tmp.union_with(&raw_required_cols);
+            tmp.union_with(&window_function_required_cols);
+            tmp.ones().collect_vec()
+        };
+        let input_col_change =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_cnt);
+        let new_over_agg = {
+            let input = self.input().prune_col(&input_required_cols, ctx);
+            self.rewrite_with_input_and_window(input, &window_functions, input_col_change)
+        };
+        if new_over_agg.schema().len() == required_cols.len() {
+            // current schema perfectly fit the required columns
+            new_over_agg.into()
+        } else {
+            // some columns are not needed so we did a projection to remove the columns.
+            let mut new_output_cols = input_required_cols.clone();
+            new_output_cols.extend(required_cols.iter().filter(|&&x| x >= input_cnt));
+            let mapping =
+                &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
+            let output_required_cols = required_cols
+                .iter()
+                .map(|&idx| mapping.map(idx))
+                .collect_vec();
+            let src_size = new_over_agg.schema().len();
+            LogicalProject::with_mapping(
+                new_over_agg.into(),
+                ColIndexMapping::with_remaining_columns(&output_required_cols, src_size),
+            )
+            .into()
+        }
     }
 }
 
@@ -272,7 +333,7 @@ impl PredicatePushdown for LogicalOverAgg {
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
-        window_col.insert(self.schema().len() - 1);
+        window_col.insert_range(self.core.input.schema().len()..self.schema().len());
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
         gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
@@ -280,19 +341,19 @@ impl PredicatePushdown for LogicalOverAgg {
 
 impl ToBatch for LogicalOverAgg {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("OverAgg to batch".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to batch".to_string(), 9124.into()).into())
     }
 }
 
 impl ToStream for LogicalOverAgg {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
+        Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 9124.into()).into())
     }
 }

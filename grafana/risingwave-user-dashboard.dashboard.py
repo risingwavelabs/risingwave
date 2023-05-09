@@ -1,7 +1,16 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
+from grafanalib.core import (
+    Dashboard,
+    TimeSeries,
+    Target,
+    GridPos,
+    RowPanel,
+    Time,
+    Templating,
+)
 import logging
 import os
 import sys
+
 p = os.path.dirname(__file__)
 sys.path.append(p)
 from common import *
@@ -14,18 +23,25 @@ datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
+
 def section_actor_info(panels):
-    excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
+    excluded_cols = ["Time", "Value", "__name__", "job", "instance"]
     return [
         panels.row("Actor/Table Id Info"),
-        panels.table_info("Actor Id Info",
-                          "Mapping from actor id to fragment id",
-                          [panels.table_target(f"{metric('actor_info')}")], excluded_cols),
-        panels.table_info("Table Id Info",
-                          "Mapping from table id to actor id and table name",
-                          [panels.table_target(f"{metric('table_info')}")], excluded_cols),
-
+        panels.table_info(
+            "Actor Id Info",
+            "Mapping from actor id to fragment id",
+            [panels.table_target(f"{metric('actor_info')}")],
+            excluded_cols,
+        ),
+        panels.table_info(
+            "Table Id Info",
+            "Mapping from table id to actor id and table name",
+            [panels.table_target(f"{metric('table_info')}")],
+            excluded_cols,
+        ),
     ]
+
 
 def section_overview(panels):
     return [
@@ -61,7 +77,8 @@ def section_overview(panels):
                     f"barrier_latency_p{legend}",
                 ),
                 [50, 99],
-            ) + [
+            )
+            + [
                 panels.target(
                     f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval])",
                     "barrier_latency_avg",
@@ -88,18 +105,18 @@ def section_overview(panels):
                     "Recovery Triggered",
                 ),
                 panels.target(
-                    f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + " + 
-                    f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
+                    f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
+                    + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
                     "Lagging Version",
                 ),
                 panels.target(
-                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_min_pinned_epoch')}) >= bool 6553600000 unless + {metric('storage_min_pinned_epoch')} == 0) + " + 
-                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_safe_epoch')}) >= bool 6553600000 unless + {metric('storage_safe_epoch')} == 0)",
+                    f"(({metric('storage_max_committed_epoch')} - {metric('storage_min_pinned_epoch')}) >= bool 6553600000 unless + {metric('storage_min_pinned_epoch')} == 0) + "
+                    + f"(({metric('storage_max_committed_epoch')} - {metric('storage_safe_epoch')}) >= bool 6553600000 unless + {metric('storage_safe_epoch')} == 0)",
                     "Lagging Epoch",
                 ),
                 panels.target(
-                    f"sum(label_replace({metric('storage_level_sst_num')}, 'L0', 'L0', 'level_index', '.*_L0') unless " + 
-                    f"{metric('storage_level_sst_num')}) by (L0) >= bool 200",
+                    f"sum(label_replace({metric('storage_level_sst_num')}, 'L0', 'L0', 'level_index', '.*_L0') unless "
+                    + f"{metric('storage_level_sst_num')}) by (L0) >= bool 200",
                     "Lagging Compaction",
                 ),
                 panels.target(
@@ -122,13 +139,13 @@ def section_overview(panels):
                     "parse error {{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                 ),
                 panels.target(
-                     f"{metric('source_status_is_up')} == 0",
+                    f"{metric('source_status_is_up')} == 0",
                     "source error: source_id={{source_id}}, source_name={{source_name}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('object_store_failure_count')}[$__rate_interval])) by (instance, job, type)",
                     "remote storage error {{type}}: {{job}} @ {{instance}}",
-                )
+                ),
             ],
         ),
         panels.timeseries_query_per_sec(
@@ -149,8 +166,9 @@ def section_overview(panels):
             "Node Count",
             "The number of each type of RisingWave components alive.",
             [
-                panels.target(f"sum({metric('worker_num')}) by (worker_type)",
-                              "{{worker_type}}")
+                panels.target(
+                    f"sum({metric('worker_num')}) by (worker_type)", "{{worker_type}}"
+                )
             ],
             ["last"],
         ),
@@ -183,13 +201,14 @@ def section_cpu(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
 
 def section_memory(outer_panels):
     panels = outer_panels.sub_panel()
+    meta_miss_filter = "type='meta_miss'"
     return [
         outer_panels.row_collapsed(
             "Memory",
@@ -209,17 +228,9 @@ def section_memory(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('stream_total_mem_usage')}) by (instance)",
-                            "streaming @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('batch_total_mem_usage')}) by (instance)",
-                            "batch @ {{instance}}",
-                        ),
-                        panels.target(
-                            f"sum({metric('state_store_meta_cache_size')}) by (instance) + " +
-                            f"sum({metric('state_store_block_cache_size')}) by (instance) + " +
-                            f"sum({metric('state_store_limit_memory_size')}) by (instance)",
+                            f"sum({metric('state_store_meta_cache_size')}) by (instance) + "
+                            + f"sum({metric('state_store_block_cache_size')}) by (instance) + "
+                            + f"sum({metric('state_store_limit_memory_size')}) by (instance)",
                             "storage @ {{instance}}",
                         ),
                     ],
@@ -267,35 +278,31 @@ def section_memory(outer_panels):
                             "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
-                             f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
                             "Materialize - cache hit count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
-                            ),
+                        ),
                         panels.target(
-                             f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
                             "Materialize - total cache count - table {{table_id}} - actor {{actor_id}}  {{instance}}",
-                            ),
+                        ),
                     ],
                 ),
-
                 panels.timeseries_percentage(
                     "Executor Cache Miss Ratio",
                     "",
                     [
                         panels.target(
-                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
                             "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                            ),
-
+                        ),
                         panels.target(
-                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
-                            ),
-
+                        ),
                         panels.target(
-                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",
-                            ),
-
+                        ),
                     ],
                 ),
                 panels.timeseries_ops(
@@ -307,6 +314,16 @@ def section_memory(outer_panels):
                             "memory cache - {{table_id}} @ {{type}} @ {{job}} @ {{instance}}",
                         ),
                         panels.target(
+                            f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, type)",
+                            "total_meta_miss_count - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Storage Bloom Filer",
+                    "Storage bloom filter statistics",
+                    [
+                        panels.target(
                             f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id)",
                             "bloom filter total - {{table_id}} @ {{job}} @ {{instance}}",
                         ),
@@ -314,6 +331,12 @@ def section_memory(outer_panels):
                             f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id)",
                             "bloom filter false positive  - {{table_id}} @ {{job}} @ {{instance}}",
                         ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Storage File Cache",
+                    "Storage file cache statistics",
+                    [
                         panels.target(
                             f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                             "file cache {{op}} @ {{instance}}",
@@ -324,7 +347,7 @@ def section_memory(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
@@ -368,12 +391,12 @@ def section_network(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"{metric('batch_task_exchange_recv_row_number')}",
+                            f"{metric('batch_exchange_recv_row_number')}",
                             "{{query_id}} : {{source_stage_id}}.{{source_task_id}} -> {{target_stage_id}}.{{target_task_id}}",
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
@@ -393,12 +416,18 @@ def section_storage(outer_panels):
                     - referenced by current version: these objects are in the latest version.
                     """,
                     [
-                        panels.target(f"{metric('storage_stale_object_size')}",
-                                      "not referenced by versions"),
-                        panels.target(f"{metric('storage_old_version_object_size')}",
-                                      "referenced by non-current versions"),
-                        panels.target(f"{metric('storage_current_version_object_size')}",
-                                      "referenced by current version"),
+                        panels.target(
+                            f"{metric('storage_stale_object_size')}",
+                            "not referenced by versions",
+                        ),
+                        panels.target(
+                            f"{metric('storage_old_version_object_size')}",
+                            "referenced by non-current versions",
+                        ),
+                        panels.target(
+                            f"{metric('storage_current_version_object_size')}",
+                            "referenced by current version",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -410,12 +439,18 @@ def section_storage(outer_panels):
                     - referenced by current version: these objects are in the latest version.
                     """,
                     [
-                        panels.target(f"{metric('storage_stale_object_count')}",
-                                      "not referenced by versions"),
-                        panels.target(f"{metric('storage_old_version_object_count')}",
-                                      "referenced by non-current versions"),
-                        panels.target(f"{metric('storage_current_version_object_count')}",
-                                      "referenced by current version"),
+                        panels.target(
+                            f"{metric('storage_stale_object_count')}",
+                            "not referenced by versions",
+                        ),
+                        panels.target(
+                            f"{metric('storage_old_version_object_count')}",
+                            "referenced by non-current versions",
+                        ),
+                        panels.target(
+                            f"{metric('storage_current_version_object_count')}",
+                            "referenced by current version",
+                        ),
                     ],
                 ),
                 panels.timeseries_bytes(
@@ -465,7 +500,7 @@ def section_storage(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
@@ -502,11 +537,11 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "Read Snapshot - table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                            "Read Snapshot - table_id={{table_id}} actor={{actor_id}} @ {{instance}}",
                         ),
                         panels.target(
                             f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
-                            "Upstream - table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
+                            "Upstream - table_id={{table_id}} actor={{actor_id}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -522,7 +557,7 @@ def section_streaming(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
@@ -537,8 +572,10 @@ def section_batch(outer_panels):
                     "Running query in distributed execution mode",
                     "",
                     [
-                        panels.target(f"{metric('distributed_running_query_num')}",
-                                      "The number of running query in distributed execution mode"),
+                        panels.target(
+                            f"{metric('distributed_running_query_num')}",
+                            "The number of running query in distributed execution mode",
+                        ),
                     ],
                     ["last"],
                 ),
@@ -546,8 +583,10 @@ def section_batch(outer_panels):
                     "Rejected query in distributed execution mode",
                     "",
                     [
-                        panels.target(f"{metric('distributed_rejected_query_counter')}",
-                                      "The number of rejected query in distributed execution mode"),
+                        panels.target(
+                            f"{metric('distributed_rejected_query_counter')}",
+                            "The number of rejected query in distributed execution mode",
+                        ),
                     ],
                     ["last"],
                 ),
@@ -555,8 +594,10 @@ def section_batch(outer_panels):
                     "Completed query in distributed execution mode",
                     "",
                     [
-                        panels.target(f"{metric('distributed_completed_query_counter')}",
-                                      "The number of completed query in distributed execution mode"),
+                        panels.target(
+                            f"{metric('distributed_completed_query_counter')}",
+                            "The number of completed query in distributed execution mode",
+                        ),
                     ],
                     ["last"],
                 ),
@@ -596,7 +637,7 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 

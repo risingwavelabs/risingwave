@@ -34,22 +34,41 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 pub struct JoinEntryState {
     /// The full copy of the state.
     cached: BTreeMap<PkType, StateValueType>,
+    kv_heap_size: usize,
+}
+
+impl EstimateSize for JoinEntryState {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add btreemap internal size.
+        self.kv_heap_size
+    }
 }
 
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
+        self.kv_heap_size = self
+            .kv_heap_size
+            .saturating_add(key.estimated_size() + value.estimated_size());
         self.cached.try_insert(key, value).unwrap();
     }
 
     /// Delete from the cache.
     pub fn remove(&mut self, pk: PkType) {
-        self.cached.remove(&pk).unwrap();
+        if let Some(value) = self.cached.remove(&pk) {
+            self.kv_heap_size = self
+                .kv_heap_size
+                .saturating_sub(pk.estimated_size() + value.estimated_size());
+        } else {
+            panic!("pk {:?} should be in the cache", pk);
+        }
     }
 
     /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
     /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
     /// the changes to the first item.
+    ///
+    /// WARNING: Should not change the heap size of `StateValueType` with the mutable reference.
     pub fn values_mut<'a>(
         &'a mut self,
         data_types: &'a [DataType],

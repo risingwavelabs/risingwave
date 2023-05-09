@@ -19,12 +19,13 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
+use super::{GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{GroupKey, ManagedTopNState};
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
@@ -61,6 +62,14 @@ pub struct TopNCache<const WITH_TIES: bool> {
     ///
     /// For debug formatting only.
     data_types: Vec<DataType>,
+}
+
+impl<const WITH_TIES: bool> EstimateSize for TopNCache<WITH_TIES> {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
 }
 
 impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
@@ -325,7 +334,7 @@ impl TopNCacheTrait for TopNCache<false> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        Some(self.middle.last_key_value().unwrap().0.clone()),
                         self.high_capacity,
                     )
                     .await?;
@@ -359,7 +368,7 @@ impl TopNCacheTrait for TopNCache<false> {
                         .fill_high_cache(
                             group_key,
                             self,
-                            self.middle.last_key_value().unwrap().0.clone(),
+                            Some(self.middle.last_key_value().unwrap().0.clone()),
                             self.high_capacity,
                         )
                         .await?;
@@ -501,7 +510,9 @@ impl TopNCacheTrait for TopNCache<true> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.middle
+                            .last_key_value()
+                            .map(|(key, _value)| key.clone()),
                         self.high_capacity,
                     )
                     .await?;

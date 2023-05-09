@@ -35,6 +35,7 @@
 mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_length;
+mod expr_array_positions;
 mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
@@ -56,11 +57,11 @@ pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
+mod expr_trim_array;
 mod expr_udf;
 mod expr_unary;
 mod expr_vnode;
 
-mod agg;
 mod build;
 pub(crate) mod data_types;
 pub(crate) mod template;
@@ -74,10 +75,8 @@ use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::epoch::Epoch;
 use static_assertions::const_assert;
 
-pub use self::agg::AggKind;
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
@@ -193,24 +192,3 @@ pub type ExpressionRef = Arc<dyn Expression>;
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
 #[allow(dead_code)]
 const STRICT_MODE: bool = false;
-
-/// The context used by expressions.
-#[derive(Clone)]
-pub struct ExprContext {
-    /// The epoch that an executor currently in.
-    curr_epoch: Epoch,
-}
-
-impl ExprContext {
-    pub fn new(curr_epoch: Epoch) -> Self {
-        Self { curr_epoch }
-    }
-
-    pub fn get_proctime(&self) -> u64 {
-        self.curr_epoch.as_unix_millis() * 1000
-    }
-}
-
-tokio::task_local! {
-    pub static CONTEXT: ExprContext;
-}

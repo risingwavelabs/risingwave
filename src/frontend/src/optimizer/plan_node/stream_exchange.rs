@@ -32,13 +32,11 @@ pub struct StreamExchange {
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
-        let ctx = input.ctx();
-        let pk_indices = input.logical_pk().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
-            ctx,
+            input.ctx(),
             input.schema().clone(),
-            pk_indices,
+            input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
