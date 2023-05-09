@@ -74,7 +74,9 @@ async fn test_mv_on_scaled_table() -> Result<()> {
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
 
-    cluster.reschedule(fragment.reschedule([0, 2, 4], [])).await?;
+    cluster
+        .reschedule(fragment.reschedule([0, 2, 4], []))
+        .await?;
 
     insert_and_flush!(cluster);
 
