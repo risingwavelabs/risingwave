@@ -435,7 +435,7 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                let plan = LogicalValues::create(vec![], scan.schema().clone(), scan.ctx.clone())
+                let plan = LogicalValues::create(vec![], scan.schema(), scan.ctx)
                     .to_batch()?;
                 assert_eq!(plan.schema(), self.schema());
                 return required_order.enforce_if_not_satisfies(plan);
