@@ -238,7 +238,7 @@ pub async fn handle_explain(
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
 
-    let context = OptimizerContext::new(handler_args.clone(), options.clone());
+    let context = OptimizerContext::new_raw(handler_args.clone(), options.clone());
 
     let mut blocks = Vec::new();
     let result = do_handle_explain(context, stmt, &mut blocks).await;

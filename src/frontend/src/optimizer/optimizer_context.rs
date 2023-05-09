@@ -55,17 +55,47 @@ pub struct OptimizerContext {
     warning_messages: RefCell<Vec<String>>,
 }
 
+pub struct OptimizerContextDefer {
+    ctx: OptimizerContextRef,
+}
+impl OptimizerContextDefer {
+    pub fn new(ctx: OptimizerContextRef) -> Self {
+        Self { ctx }
+    }
+}
+
+impl Drop for OptimizerContextDefer {
+    fn drop(&mut self) {}
+}
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`], with empty
     /// [`ExplainOptions`].
-    pub fn from_handler_args(handler_args: HandlerArgs) -> Self {
+    pub fn from_handler_args(
+        handler_args: HandlerArgs,
+    ) -> (OptimizerContextRef, OptimizerContextDefer) {
         Self::new(handler_args, ExplainOptions::default())
     }
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
-    pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+    pub fn new(
+        handler_args: HandlerArgs,
+        explain_options: ExplainOptions,
+    ) -> (OptimizerContextRef, OptimizerContextDefer) {
+        Self::new_raw(handler_args, explain_options).into_ref()
+    }
+
+    pub fn into_ref(self) -> (OptimizerContextRef, OptimizerContextDefer) {
+        let ctx: OptimizerContextRef = self.into();
+        (ctx, OptimizerContextDefer::new(ctx.clone()))
+    }
+
+    /// WARNING!!! this function is just for create a `OptimizerContext` and delay it convert it
+    /// into `OptimizerContextRef` to workaround in the async function, please make sure. Please
+    /// make sure you call the `OptimizerContext::into_ref` and handle the defer properly.
+    pub fn new_raw(handler_args: HandlerArgs, explain_options: ExplainOptions) -> OptimizerContext {
         let session_timezone = RefCell::new(SessionTimezone::new(
             handler_args.session.config().get_timezone().to_owned(),
         ));

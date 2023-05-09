@@ -29,8 +29,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
-    TableConstraint,
+    ColumnDef, ColumnOption, DataType as AstDataType, ExplainOptions, ObjectName, SourceSchema,
+    SourceWatermark, TableConstraint,
 };
 
 use super::create_source::resolve_source_schema;
@@ -45,7 +45,9 @@ use crate::handler::create_source::{
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{
+    OptimizerContext, OptimizerContextDefer, OptimizerContextRef, PlanRef, PlanRoot,
+};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -402,7 +404,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable, OptimizerContextDefer)> {
     let session = context.session_ctx();
     let column_descs = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
     let mut properties = context.with_options().inner().clone().into_iter().collect();
@@ -461,7 +463,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
 pub(crate) fn gen_create_table_plan(
-    context: OptimizerContext,
+    context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
@@ -489,7 +491,7 @@ pub(crate) fn gen_create_table_plan(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_bind(
-    context: OptimizerContext,
+    context: OptimizerContextRef,
     table_name: ObjectName,
     column_descs: Vec<ColumnDesc>,
     column_defs: Vec<ColumnDef>,
@@ -518,7 +520,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     )?;
 
     gen_table_plan_inner(
-        context.into(),
+        context,
         table_name,
         columns,
         properties,
@@ -652,12 +654,14 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table, notices) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
 
-        let (plan, source, table) = match source_schema {
+        let (plan, source, table, defer) = match source_schema {
             Some(source_schema) => {
+                // TODO(st1page): remove the async
+                let context = OptimizerContext::new_raw(handler_args, ExplainOptions::default());
+
                 gen_create_table_plan_with_source(
                     context,
                     table_name.clone(),
@@ -670,15 +674,20 @@ pub async fn handle_create_table(
                 )
                 .await?
             }
-            None => gen_create_table_plan(
-                context,
-                table_name.clone(),
-                columns,
-                constraints,
-                col_id_gen,
-                source_watermarks,
-                append_only,
-            )?,
+            None => {
+                let (ctx, defer) = OptimizerContext::from_handler_args(handler_args);
+
+                let (plan, source, table) = gen_create_table_plan(
+                    ctx,
+                    table_name.clone(),
+                    columns,
+                    constraints,
+                    col_id_gen,
+                    source_watermarks,
+                    append_only,
+                )?;
+                (plan, source, table, defer)
+            }
         };
 
         let context = plan.plan_base().ctx.clone();
