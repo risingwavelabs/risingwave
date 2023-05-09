@@ -47,7 +47,6 @@ use risingwave_pb::hummock::{
     IntraLevelDelta, LevelType, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_sqlparser::keywords::CLUSTER;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
