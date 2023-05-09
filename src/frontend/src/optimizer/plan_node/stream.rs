@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derivative::Derivative;
+use educe::Educe;
 use generic::PlanAggCall;
 use itertools::Itertools;
 use pb::stream_node as pb_node;
@@ -69,6 +69,7 @@ macro_rules! impl_node {
 pub trait StreamPlanNode: GenericPlanNode {
     fn distribution(&self) -> Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
     fn to_stream_base(&self) -> PlanBase {
         let ctx = self.ctx();
         PlanBase {
@@ -78,6 +79,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             logical_pk: self.logical_pk().unwrap_or_default(),
             dist: self.distribution(),
             append_only: self.append_only(),
+            emit_on_window_close: self.emit_on_window_close(),
         }
     }
 }
@@ -85,6 +87,7 @@ pub trait StreamPlanNode: GenericPlanNode {
 pub trait StreamPlanRef: GenericPlanRef {
     fn distribution(&self) -> &Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
 }
 
 impl generic::GenericPlanRef for PlanRef {
@@ -131,6 +134,10 @@ impl StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
         self.append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -140,6 +147,10 @@ impl StreamPlanRef for PlanRef {
 
     fn append_only(&self) -> bool {
         self.0.append_only
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.0.emit_on_window_close
     }
 }
 
@@ -185,12 +196,12 @@ pub struct Filter {
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GlobalSimpleAgg {
+pub struct SimpleAgg {
     pub core: generic::Agg<PlanRef>,
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
 }
-impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(SimpleAgg, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupTopN {
@@ -316,17 +327,18 @@ pub struct IndexScan {
     pub batch_plan_id: PlanNodeId,
 }
 impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
-/// Local simple agg.
+
+/// Stateless simple agg.
 ///
 /// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
 ///
-/// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
-/// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
+/// The output of `StatelessSimpleAgg` doesn't have pk columns, so the result can only be used by
+/// `SimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LocalSimpleAgg {
+pub struct StatelessSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(LocalSimpleAgg, core, input);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(StatelessSimpleAgg, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Materialize {
@@ -382,21 +394,22 @@ pub struct TopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub dist: Distribution,
     pub append_only: bool,
+    pub emit_on_window_close: bool,
 }
 
 impl_node!(
@@ -406,13 +419,13 @@ impl_node!(
     DeltaJoin,
     Expand,
     Filter,
-    GlobalSimpleAgg,
+    SimpleAgg,
     GroupTopN,
     HashAgg,
     HashJoin,
     HopWindow,
     IndexScan,
-    LocalSimpleAgg,
+    StatelessSimpleAgg,
     Materialize,
     ProjectSet,
     Project,
@@ -547,12 +560,12 @@ pub fn to_stream_prost_body(
                 search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
-        Node::GlobalSimpleAgg(me) => {
+        Node::SimpleAgg(me) => {
             let result_table = me.core.infer_result_table(base, None);
             let agg_states = me.core.infer_stream_agg_state(base, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
-            PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
+            PbNodeBody::SimpleAgg(SimpleAggNode {
                 agg_calls: me
                     .core
                     .agg_calls
@@ -610,7 +623,7 @@ pub fn to_stream_prost_body(
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
             PbNodeBody::HashAgg(HashAggNode {
-                group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
+                group_key: me.core.group_key.ones().map(|idx| idx as u32).collect(),
                 agg_calls: me
                     .core
                     .agg_calls
@@ -660,9 +673,9 @@ pub fn to_stream_prost_body(
                 window_end_exprs,
             })
         }
-        Node::LocalSimpleAgg(me) => {
+        Node::StatelessSimpleAgg(me) => {
             let me = &me.core;
-            PbNodeBody::LocalSimpleAgg(SimpleAggNode {
+            PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
                 agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
                 row_count_index: u32::MAX, // this is not used
                 distribution_key: base

@@ -253,19 +253,19 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::function::aggregate::{AggCall, AggKind};
+    use risingwave_expr::agg::{AggCall, AggKind};
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
-        AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
+        AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
-        HashAggExecutor, PkIndices,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, HashAggExecutor, PkIndices,
+        SimpleAggExecutor,
     };
 
     /// Create state storage for the given agg call.
@@ -432,7 +432,7 @@ pub mod agg_executor {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: GroupAggExecutorExtraArgs {
+            extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
                 emit_on_window_close,
@@ -479,7 +479,7 @@ pub mod agg_executor {
         )
         .await;
 
-        GlobalSimpleAggExecutor::new(AggExecutorArgs {
+        SimpleAggExecutor::new(AggExecutorArgs {
             input,
             actor_ctx,
             pk_indices,

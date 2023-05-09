@@ -71,6 +71,7 @@ where
     pub del_agg: Arc<CompactionDeleteRanges>,
     key_range: KeyRange,
     last_table_id: u32,
+    is_target_level_l0_or_lbase: bool,
     split_by_table: bool,
 }
 
@@ -85,6 +86,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<CompactionDeleteRanges>,
         key_range: KeyRange,
+        is_target_level_l0_or_lbase: bool,
         split_by_table: bool,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
@@ -103,6 +105,7 @@ where
             last_sealed_key: start_key,
             key_range,
             last_table_id: 0,
+            is_target_level_l0_or_lbase,
             split_by_table,
         }
     }
@@ -118,6 +121,7 @@ where
             del_agg: Arc::new(CompactionDeleteRanges::for_test()),
             key_range: KeyRange::inf(),
             last_table_id: 0,
+            is_target_level_l0_or_lbase: false,
             split_by_table: false,
         }
     }
@@ -160,7 +164,11 @@ where
             switch_builder = true;
         }
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
+            if is_new_user_key
+                && (switch_builder
+                    || (!(self.is_target_level_l0_or_lbase && self.split_by_table)
+                        && builder.reach_capacity()))
+            {
                 let monotonic_deletes = self
                     .del_agg
                     .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
@@ -312,8 +320,8 @@ mod tests {
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{
-        CompactionDeleteRangesBuilder, DeleteRangeTombstone, SstableBuilderOptions,
-        DEFAULT_RESTART_INTERVAL,
+        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
+        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
     };
 
     #[tokio::test]
@@ -428,16 +436,18 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+        let events = create_monotonic_events(vec![
+            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
+            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
         ]);
+        builder.add_delete_events(events);
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             builder.build_for_compaction(false),
             KeyRange::inf(),
+            false,
             false,
         );
         builder
@@ -458,7 +468,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             key_range.left,
-            FullKey::for_test(table_id, b"aaa", 200).encode()
+            FullKey::for_test(table_id, b"aaa", u64::MAX).encode()
         );
         assert_eq!(
             key_range.right,
@@ -479,16 +489,17 @@ mod tests {
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_tombstone(vec![
-            DeleteRangeTombstone::new(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
-        ]);
+        builder.add_delete_events(create_monotonic_events(vec![
+            DeleteRangeTombstone::new(table_id, b"k".to_vec(), false, b"kkk".to_vec(), true, 100),
+            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), true, b"ddd".to_vec(), true, 200),
+        ]));
         let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
             builder.build_for_compaction(false),
             KeyRange::inf(),
+            false,
             false,
         );
         let results = builder.finish().await.unwrap();

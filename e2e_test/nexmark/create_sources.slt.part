@@ -25,7 +25,14 @@ CREATE SOURCE nexmark (
              "channel" VARCHAR,
              "url" VARCHAR,
              "date_time" TIMESTAMP,
-             "extra" VARCHAR>
+             "extra" VARCHAR>,
+  date_time TIMESTAMP AS
+    CASE
+        WHEN event_type = 0 THEN (person).date_time
+        WHEN event_type = 1 THEN (auction).date_time
+        ELSE (bid).date_time
+    END,
+  WATERMARK FOR date_time AS date_time - INTERVAL '4' SECOND
 ) WITH (
     connector = 'nexmark',
     nexmark.split.num = '2',

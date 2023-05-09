@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
 
-use crate::hummock::compaction::CompactionInput;
+use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_TTL_EXPIRE_INTERVAL_MS: u64 = 60 * 60 * 1000; // 1h
@@ -97,7 +97,7 @@ impl TtlReclaimCompactionPicker {
                     // default to zero.
                     let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
-                    if Epoch(sst.min_epoch) <= min_epoch {
+                    if Epoch(sst.min_epoch) < min_epoch {
                         return false;
                     }
                 }

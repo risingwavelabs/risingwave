@@ -13,17 +13,68 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Display;
 
+use risingwave_common::bail;
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::window_frame::PbBound;
+use risingwave_pb::expr::{PbWindowFrame, PbWindowFunction};
 
 use super::WindowFuncKind;
-use crate::function::aggregate::AggArgs;
+use crate::agg::AggArgs;
+use crate::Result;
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone)]
+pub struct WindowFuncCall {
+    pub kind: WindowFuncKind,
+    pub args: AggArgs,
+    pub return_type: DataType,
+    pub frame: Frame,
+}
+
+impl WindowFuncCall {
+    pub fn from_protobuf(call: &PbWindowFunction) -> Result<Self> {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::from_protobuf(call.get_type()?)?,
+            args: AggArgs::from_protobuf(call.get_args())?,
+            return_type: DataType::from(call.get_return_type()?),
+            frame: Frame::from_protobuf(call.get_frame()?)?,
+        };
+        Ok(call)
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Frame {
     Rows(FrameBound<usize>, FrameBound<usize>),
     // Groups(FrameBound<usize>, FrameBound<usize>),
     // Range(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>),
+}
+
+impl Frame {
+    pub fn from_protobuf(frame: &PbWindowFrame) -> Result<Self> {
+        use risingwave_pb::expr::window_frame::PbType;
+        let frame = match frame.get_type()? {
+            PbType::Unspecified => bail!("unspecified type of `WindowFrame`"),
+            PbType::Rows => {
+                let start = FrameBound::from_protobuf(frame.get_start()?)?;
+                let end = FrameBound::from_protobuf(frame.get_end()?)?;
+                Frame::Rows(start, end)
+            }
+        };
+        Ok(frame)
+    }
+
+    pub fn to_protobuf(&self) -> PbWindowFrame {
+        use risingwave_pb::expr::window_frame::PbType;
+        match self {
+            Frame::Rows(start, end) => PbWindowFrame {
+                r#type: PbType::Rows as _,
+                start: Some(start.to_protobuf()),
+                end: Some(end.to_protobuf()),
+            },
+        }
+    }
 }
 
 impl Frame {
@@ -46,7 +97,18 @@ impl Frame {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+impl Display for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Frame::Rows(start, end) => {
+                write!(f, "ROWS BETWEEN {} AND {}", start, end)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum FrameBound<T> {
     UnboundedPreceding,
     Preceding(T),
@@ -86,6 +148,57 @@ impl<T: Ord> PartialOrd for FrameBound<T> {
 }
 
 impl FrameBound<usize> {
+    pub fn from_protobuf(bound: &PbBound) -> Result<Self> {
+        use risingwave_pb::expr::window_frame::bound::PbOffset;
+        use risingwave_pb::expr::window_frame::PbBoundType;
+
+        let offset = bound.get_offset()?;
+        let bound = match offset {
+            PbOffset::Integer(offset) => match bound.get_type()? {
+                PbBoundType::Unspecified => bail!("unspecified type of `FrameBound<usize>`"),
+                PbBoundType::UnboundedPreceding => Self::UnboundedPreceding,
+                PbBoundType::Preceding => Self::Preceding(*offset as usize),
+                PbBoundType::CurrentRow => Self::CurrentRow,
+                PbBoundType::Following => Self::Following(*offset as usize),
+                PbBoundType::UnboundedFollowing => Self::UnboundedFollowing,
+            },
+            PbOffset::Datum(_) => bail!("offset of `FrameBound<usize>` must be `Integer`"),
+        };
+        Ok(bound)
+    }
+
+    pub fn to_protobuf(&self) -> PbBound {
+        use risingwave_pb::expr::window_frame::bound::PbOffset;
+        use risingwave_pb::expr::window_frame::PbBoundType;
+
+        let (r#type, offset) = match self {
+            Self::UnboundedPreceding => (PbBoundType::UnboundedPreceding, PbOffset::Integer(0)),
+            Self::Preceding(offset) => (PbBoundType::Preceding, PbOffset::Integer(*offset as _)),
+            Self::CurrentRow => (PbBoundType::CurrentRow, PbOffset::Integer(0)),
+            Self::Following(offset) => (PbBoundType::Following, PbOffset::Integer(*offset as _)),
+            Self::UnboundedFollowing => (PbBoundType::UnboundedFollowing, PbOffset::Integer(0)),
+        };
+        PbBound {
+            r#type: r#type as _,
+            offset: Some(offset),
+        }
+    }
+}
+
+impl Display for FrameBound<usize> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FrameBound::UnboundedPreceding => write!(f, "UNBOUNDED PRECEDING")?,
+            FrameBound::Preceding(n) => write!(f, "{} PRECEDING", n)?,
+            FrameBound::CurrentRow => write!(f, "CURRENT ROW")?,
+            FrameBound::Following(n) => write!(f, "{} FOLLOWING", n)?,
+            FrameBound::UnboundedFollowing => write!(f, "UNBOUNDED FOLLOWING")?,
+        }
+        Ok(())
+    }
+}
+
+impl FrameBound<usize> {
     pub fn to_offset(&self) -> Option<isize> {
         match self {
             FrameBound::UnboundedPreceding | FrameBound::UnboundedFollowing => None,
@@ -94,12 +207,4 @@ impl FrameBound<usize> {
             FrameBound::Following(n) => Some(*n as isize),
         }
     }
-}
-
-#[derive(Clone)]
-pub struct WindowFuncCall {
-    pub kind: WindowFuncKind,
-    pub args: AggArgs,
-    pub return_type: DataType,
-    pub frame: Frame,
 }

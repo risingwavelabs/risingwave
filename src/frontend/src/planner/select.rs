@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -31,7 +32,7 @@ use crate::expr::{
 use crate::optimizer::plan_node::generic::{Agg, Project, ProjectBuilder};
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverAgg, LogicalProject, LogicalProjectSet,
+    LogicalAgg, LogicalApply, LogicalDedup, LogicalOverWindow, LogicalProject, LogicalProjectSet,
     LogicalTopN, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::optimizer::property::Order;
@@ -111,7 +112,7 @@ impl Planner {
             (root, select_items) = self.substitute_subqueries(root, select_items)?;
         }
         if select_items.iter().any(|e| e.has_window_function()) {
-            (root, select_items) = LogicalOverAgg::create(root, select_items)?;
+            (root, select_items) = LogicalOverWindow::create(root, select_items)?;
         }
 
         let original_select_items_len = select_items.len();
@@ -183,10 +184,10 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id"  {
+            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
-            }else {
+            } else {
                 (0..fields.len()).collect()
             };
             root = Agg::new(vec![], group_key, root).into();
@@ -204,7 +205,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star = Agg::new(vec![PlanAggCall::count_star()], vec![], input);
+        let count_star = Agg::new(vec![PlanAggCall::count_star()], FixedBitSet::new(), input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![

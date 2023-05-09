@@ -118,6 +118,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        sink_id: u64,
     ) -> Result<Self> {
         let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
@@ -146,6 +147,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let (request_sender, mut response) = client
             .start_sink_stream(
                 config.connector_type.clone(),
+                sink_id,
                 config.properties.clone(),
                 table_schema,
                 connector_params.sink_payload_format,

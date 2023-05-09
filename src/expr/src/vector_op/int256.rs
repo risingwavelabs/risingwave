@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::num256::Int256;
+use risingwave_common::types::Int256;
 use risingwave_expr_macro::function;
 
 use crate::ExprError::Parse;
@@ -51,7 +51,7 @@ pub fn hex_to_int256(s: &str) -> Result<Int256> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::num256::Int256;
+    use risingwave_common::types::Int256;
 
     use crate::vector_op::int256::hex_to_int256;
     use crate::ExprError::Parse;

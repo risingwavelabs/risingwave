@@ -140,12 +140,7 @@ mod tests {
         use risingwave_common::array::{ArrayBuilder, ListArrayBuilder, ListRef, ListValue};
         use risingwave_common::types::Scalar;
 
-        let mut builder = ListArrayBuilder::with_type(
-            4,
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
-        );
+        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
 
         // Add 4 ListValues to ArrayBuilder
         (1..=4).for_each(|i| {
@@ -159,9 +154,7 @@ mod tests {
 
         // Initialize mock executor
         let mut mock_executor = MockExecutor::new(Schema {
-            fields: vec![Field::unnamed(DataType::List {
-                datatype: Box::new(DataType::Int32),
-            })],
+            fields: vec![Field::unnamed(DataType::List(Box::new(DataType::Int32)))],
         });
         mock_executor.add(chunk);
 
@@ -175,10 +168,9 @@ mod tests {
 
         let fields = &filter_executor.schema().fields;
 
-        assert!(fields.iter().all(|f| f.data_type
-            == DataType::List {
-                datatype: Box::new(DataType::Int32)
-            }));
+        assert!(fields
+            .iter()
+            .all(|f| f.data_type == DataType::List(Box::new(DataType::Int32))));
 
         let mut stream = filter_executor.execute();
 

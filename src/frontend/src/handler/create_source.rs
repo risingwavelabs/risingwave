@@ -194,7 +194,6 @@ pub(crate) async fn resolve_source_schema(
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
     validate_compatibility(&source_schema, with_properties)?;
-    check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
     let is_kafka = is_kafka_connector(with_properties);
 
@@ -343,6 +342,78 @@ pub(crate) async fn resolve_source_schema(
                 ..Default::default()
             }
         }
+        SourceSchema::DebeziumMongoJson => {
+            if columns.is_empty() {
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                let pk_id = col_id_gen.generate("_id");
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: pk_id,
+                        name: "_id".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                });
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Jsonb,
+                        column_id: col_id_gen.generate("payload"),
+                        name: "payload".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                });
+                pk_column_ids.push(pk_id);
+                row_id_index.take();
+            }
+
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            'check_pk: {
+                if pk_column_ids.len() == 1 {
+                    let pk_column = columns
+                        .iter()
+                        .find(|col| col.column_id() == pk_column_ids[0])
+                        .unwrap();
+                    if pk_column.name() == "_id"
+                        && matches!(
+                            pk_column.data_type(),
+                            DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64
+                        )
+                    {
+                        break 'check_pk;
+                    }
+                }
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must named as `_id` with supported datatypes (Jsonb Varchar Int32 Int64)."
+                        .to_string(),
+                )));
+            }
+            let _ = columns
+                .iter()
+                .find(|col| col.name() == "payload" && matches!(col.data_type(), DataType::Jsonb))
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                "A column named as `payload` with supported datatypes Jsonb must exist in table."
+                    .to_string(),
+            ))
+                })?;
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumMongoJson as i32,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::CanalJson => {
             // return err if user has not specified a pk
@@ -460,7 +531,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -495,7 +566,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
                 PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
@@ -515,6 +586,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::Protobuf(_) => RowFormatType::Protobuf,
         SourceSchema::Json => RowFormatType::Json,
         SourceSchema::DebeziumJson => RowFormatType::DebeziumJson,
+        SourceSchema::DebeziumMongoJson => RowFormatType::DebeziumMongoJson,
         SourceSchema::DebeziumAvro(_) => RowFormatType::DebeziumAvro,
         SourceSchema::UpsertJson => RowFormatType::UpsertJson,
         SourceSchema::UpsertAvro(_) => RowFormatType::UpsertAvro,
@@ -580,7 +652,13 @@ fn validate_compatibility(
     Ok(())
 }
 
-fn check_nexmark_schema(
+/// Performs early stage checking in frontend to see if the schema of the given `columns` is
+/// compatible with the connector extracted from the properties. Currently this only works for
+/// `nexmark` connector since it's in chunk format.
+///
+/// One should only call this function after all properties of all columns are resolved, like
+/// generated column descriptors.
+pub(super) fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -610,9 +688,21 @@ fn check_nexmark_schema(
         }
     };
 
+    // Ignore the generated columns and map the index of row_id column.
+    let user_defined_columns = columns.iter().filter(|c| !c.is_generated());
+    let row_id_index = if let Some(index) = row_id_index {
+        let col_id = columns[index].column_id();
+        user_defined_columns
+            .clone()
+            .position(|c| c.column_id() == col_id)
+            .unwrap()
+            .into()
+    } else {
+        None
+    };
+
     let expected = get_event_data_types_with_names(event_type, row_id_index);
-    let user_defined = columns
-        .iter()
+    let user_defined = user_defined_columns
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
@@ -622,9 +712,9 @@ fn check_nexmark_schema(
         .collect_vec();
 
     if expected != user_defined {
+        let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
-            "The shema of the nexmark source must specify all columns in order, expected {:?}, but get {:?}",
-            expected, user_defined
+            "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
     Ok(())
@@ -686,6 +776,8 @@ pub async fn handle_create_source(
     assert!(watermark_descs.len() <= 1);
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+
+    check_source_schema(&with_properties, row_id_index, &columns)?;
 
     if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
         // TODO(yuhao): allow delete from a non append only source

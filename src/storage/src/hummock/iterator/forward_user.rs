@@ -93,7 +93,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             let epoch = full_key.epoch;
 
             // handle multi-version
-            if epoch <= self.min_epoch || epoch > self.read_epoch {
+            if epoch < self.min_epoch || epoch > self.read_epoch {
                 self.iterator.next().await?;
                 continue;
             }
@@ -103,7 +103,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        self.delete_range_iter.next_until(full_key.user_key);
+                        self.delete_range_iter.next_until(full_key.user_key).await?;
                         if self.delete_range_iter.current_epoch() >= epoch {
                             self.stats.skip_delete_key_count += 1;
                         } else {
@@ -170,12 +170,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     epoch: self.read_epoch,
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
-                self.delete_range_iter.seek(begin_key.as_ref());
+                self.delete_range_iter.seek(begin_key.as_ref()).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => {
                 self.iterator.rewind().await?;
-                self.delete_range_iter.rewind();
+                self.delete_range_iter.rewind().await?;
             }
         };
 
@@ -206,7 +206,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             epoch: self.read_epoch,
         };
         self.iterator.seek(full_key).await?;
-        self.delete_range_iter.seek(full_key.user_key);
+        self.delete_range_iter.seek(full_key.user_key).await?;
 
         // Handle multi-version
         self.last_key = FullKey::default();
@@ -891,13 +891,13 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let key_epoch = key.epoch;
-            assert!(key_epoch > min_epoch);
+            assert!(key_epoch >= min_epoch);
 
             i += 1;
             ui.next().await.unwrap();
         }
 
-        let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
+        let expect_count = TEST_KEYS_COUNT - min_epoch as usize + 1;
         assert_eq!(i, expect_count);
     }
 

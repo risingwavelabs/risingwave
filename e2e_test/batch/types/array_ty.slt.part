@@ -105,3 +105,138 @@ drop table t;
 # This is different from PostgreSQL, we may want to change this in the future.
 statement ok
 select array[array[1,2], array[3]];
+
+# Comments from Xiangjin:
+# In RisingWave, assume arr is of type T[][][]:
+#
+#    arr[x] is of type T[][]
+#    arr[x][y] is interpreted as (arr[x])[y], and of type T[]
+#    arr[x0:x1] is of type T[][][]
+#    arr[x0:x1][y0:y1] is interpreted as (arr[x0:x1])[y0:y1], and of type T[][][]
+#    arr[x0:x1][y] is interpreted as (arr[x0:x1])[y], and of type T[][]
+#
+# In PostgreSQL, a 3d array arr would still have type T[]:
+#
+#    arr[x] or arr[x][y] is of type T but value null due to insufficient number of indices
+#    arr[x][y][z] is of type T
+#    arr[x0:x1][y0:y1][z0:z1] is of type T[] and 3d
+#    arr[x0:x1] is interpreted as arr[x0:x1][:][:], and of type T[] 3d
+#    arr[x0:x1][y] is interpreted as arr[x0:x1][1:y][:], and of type T[] 3d
+
+# array range access
+query T
+select array[1,NULL,2][-1:134124523];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[3:1];
+----
+{}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523];
+----
+{{1},{2},{3}}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523][1];
+----
+{1}
+
+query T
+select array[array[1],array[2],array[3]][-21432315:134124523][1:2];
+----
+{{1},{2}}
+
+query I
+select array[array[1],array[2],array[3]][-21432315:134124523][1][1];
+----
+1
+
+query T
+select (array[1,NULL,2])[:3];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[:2];
+----
+{1,NULL}
+
+query T
+select (array[1,NULL,2])[:1];
+----
+{1}
+
+query T
+select (array[1,NULL,2])[:999];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[:0];
+----
+{}
+
+query T
+select (array[1,NULL,2])[:-1];
+----
+{}
+
+query T
+select (array[1,NULL,2])[-1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[0:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[1:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[2:];
+----
+{NULL,2}
+
+query T
+select (array[1,NULL,2])[3:];
+----
+{2}
+
+query T
+select (array[1,NULL,2])[4:];
+----
+{}
+
+query T
+select (array[1,NULL,2])[5:];
+----
+{}
+
+query T
+select (array[1,NULL,2])[:];
+----
+{1,NULL,2}
+
+query T
+select (array[1,NULL,2])[5:-1];
+----
+{}
+
+query T
+select (array[1,NULL,2])[2:1];
+----
+{}
+
+# index larger than int32
+statement error cannot cast type "bigint" to "integer" in Implicit context
+select (array[1,NULL,2])[1:4294967296];
+
+statement error cannot cast type "bigint" to "integer" in Implicit context
+select (array[1,NULL,2])[4294967296:3];

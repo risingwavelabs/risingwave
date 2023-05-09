@@ -18,8 +18,7 @@ use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
 use risingwave_common::catalog::row_id_column_name;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, Datum, ScalarImpl, Timestamp};
+use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType, Timestamp};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
 

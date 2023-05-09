@@ -22,7 +22,7 @@
     //     "cargo",
     //     "check",
     //     "-p",
-    //     "risingwave_simulation_scale", // Replace with your crate
+    //     "risingwave_simulation",
     //     "--tests",
     //     "--message-format=json",
     // ],

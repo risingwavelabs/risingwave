@@ -35,7 +35,7 @@ use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
     OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
+use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -93,6 +93,12 @@ pub struct TestCase {
     /// Create MV fragments plan
     pub stream_dist_plan: Option<String>,
 
+    /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`
+    pub eowc_stream_plan: Option<String>,
+
+    /// Create MV fragments plan with EOWC semantics
+    pub eowc_stream_dist_plan: Option<String>,
+
     // TODO: uncomment for Proto JSON of generated stream plan
     //  was: "stream_plan_proto": Option<String>
     // pub plan_graph_proto: Option<String>,
@@ -113,6 +119,9 @@ pub struct TestCase {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// Error of `.gen_stream_plan()` with `emit_on_window_close = true`
+    pub eowc_stream_error: Option<String>,
 
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateConnector>,
@@ -165,6 +174,12 @@ pub struct TestCaseResult {
     /// Create MV fragments plan
     pub stream_dist_plan: Option<String>,
 
+    /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`
+    pub eowc_stream_plan: Option<String>,
+
+    /// Create MV fragments plan with EOWC semantics
+    pub eowc_stream_dist_plan: Option<String>,
+
     /// Error of binder
     pub binder_error: Option<String>,
 
@@ -182,6 +197,9 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// Error of `.gen_stream_plan()` with `emit_on_window_close = true`
+    pub eowc_stream_error: Option<String>,
 
     /// Error of `.gen_sink_plan()`
     pub sink_error: Option<String>,
@@ -202,7 +220,8 @@ impl TestCaseResult {
         if original_test_case.planner_error.is_none() && let Some(ref err) = self.planner_error {
             return Err(anyhow!("unexpected planner error: {}", err));
         }
-        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error {
+        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error
+        {
             return Err(anyhow!("unexpected optimizer error: {}", err));
         }
 
@@ -219,6 +238,9 @@ impl TestCaseResult {
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
+            stream_dist_plan: self.stream_dist_plan,
+            eowc_stream_plan: self.eowc_stream_plan,
+            eowc_stream_dist_plan: self.eowc_stream_dist_plan,
             sink_plan: self.sink_plan,
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
@@ -226,11 +248,11 @@ impl TestCaseResult {
             batch_error: self.batch_error,
             batch_local_error: self.batch_local_error,
             stream_error: self.stream_error,
+            eowc_stream_error: self.eowc_stream_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
             create_table_with_connector: original_test_case.create_table_with_connector.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
-            stream_dist_plan: self.stream_dist_plan,
         };
         Ok(case)
     }
@@ -436,9 +458,11 @@ impl TestCase {
                     name,
                     query,
                     columns,
+                    emit_mode,
                     ..
                 } => {
-                    create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
+                    create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode)
+                        .await?;
                 }
                 Statement::CreateView {
                     materialized: false,
@@ -623,11 +647,40 @@ impl TestCase {
             }
         }
 
-        'stream: {
-            if self.stream_plan.is_some()
-                || self.stream_error.is_some()
-                || self.stream_dist_plan.is_some()
-            {
+        {
+            // stream
+            for (
+                emit_mode,
+                plan_str,
+                ret_plan_str,
+                dist_plan_str,
+                ret_dist_plan_str,
+                error_str,
+                ret_error_str,
+            ) in [
+                (
+                    EmitMode::Immediately,
+                    self.stream_plan.as_ref(),
+                    &mut ret.stream_plan,
+                    self.stream_dist_plan.as_ref(),
+                    &mut ret.stream_dist_plan,
+                    self.stream_error.as_ref(),
+                    &mut ret.stream_error,
+                ),
+                (
+                    EmitMode::OnWindowClose,
+                    self.eowc_stream_plan.as_ref(),
+                    &mut ret.eowc_stream_plan,
+                    self.eowc_stream_dist_plan.as_ref(),
+                    &mut ret.eowc_stream_dist_plan,
+                    self.eowc_stream_error.as_ref(),
+                    &mut ret.eowc_stream_error,
+                ),
+            ] {
+                if plan_str.is_none() && dist_plan_str.is_none() && error_str.is_none() {
+                    continue;
+                }
+
                 let q = if let Statement::Query(q) = stmt {
                     q.as_ref().clone()
                 } else {
@@ -636,27 +689,28 @@ impl TestCase {
 
                 let stream_plan = match create_mv::gen_create_mv_plan(
                     &session,
-                    context,
+                    context.clone(),
                     q,
                     ObjectName(vec!["test".into()]),
                     vec![],
+                    Some(emit_mode),
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
-                        ret.stream_error = Some(err.to_string());
-                        break 'stream;
+                        *ret_error_str = Some(err.to_string());
+                        continue;
                     }
                 };
 
                 // Only generate stream_plan if it is specified in test case
-                if self.stream_plan.is_some() {
-                    ret.stream_plan = Some(explain_plan(&stream_plan));
+                if plan_str.is_some() {
+                    *ret_plan_str = Some(explain_plan(&stream_plan));
                 }
 
                 // Only generate stream_dist_plan if it is specified in test case
-                if self.stream_dist_plan.is_some() {
+                if dist_plan_str.is_some() {
                     let graph = build_graph(stream_plan);
-                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false));
+                    *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
             }
         }
@@ -707,6 +761,12 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.batch_local_error,
         &actual.batch_local_error,
     )?;
+    check_err("stream", &expected.stream_error, &actual.stream_error)?;
+    check_err(
+        "eowc_stream",
+        &expected.eowc_stream_error,
+        &actual.eowc_stream_error,
+    )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
     check_option_plan_eq(
         "optimized_logical_plan_for_batch",
@@ -729,6 +789,16 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         "stream_dist_plan",
         &expected.stream_dist_plan,
         &actual.stream_dist_plan,
+    )?;
+    check_option_plan_eq(
+        "eowc_stream_plan",
+        &expected.eowc_stream_plan,
+        &actual.eowc_stream_plan,
+    )?;
+    check_option_plan_eq(
+        "eowc_stream_dist_plan",
+        &expected.eowc_stream_dist_plan,
+        &actual.eowc_stream_dist_plan,
     )?;
     check_option_plan_eq(
         "batch_plan_proto",

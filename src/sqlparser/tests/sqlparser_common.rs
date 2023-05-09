@@ -3529,7 +3529,7 @@ fn parse_create_index() {
     ];
 
     let include_columns = vec![Ident::new_unchecked("other")];
-    let distributed_columns = vec![Ident::new_unchecked("name")];
+    let distributed_columns = vec![Expr::Identifier(Ident::new_unchecked("name"))];
     match verified_stmt(sql) {
         Statement::CreateIndex {
             name,
