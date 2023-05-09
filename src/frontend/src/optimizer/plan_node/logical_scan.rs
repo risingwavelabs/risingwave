@@ -28,9 +28,7 @@ use super::{
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{
-    CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
-};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,

@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
 
-use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
