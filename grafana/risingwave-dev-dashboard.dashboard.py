@@ -180,33 +180,37 @@ def section_compaction(outer_panels):
 
                 panels.timeseries_count(
                     "Compaction Task L0 Select Level Count",
-                    "Count of L0 compact task.",
+                    "Avg l0 select_level_count of the compact task, and categorize it according to different cg, levels and task types",
                     [
                         panels.target(
                             f"sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
-                            "cg{{group}}@{{type}}",
+                            "avg cg{{group}}@{{type}}",
                         ),
                     ],
                 ),
 
                 panels.timeseries_count(
                     "Compaction Task File Count",
-                    "File count of compact task.",
+                    "Avg file count of the compact task, and categorize it according to different cg, levels and task types",
                     [
                         panels.target(
                             f"sum by(le, group, type)(rate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
-                            "cg{{group}}@{{type}}",
+                            "avg cg{{group}}@{{type}}",
                         ),
                     ],
                 ),
 
                 panels.timeseries_bytes(
-                    "Compaction Task Size",
-                    "Size of compact task.",
+                    "Compaction Task Size Distribution",
+                    "The distribution of the compact task size triggered, including p90 and max. and categorize it according to different cg, levels and task types.",
                     [
-                        panels.target(
-                            f"sum by(le, group, type)(rate({metric('storage_compact_task_size_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_size_count')}[$__rate_interval]))",
-                            "cg{{group}}@{{type}}",
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('storage_compact_task_size_bucket')}[$__rate_interval])) by (le, group, type))",
+                                f"p{legend}" +
+                                " - cg{{group}}@{{type}}",
+                                ),
+                            [90, "max"],
                         ),
                     ],
                 ),
@@ -407,21 +411,6 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
                             "avg_epoch_count - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_bytes(
-                    "Compact Task Size Distribution",
-                    "the size of each compact task",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_compact_task_size_bucket')}[$__rate_interval])) by (le, job, group, level))",
-                                f"p{legend}" +
-                                " - {{group}} @ {{level}}",
-                                ),
-                            [90, "max"],
                         ),
                     ],
                 ),

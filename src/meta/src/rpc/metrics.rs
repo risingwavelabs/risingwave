@@ -450,13 +450,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let compact_task_size = register_histogram_vec_with_registry!(
+        let opts = histogram_opts!(
             "storage_compact_task_size",
-            "size of compact task",
-            &["group", "type"],
-            registry
-        )
-        .unwrap();
+            "Total size of compact that have been issued to state store",
+            exponential_buckets(4096.0, 1.6, 28).unwrap()
+        );
+
+        let compact_task_size =
+            register_histogram_vec_with_registry!(opts, &["group", "type"], registry).unwrap();
 
         let compact_task_file_count = register_histogram_vec_with_registry!(
             "storage_compact_task_file_count",

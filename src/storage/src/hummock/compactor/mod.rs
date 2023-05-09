@@ -155,11 +155,6 @@ impl Compactor {
             .compact_read_sstn_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(target_table_infos.len() as u64);
-        context
-            .compactor_metrics
-            .compact_task_size
-            .with_label_values(&[&group_label, next_level_label.as_str()])
-            .observe((select_size + target_level_read_bytes) as f64);
 
         let timer = context
             .compactor_metrics
