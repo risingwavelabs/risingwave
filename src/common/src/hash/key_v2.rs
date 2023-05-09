@@ -22,12 +22,12 @@ use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
-use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk};
+use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_type_pairs;
 use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
-use crate::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToDatumRef};
+use crate::types::{DataType, Datum, ScalarImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
 
@@ -109,13 +109,9 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         }
     }
 
-    fn serialize(&mut self, datum: impl ToDatumRef) {
-        match datum.to_datum_ref() {
-            Some(scalar) => {
-                dispatch_all_variants!(scalar, ScalarRefImpl, scalar, {
-                    HashKeySer::serialize_into(scalar, &mut self.buffer);
-                })
-            }
+    fn serialize<'a>(&mut self, datum: Option<impl HashKeySer<'a>>) {
+        match datum {
+            Some(scalar) => HashKeySer::serialize_into(scalar, &mut self.buffer),
             None => self.null_bitmap.set_true(self.idx),
         }
         self.idx += 1;
@@ -264,9 +260,11 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         for &i in column_indices {
             let array = data_chunk.column_at(i).array_ref();
 
-            for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
-                serializer.serialize(scalar);
-            }
+            dispatch_all_variants!(array, ArrayImpl, array, {
+                for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
+                    serializer.serialize(scalar);
+                }
+            });
         }
 
         let hash_keys = serializers.into_iter().map(|s| s.finish()).collect();

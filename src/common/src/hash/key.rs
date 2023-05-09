@@ -357,6 +357,19 @@ impl HashKeyDe for i64 {
     }
 }
 
+impl<'a> HashKeySer<'a> for Serial {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.as_row_id().to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for Serial {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_i64_ne().into()
+    }
+}
+
 impl HashKeySer<'_> for F32 {
     fn serialize_into(self, mut buf: impl BufMut) {
         let b = self.normalized().0.to_ne_bytes();
@@ -461,9 +474,6 @@ impl HashKeyDe for Box<[u8]> {}
 
 impl<'a> HashKeySer<'a> for JsonbRef<'a> {}
 impl HashKeyDe for JsonbVal {}
-
-impl<'a> HashKeySer<'a> for Serial {}
-impl HashKeyDe for Serial {}
 
 impl<'a> HashKeySer<'a> for StructRef<'a> {}
 impl HashKeyDe for StructValue {}
