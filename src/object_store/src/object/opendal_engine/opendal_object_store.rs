@@ -285,6 +285,8 @@ mod tests {
         let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
+        let err = obj_store.metadata("/not_exist").await.unwrap_err();
+        assert!(err.is_object_not_found_error());
         let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
         obj_store.delete(&path).await.unwrap();
