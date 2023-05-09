@@ -233,7 +233,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 target_splits.iter().map(|split| split.id()).collect();
 
             let dropped_splits = cache
-                .drain_filter(|split| target_split_ids.contains(&split.id()))
+                .drain_filter(|split| !target_split_ids.contains(&split.id()))
                 .collect_vec();
 
             if !dropped_splits.is_empty() {
