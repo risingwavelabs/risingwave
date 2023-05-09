@@ -21,18 +21,15 @@ use educe::Educe;
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
-use super::dispatcher::{hash_key_size, HashKeySize};
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
 use crate::array::{ArrayBuilderImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_type_pairs;
-use crate::hash::HashKeySerDe;
+use crate::hash::{HashKeyDe, HashKeySer};
 use crate::row::OwnedRow;
-use crate::types::{DataType, Datum, ScalarRefImpl, ToDatumRef, ToOwnedDatum};
+use crate::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToDatumRef};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
-use crate::util::memcmp_encoding;
-use crate::util::sort_util::OrderType;
 
 pub trait KeyStorage: 'static {
     type Key: AsRef<[u8]> + EstimateSize + Clone + Send + Sync + 'static;
@@ -112,26 +109,12 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         }
     }
 
-    fn serialize(&mut self, data_type: &DataType, datum: impl ToDatumRef) {
+    fn serialize(&mut self, datum: impl ToDatumRef) {
         match datum.to_datum_ref() {
             Some(scalar) => {
-                match hash_key_size(data_type) {
-                    HashKeySize::Fixed(_) => {
-                        dispatch_all_variants!(scalar, ScalarRefImpl, scalar, {
-                            let bytes = HashKeySerDe::serialize(scalar);
-                            self.buffer.put_slice(bytes.as_ref());
-                        })
-                    }
-                    HashKeySize::Variable => {
-                        let mut serializer = memcomparable::Serializer::new(&mut self.buffer);
-                        memcmp_encoding::serialize_datum(
-                            Some(scalar),
-                            OrderType::ascending(),
-                            &mut serializer,
-                        )
-                        .expect("ser fail"); // TODO: error handling
-                    }
-                }
+                dispatch_all_variants!(scalar, ScalarRefImpl, scalar, {
+                    HashKeySer::serialize_into(scalar, &mut self.buffer);
+                })
             }
             None => self.null_bitmap.set_true(self.idx),
         }
@@ -166,35 +149,19 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
 
     fn deserialize(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
         let datum = if !self.null_bitmap.contains(self.idx) {
-            match hash_key_size(data_type) {
-                HashKeySize::Fixed(_) => {
-                    macro_rules! deserialize {
-                        ($( { $DataType:ident, $PhysicalType:ident }),*) => {
-                            match data_type {
-                                $(
-                                    DataType::$DataType { .. } => ScalarRefImpl::$PhysicalType(
-                                        HashKeySerDe::deserialize(&mut self.key)
-                                    ),
-                                )*
-                            }
-                        }
+            macro_rules! deserialize {
+                ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                    match data_type {
+                        $(
+                            DataType::$DataType { .. } => ScalarImpl::$PhysicalType(
+                                HashKeyDe::deserialize(data_type, &mut self.key)
+                            ),
+                        )*
                     }
-
-                    Some(for_all_type_pairs! { deserialize }).to_owned_datum()
-                }
-                HashKeySize::Variable => {
-                    let mut deserializer = memcomparable::Deserializer::new(&mut self.key);
-                    let datum = memcmp_encoding::deserialize_datum(
-                        data_type,
-                        OrderType::ascending(),
-                        &mut deserializer,
-                    )
-                    .expect("de fail"); // TODO: error handling
-
-                    debug_assert!(datum.is_some());
-                    datum
                 }
             }
+
+            Some(for_all_type_pairs! { deserialize })
         } else {
             None
         };
@@ -296,10 +263,9 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
 
         for &i in column_indices {
             let array = data_chunk.column_at(i).array_ref();
-            let data_type = array.data_type();
 
             for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
-                serializer.serialize(&data_type, scalar);
+                serializer.serialize(scalar);
             }
         }
 

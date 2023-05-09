@@ -25,21 +25,24 @@ use std::convert::TryInto;
 use std::default::Default;
 use std::fmt::Debug;
 use std::hash::{BuildHasher, Hasher};
-use std::io::Read;
 use std::marker::PhantomData;
 
+use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListRef, StructRef};
+use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    Date, Decimal, Int256Ref, JsonbRef, ScalarRef, Serial, Time, Timestamp, F32, F64,
+    DataType, Date, Decimal, Int256, Int256Ref, JsonbRef, JsonbVal, Scalar, ScalarRef, Serial,
+    Time, Timestamp, F32, F64,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
+use crate::util::memcmp_encoding;
+use crate::util::sort_util::OrderType;
 
 /// This is determined by the stack based data structure we use,
 /// `StackNullBitmap`, which can store 64 bits at most.
@@ -276,264 +279,197 @@ impl BuildHasher for PrecomputedBuildHasher {
 /// Note that this trait is more like a marker suggesting that types that implement it can be
 /// encoded into the hash key. The actual encoding/decoding method is not limited to
 /// [`HashKeySerDe`]'s fixed-size implementation.
-pub trait HashKeySerDe<'a>: ScalarRef<'a> {
-    type S: AsRef<[u8]>;
-    fn serialize(self) -> Self::S;
-    fn deserialize<R: Read>(source: &mut R) -> Self;
-
-    fn read_fixed_size_bytes<R: Read, const N: usize>(source: &mut R) -> [u8; N] {
-        let mut buffer: [u8; N] = [0u8; N];
-        source
-            .read_exact(&mut buffer)
-            .expect("Failed to read fixed size serialized key!");
-        buffer
+pub trait HashKeySer<'a>: ScalarRef<'a> {
+    fn serialize_into(self, buf: impl BufMut) {
+        let mut serializer = memcomparable::Serializer::new(buf);
+        memcmp_encoding::serialize_datum(
+            Some(self.into()),
+            OrderType::ascending(),
+            &mut serializer,
+        )
+        .expect("ser fail"); // TODO: error handling
     }
 }
 
-impl HashKeySerDe<'_> for bool {
-    type S = [u8; 1];
+pub trait HashKeyDe: Scalar {
+    fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
+        let mut deserializer = memcomparable::Deserializer::new(buf);
+        let scalar = memcmp_encoding::deserialize_datum(
+            data_type,
+            OrderType::ascending(),
+            &mut deserializer,
+        )
+        .expect("de fail") // TODO: error handling
+        .unwrap();
 
-    fn serialize(self) -> Self::S {
-        if self {
-            [1u8; 1]
-        } else {
-            [0u8; 1]
-        }
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 1>(source);
-        value[0] == 1u8
+        scalar.try_into().unwrap()
     }
 }
 
-impl HashKeySerDe<'_> for i16 {
-    type S = [u8; 2];
-
-    fn serialize(self) -> Self::S {
-        self.to_ne_bytes()
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 2>(source);
-        Self::from_ne_bytes(value)
+impl HashKeySer<'_> for bool {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        buf.put_u8(if self { 1 } else { 0 });
     }
 }
 
-impl HashKeySerDe<'_> for i32 {
-    type S = [u8; 4];
-
-    fn serialize(self) -> Self::S {
-        self.to_ne_bytes()
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 4>(source);
-        Self::from_ne_bytes(value)
+impl HashKeyDe for bool {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_u8() == 1
     }
 }
 
-impl HashKeySerDe<'_> for i64 {
-    type S = [u8; 8];
-
-    fn serialize(self) -> Self::S {
-        self.to_ne_bytes()
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 8>(source);
-        Self::from_ne_bytes(value)
+impl HashKeySer<'_> for i16 {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.to_ne_bytes();
+        buf.put_slice(b.as_ref());
     }
 }
 
-impl HashKeySerDe<'_> for F32 {
-    type S = [u8; 4];
-
-    fn serialize(self) -> Self::S {
-        self.normalized().0.to_ne_bytes()
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 4>(source);
-        f32::from_ne_bytes(value).into()
+impl HashKeyDe for i16 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_i16_ne()
     }
 }
 
-impl HashKeySerDe<'_> for F64 {
-    type S = [u8; 8];
-
-    fn serialize(self) -> Self::S {
-        self.normalized().0.to_ne_bytes()
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 8>(source);
-        f64::from_ne_bytes(value).into()
+impl HashKeySer<'_> for i32 {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.to_ne_bytes();
+        buf.put_slice(b.as_ref());
     }
 }
 
-impl HashKeySerDe<'_> for Decimal {
-    type S = [u8; 16];
-
-    fn serialize(self) -> Self::S {
-        Decimal::unordered_serialize(&self.normalize())
+impl HashKeyDe for i32 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_i32_ne()
     }
+}
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
+impl HashKeySer<'_> for i64 {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for i64 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_i64_ne()
+    }
+}
+
+impl HashKeySer<'_> for F32 {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.normalized().0.to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for F32 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_f32_ne().into()
+    }
+}
+
+impl HashKeySer<'_> for F64 {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.normalized().0.to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for F64 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        buf.get_f64_ne().into()
+    }
+}
+
+impl HashKeySer<'_> for Decimal {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = Decimal::unordered_serialize(&self.normalize());
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for Decimal {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let mut value = [0; 16];
+        buf.copy_to_slice(&mut value);
         Self::unordered_deserialize(value)
     }
 }
 
-impl<'a> HashKeySerDe<'a> for &'a str {
-    type S = Vec<u8>;
-
-    /// This should never be called
-    fn serialize(self) -> Self::S {
-        panic!("Should not serialize str for hash!")
-    }
-
-    /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        panic!("Should not serialize str for hash!")
-    }
-}
-
-impl<'a> HashKeySerDe<'a> for Int256Ref<'a> {
-    type S = [u8; 32];
-
-    fn serialize(self) -> Self::S {
-        unimplemented!("HashKeySerDe cannot be implemented for non-primitive types")
-    }
-
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        unimplemented!("HashKeySerDe cannot be implemented for non-primitive types")
-    }
-}
-
-/// Same as str.
-impl<'a> HashKeySerDe<'a> for &'a [u8] {
-    type S = Vec<u8>;
-
-    /// This should never be called
-    fn serialize(self) -> Self::S {
-        panic!("Should not serialize bytes for hash!")
-    }
-
-    /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        panic!("Should not serialize bytes for hash!")
-    }
-}
-
-impl HashKeySerDe<'_> for Date {
-    type S = [u8; 4];
-
-    fn serialize(self) -> Self::S {
+impl HashKeySer<'_> for Date {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let mut ret = [0; 4];
         ret[0..4].copy_from_slice(&self.0.num_days_from_ce().to_ne_bytes());
 
-        ret
+        buf.put_slice(ret.as_ref());
     }
+}
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 4>(source);
-        let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
+impl HashKeyDe for Date {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let days = buf.get_i32_ne();
         Date::with_days(days).unwrap()
     }
 }
 
-impl HashKeySerDe<'_> for Timestamp {
-    type S = [u8; 12];
-
-    fn serialize(self) -> Self::S {
+impl HashKeySer<'_> for Timestamp {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let mut ret = [0; 12];
         ret[0..8].copy_from_slice(&self.0.timestamp().to_ne_bytes());
         ret[8..12].copy_from_slice(&self.0.timestamp_subsec_nanos().to_ne_bytes());
 
-        ret
+        buf.put_slice(ret.as_ref());
     }
+}
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 12>(source);
-        let secs = i64::from_ne_bytes(value[0..8].try_into().unwrap());
-        let nsecs = u32::from_ne_bytes(value[8..12].try_into().unwrap());
+impl HashKeyDe for Timestamp {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let secs = buf.get_i64_ne();
+        let nsecs = buf.get_u32_ne();
         Timestamp::with_secs_nsecs(secs, nsecs).unwrap()
     }
 }
 
-impl HashKeySerDe<'_> for Time {
-    type S = [u8; 8];
-
-    fn serialize(self) -> Self::S {
+impl HashKeySer<'_> for Time {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let mut ret = [0; 8];
         ret[0..4].copy_from_slice(&self.0.num_seconds_from_midnight().to_ne_bytes());
         ret[4..8].copy_from_slice(&self.0.nanosecond().to_ne_bytes());
 
-        ret
+        buf.put_slice(ret.as_ref());
     }
+}
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 8>(source);
-        let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
-        let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
+impl HashKeyDe for Time {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let secs = buf.get_u32_ne();
+        let nano = buf.get_u32_ne();
         Time::with_secs_nano(secs, nano).unwrap()
     }
 }
 
-impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
-    type S = Vec<u8>;
+impl<'a> HashKeySer<'a> for Int256Ref<'a> {}
+impl HashKeyDe for Int256 {}
 
-    /// This should never be called
-    fn serialize(self) -> Self::S {
-        todo!()
-    }
+impl<'a> HashKeySer<'a> for &'a str {}
+impl HashKeyDe for Box<str> {}
 
-    /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        todo!()
-    }
-}
+impl<'a> HashKeySer<'a> for &'a [u8] {}
+impl HashKeyDe for Box<[u8]> {}
 
-impl<'a> HashKeySerDe<'a> for Serial {
-    type S = <i64 as HashKeySerDe<'a>>::S;
+impl<'a> HashKeySer<'a> for JsonbRef<'a> {}
+impl HashKeyDe for JsonbVal {}
 
-    fn serialize(self) -> Self::S {
-        self.into_inner().serialize()
-    }
+impl<'a> HashKeySer<'a> for Serial {}
+impl HashKeyDe for Serial {}
 
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        i64::deserialize(source).into()
-    }
-}
+impl<'a> HashKeySer<'a> for StructRef<'a> {}
+impl HashKeyDe for StructValue {}
 
-impl<'a> HashKeySerDe<'a> for StructRef<'a> {
-    type S = Vec<u8>;
-
-    /// This should never be called
-    fn serialize(self) -> Self::S {
-        todo!()
-    }
-
-    /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        todo!()
-    }
-}
-
-impl<'a> HashKeySerDe<'a> for ListRef<'a> {
-    type S = Vec<u8>;
-
-    /// This should never be called
-    fn serialize(self) -> Self::S {
-        todo!()
-    }
-
-    /// This should never be called
-    fn deserialize<R: Read>(_source: &mut R) -> Self {
-        todo!()
-    }
-}
+impl<'a> HashKeySer<'a> for ListRef<'a> {}
+impl HashKeyDe for ListValue {}
 
 #[cfg(test)]
 mod tests {
