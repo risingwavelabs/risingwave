@@ -756,10 +756,8 @@ impl ExprImpl {
                 | ExprType::CastWithTimeZone) => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
                     if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
-                        && rhs
-                            .as_literal()
-                            .and_then(|literal| literal.get_data().as_ref())
-                            .map_or(true, |time_zone| *time_zone != String::from("UTC").into())
+                        && !(f.return_type() == DataType::Timestamptz
+                            && lhs.return_type() == DataType::Timestamp)
                     {
                         false
                     } else {
@@ -770,10 +768,7 @@ impl ExprImpl {
                     let inputs = f.inputs();
                     f.return_type() == DataType::Timestamptz
                         && inputs.len() == 1
-                        && matches!(
-                            inputs[0].return_type(),
-                            DataType::Timestamp | DataType::Timestamptz
-                        )
+                        && inputs[0].return_type() == DataType::Timestamp
                         && inputs[0].is_now_offset()
                 }
                 _ => false,

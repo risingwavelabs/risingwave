@@ -508,10 +508,18 @@ impl WatermarkAnalyzer {
                 }
                 (WatermarkDerivation::Watermark(idx), WatermarkDerivation::Constant) => {
                     if matches!(ty, ExprType::AtTimeZone | ExprType::CastWithTimeZone)
+                        && !(func_call.return_type() == DataType::Timestamptz
+                            && func_call.inputs()[0].return_type() == DataType::Timestamp)
                         && func_call.inputs()[1]
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
-                            .map_or(true, |time_zone| *time_zone != String::from("UTC").into())
+                            .map_or(true, |time_zone| {
+                                if let ScalarImpl::Utf8(time_zone_str) = time_zone {
+                                    !time_zone_str.eq_ignore_ascii_case("UTC")
+                                } else {
+                                    true
+                                }
+                            })
                     {
                         WatermarkDerivation::None
                     } else {
@@ -552,10 +560,7 @@ impl WatermarkAnalyzer {
                 let inputs = func_call.inputs();
                 if func_call.return_type() == DataType::Timestamptz
                     && inputs.len() == 1
-                    && matches!(
-                        inputs[0].return_type(),
-                        DataType::Timestamp | DataType::Timestamptz
-                    )
+                    && inputs[0].return_type() == DataType::Timestamp
                 {
                     self.visit_unary_op(func_call.inputs())
                 } else {
