@@ -308,8 +308,9 @@ impl<A: Array> CompactableArray for A {
 /// name, array type, builder type }` tuples. Refer to the following implementations as examples.
 #[macro_export]
 macro_rules! for_all_variants {
-    ($macro:ident) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
+            $($x, )*
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
@@ -331,6 +332,21 @@ macro_rules! for_all_variants {
         }
     };
 }
+
+macro_rules! do_dispatch {
+    ($impl:expr, $type:ident, $inner:ident, $body:tt, $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $impl {
+            $( $type::$variant_name($inner) => $body, )*
+        }
+    };
+}
+
+macro_rules! dispatch_all_variants {
+    ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
+        for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }
+    }}
+}
+
 
 /// Define `ArrayImpl` with macro.
 macro_rules! array_impl_enum {

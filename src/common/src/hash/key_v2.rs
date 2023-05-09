@@ -1,21 +1,21 @@
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
 use educe::Educe;
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 use super::{NullBitmap, XxHash64HashCode};
-use crate::array::{ArrayResult, DataChunk};
+use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::row::OwnedRow;
-use crate::types::{DataType, ScalarRef, ScalarRefImpl};
+use crate::types::{DataType, Datum, ScalarRef, ScalarRefImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
 use crate::util::sort_util::OrderType;
-use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 pub trait Buffer: 'static {
     type BufMut<'a>: BufMut
@@ -69,63 +69,99 @@ impl Buffer for Vec<u8> {
     }
 }
 
-pub trait HashKeySerde: for<'a> ScalarRef<'a> {
-    fn serialize_into(self, buf: impl BufMut);
-
-    fn deserialize(
-        data_type: &DataType,
-        buf: impl Buf,
-    ) -> ArrayResult<<Self as ScalarRef<'_>>::ScalarType>;
+struct HashKeySerializer<B: Buffer, N: NullBitmap> {
+    buffer: B,
+    null_bitmap: N,
+    idx: usize,
+    hash_code: XxHash64HashCode,
 }
 
-pub trait ValueEncodingHashKeySerde: HashKeySerde {}
-
-impl<T: ValueEncodingHashKeySerde> HashKeySerde for T {
-    fn serialize_into(self, mut buf: impl BufMut) {
-        let scalar: ScalarRefImpl<'_> = self.into();
-        serialize_datum_into(Some(scalar), &mut buf);
+impl<B: Buffer, N: NullBitmap> HashKeySerializer<B, N> {
+    fn new(buffer: B, hash_code: XxHash64HashCode) -> Self {
+        Self {
+            buffer,
+            null_bitmap: N::empty(),
+            idx: 0,
+            hash_code,
+        }
     }
 
-    fn deserialize(
-        data_type: &DataType,
-        buf: impl Buf,
-    ) -> ArrayResult<<Self as ScalarRef<'_>>::ScalarType> {
-        let scalar_impl = deserialize_datum(buf, data_type).expect("de fail").unwrap(); // TODO: error handling
-        Ok(scalar_impl.try_into().unwrap())
+    fn push<'a>(&mut self, scalar: Option<impl ScalarRef<'a>>) {
+        match scalar {
+            Some(scalar) => {
+                let scalar: ScalarRefImpl<'_> = scalar.into();
+                let mut serializer = memcomparable::Serializer::new(self.buffer.buf_mut());
+                memcmp_encoding::serialize_datum(
+                    Some(scalar),
+                    OrderType::ascending(),
+                    &mut serializer,
+                )
+                .expect("ser fail"); // TODO: error handling
+            }
+            None => self.null_bitmap.set_true(self.idx),
+        }
+        self.idx += 1;
+    }
+
+    fn finish(self) -> GenericHashKey<B, N> {
+        GenericHashKey {
+            hash_code: self.hash_code,
+            key: self.buffer.seal(),
+            null_bitmap: self.null_bitmap,
+        }
     }
 }
 
-pub trait MemCmpHashKeySerde: HashKeySerde {}
+struct HashKeyDeserializer<'a, B: Buffer, N: NullBitmap> {
+    key: &'a [u8],
+    null_bitmap: &'a N,
+    idx: usize,
+    _phantom: PhantomData<&'a B::Sealed>,
+}
 
-impl<T: MemCmpHashKeySerde> HashKeySerde for T {
-    fn serialize_into(self, buf: impl BufMut) {
-        let scalar: ScalarRefImpl<'_> = self.into();
-        let mut serializer = memcomparable::Serializer::new(buf);
-        memcmp_encoding::serialize_datum(Some(scalar), OrderType::ascending(), &mut serializer);
+impl<'a, B: Buffer, N: NullBitmap> HashKeyDeserializer<'a, B, N> {
+    fn new(key: &'a B::Sealed, null_bitmap: &'a N) -> Self {
+        Self {
+            key: key.as_ref(),
+            null_bitmap,
+            idx: 0,
+            _phantom: PhantomData,
+        }
     }
 
-    fn deserialize(
-        data_type: &DataType,
-        buf: impl Buf,
-    ) -> ArrayResult<<Self as ScalarRef<'_>>::ScalarType> {
-        let mut deserializer = memcomparable::Deserializer::new(buf);
-        let scalar_impl = memcmp_encoding::deserialize_datum(
-            data_type,
-            OrderType::ascending(),
-            &mut deserializer,
-        )
-        .expect("de fail")
-        .unwrap(); // TODO: error handling
-        Ok(scalar_impl.try_into().unwrap())
+    fn deserialize(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
+        let datum = if self.null_bitmap.contains(self.idx) {
+            let mut deserializer = memcomparable::Deserializer::new(&mut self.key);
+            let datum = memcmp_encoding::deserialize_datum(
+                data_type,
+                OrderType::ascending(),
+                &mut deserializer,
+            )
+            .expect("de fail"); // TODO: error handling
+
+            debug_assert!(datum.is_some());
+            datum
+        } else {
+            None
+        };
+
+        self.idx += 1;
+        Ok(datum)
     }
 }
 
 pub trait HashKey: EstimateSize + Clone + Debug + Hash + Eq + Sized + 'static {
     type NullBitmap: NullBitmap;
 
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self>;
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
+
+    fn deserialize_to_builders(
+        &self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()>;
 
     fn null_bitmap(&self) -> &Self::NullBitmap;
 }
@@ -173,43 +209,73 @@ impl<B: Buffer, N: NullBitmap> EstimateSize for GenericHashKey<B, N> {
 impl<B: Buffer, N: NullBitmap> HashKey for GenericHashKey<B, N> {
     type NullBitmap = N;
 
-    fn build(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
+    fn build_many(column_indices: &[usize], data_chunk: &DataChunk) -> Vec<Self> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
-        let buffers = {
+        let mut serializers = {
             let mut estimated_key_sizes = None;
 
-            (0..data_chunk.capacity())
-                .map(|i| {
-                    B::with_capacity(|| {
-                        let estimated_key_sizes = estimated_key_sizes.get_or_insert_with(|| {
-                            data_chunk.compute_key_sizes_by_columns(column_indices)
-                        });
-                        estimated_key_sizes[i]
-                    })
+            let buffers = (0..data_chunk.capacity()).map(|i| {
+                B::with_capacity(|| {
+                    let estimated_key_sizes = estimated_key_sizes.get_or_insert_with(|| {
+                        data_chunk.compute_key_sizes_by_columns(column_indices)
+                    });
+                    estimated_key_sizes[i]
                 })
+            });
+
+            hash_codes
+                .into_iter()
+                .zip_eq_fast(buffers)
+                .map(|(hash_code, buffer)| HashKeySerializer::new(buffer, hash_code))
                 .collect_vec()
         };
 
-        // TODO: serialize and null bitmap
+        for &i in column_indices {
+            let array_impl = data_chunk.column_at(i).array_ref();
 
-        hash_codes
-            .into_iter()
-            .zip_eq_fast(buffers)
-            .map(|(hash_code, buffer)| GenericHashKey {
-                hash_code,
-                key: buffer.seal(),
-                null_bitmap: N::empty(),
-            })
-            .collect()
+            dispatch_all_variants!(array_impl, ArrayImpl, array, {
+                for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
+                    serializer.push(scalar);
+                }
+            });
+        }
+
+        serializers.into_iter().map(|s| s.finish()).collect()
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
-        let _ = data_types;
-        todo!()
+        let mut deserializer = HashKeyDeserializer::<B, N>::new(&self.key, &self.null_bitmap);
+        let mut row = Vec::with_capacity(data_types.len());
+
+        for data_type in data_types {
+            let datum = deserializer.deserialize(data_type)?;
+            row.push(datum);
+        }
+
+        Ok(OwnedRow::new(row))
+    }
+
+    fn deserialize_to_builders(
+        &self,
+        array_builders: &mut [ArrayBuilderImpl],
+        data_types: &[DataType],
+    ) -> ArrayResult<()> {
+        let mut deserializer = HashKeyDeserializer::<B, N>::new(&self.key, &self.null_bitmap);
+
+        for (data_type, array_builder) in data_types.iter().zip_eq_fast(array_builders.iter_mut()) {
+            let datum = deserializer.deserialize(data_type)?;
+            array_builder.append_datum(datum);
+        }
+
+        Ok(())
     }
 
     fn null_bitmap(&self) -> &Self::NullBitmap {
         &self.null_bitmap
     }
 }
+
+pub type FixedSizeKey<const N: usize, NB> = GenericHashKey<[u8; N], NB>;
+
+pub type SerializedKey<NB> = GenericHashKey<Box<[u8]>, NB>;
