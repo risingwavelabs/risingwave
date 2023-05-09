@@ -293,7 +293,7 @@ where
                 .into_iter()
                 .filter(|node| {
                     !info.actor_map.contains_key(&node.id)
-                        && !cached_plan.worker_plan.contains_key(&node.id)
+                        && !cached_plan.worker_plan.values().contains(&node.id)
                 })
                 .collect_vec();
 
@@ -341,6 +341,12 @@ where
             }
             new_plan.parallel_unit_plan.insert(*from, to);
         }
+
+        assert!(
+            new_plan.worker_plan.values().all_unique(),
+            "target workers must be unique: {:?}",
+            new_plan.worker_plan
+        );
 
         new_plan.insert(self.env.meta_store()).await?;
         Ok(new_plan)

@@ -28,7 +28,7 @@ pub const MIGRATION_PLAN_KEY: &[u8] = &[
 type WorkerId = u32;
 type ParallelUnitId = u32;
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct MigrationPlan {
     pub worker_plan: HashMap<WorkerId, WorkerId>,
     pub parallel_unit_plan: HashMap<ParallelUnitId, ParallelUnit>,
