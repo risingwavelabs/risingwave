@@ -127,7 +127,7 @@ impl ObjectStore for OpendalObjectStore {
         let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
-            Some(t) => t.unix_timestamp() as f64,
+            Some(t) => t.timestamp() as f64,
             None => 0_f64,
         };
 
@@ -153,11 +153,12 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.list(prefix).await?;
+        let mut object_lister = self.op.scan(prefix).await?;
         let mut metadata_list = vec![];
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
-            let key = prefix.to_string();
+
+            let key = object.path().to_string();
 
             let om = self
                 .op
@@ -165,7 +166,7 @@ impl ObjectStore for OpendalObjectStore {
                 .await?;
 
             let last_modified = match om.last_modified() {
-                Some(t) => t.unix_timestamp() as f64,
+                Some(t) => t.timestamp() as f64,
                 None => 0_f64,
             };
 
@@ -291,24 +292,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_memory_delete_objects() {
+    async fn test_memory_delete_objects_and_list_object() {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
         let store = OpendalObjectStore::new_memory_engine().unwrap();
-        store.upload("abc", block1).await.unwrap();
-        store.upload("/klm", block2).await.unwrap();
+        store.upload("abc", Bytes::from("123456")).await.unwrap();
+        store.upload("prefix/abc", block1).await.unwrap();
+        store.upload("prefix/xyz", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 2);
-
-        let str_list = [
-            String::from("abc"),
-            String::from("klm"),
-            String::from("xyz"),
-        ];
+        assert_eq!(store.list("").await.unwrap().len(), 3);
+        assert_eq!(store.list("prefix/").await.unwrap().len(), 2);
+        let str_list = [String::from("prefix/abc"), String::from("prefix/xyz")];
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 0);
+        assert!(store.read("prefix/abc/", None).await.is_err());
+        assert!(store.read("prefix/xyz/", None).await.is_err());
+        assert_eq!(store.list("").await.unwrap().len(), 1);
+        assert_eq!(store.list("prefix/").await.unwrap().len(), 0);
     }
 
     #[tokio::test]
