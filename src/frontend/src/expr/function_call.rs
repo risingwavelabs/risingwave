@@ -227,7 +227,7 @@ impl FunctionCall {
 
                 if return_type != DataType::Boolean {
                     return Err(ErrorCode::BindError(format!(
-                        "op ANY/ALL (array) requires operator to yield boolean, but got {:?}",
+                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
                         return_type
                     ))
                     .into());
@@ -372,7 +372,7 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
             }
-            ExprType::Now | ExprType::Proctime => {
+            ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)
             }
             _ => {

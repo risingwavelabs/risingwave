@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use clap::ValueEnum;
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -40,11 +40,17 @@ pub const NO_OVERRIDE: Option<NoOverride> = None;
 /// error messages.
 ///
 /// The current implementation will log warnings if there are unrecognized fields.
-#[derive(Derivative)]
-#[derivative(Clone, Debug, Default)]
+#[derive(Educe)]
+#[educe(Clone, Default)]
 pub struct Unrecognized<T: 'static> {
     inner: BTreeMap<String, Value>,
     _marker: std::marker::PhantomData<&'static T>,
+}
+
+impl<T> std::fmt::Debug for Unrecognized<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
 }
 
 impl<T> Unrecognized<T> {
@@ -114,8 +120,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
-#[derivative(Debug)]
+#[derive(Educe, Clone, Serialize, Deserialize, Default)]
+#[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -133,7 +139,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    #[derivative(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     pub system: SystemConfig,
 
     #[serde(flatten)]
@@ -216,11 +222,20 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::periodic_split_compact_group_interval_sec")]
+    pub periodic_split_compact_group_interval_sec: u64,
+
     /// Compute compactor_task_limit for machines with different hardware.Currently cpu is used as
     /// the main consideration,and is adjusted by max_compactor_task_multiplier, calculated as
     /// compactor_task_limit = core_num * max_compactor_task_multiplier;
     #[serde(default = "default::meta::max_compactor_task_multiplier")]
     pub max_compactor_task_multiplier: u32,
+
+    #[serde(default = "default::meta::move_table_size_limit")]
+    pub move_table_size_limit: u64,
+
+    #[serde(default = "default::meta::split_group_size_limit")]
+    pub split_group_size_limit: u64,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -452,6 +467,10 @@ pub struct StreamingDeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub exchange_batched_permits: usize,
+
+    /// The maximum number of concurrent barriers in an exchange channel.
+    #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
+    pub exchange_concurrent_barriers: usize,
 }
 
 /// The subsections `[batch.developer]`.
@@ -585,8 +604,20 @@ mod default {
             1800 // 30mi
         }
 
+        pub fn periodic_split_compact_group_interval_sec() -> u64 {
+            180 // 5mi
+        }
+
         pub fn max_compactor_task_multiplier() -> u32 {
             2
+        }
+
+        pub fn move_table_size_limit() -> u64 {
+            5 * 1024 * 1024 * 1024 // 5GB
+        }
+
+        pub fn split_group_size_limit() -> u64 {
+            20 * 1024 * 1024 * 1024 // 20GB
         }
     }
 
@@ -757,7 +788,7 @@ mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
-            1 << 10
+            10
         }
 
         pub fn stream_chunk_size() -> usize {
@@ -770,6 +801,10 @@ mod default {
 
         pub fn stream_exchange_batched_permits() -> usize {
             1024
+        }
+
+        pub fn stream_exchange_concurrent_barriers() -> usize {
+            2
         }
     }
 
@@ -861,5 +896,29 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// This test ensures that `config/example.toml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-example-config` to update it if this
+    /// test fails.
+    #[test]
+    fn test_example_up_to_date() {
+        let actual = {
+            let content = include_str!("../../config/example.toml");
+            toml::from_str::<toml::Value>(content).expect("parse example.toml failed")
+        };
+        let expected =
+            toml::Value::try_from(RwConfig::default()).expect("serialize default config failed");
+
+        // Compare the `Value` representation instead of string for normalization.
+        pretty_assertions::assert_eq!(
+            actual, expected,
+            "\n`config/example.toml` is not up-to-date with the default values specified in `config.rs`.\nPlease run `./risedev generate-example-config` to update it."
+        );
     }
 }

@@ -147,22 +147,30 @@ pub fn extract_from_interval(unit: &str, interval: Interval) -> Result<Decimal> 
 pub fn date_part_from_date(unit: &str, date: Date) -> Result<F64> {
     // date_part of date manually cast to timestamp
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/catalog/system_functions.sql#L123
-    extract_from_timestamp(unit, date.into()).map(|d| d.into())
+    extract_from_timestamp(unit, date.into())?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 #[function("date_part(varchar, time) -> float64")]
 pub fn date_part_from_time(unit: &str, time: Time) -> Result<F64> {
-    extract_from_time(unit, time).map(|d| d.into())
+    extract_from_time(unit, time)?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 #[function("date_part(varchar, timestamp) -> float64")]
 pub fn date_part_from_timestamp(unit: &str, timestamp: Timestamp) -> Result<F64> {
-    extract_from_timestamp(unit, timestamp).map(|d| d.into())
+    extract_from_timestamp(unit, timestamp)?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 #[function("date_part(varchar, interval) -> float64")]
 pub fn date_part_from_interval(unit: &str, interval: Interval) -> Result<F64> {
-    extract_from_interval(unit, interval).map(|d| d.into())
+    extract_from_interval(unit, interval)?
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 fn invalid_unit(name: &'static str, unit: &str) -> ExprError {

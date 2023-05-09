@@ -21,7 +21,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
-opendal = "0.30"
+opendal = "0.33.2"
 prometheus = { version = "0.13", features = ["process"] }
 random-string = "1.0"
 risingwave_common = { path = "../common" }
@@ -31,6 +31,7 @@ thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
+tokio-retry = "0.3"
 tracing = "0.1"
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...
 #

@@ -3,6 +3,11 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
+    echo "--- Run sqlsmith frontend tests"
+     NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test" 2> >(tee);
+fi
+
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     while getopts 'p:' opt; do
         case ${opt} in
@@ -25,9 +30,6 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     echo "--- Download artifacts"
     buildkite-agent artifact download risingwave_simulation .
     chmod +x ./risingwave_simulation
-
-    echo "--- Run sqlsmith tests"
-    NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);
 
     echo "--- Download sqlsmith e2e bin"
     buildkite-agent artifact download sqlsmith-"$profile" target/debug/

@@ -89,7 +89,7 @@ pub fn row_id_column_desc() -> ColumnDesc {
         name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
-        generated_column: None,
+        generated_or_default_column: None,
     }
 }
 

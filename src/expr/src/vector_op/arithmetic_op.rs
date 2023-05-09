@@ -16,8 +16,10 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Float, Signed, Zero};
-use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use risingwave_common::types::{
+    CheckedAdd, Date, Decimal, FloatExt, Interval, Time, Timestamp, F64,
+};
 use risingwave_expr_macro::function;
 use rust_decimal::MathematicalOps;
 
@@ -95,7 +97,6 @@ where
 
 #[function("modulus(*int, *int) -> auto")]
 #[function("modulus(*numeric, *numeric) -> auto")]
-#[function("modulus(*float, *float) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -408,9 +409,11 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::num256::{Int256, Int256Ref};
+    use num_traits::Float;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
+    use risingwave_common::types::{
+        Date, Decimal, Int256, Int256Ref, Interval, Scalar, Timestamp, F32, F64,
+    };
 
     use super::*;
 
@@ -452,26 +455,6 @@ mod tests {
         assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
         assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
-        assert_eq!(
-            general_add::<Decimal, f32, Decimal>(dec("1.0"), -1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_sub::<Decimal, f32, Decimal>(dec("1.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_div::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_mul::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
-        assert_eq!(
-            general_mod::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
-            dec("0.0")
-        );
         assert!(general_add::<i32, F32, F64>(-1i32, 1f32.into())
             .unwrap()
             .is_zero());

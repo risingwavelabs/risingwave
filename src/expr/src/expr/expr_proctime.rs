@@ -15,10 +15,11 @@
 use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::util::epoch;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use super::{Expression, ValueImpl, CONTEXT};
+use super::{Expression, ValueImpl};
 use crate::{bail, ensure, ExprError, Result};
 
 #[derive(Debug)]
@@ -45,6 +46,13 @@ impl<'a> TryFrom<&'a ExprNode> for ProcTimeExpression {
     }
 }
 
+/// Get the processing time in Timestamptz scalar from the task-local epoch.
+fn proc_time_from_epoch() -> Result<ScalarImpl> {
+    epoch::task_local::curr_epoch()
+        .map(|e| e.as_scalar())
+        .ok_or(ExprError::Context)
+}
+
 #[async_trait::async_trait]
 impl Expression for ProcTimeExpression {
     fn return_type(&self) -> DataType {
@@ -52,24 +60,14 @@ impl Expression for ProcTimeExpression {
     }
 
     async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        let proctime = CONTEXT
-            .try_with(|context| context.get_proctime())
-            .map_err(|_| ExprError::Context)?;
-        let datum = Some(ScalarImpl::Int64(proctime as i64));
-
-        Ok(ValueImpl::Scalar {
-            value: datum,
+        proc_time_from_epoch().map(|s| ValueImpl::Scalar {
+            value: Some(s),
             capacity: input.capacity(),
         })
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
-        let proctime = CONTEXT
-            .try_with(|context| context.get_proctime())
-            .map_err(|_| ExprError::Context)?;
-        let datum = Some(ScalarImpl::Int64(proctime as i64));
-
-        Ok(datum)
+        proc_time_from_epoch().map(Some)
     }
 }
 
@@ -77,25 +75,26 @@ impl Expression for ProcTimeExpression {
 mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarRefImpl;
-    use risingwave_common::util::epoch::Epoch;
+    use risingwave_common::util::epoch::{Epoch, EpochPair};
 
     use super::*;
-    use crate::expr::{ExprContext, CONTEXT};
 
     #[tokio::test]
     async fn test_expr_proctime() {
         let proctime_expr = ProcTimeExpression::new();
-        let epoch = Epoch::now();
-        let time_us = epoch.as_unix_millis() * 1000;
-        let time_datum = Some(ScalarRefImpl::Int64(time_us as i64));
-        let context = ExprContext::new(epoch);
+        let curr_epoch = Epoch::now();
+        let epoch = EpochPair {
+            curr: curr_epoch.0,
+            prev: 0,
+        };
         let chunk = DataChunk::new_dummy(3);
 
-        let array = CONTEXT
-            .scope(context, proctime_expr.eval(&chunk))
+        let array = epoch::task_local::scope(epoch, proctime_expr.eval(&chunk))
             .await
             .unwrap();
 
+        let time_us = curr_epoch.as_unix_millis() * 1000;
+        let time_datum = Some(ScalarRefImpl::Int64(time_us as i64));
         for datum_ref in array.iter() {
             assert_eq!(datum_ref, time_datum)
         }

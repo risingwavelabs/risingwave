@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
+use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::compaction_utils::estimate_task_memory_capacity;
@@ -31,8 +31,8 @@ use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, Comp
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::CompactionDeleteRangesBuilder;
 use crate::hummock::{
-    create_tombstones_to_represent_monotonic_deletes, CachePolicy, CompactionDeleteRanges,
-    CompressionAlgorithm, HummockResult, SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, CompactionDeleteRanges, CompressionAlgorithm, HummockResult,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -70,6 +70,8 @@ impl CompactorRunner {
                 watermark: task.watermark,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 task_type: task.task_type(),
+                is_target_l0_or_lbase: task.target_level == 0
+                    || task.target_level == task.base_level,
                 split_by_table: task.split_by_state_table,
             },
         );
@@ -115,19 +117,19 @@ impl CompactorRunner {
             if level.table_infos.is_empty() {
                 continue;
             }
-
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let mut range_tombstone_list = create_tombstones_to_represent_monotonic_deletes(
-                    &table.value().meta.monotonic_tombstone_events,
-                );
-                range_tombstone_list.retain(|tombstone| {
-                    !filter.should_delete(FullKey::from_user_key(
-                        tombstone.start_user_key.as_ref(),
-                        tombstone.sequence,
-                    ))
+                let mut range_tombstone_list =
+                    table.value().meta.monotonic_tombstone_events.clone();
+                range_tombstone_list.iter_mut().for_each(|tombstone| {
+                    if filter.should_delete(FullKey::from_user_key(
+                        tombstone.event_key.left_user_key.as_ref(),
+                        tombstone.new_epoch,
+                    )) {
+                        tombstone.new_epoch = HummockEpoch::MAX;
+                    }
                 });
-                builder.add_tombstone(range_tombstone_list);
+                builder.add_delete_events(range_tombstone_list);
             }
         }
         let aggregator = builder.build_for_compaction(compact_task.gc_delete_keys);
@@ -149,9 +151,14 @@ impl CompactorRunner {
                 let tables = level
                     .table_infos
                     .iter()
-                    .filter(|info| {
-                        let key_range = KeyRange::from(info.key_range.as_ref().unwrap());
-                        self.key_range.full_key_overlap(&key_range)
+                    .filter(|table_info| {
+                        let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
+                        let table_ids = &table_info.table_ids;
+                        let exist_table = table_ids.iter().any(|table_id| {
+                            self.compact_task.existing_table_ids.contains(table_id)
+                        });
+
+                        self.key_range.full_key_overlap(&key_range) && exist_table
                     })
                     .cloned()
                     .collect_vec();
@@ -164,7 +171,12 @@ impl CompactorRunner {
             } else {
                 for table_info in &level.table_infos {
                     let key_range = KeyRange::from(table_info.key_range.as_ref().unwrap());
-                    if !self.key_range.full_key_overlap(&key_range) {
+                    let table_ids = &table_info.table_ids;
+                    let exist_table = table_ids
+                        .iter()
+                        .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
+
+                    if !self.key_range.full_key_overlap(&key_range) || !exist_table {
                         continue;
                     }
                     table_iters.push(ConcatSstableIterator::new(
@@ -200,8 +212,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         let kv_pairs = vec![];
         let range_tombstones = vec![
-            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
-            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(1),
+                b"abc".to_vec(),
+                b"cde".to_vec(),
+                1,
+            ),
+            DeleteRangeTombstone::new_for_test(
+                TableId::new(2),
+                b"abc".to_vec(),
+                b"def".to_vec(),
+                1,
+            ),
         ];
         let sstable_info = gen_test_sstable_with_range_tombstone(
             default_builder_opt_for_test(),
@@ -232,12 +254,12 @@ mod tests {
         .await
         .unwrap();
         let ret = collector.get_tombstone_between(
-            &UserKey::<Bytes>::default().as_ref(),
-            &UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
+            UserKey::<Bytes>::default().as_ref(),
         );
         assert_eq!(
             ret,
-            create_monotonic_events(&vec![range_tombstones[1].clone()])
+            create_monotonic_events(vec![range_tombstones[1].clone()])
         );
     }
 }

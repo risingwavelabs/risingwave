@@ -191,9 +191,7 @@ impl RegexpMatchExpression {
 #[async_trait::async_trait]
 impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -201,9 +199,7 @@ impl Expression for RegexpMatchExpression {
         let text_arr: &Utf8Array = text_arr.as_ref().into();
         let mut output = ListArrayBuilder::with_type(
             input.capacity(),
-            DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            },
+            DataType::List(Box::new(DataType::Varchar)),
         );
 
         for (text, vis) in text_arr.iter().zip_eq_fast(input.vis().iter()) {

@@ -27,10 +27,10 @@ use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{

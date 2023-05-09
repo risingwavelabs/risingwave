@@ -131,6 +131,7 @@ impl SharedContext {
                 let (tx, rx) = permit::channel(
                     self.config.developer.exchange_initial_permits,
                     self.config.developer.exchange_batched_permits,
+                    self.config.developer.exchange_concurrent_barriers,
                 );
                 (Some(tx), Some(rx))
             })

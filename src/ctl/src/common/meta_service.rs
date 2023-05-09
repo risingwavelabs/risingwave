@@ -18,6 +18,7 @@ use anyhow::{bail, Result};
 use risingwave_common::config::MetaConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_rpc_client::MetaClient;
 
 pub struct MetaServiceOpts {
@@ -58,7 +59,7 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
             &self.meta_addr,
             WorkerType::RiseCtl,
             &get_new_ctl_identity(),
-            0,
+            Property::default(),
             &MetaConfig::default(),
         )
         .await?;

@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::top_n_cache::CacheKey;
@@ -67,6 +67,8 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
+    fn update_epoch(&mut self, _epoch: u64) {}
+
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
     /// Handle incoming watermarks
@@ -123,6 +125,7 @@ where
 
         #[for_await]
         for msg in input {
+            self.inner.evict();
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
@@ -138,7 +141,8 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-                    self.inner.evict();
+
+                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };

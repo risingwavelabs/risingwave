@@ -25,7 +25,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -310,7 +310,7 @@ where
         // Index worker node, used to create actor
         let worker_nodes: HashMap<WorkerId, WorkerNode> = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(worker_node::State::Running))
+            .list_active_streaming_compute_nodes()
             .await
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
@@ -323,7 +323,7 @@ where
         // Associating ParallelUnit with Worker
         let parallel_unit_id_to_worker_id: BTreeMap<_, _> = self
             .cluster_manager
-            .list_active_parallel_units()
+            .list_active_streaming_parallel_units()
             .await
             .into_iter()
             .map(|parallel_unit| {

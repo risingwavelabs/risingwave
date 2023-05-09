@@ -15,8 +15,10 @@
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common_proc_macro::EstimateSize;
 use smallvec::SmallVec;
 
 use super::minput_agg_impl::MInputAggregator;
@@ -91,7 +93,7 @@ impl<'a> Iterator for StateCacheInputBatch<'a> {
 }
 
 /// Trait that defines the interface of state table cache for stateful streaming agg.
-pub trait AggStateCache {
+pub trait AggStateCache: EstimateSize {
     /// Check if the cache is synced with state table.
     fn is_synced(&self) -> bool;
 
@@ -120,12 +122,14 @@ pub trait AggStateCacheFiller {
 
 /// A generic implementation of [`AggStateCache`] that combines a [`StateCache`] and an
 /// [`MInputAggregator`].
+#[derive(EstimateSize)]
 pub struct GenericAggStateCache<C, A>
 where
     C: StateCache<Key = CacheKey, Value = A::Value>,
     A: MInputAggregator,
 {
     state_cache: C,
+    #[estimate_size(ignore)]
     aggregator: A,
 }
 

@@ -18,9 +18,9 @@ package com.risingwave.connector;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.risingwave.connector.api.sink.CommonSinkConfig;
+import com.risingwave.connector.common.S3Config;
 
-public class IcebergSinkConfig extends CommonSinkConfig {
+public class IcebergSinkConfig extends S3Config {
     private String sinkType;
 
     private String warehousePath;
@@ -28,15 +28,6 @@ public class IcebergSinkConfig extends CommonSinkConfig {
     private String databaseName;
 
     private String tableName;
-
-    @JsonProperty(value = "s3.access.key")
-    private String s3AccessKey;
-
-    @JsonProperty(value = "s3.secret.key")
-    private String s3SecretKey;
-
-    @JsonProperty(value = "s3.endpoint")
-    private String s3Endpoint;
 
     @JsonProperty(value = "force_append_only")
     private Boolean forceAppendOnly;
@@ -60,10 +51,6 @@ public class IcebergSinkConfig extends CommonSinkConfig {
         return sinkType;
     }
 
-    public void setSinkType(String sinkType) {
-        this.sinkType = sinkType;
-    }
-
     public String getWarehousePath() {
         return warehousePath;
     }
@@ -76,51 +63,7 @@ public class IcebergSinkConfig extends CommonSinkConfig {
         return databaseName;
     }
 
-    public void setDatabaseName(String databaseName) {
-        this.databaseName = databaseName;
-    }
-
     public String getTableName() {
         return tableName;
-    }
-
-    public void setTableName(String tableName) {
-        this.tableName = tableName;
-    }
-
-    public String getS3AccessKey() {
-        return s3AccessKey;
-    }
-
-    public void setS3AccessKey(String s3AccessKey) {
-        this.s3AccessKey = s3AccessKey;
-    }
-
-    public String getS3SecretKey() {
-        return s3SecretKey;
-    }
-
-    public void setS3SecretKey(String s3SecretKey) {
-        this.s3SecretKey = s3SecretKey;
-    }
-
-    public String getS3Endpoint() {
-        return s3Endpoint;
-    }
-
-    public void setS3Endpoint(String s3Endpoint) {
-        this.s3Endpoint = s3Endpoint;
-    }
-
-    public boolean hasS3Endpoint() {
-        return s3Endpoint != null;
-    }
-
-    public boolean hasS3AccessKey() {
-        return s3AccessKey != null;
-    }
-
-    public boolean hasS3SecretKey() {
-        return s3SecretKey != null;
     }
 }

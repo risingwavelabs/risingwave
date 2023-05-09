@@ -14,12 +14,11 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
+use risingwave_expr::function::window::WindowFuncKind;
 
 use super::Rule;
-use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
-use crate::optimizer::plan_node::{
-    LogicalFilter, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
-};
+use crate::expr::{ExprImpl, ExprType};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::PlanRef;
@@ -31,29 +30,39 @@ use crate::PlanRef;
 ///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
 /// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
-pub struct OverAggToTopNRule;
+pub struct OverWindowToTopNRule;
 
-impl OverAggToTopNRule {
+impl OverWindowToTopNRule {
     pub fn create() -> Box<dyn Rule> {
-        Box::new(OverAggToTopNRule)
+        Box::new(OverWindowToTopNRule)
     }
 }
 
-impl Rule for OverAggToTopNRule {
+impl Rule for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         let plan = project.input();
         let filter = plan.as_logical_filter()?;
         let plan = filter.input();
-        // The filter is directly on top of the over agg after predicate pushdown.
-        let over_agg = plan.as_logical_over_agg()?;
-        let input = over_agg.input();
+        // The filter is directly on top of the over window after predicate pushdown.
+        let over_window = plan.as_logical_over_window()?;
 
-        let over_agg_len = over_agg.schema().len();
-        let window_func_pos = over_agg_len - 1;
+        if over_window.window_functions().len() != 1 {
+            // Queries with multiple window function calls are not supported yet.
+            return None;
+        }
+
+        let f = &over_window.window_functions()[0];
+        if !f.kind.is_rank() {
+            // Only rank functions can be converted to TopN.
+            return None;
+        }
+
+        let output_len = over_window.schema().len();
+        let window_func_pos = output_len - 1;
 
         if project.exprs().iter().any(|expr| {
-            expr.collect_input_refs(over_agg_len)
+            expr.collect_input_refs(output_len)
                 .contains(window_func_pos)
         }) {
             // TopN with ranking output is not supported yet.
@@ -61,21 +70,17 @@ impl Rule for OverAggToTopNRule {
             return None;
         }
 
-        let PlanWindowFunction {
-            function_type,
-            return_type: _,
-            partition_by,
-            order_by,
-        } = &over_agg.window_function;
-        let with_ties = match function_type {
-            WindowFunctionType::RowNumber => false,
-            WindowFunctionType::Rank => true,
-            WindowFunctionType::DenseRank => unreachable!("Not implemented. Banned in planner."),
+        let with_ties = match f.kind {
+            // Only `ROW_NUMBER` and `RANK` can be optimized to TopN now.
+            WindowFuncKind::RowNumber => false,
+            WindowFuncKind::Rank => true,
+            WindowFuncKind::DenseRank => unimplemented!("should be banned in planner"),
+            _ => unreachable!("window functions other than rank functions should not reach here"),
         };
 
         let (rank_pred, other_pred) = {
             let predicate = filter.predicate();
-            let mut rank_col = FixedBitSet::with_capacity(over_agg_len);
+            let mut rank_col = FixedBitSet::with_capacity(output_len);
             rank_col.set(window_func_pos, true);
             predicate.clone().split_disjoint(&rank_col)
         };
@@ -88,14 +93,14 @@ impl Rule for OverAggToTopNRule {
         }
 
         let topn = LogicalTopN::with_group(
-            input,
+            over_window.input(),
             limit,
             offset,
             with_ties,
             Order {
-                column_orders: order_by.to_vec(),
+                column_orders: f.order_by.to_vec(),
             },
-            partition_by.iter().map(|i| i.index).collect(),
+            f.partition_by.iter().map(|i| i.index).collect(),
         )
         .into();
         let filter = LogicalFilter::create(topn, other_pred);
@@ -115,11 +120,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     for cond in rank_preds {
         if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             match cmp {
                 ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
@@ -130,11 +131,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             }
         } else if let Some((input_ref, v)) = cond.as_eq_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v
-                .cast_implicit(DataType::Int64)
-                .ok()?
-                .eval_row_const()
-                .ok()??;
+            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
                 tracing::error!(

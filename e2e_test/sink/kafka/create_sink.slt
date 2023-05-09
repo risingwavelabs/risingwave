@@ -10,6 +10,50 @@ create table t_kafka (
     v_timestamp timestamp
 );
 
+# Test create sink with connection
+# Create a mock connection
+statement ok
+create connection mock with (
+    type = 'privatelink',
+    provider = 'mock',
+);
+
+# Refer to a non-existant connection
+statement error
+create sink si_kafka_append_only_conn from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-append-only',
+    type = 'append-only',
+    force_append_only = 'true',
+    connection.name = 'nonexist',
+);
+
+# Create sink with connection
+statement ok
+create sink si_kafka_append_only_conn from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-append-only',
+    type = 'append-only',
+    force_append_only = 'true',
+    connection.name = 'mock',
+);
+
+# Try to drop connection mock, which is in use
+statement error
+drop connection mock;
+
+# Drop sink
+statement ok
+drop sink si_kafka_append_only_conn;
+
+# Drop connection
+statement ok
+drop connection mock;
+
+# Connection test clean-up finished
+
 statement error sink cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
@@ -51,6 +95,35 @@ create sink si_kafka_debezium from t_kafka with (
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id',
+);
+
+statement error primary key not defined for debezium kafka sink
+create sink debezium_without_pk from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+);
+
+statement ok
+create sink multiple_pk from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+    primary_key = 'id,v_varchar'
+);
+
+statement ok
+drop sink multiple_pk;
+
+statement error Sink primary key column not found: invalid.
+create sink invalid_pk_column from t_kafka with (
+    connector = 'kafka',
+    properties.bootstrap.server = '127.0.0.1:29092',
+    topic = 'test-rw-sink-debezium',
+    type = 'debezium',
+    primary_key = 'id,invalid'
 );
 
 statement ok

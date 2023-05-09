@@ -67,6 +67,7 @@ impl StreamTableScan {
             &logical,
             distribution,
             logical.table_desc.append_only,
+            false,
             logical.watermark_columns(),
         );
         Self {

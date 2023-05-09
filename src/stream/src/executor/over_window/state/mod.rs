@@ -19,7 +19,7 @@ use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
 use super::MemcmpEncoded;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 mod buffer;
 
@@ -120,6 +120,15 @@ pub(super) fn create_window_state(
 
     use WindowFuncKind::*;
     Ok(match call.kind {
+        RowNumber | Rank | DenseRank => {
+            return Err(StreamExecutorError::not_implemented(
+                format!(
+                    "window function `{}` is only supported by converting to TopN",
+                    call.kind
+                ),
+                None,
+            ))
+        }
         Lag => Box::new(lag::LagState::new(&call.frame)),
         Lead => Box::new(lead::LeadState::new(&call.frame)),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),

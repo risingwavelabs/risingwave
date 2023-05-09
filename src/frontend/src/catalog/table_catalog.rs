@@ -24,8 +24,11 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 
 use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use crate::expr::ExprImpl;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -390,6 +393,26 @@ impl TableCatalog {
             .map(|c| c.name())
     }
 
+    pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_default())
+            .map(|(i, c)| {
+                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                    c.column_desc.generated_or_default_column.clone().unwrap()
+                {
+                    (
+                        i,
+                        ExprImpl::from_expr_proto(&expr.unwrap())
+                            .expect("expr in default columns corrupted"),
+                    )
+                } else {
+                    unreachable!()
+                }
+            })
+    }
+
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
     }
@@ -561,7 +584,7 @@ mod tests {
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
                             type_name: ".test.Country".to_string(),
-                            generated_column: None,
+                            generated_or_default_column: None,
                         },
                         is_hidden: false
                     }

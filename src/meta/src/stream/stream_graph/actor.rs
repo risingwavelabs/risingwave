@@ -224,6 +224,11 @@ impl ActorBuilder {
             .into_values()
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
+        // Only fill the definition when debug assertions enabled, otherwise use name instead.
+        #[cfg(not(debug_assertions))]
+        let mview_definition = job.name();
+        #[cfg(debug_assertions)]
+        let mview_definition = job.definition();
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
@@ -232,7 +237,7 @@ impl ActorBuilder {
             dispatcher: self.downstreams.into_values().collect(),
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition: job.mview_definition(),
+            mview_definition,
         })
     }
 }
@@ -715,22 +720,23 @@ impl ActorGraphBuilder {
         let merge_updates = external_changes
             .iter()
             .flat_map(|(actor_id, change)| {
-                change
-                    .new_upstreams
-                    .values()
-                    .map(move |upstream| {
-                        let EdgeId::DownstreamExternal { original_upstream_fragment_id, .. } = upstream.edge_id else {
-                            unreachable!("edge from internal to external must be `DownstreamExternal`")
-                        };
+                change.new_upstreams.values().map(move |upstream| {
+                    let EdgeId::DownstreamExternal {
+                        original_upstream_fragment_id,
+                        ..
+                    } = upstream.edge_id
+                    else {
+                        unreachable!("edge from internal to external must be `DownstreamExternal`")
+                    };
 
-                        MergeUpdate {
-                            actor_id: actor_id.as_global_id(),
-                            upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
-                            new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
-                            added_upstream_actor_id: upstream.actors.as_global_ids(),
-                            removed_upstream_actor_id: vec![],
-                        }
-                    })
+                    MergeUpdate {
+                        actor_id: actor_id.as_global_id(),
+                        upstream_fragment_id: original_upstream_fragment_id.as_global_id(),
+                        new_upstream_fragment_id: Some(upstream.fragment_id.as_global_id()),
+                        added_upstream_actor_id: upstream.actors.as_global_ids(),
+                        removed_upstream_actor_id: vec![],
+                    }
+                })
             })
             .collect();
 

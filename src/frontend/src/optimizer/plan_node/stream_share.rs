@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
@@ -39,6 +40,7 @@ impl StreamShare {
             &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamShare { base, logical }

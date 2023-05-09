@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, 
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
-    HummockVersionCheckpoint, HummockVersionStats,
+    HummockVersionCheckpoint, HummockVersionStats, LevelType,
 };
 
 use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
@@ -139,16 +139,47 @@ pub fn trigger_sst_stat(
             .set(compacting_task_count as _);
     }
 
-    let level_label = format!("cg{}_l0_sub", compaction_group_id);
-    let sst_num = current_version
-        .levels
-        .get(&compaction_group_id)
-        .and_then(|level| level.l0.as_ref().map(|l0| l0.sub_levels.len()))
-        .unwrap_or(0);
-    metrics
-        .level_sst_num
-        .with_label_values(&[&level_label])
-        .set(sst_num as i64);
+    {
+        // sub level stat
+        let overlapping_level_label = format!("cg{}_l0_sub_overlapping", compaction_group_id);
+        let non_overlap_level_label = format!("cg{}_l0_sub_non_overlap", compaction_group_id);
+
+        let overlapping_sst_num = current_version
+            .levels
+            .get(&compaction_group_id)
+            .and_then(|level| {
+                level.l0.as_ref().map(|l0| {
+                    l0.sub_levels
+                        .iter()
+                        .filter(|sub_level| sub_level.level_type() == LevelType::Overlapping)
+                        .count()
+                })
+            })
+            .unwrap_or(0);
+
+        let non_overlap_sst_num = current_version
+            .levels
+            .get(&compaction_group_id)
+            .and_then(|level| {
+                level.l0.as_ref().map(|l0| {
+                    l0.sub_levels
+                        .iter()
+                        .filter(|sub_level| sub_level.level_type() == LevelType::Nonoverlapping)
+                        .count()
+                })
+            })
+            .unwrap_or(0);
+
+        metrics
+            .level_sst_num
+            .with_label_values(&[&overlapping_level_label])
+            .set(overlapping_sst_num as i64);
+
+        metrics
+            .level_sst_num
+            .with_label_values(&[&non_overlap_level_label])
+            .set(non_overlap_sst_num as i64);
+    }
 
     let previous_time = metrics.time_after_last_observation.load(Ordering::Relaxed);
     let current_time = SystemTime::now()
@@ -208,10 +239,15 @@ pub fn remove_compaction_group_in_sst_stat(
         idx += 1;
     }
 
-    let level_label = format!("cg{}_l0_sub", compaction_group_id);
+    let overlapping_level_label = format!("cg{}_l0_sub_overlapping", compaction_group_id);
+    let non_overlap_level_label = format!("cg{}_l0_sub_non_overlap", compaction_group_id);
     metrics
         .level_sst_num
-        .remove_label_values(&[&level_label])
+        .remove_label_values(&[&overlapping_level_label])
+        .ok();
+    metrics
+        .level_sst_num
+        .remove_label_values(&[&non_overlap_level_label])
         .ok();
 }
 

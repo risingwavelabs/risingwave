@@ -28,7 +28,9 @@ use super::{
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
+};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
@@ -51,6 +53,7 @@ impl From<generic::Scan> for LogicalScan {
         Self { base, core }
     }
 }
+
 impl From<generic::Scan> for PlanRef {
     fn from(core: generic::Scan) -> Self {
         LogicalScan::from(core).into()

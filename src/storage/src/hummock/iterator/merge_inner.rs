@@ -304,7 +304,8 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                 }
             };
             loop {
-                let Some(mut node) = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters) else {
+                let Some(mut node) = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters)
+                else {
                     break;
                 };
                 // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places

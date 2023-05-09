@@ -17,7 +17,8 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{DefaultColumns, IndexAndExpr, InsertNode};
+use risingwave_pb::batch_plan::InsertNode;
+use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
 use super::{
     ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -85,7 +86,7 @@ impl ToBatchPb for BatchInsert {
         let default_columns = self.logical.default_columns();
         let has_default_columns = !default_columns.is_empty();
         let default_columns = DefaultColumns {
-            default_column: default_columns
+            default_columns: default_columns
                 .into_iter()
                 .map(|(i, expr)| IndexAndExpr {
                     index: i as u32,

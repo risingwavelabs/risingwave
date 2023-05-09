@@ -252,7 +252,8 @@ impl QueryRewriter<'_> {
             | Expr::Overlay { expr, .. }
             | Expr::Trim { expr, .. }
             | Expr::Nested(expr)
-            | Expr::ArrayIndex { obj: expr, .. } => self.visit_expr(expr),
+            | Expr::ArrayIndex { obj: expr, .. }
+            | Expr::ArrayRangeIndex { obj: expr, .. } => self.visit_expr(expr),
 
             Expr::Position { substring, string } => {
                 self.visit_expr(substring);

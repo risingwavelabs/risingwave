@@ -36,7 +36,9 @@ impl MetaNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("meta-node")))
+            Ok(Command::new(
+                Path::new(&prefix_bin).join("risingwave").join("meta-node"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
         }
@@ -162,6 +164,8 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

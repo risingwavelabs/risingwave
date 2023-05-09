@@ -128,9 +128,6 @@ impl EstimateSize for Column {
 
 #[cfg(test)]
 mod tests {
-
-    use num_traits::FromPrimitive;
-
     use super::*;
     use crate::array::{
         Array, ArrayBuilder, BoolArray, BoolArrayBuilder, DateArray, DateArrayBuilder,
@@ -220,7 +217,7 @@ mod tests {
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Decimal::from_usize(i));
+                builder.append(Some(Decimal::from(i)));
             } else {
                 builder.append(None);
             }
@@ -231,7 +228,7 @@ mod tests {
         let arr: &DecimalArray = new_col.array_ref().as_decimal();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(Decimal::from_usize(i).unwrap(), x.unwrap());
+                assert_eq!(Decimal::from(i), x.unwrap());
             } else {
                 assert!(x.is_none());
             }
