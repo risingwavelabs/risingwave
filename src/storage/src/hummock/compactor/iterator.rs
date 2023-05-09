@@ -127,22 +127,16 @@ impl SstableStreamIterator {
     /// `self.block_iter` to `None`.
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
-        while self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
-            self.remaining_blocks -= 1;
-            let block_table_id = block.table_id();
-            if !self.existing_table_ids.contains(&block_table_id.table_id) {
-                continue;
-            }
-
-
+        if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
             let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
             block_iter.seek_to_first();
-            self.block_iter = Some(block_iter);
-            return Ok(());
-        }
 
-        self.remaining_blocks = 0;
-        self.block_iter = None;
+            self.remaining_blocks -= 1;
+            self.block_iter = Some(block_iter);
+        } else {
+            self.remaining_blocks = 0;
+            self.block_iter = None;
+        }
 
         Ok(())
     }
