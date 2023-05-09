@@ -95,14 +95,14 @@ impl Buffer<Box<[u8]>> for Vec<u8> {
     }
 }
 
-struct HashKeySerializer<S: KeyStorage, N: NullBitmap> {
+struct Serializer<S: KeyStorage, N: NullBitmap> {
     buffer: S::Buffer,
     null_bitmap: N,
     idx: usize,
     hash_code: XxHash64HashCode,
 }
 
-impl<S: KeyStorage, N: NullBitmap> HashKeySerializer<S, N> {
+impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
     fn new(buffer: S::Buffer, hash_code: XxHash64HashCode) -> Self {
         Self {
             buffer,
@@ -147,14 +147,14 @@ impl<S: KeyStorage, N: NullBitmap> HashKeySerializer<S, N> {
     }
 }
 
-struct HashKeyDeserializer<'a, S: KeyStorage, N: NullBitmap> {
+struct Deserializer<'a, S: KeyStorage, N: NullBitmap> {
     key: &'a [u8],
     null_bitmap: &'a N,
     idx: usize,
     _phantom: PhantomData<&'a S::Key>,
 }
 
-impl<'a, S: KeyStorage, N: NullBitmap> HashKeyDeserializer<'a, S, N> {
+impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
     fn new(key: &'a S::Key, null_bitmap: &'a N) -> Self {
         Self {
             key: key.as_ref(),
@@ -290,7 +290,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
             hash_codes
                 .into_iter()
                 .zip_eq_fast(buffers)
-                .map(|(hash_code, buffer)| HashKeySerializer::new(buffer, hash_code))
+                .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
                 .collect_vec()
         };
 
@@ -308,7 +308,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
     }
 
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
-        let mut deserializer = HashKeyDeserializer::<S, N>::new(&self.key, &self.null_bitmap);
+        let mut deserializer = Deserializer::<S, N>::new(&self.key, &self.null_bitmap);
         let mut row = Vec::with_capacity(data_types.len());
 
         for data_type in data_types {
@@ -324,7 +324,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         array_builders: &mut [ArrayBuilderImpl],
         data_types: &[DataType],
     ) -> ArrayResult<()> {
-        let mut deserializer = HashKeyDeserializer::<S, N>::new(&self.key, &self.null_bitmap);
+        let mut deserializer = Deserializer::<S, N>::new(&self.key, &self.null_bitmap);
 
         for (data_type, array_builder) in data_types.iter().zip_eq_fast(array_builders.iter_mut()) {
             let datum = deserializer.deserialize(data_type)?;
