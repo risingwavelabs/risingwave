@@ -507,4 +507,27 @@ mod tests {
             vec!["streaming platform"]
         );
     }
+
+    #[test]
+    fn test_rows_frame_exclude_current_row() {
+        let mut buffer = StreamWindowBuffer::new(Frame::rows_with_exclusion(
+            FrameBound::UnboundedPreceding,
+            FrameBound::CurrentRow,
+            FrameExclusion::CurrentRow,
+        ));
+
+        buffer.append(1, "hello");
+        assert!(buffer
+            .curr_window_values()
+            .cloned()
+            .collect_vec()
+            .is_empty());
+
+        buffer.append(2, "world");
+        let _ = buffer.slide();
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello"]
+        );
+    }
 }
