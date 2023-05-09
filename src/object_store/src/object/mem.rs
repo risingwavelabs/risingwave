@@ -39,6 +39,12 @@ pub enum Error {
 }
 
 impl Error {
+    pub fn is_object_not_found_error(&self) -> bool {
+        matches!(self, Error::NotFound(_))
+    }
+}
+
+impl Error {
     fn not_found(msg: impl ToString) -> Self {
         Error::NotFound(msg.to_string())
     }

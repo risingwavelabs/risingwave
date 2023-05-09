@@ -36,7 +36,7 @@ enum ObjectErrorInner {
     #[error(transparent)]
     Opendal(BoxedError),
     #[error(transparent)]
-    Mem(BoxedError),
+    Mem(crate::object::mem::Error),
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -98,9 +98,7 @@ impl ObjectError {
                 return matches!(inner.kind(), io::ErrorKind::NotFound);
             }
             ObjectErrorInner::Mem(e) => {
-                if let Some(e) = e.downcast_ref::<crate::object::mem::Error>() {
-                    return matches!(e, crate::object::mem::Error::NotFound(_));
-                }
+                return e.is_object_not_found_error();
             }
             _ => {}
         };
@@ -142,7 +140,7 @@ impl From<RecvError> for ObjectError {
 
 impl From<crate::object::mem::Error> for ObjectError {
     fn from(e: Error) -> Self {
-        ObjectErrorInner::Mem(e.into()).into()
+        ObjectErrorInner::Mem(e).into()
     }
 }
 
