@@ -37,6 +37,11 @@ impl PlanCorrelatedIdFinder {
         plan_correlated_id_finder.visit(plan);
         plan_correlated_id_finder.contains(correlated_id)
     }
+    // pub fn no_correlated_id(plan: PlanRef) -> bool {
+    //     let mut plan_correlated_id_finder = Self::default();
+    //     plan_correlated_id_finder.visit(plan);
+    //     plan_correlated_id_finder.correlated_id_set.is_empty()
+    // }
 }
 
 impl PlanVisitor<()> for PlanCorrelatedIdFinder {
