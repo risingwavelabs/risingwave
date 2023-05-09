@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::{
-    generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext,
-    RewriteStreamContext, ToStreamContext,
+    generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
