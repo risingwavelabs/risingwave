@@ -32,6 +32,7 @@ pub(super) struct AggregateState {
     factory: BoxedAggState,
     arg_data_types: Vec<DataType>,
     buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
+    buffer_heap_size: usize,
 }
 
 impl AggregateState {
@@ -60,12 +61,17 @@ impl AggregateState {
             factory: builg_agg(agg_call)?,
             arg_data_types,
             buffer: StreamWindowBuffer::new(call.frame.clone()),
+            buffer_heap_size: 0,
         })
     }
 }
 
 impl WindowState for AggregateState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
+        let args_heap_size: usize = args.iter().map(|arg| arg.estimated_heap_size()).sum();
+        self.buffer_heap_size = self
+            .buffer_heap_size
+            .saturating_add(key.estimated_heap_size() + args_heap_size);
         self.buffer.append(key, args);
     }
 
@@ -85,7 +91,17 @@ impl WindowState for AggregateState {
         };
         let return_value =
             wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))?;
-        let removed_keys: BTreeSet<_> = self.buffer.slide().collect();
+        let removed_keys: BTreeSet<_> = self
+            .buffer
+            .slide()
+            .map(|(k, v)| {
+                self.buffer_heap_size = self.buffer_heap_size.saturating_sub(
+                    k.estimated_heap_size()
+                        + v.iter().map(|arg| arg.estimated_heap_size()).sum::<usize>(),
+                );
+                k
+            })
+            .collect();
         Ok(StateOutput {
             return_value,
             evict_hint: if removed_keys.is_empty() {
@@ -106,7 +122,7 @@ impl EstimateSize for AggregateState {
     fn estimated_heap_size(&self) -> usize {
         // `factory` is not estimated because it should be moved out of `AggregateState`
         // https://github.com/risingwavelabs/risingwave/issues/9643
-        0
+        self.arg_data_types.estimated_heap_size() + self.buffer_heap_size
     }
 }
 

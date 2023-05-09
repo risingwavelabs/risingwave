@@ -20,6 +20,8 @@ use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use rust_decimal::Decimal as RustDecimal;
 
+use crate::types::DataType;
+
 /// The trait for estimating the actual memory usage of a struct.
 ///
 /// Used for cache eviction now.
@@ -122,6 +124,8 @@ impl<T: ZeroHeapSize, const LEN: usize> EstimateSize for [T; LEN] {
 impl ZeroHeapSize for RustDecimal {}
 
 impl<T> ZeroHeapSize for PhantomData<T> {}
+
+impl ZeroHeapSize for DataType {}
 
 #[derive(Clone)]
 pub struct VecWithKvSize<T: EstimateSize> {

@@ -193,6 +193,7 @@ impl<T: EstimateSize> std::ops::Index<usize> for EstimatedVecDeque<T> {
 
 impl<T: EstimateSize> EstimateSize for EstimatedVecDeque<T> {
     fn estimated_heap_size(&self) -> usize {
+        // TODO: Add `VecDeque` internal size.
         self.heap_size
     }
 }
