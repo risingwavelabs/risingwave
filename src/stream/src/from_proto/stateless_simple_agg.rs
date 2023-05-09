@@ -16,12 +16,12 @@ use risingwave_expr::agg::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::*;
-use crate::executor::LocalSimpleAggExecutor;
+use crate::executor::StatelessSimpleAggExecutor;
 
-pub struct LocalSimpleAggExecutorBuilder;
+pub struct StatelessSimpleAggExecutorBuilder;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
+impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
     async fn new_boxed_executor(
@@ -37,7 +37,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
             .map(AggCall::from_protobuf)
             .try_collect()?;
 
-        Ok(LocalSimpleAggExecutor::new(
+        Ok(StatelessSimpleAggExecutor::new(
             params.actor_context,
             input,
             agg_calls,

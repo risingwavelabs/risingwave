@@ -1429,7 +1429,7 @@
       |       └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
-          └─StreamGlobalSimpleAgg { aggs: [sum0(count), count(bid.auction), count] }
+          └─StreamSimpleAgg { aggs: [sum0(count), count(bid.auction), count] }
             └─StreamExchange { dist: Single }
               └─StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [count] }
                 └─StreamExchange { dist: HashShard(bid.auction) }
@@ -1458,7 +1458,7 @@
 
     Fragment 3
     StreamProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
-    └── StreamGlobalSimpleAgg { aggs: [sum0(count), count(bid.auction), count] } { result table: 7, state tables: [], distinct tables: [] }
+    └── StreamSimpleAgg { aggs: [sum0(count), count(bid.auction), count] } { result table: 7, state tables: [], distinct tables: [] }
         └──  StreamExchange Single from 4
 
     Fragment 4
@@ -1835,7 +1835,7 @@
   stream_plan: |
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [min(min(max(bid.price)))] }
-      └─StreamGlobalSimpleAgg { aggs: [min(min(max(bid.price))), count] }
+      └─StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
             └─StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
@@ -1852,7 +1852,7 @@
     StreamMaterialize { columns: [min_final], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [min(min(max(bid.price)))] }
-        └── StreamGlobalSimpleAgg { aggs: [min(min(max(bid.price))), count] }
+        └── StreamSimpleAgg { aggs: [min(min(max(bid.price))), count] }
             ├── result table: 1
             ├── state tables: [ 0 ]
             ├── distinct tables: []

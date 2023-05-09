@@ -99,12 +99,12 @@ function execute_sql_and_expect() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 
