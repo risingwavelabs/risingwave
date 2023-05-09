@@ -763,7 +763,18 @@ impl ExprImpl {
                                 std::mem::swap(&mut lhs, &mut rhs);
                             }
                             if rhs.is_const() {
-                                cur = lhs;
+                                if expr_type == ExprType::AtTimeZone
+                                    && rhs
+                                        .as_literal()
+                                        .and_then(|literal| literal.get_data().as_ref())
+                                        .map_or(true, |time_zone| {
+                                            *time_zone != String::from("UTC").into()
+                                        })
+                                {
+                                    return None;
+                                } else {
+                                    cur = lhs;
+                                }
                             } else {
                                 return None;
                             }
