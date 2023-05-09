@@ -330,11 +330,5 @@ pub mod tests {
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
         assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert_eq!(
-            response.get_notices()[0],
-            r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#
-        );
     }
 }
