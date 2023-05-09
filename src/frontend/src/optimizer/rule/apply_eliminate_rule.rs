@@ -72,7 +72,7 @@ impl Rule for ApplyEliminateRule {
 
         let apply_left_len = left.schema().len();
         assert_eq!(join_type, JoinType::Inner);
-        
+
         // Record the mapping from `CorrelatedInputRef`'s index to `InputRef`'s index.
         // We currently can remove DAG only if ALL the `CorrelatedInputRef` are equal joined to
         // `InputRef`.
