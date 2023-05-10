@@ -433,6 +433,7 @@ impl SharedBufferCompactRunner {
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
                 split_by_table: false,
+                split_weight_by_vnode: 0,
             },
         );
         Self {
