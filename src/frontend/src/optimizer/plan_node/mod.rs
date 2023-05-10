@@ -519,6 +519,10 @@ impl dyn PlanNode {
         self.plan_base().append_only
     }
 
+    pub fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
+
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
         &self.plan_base().functional_dependency
     }
