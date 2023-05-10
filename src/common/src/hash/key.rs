@@ -34,15 +34,15 @@ use fixedbitset::FixedBitSet;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::array::{ListValue, StructValue};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Date, Decimal, Int256, Int256Ref, JsonbRef, JsonbVal, Scalar, ScalarRef, Serial,
+    DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
     Time, Timestamp, F32, F64,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
-use crate::util::memcmp_encoding;
 use crate::util::sort_util::OrderType;
+use crate::util::{memcmp_encoding, value_encoding};
 
 /// This is determined by the stack based data structure we use,
 /// `StackNullBitmap`, which can store 64 bits at most.
@@ -280,30 +280,11 @@ impl BuildHasher for PrecomputedBuildHasher {
 /// encoded into the hash key. The actual encoding/decoding method is not limited to
 /// [`HashKeySerDe`]'s fixed-size implementation.
 pub trait HashKeySer<'a>: ScalarRef<'a> {
-    fn serialize_into(self, buf: impl BufMut) {
-        let mut serializer = memcomparable::Serializer::new(buf);
-        memcmp_encoding::serialize_datum(
-            Some(self.into()),
-            OrderType::ascending(),
-            &mut serializer,
-        )
-        .expect("ser fail"); // TODO: error handling
-    }
+    fn serialize_into(self, buf: impl BufMut);
 }
 
 pub trait HashKeyDe: Scalar {
-    fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
-        let mut deserializer = memcomparable::Deserializer::new(buf);
-        let scalar = memcmp_encoding::deserialize_datum(
-            data_type,
-            OrderType::ascending(),
-            &mut deserializer,
-        )
-        .expect("de fail") // TODO: error handling
-        .unwrap();
-
-        scalar.try_into().unwrap()
-    }
+    fn deserialize(data_type: &DataType, buf: impl Buf) -> Self;
 }
 
 impl HashKeySer<'_> for bool {
@@ -320,8 +301,7 @@ impl HashKeyDe for bool {
 
 impl HashKeySer<'_> for i16 {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_i16_ne(self);
     }
 }
 
@@ -333,8 +313,7 @@ impl HashKeyDe for i16 {
 
 impl HashKeySer<'_> for i32 {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_i32_ne(self);
     }
 }
 
@@ -346,8 +325,7 @@ impl HashKeyDe for i32 {
 
 impl HashKeySer<'_> for i64 {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_i64_ne(self);
     }
 }
 
@@ -357,10 +335,24 @@ impl HashKeyDe for i64 {
     }
 }
 
+impl<'a> HashKeySer<'a> for Int256Ref<'a> {
+    fn serialize_into(self, mut buf: impl BufMut) {
+        let b = self.to_ne_bytes();
+        buf.put_slice(b.as_ref());
+    }
+}
+
+impl HashKeyDe for Int256 {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let mut value = [0; 32];
+        buf.copy_to_slice(&mut value);
+        Self::from_ne_bytes(value)
+    }
+}
+
 impl<'a> HashKeySer<'a> for Serial {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.as_row_id().to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_i64_ne(self.as_row_id());
     }
 }
 
@@ -372,8 +364,7 @@ impl HashKeyDe for Serial {
 
 impl HashKeySer<'_> for F32 {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.normalized().0.to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_f32_ne(self.normalized().0);
     }
 }
 
@@ -385,8 +376,7 @@ impl HashKeyDe for F32 {
 
 impl HashKeySer<'_> for F64 {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let b = self.normalized().0.to_ne_bytes();
-        buf.put_slice(b.as_ref());
+        buf.put_f64_ne(self.normalized().0);
     }
 }
 
@@ -413,10 +403,8 @@ impl HashKeyDe for Decimal {
 
 impl HashKeySer<'_> for Date {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let mut ret = [0; 4];
-        ret[0..4].copy_from_slice(&self.0.num_days_from_ce().to_ne_bytes());
-
-        buf.put_slice(ret.as_ref());
+        let b = self.0.num_days_from_ce().to_ne_bytes();
+        buf.put_slice(b.as_ref());
     }
 }
 
@@ -429,11 +417,8 @@ impl HashKeyDe for Date {
 
 impl HashKeySer<'_> for Timestamp {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let mut ret = [0; 12];
-        ret[0..8].copy_from_slice(&self.0.timestamp().to_ne_bytes());
-        ret[8..12].copy_from_slice(&self.0.timestamp_subsec_nanos().to_ne_bytes());
-
-        buf.put_slice(ret.as_ref());
+        buf.put_i64_ne(self.0.timestamp());
+        buf.put_u32_ne(self.0.timestamp_subsec_nanos());
     }
 }
 
@@ -447,11 +432,8 @@ impl HashKeyDe for Timestamp {
 
 impl HashKeySer<'_> for Time {
     fn serialize_into(self, mut buf: impl BufMut) {
-        let mut ret = [0; 8];
-        ret[0..4].copy_from_slice(&self.0.num_seconds_from_midnight().to_ne_bytes());
-        ret[4..8].copy_from_slice(&self.0.nanosecond().to_ne_bytes());
-
-        buf.put_slice(ret.as_ref());
+        buf.put_u32_ne(self.0.num_seconds_from_midnight());
+        buf.put_u32_ne(self.0.nanosecond());
     }
 }
 
@@ -463,36 +445,61 @@ impl HashKeyDe for Time {
     }
 }
 
-impl<'a> HashKeySer<'a> for Int256Ref<'a> {}
-impl HashKeyDe for Int256 {}
+macro_rules! impl_value_encoding_hash_key_serde {
+    ($owned_ty:ty) => {
+        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
+            fn serialize_into(self, mut buf: impl BufMut) {
+                value_encoding::serialize_datum_into(Some(ScalarRefImpl::from(self)), &mut buf);
+            }
+        }
+        impl HashKeyDe for $owned_ty {
+            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
+                let scalar = value_encoding::deserialize_datum(buf, data_type)
+                    .expect("in-memory deserialize should never fail")
+                    .expect("datum should never be NULL");
 
-impl<'a> HashKeySer<'a> for &'a str {
-    fn serialize_into(self, mut buf: impl BufMut) {
-        buf.put_u64_ne(self.len() as u64);
-        buf.put_slice(self.as_bytes());
-    }
+                scalar.try_into().unwrap()
+            }
+        }
+    };
 }
 
-impl HashKeyDe for Box<str> {
-    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
-        let len = buf.get_u64_ne() as usize;
-        let mut value = vec![0; len];
-        buf.copy_to_slice(&mut value);
-        unsafe { String::from_utf8_unchecked(value) }.into_boxed_str()
-    }
+macro_rules! impl_memcmp_encoding_hash_key_serde {
+    ($owned_ty:ty) => {
+        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
+            fn serialize_into(self, buf: impl BufMut) {
+                let mut serializer = memcomparable::Serializer::new(buf);
+                memcmp_encoding::serialize_datum(
+                    Some(ScalarRefImpl::from(self)),
+                    OrderType::ascending(),
+                    &mut serializer,
+                )
+                .expect("serialize should never fail");
+            }
+        }
+        impl HashKeyDe for $owned_ty {
+            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
+                let mut deserializer = memcomparable::Deserializer::new(buf);
+                let scalar = memcmp_encoding::deserialize_datum(
+                    data_type,
+                    OrderType::ascending(),
+                    &mut deserializer,
+                )
+                .expect("in-memory deserialize should never fail")
+                .expect("datum should never be NULL");
+
+                scalar.try_into().unwrap()
+            }
+        }
+    };
 }
 
-impl<'a> HashKeySer<'a> for &'a [u8] {}
-impl HashKeyDe for Box<[u8]> {}
+impl_value_encoding_hash_key_serde!(Box<str>);
+impl_value_encoding_hash_key_serde!(Box<[u8]>);
+impl_value_encoding_hash_key_serde!(JsonbVal);
 
-impl<'a> HashKeySer<'a> for JsonbRef<'a> {}
-impl HashKeyDe for JsonbVal {}
-
-impl<'a> HashKeySer<'a> for StructRef<'a> {}
-impl HashKeyDe for StructValue {}
-
-impl<'a> HashKeySer<'a> for ListRef<'a> {}
-impl HashKeyDe for ListValue {}
+impl_memcmp_encoding_hash_key_serde!(StructValue);
+impl_memcmp_encoding_hash_key_serde!(ListValue);
 
 #[cfg(test)]
 mod tests {
