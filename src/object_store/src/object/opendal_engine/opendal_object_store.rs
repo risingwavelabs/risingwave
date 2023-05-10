@@ -48,7 +48,6 @@ impl OpendalObjectStore {
     pub fn new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
-
         let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
@@ -222,7 +221,6 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-        // todo: refactor this after https://github.com/apache/incubator-opendal/issues/2087 is implemented.
         OPENDAL_BUFFER_SIZE
     }
 }
