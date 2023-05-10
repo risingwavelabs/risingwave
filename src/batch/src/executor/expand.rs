@@ -14,10 +14,10 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::array::{Array, ArrayError, ArrayRef, DataChunk, I64Array, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -64,8 +64,7 @@ impl ExpandExecutor {
             assert_eq!(vis, Vis::Compact(cardinality));
 
             #[for_await]
-            for new_columns in
-                Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
+            for new_columns in expand_columns(cardinality, columns, self.column_subsets.to_owned())
             {
                 for data_chunk in
                     data_chunk_builder.append_chunk(DataChunk::new(new_columns?, vis.clone()))
@@ -93,6 +92,35 @@ impl ExpandExecutor {
             identity: "ExpandExecutor".into(),
             chunk_size,
         }
+    }
+}
+
+/// Expand the `columns` according to `column_subsets`.
+///
+/// This is a helper function for Expand operator.
+#[try_stream(boxed, ok = Vec<ArrayRef>, error = ArrayError)]
+async fn expand_columns(
+    cardinality: usize,
+    columns: Vec<ArrayRef>,
+    column_subsets: Vec<Vec<usize>>,
+) {
+    let null_columns: Vec<_> = columns
+        .iter()
+        .map(|column| {
+            let mut builder = column.create_builder(cardinality);
+            builder.append_datum_n(cardinality, None as DatumRef<'_>);
+            builder.finish().into()
+        })
+        .collect();
+    for (i, subset) in column_subsets.into_iter().enumerate() {
+        let mut new_columns = null_columns.clone();
+        for key in subset {
+            new_columns[key] = columns[key].clone();
+        }
+        new_columns.extend(columns.iter().cloned());
+        let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(cardinality)).into_ref();
+        new_columns.push(flags);
+        yield new_columns;
     }
 }
 
