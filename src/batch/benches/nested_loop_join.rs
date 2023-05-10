@@ -53,7 +53,7 @@ fn create_nested_loop_join_executor(
         right_input,
         "NestedLoopJoinExecutor".into(),
         CHUNK_SIZE,
-        MemoryContext::default(),
+        MemoryContext::none(),
     ))
 }
 

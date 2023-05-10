@@ -615,7 +615,7 @@ mod tests {
                 right_child,
                 "NestedLoopJoinExecutor".into(),
                 CHUNK_SIZE,
-                MemoryContext::default(),
+                MemoryContext::none(),
             ))
         }
 

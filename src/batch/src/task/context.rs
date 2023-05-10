@@ -148,7 +148,7 @@ impl BatchTaskContext for ComputeNodeContext {
                 metrics.create_collector_for_mem_usage(vec![executor_id.to_string()]);
             MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
         } else {
-            MemoryContext::default()
+            MemoryContext::none()
         }
     }
 }
@@ -161,7 +161,7 @@ impl ComputeNodeContext {
             batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
-            mem_context: MemoryContext::default(),
+            mem_context: MemoryContext::none(),
         }
     }
 
@@ -195,7 +195,7 @@ impl ComputeNodeContext {
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
             // Leave it for now, it should be None
-            mem_context: MemoryContext::new(None, IntGauge::new("test", "test").unwrap()),
+            mem_context: MemoryContext::root(IntGauge::new("test", "test").unwrap()),
         }
     }
 

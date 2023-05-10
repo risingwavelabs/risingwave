@@ -92,6 +92,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     }
 
     fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
-        MemoryContext::default()
+        MemoryContext::none()
     }
 }

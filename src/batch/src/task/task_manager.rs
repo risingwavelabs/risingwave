@@ -73,7 +73,7 @@ impl BatchManager {
                 .unwrap()
         };
 
-        let mem_context = MemoryContext::new(None, metrics.batch_total_mem.clone());
+        let mem_context = MemoryContext::root(metrics.batch_total_mem.clone());
         BatchManager {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             runtime: Arc::new(runtime.into()),

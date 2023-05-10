@@ -23,7 +23,7 @@ struct MemoryContextInner {
     parent: Option<MemoryContext>,
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct MemoryContext {
     /// Add None op mem context, so that we don't need to return [`Option`] in
     /// [`BatchTaskContext`]. This helps with later `Allocator` implementation.
@@ -57,6 +57,15 @@ impl MemoryContext {
                 parent,
             })),
         }
+    }
+
+    /// Creates a noop memory context.
+    pub fn none() -> Self {
+        Self { inner: None }
+    }
+
+    pub fn root<C: Into<MemCounter>>(counter: C) -> Self {
+        Self::new(None, counter)
     }
 
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
