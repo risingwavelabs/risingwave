@@ -424,14 +424,17 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+        // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+        // 2. should be after merge the multiple projects
+        plan = plan.optimize_by_rules_until_fix_point(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -485,6 +488,11 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+        // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+        // 2. should be after merge the multiple projects
+        plan = plan.optimize_by_rules_until_fix_point(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
@@ -493,8 +501,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
