@@ -105,6 +105,49 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
+    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+        let core = self.stream_source_core.as_ref().unwrap();
+
+        let mut revert_index = HashMap::new();
+
+        for (actor_id, splits) in actor_splits {
+            for split in splits {
+                assert!(revert_index.insert(split.id(), actor_id).is_none());
+            }
+        }
+
+        for split_id in core.state_cache.keys() {
+            if let Some(actor_id) = revert_index.remove(split_id) {
+                if self.ctx.id != *actor_id {
+                    tracing::warn!(
+                        "split {} migration detected, from {} to {}",
+                        split_id,
+                        self.ctx.id,
+                        actor_id
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    fn check_split_is_changed(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+        let core = self.stream_source_core.as_ref().unwrap();
+
+        let split_ids: HashSet<_> = actor_splits
+            .get(&self.ctx.id)
+            .unwrap()
+            .iter()
+            .map(SplitImpl::id)
+            .collect();
+
+        let owned_split_ids: HashSet<_> = core.state_cache.keys().cloned().collect();
+
+        split_ids != owned_split_ids
+    }
+
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
@@ -176,9 +219,10 @@ impl<S: StateStore> SourceExecutor<S> {
             }
         }
 
-        // todo(peng): check if we support split number reduction in cn
-        for existing_split_id in core.state_cache.keys() {
+        // state cache may be stale
+        for existing_split_id in core.stream_source_splits.keys() {
             if !target_splits.contains_key(existing_split_id) {
+                tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
             }
         }
@@ -219,6 +263,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         epoch: EpochPair,
         target_state: Option<Vec<SplitImpl>>,
+        trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
@@ -228,7 +273,9 @@ impl<S: StateStore> SourceExecutor<S> {
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        if let Some(target_splits) = target_state {
+        if let Some(target_splits) = target_state && trim_state {
+            println!("trim {:?}", target_splits);
+
             let target_split_ids: HashSet<_> =
                 target_splits.iter().map(|split| split.id()).collect();
 
@@ -236,8 +283,26 @@ impl<S: StateStore> SourceExecutor<S> {
                 .drain_filter(|split| !target_split_ids.contains(&split.id()))
                 .collect_vec();
 
+            println!("deleting {:?}", dropped_splits);
+
             if !dropped_splits.is_empty() {
-                core.split_state_store.trim_state(dropped_splits);
+                for split in dropped_splits.iter() {
+                    // should be already trimmed in `replace_stream_reader_with_target_state`
+                    assert!(!core.stream_source_splits.contains_key(&split.id()));
+                }
+
+                core.split_state_store.trim_state(&dropped_splits);
+
+                // for split in dropped_splits {
+                //     let x =                    core.split_state_store.get(split.id()).await.unwrap();
+                //     println!("key {} value {:?}", split.id(), x);
+                // }
+
+
+                for split in dropped_splits.iter() {
+                    let x = core.split_state_store.get(split.id()).await.unwrap();
+                    println!("key {} value {:?}", split.id(), x);
+                }
             }
         }
 
@@ -248,7 +313,7 @@ impl<S: StateStore> SourceExecutor<S> {
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
 
-        core.state_cache.clear();
+        // core.state_cache.clear();
 
         Ok(())
     }
@@ -361,13 +426,37 @@ impl<S: StateStore> SourceExecutor<S> {
                         let epoch = barrier.epoch;
 
                         let mut target_state = None;
+                        let mut should_trim_state = false;
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::SourceChangeSplit(actor_splits)
-                                | Mutation::Update { actor_splits, .. } => {
+                                Mutation::SourceChangeSplit(split_assignment) => {
+                                    // In the context of split changes, we do not allow split
+                                    // migration because it can lead to inconsistent states.
+                                    // Therefore, all split migration must be done via update
+                                    // mutation and pause/resume
+                                    assert!(!self.check_split_is_migration(split_assignment));
+
+                                    let target_splits = self
+                                        .apply_split_change(
+                                            &source_desc,
+                                            &mut stream,
+                                            split_assignment,
+                                        )
+                                        .await?;
+
+                                    println!("target {:?}", target_state);
+
+                                    target_state = target_splits;
+                                    should_trim_state = true;
+                                }
+
+                                Mutation::Update { actor_splits, .. } => {
+                                    // In the scenario of scaling, our splits will not change.
+                                    assert!(!self.check_split_is_changed(actor_splits));
+
                                     let target_splits = self
                                         .apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?;
@@ -378,7 +467,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             }
                         }
 
-                        self.take_snapshot_and_clear_cache(epoch, target_state)
+                        self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
                             .await?;
 
                         self.metrics
@@ -527,7 +616,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
@@ -541,6 +629,7 @@ mod tests {
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use futures::StreamExt;
     use tracing_test::traced_test;
 
     use super::*;
@@ -778,5 +867,143 @@ mod tests {
 
         let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
+    }
+
+    #[traced_test]
+    #[tokio::test]
+    async fn test_split_drop_mutation() {
+        let table_id = TableId::default();
+        let schema = Schema {
+            fields: vec![Field::with_name(DataType::Int32, "v1")],
+        };
+        let row_id_index = None;
+        let pk_indices = vec![0_usize];
+        let source_info = StreamSourceInfo {
+            row_format: PbRowFormatType::Native as i32,
+            ..Default::default()
+        };
+        let properties = convert_args!(hashmap!(
+            "connector" => "datagen",
+            "fields.v1.kind" => "sequence",
+            "fields.v1.start" => "1",
+            "fields.v1.end" => "2",
+        ));
+
+        let source_desc_builder =
+            create_source_desc_builder(&schema, row_id_index, source_info, properties);
+        let mem_state_store = MemoryStateStore::new();
+
+        let column_ids = vec![ColumnId::from(0)];
+        let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
+        let split_state_store = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
+
+        let core = StreamSourceCore::<MemoryStateStore> {
+            source_id: table_id,
+            column_ids: column_ids.clone(),
+            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
+            source_desc_builder: Some(source_desc_builder),
+            stream_source_splits: HashMap::new(),
+            split_state_store,
+            state_cache: HashMap::new(),
+            source_name: MOCK_SOURCE_NAME.to_string(),
+        };
+
+        let executor = SourceExecutor::new(
+            ActorContext::create(0),
+            schema,
+            pk_indices,
+            Some(core),
+            Arc::new(StreamingMetrics::unused()),
+            barrier_rx,
+            u64::MAX,
+            1,
+        );
+        let boxed = Box::new(executor);
+        let mut handler = boxed.execute();
+
+        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
+            adds: HashMap::new(),
+            added_actors: HashSet::new(),
+            splits: hashmap! {
+                ActorId::default() => vec![
+                    SplitImpl::Datagen(DatagenSplit {
+                        split_index: 0,
+                        split_num: 3,
+                        start_offset: None,
+                    }),
+                ],
+            },
+        });
+
+        println!("before init");
+        barrier_tx.send(init_barrier).unwrap();
+
+        (handler.next().await.unwrap().unwrap())
+            .into_barrier()
+            .unwrap();
+
+        let mut ready_chunks = handler.ready_chunks(10);
+
+        let new_assignments = gen_seq_datagen_split(3);
+
+        ready_chunks.next().await.unwrap();
+
+        let change_split_mutation =
+            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+                ActorId::default() => new_assignments.clone()
+            }));
+
+        println!("before assign 012");
+        barrier_tx.send(change_split_mutation).unwrap();
+
+        let _ = ready_chunks.next().await.unwrap(); // barrier
+
+        let prev = new_assignments;
+
+        let assignment = vec![SplitImpl::Datagen(DatagenSplit {
+            split_index: 2,
+            split_num: 3,
+            start_offset: None,
+        })];
+
+        let change_split_mutation =
+            Barrier::new_test_barrier(3).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+                ActorId::default() => assignment.clone()
+            }));
+
+        println!("before assign 2");
+        barrier_tx.send(change_split_mutation).unwrap();
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+
+        ready_chunks.next().await;
+
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
+
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(4));
+
+        let x = source_state_handler.get(prev[0].id()).await.unwrap();
+        assert_eq!(x, None);
+    }
+
+    fn gen_seq_datagen_split(count: i32) -> Vec<SplitImpl> {
+        (0..count)
+            .into_iter()
+            .map(|i| {
+                SplitImpl::Datagen(DatagenSplit {
+                    split_index: i,
+                    split_num: count,
+                    start_offset: None,
+                })
+            })
+            .collect()
     }
 }

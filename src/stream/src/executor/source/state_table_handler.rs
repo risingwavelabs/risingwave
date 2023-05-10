@@ -184,7 +184,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    pub fn trim_state<SS>(&mut self, to_trim: Vec<SS>)
+    pub fn trim_state<SS>(&mut self, to_trim: &[SS])
     where
         SS: SplitMetaData,
     {
