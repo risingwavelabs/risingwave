@@ -177,7 +177,7 @@ where
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
         let (cluster_id, cluster_first_launch) =
-            if let Some(id) = ClusterId::from_meta_store(&meta_store).await? {
+            if let Some(id) = ClusterId::from_meta_store(meta_store.deref()).await? {
                 (id, false)
             } else {
                 (ClusterId::new(), true)
