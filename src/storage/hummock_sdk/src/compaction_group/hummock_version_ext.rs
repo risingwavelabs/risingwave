@@ -451,6 +451,14 @@ impl HummockVersionUpdateExt for HummockVersion {
                     HashSet::from_iter(group_construct.table_ids.clone()),
                     group_construct.get_new_sst_start_id(),
                 ));
+
+                let levels = self
+                    .levels
+                    .get_mut(&parent_group_id)
+                    .expect("compaction group should exist");
+                levels
+                    .member_table_ids
+                    .drain_filter(|t| group_construct.table_ids.contains(t));
             } else if let Some(group_change) = &summary.group_table_change {
                 sst_split_info.extend(self.init_with_parent_group(
                     group_change.origin_group_id,
@@ -491,7 +499,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                     removed_table_ids.extend(group_meta_delta.table_ids_remove.clone());
                 }
                 levels.member_table_ids.sort();
-                remove_stale_sstable_infos(levels, removed_table_ids);
+                if !removed_table_ids.is_empty() {
+                    remove_stale_sstable_infos(levels, removed_table_ids);
+                }
             }
 
             assert!(

@@ -571,17 +571,6 @@ impl<S: MetaStore> HummockManager<S> {
                 );
 
                 new_group = Some((new_compaction_group_id, config));
-                new_version_delta.group_deltas.insert(
-                    parent_group_id,
-                    GroupDeltas {
-                        group_deltas: vec![GroupDelta {
-                            delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                                table_ids_remove: table_ids.to_vec(),
-                                ..Default::default()
-                            })),
-                        }],
-                    },
-                );
                 new_compaction_group_id
             }
         };
