@@ -143,11 +143,6 @@ pub trait HummockVersionUpdateExt {
         group_id: CompactionGroupId,
         state_table_ids: Vec<u32>,
     ) -> Vec<(HummockSstableObjectId, HummockSstableId)>;
-    fn clear_dropped_sstable_infos(
-        &mut self,
-        group_id: CompactionGroupId,
-        sstable_ids: Vec<HummockSstableId>,
-    );
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo>;
@@ -436,38 +431,6 @@ impl HummockVersionUpdateExt for HummockVersion {
         }
     }
 
-    fn clear_dropped_sstable_infos(
-        &mut self,
-        group_id: CompactionGroupId,
-        sstable_ids: Vec<HummockSstableId>,
-    ) {
-        let removed_sstable_ids: HashSet<HummockSstableId> = HashSet::from_iter(sstable_ids);
-        if let Some(group) = self.levels.get_mut(&group_id) {
-            if let Some(ref mut l0) = group.l0 {
-                for level in &mut l0.sub_levels {
-                    level
-                        .table_infos
-                        .drain_filter(|sst_info| removed_sstable_ids.contains(&sst_info.sst_id))
-                        .for_each(|sst_info| {
-                            level.total_file_size -= sst_info.file_size;
-                            level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                            l0.total_file_size -= sst_info.file_size;
-                            l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                        });
-                }
-            }
-            for level in &mut group.levels {
-                level
-                    .table_infos
-                    .drain_filter(|sst_info| removed_sstable_ids.contains(&sst_info.sst_id))
-                    .for_each(|sst_info| {
-                        level.total_file_size -= sst_info.file_size;
-                        level.uncompressed_file_size -= sst_info.uncompressed_file_size;
-                    });
-            }
-        }
-    }
-
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
@@ -516,15 +479,19 @@ impl HummockVersionUpdateExt for HummockVersion {
                 .levels
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
-
-            for group_meta_delta in &summary.group_meta_changes {
-                levels
-                    .member_table_ids
-                    .extend(group_meta_delta.table_ids_add.clone());
-                levels
-                    .member_table_ids
-                    .drain_filter(|t| group_meta_delta.table_ids_remove.contains(t));
+            if !summary.group_meta_changes.is_empty() {
+                let mut removed_table_ids: HashSet<u32> = HashSet::default();
+                for group_meta_delta in &summary.group_meta_changes {
+                    levels
+                        .member_table_ids
+                        .extend(group_meta_delta.table_ids_add.clone());
+                    levels
+                        .member_table_ids
+                        .drain_filter(|t| group_meta_delta.table_ids_remove.contains(t));
+                    removed_table_ids.extend(group_meta_delta.table_ids_remove.clone());
+                }
                 levels.member_table_ids.sort();
+                remove_stale_sstable_infos(levels, removed_table_ids);
             }
 
             assert!(
@@ -737,6 +704,40 @@ pub fn collect_empty_sstable_infos(
         );
     }
     removed_sstable_infos
+}
+
+pub fn remove_stale_sstable_infos(group: &mut Levels, remove_table_ids: HashSet<u32>) {
+    let mut levels = vec![];
+    levels.extend(group.l0.as_mut().unwrap().sub_levels.iter_mut());
+    levels.extend(group.levels.iter_mut());
+    let mut l0_total_file_size = 0;
+    let mut l0_uncompressed_file_size = 0;
+    for level in levels {
+        level
+            .table_infos
+            .drain_filter(|sst_info| {
+                sst_info
+                    .table_ids
+                    .drain_filter(|table_id| remove_table_ids.contains(table_id));
+                sst_info.table_ids.is_empty()
+            })
+            .for_each(|sst_info| {
+                level.total_file_size -= sst_info.file_size;
+                level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                if level.level_idx == 0 {
+                    l0_total_file_size += sst_info.file_size;
+                    l0_uncompressed_file_size += sst_info.uncompressed_file_size;
+                }
+            });
+    }
+    group.l0.as_mut().unwrap().total_file_size -= l0_total_file_size;
+    group.l0.as_mut().unwrap().uncompressed_file_size -= l0_uncompressed_file_size;
+    group
+        .l0
+        .as_mut()
+        .unwrap()
+        .sub_levels
+        .retain(|level| !level.table_infos.is_empty());
 }
 
 pub fn build_initial_compaction_group_levels(

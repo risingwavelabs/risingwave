@@ -286,17 +286,6 @@ impl<S: MetaStore> HummockManager<S> {
                 Some(group_id) => group_id,
                 None => continue,
             };
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(group_id)
-                .or_default()
-                .group_deltas;
-            group_deltas.push(GroupDelta {
-                delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                    table_ids_remove: vec![*table_id],
-                    ..Default::default()
-                })),
-            });
             modified_groups
                 .entry(group_id)
                 .or_insert_with(Vec::new)
@@ -308,8 +297,19 @@ impl<S: MetaStore> HummockManager<S> {
         let mut dirty_groups = vec![];
         let mut groups_to_remove = vec![];
         for (group_id, mut removed_table_ids) in modified_groups {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(group_id)
+                .or_default()
+                .group_deltas;
+            removed_table_ids.sort();
+            group_deltas.push(GroupDelta {
+                delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                    table_ids_remove: removed_table_ids.clone(),
+                    ..Default::default()
+                })),
+            });
             if let Some(group) = versioning.current_version.levels.get(&group_id) {
-                removed_table_ids.sort();
                 let mut origin_table_ids = group.member_table_ids.clone();
                 origin_table_ids.sort();
                 let mut dropped_sstables = vec![];
@@ -355,11 +355,6 @@ impl<S: MetaStore> HummockManager<S> {
         let sst_split_info = versioning
             .current_version
             .apply_version_delta(&new_version_delta);
-        for (group_id, removed_sstables) in dirty_groups {
-            versioning
-                .current_version
-                .clear_dropped_sstable_infos(group_id, removed_sstables);
-        }
         assert!(sst_split_info.is_empty());
         new_version_delta.commit();
         branched_ssts.commit_memory();
