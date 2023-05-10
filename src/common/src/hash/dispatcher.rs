@@ -44,7 +44,7 @@ impl HashKeyKind {
 }
 
 /// Number of bytes of one element in `HashKey` serialization of [`DataType`].
-pub(super) enum HashKeySize {
+enum HashKeySize {
     /// For types with fixed size, e.g. int, float.
     Fixed(usize),
     /// For types with variable size, e.g. string.
@@ -92,7 +92,7 @@ pub trait HashKeyDispatcher: Sized {
     }
 }
 
-pub(super) fn hash_key_size(data_type: &DataType) -> HashKeySize {
+fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
     use crate::types::{Date, Decimal, Interval, Time, Timestamp, F32, F64};

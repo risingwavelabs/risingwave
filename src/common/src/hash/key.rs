@@ -304,7 +304,7 @@ macro_rules! impl_value_encoding_hash_key_serde {
         impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
             fn serialize_into(self, mut buf: impl BufMut) {
                 // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
-                // unncessary here. After we resolve them, we can make more types directly delegate
+                // unnecessary here. After we resolve them, we can make more types directly delegate
                 // to this implementation.
                 value_encoding::serialize_datum_into(Some(ScalarRefImpl::from(self)), &mut buf);
             }
@@ -315,7 +315,7 @@ macro_rules! impl_value_encoding_hash_key_serde {
                     .expect("in-memory deserialize should never fail")
                     .expect("datum should never be NULL");
 
-                // TODO: extra unboxing from `ScalarRefImpl` is unncessary here.
+                // TODO: extra unboxing from `ScalarRefImpl` is unnecessary here.
                 scalar.try_into().unwrap()
             }
         }
@@ -328,7 +328,7 @@ macro_rules! impl_memcmp_encoding_hash_key_serde {
             fn serialize_into(self, buf: impl BufMut) {
                 let mut serializer = memcomparable::Serializer::new(buf);
                 // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
-                // unncessary here.
+                // unnecessary here.
                 memcmp_encoding::serialize_datum(
                     Some(ScalarRefImpl::from(self)),
                     OrderType::ascending(),
@@ -348,7 +348,7 @@ macro_rules! impl_memcmp_encoding_hash_key_serde {
                 .expect("in-memory deserialize should never fail")
                 .expect("datum should never be NULL");
 
-                // TODO: extra unboxing from `ScalarRefImpl` is unncessary here.
+                // TODO: extra unboxing from `ScalarRefImpl` is unnecessary here.
                 scalar.try_into().unwrap()
             }
         }
@@ -517,6 +517,8 @@ impl_value_encoding_hash_key_serde!(Box<str>);
 impl_value_encoding_hash_key_serde!(Box<[u8]>);
 impl_value_encoding_hash_key_serde!(JsonbVal);
 
+// It's possible there's `Decimal` or `Interval` in these composite types, so we currently always
+// use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
 
