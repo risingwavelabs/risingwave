@@ -17,100 +17,16 @@ use std::sync::Arc;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use super::{CompactionInput, CompactionPicker, LocalPickerStatistic, MinOverlappingPicker};
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 impl TierCompactionPicker {
-    pub fn new(
-        config: Arc<CompactionConfig>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> TierCompactionPicker {
-        TierCompactionPicker {
-            config,
-            overlap_strategy,
-        }
-    }
-
-    fn pick_trivial_move_file(
-        &self,
-        l0: &OverlappingLevel,
-        level_handlers: &[LevelHandler],
-    ) -> Option<CompactionInput> {
-        for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type == LevelType::Overlapping as i32 || idx + 1 >= l0.sub_levels.len() {
-                continue;
-            }
-
-            if l0.sub_levels[idx + 1].level_type == LevelType::Overlapping as i32 {
-                continue;
-            }
-
-            let min_overlap_picker = MinOverlappingPicker::new(
-                0,
-                0,
-                self.config.sub_level_max_compaction_bytes,
-                false,
-                self.overlap_strategy.clone(),
-            );
-
-            let (select_tables, target_tables) = min_overlap_picker.pick_tables(
-                &l0.sub_levels[idx + 1].table_infos,
-                &level.table_infos,
-                level_handlers,
-            );
-
-            // only pick tables for trivial move
-            if select_tables.is_empty() || !target_tables.is_empty() {
-                continue;
-            }
-
-            // support trivial move cross multi sub_levels
-            let mut overlap = self.overlap_strategy.create_overlap_info();
-            for sst in &select_tables {
-                overlap.update(sst);
-            }
-
-            assert!(overlap
-                .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .is_empty());
-            let mut target_level_idx = idx;
-            while target_level_idx > 0 {
-                if l0.sub_levels[target_level_idx - 1].level_type
-                    != LevelType::Nonoverlapping as i32
-                    || !overlap
-                        .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
-                        .is_empty()
-                {
-                    break;
-                }
-                target_level_idx -= 1;
-            }
-
-            let input_levels = vec![
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: select_tables,
-                },
-                InputLevel {
-                    level_idx: 0,
-                    level_type: LevelType::Nonoverlapping as i32,
-                    table_infos: vec![],
-                },
-            ];
-            return Some(CompactionInput {
-                input_levels,
-                target_level: 0,
-                target_sub_level_id: l0.sub_levels[target_level_idx].sub_level_id,
-            });
-        }
-        None
+    pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
+        TierCompactionPicker { config }
     }
 
     fn pick_overlapping_level(
@@ -119,9 +35,8 @@ impl TierCompactionPicker {
         level_handler: &LevelHandler,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
-        let overlapping_type = LevelType::Overlapping as i32;
         for (idx, level) in l0.sub_levels.iter().enumerate() {
-            if level.level_type != overlapping_type {
+            if level.level_type() != LevelType::Overlapping {
                 continue;
             }
 
@@ -164,7 +79,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if other.level_type != overlapping_type {
+                if other.level_type() != LevelType::Overlapping {
                     waiting_enough_files = false;
                     break;
                 }
@@ -217,11 +132,7 @@ impl CompactionPicker for TierCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_overlapping_level(l0, &level_handlers[0], stats) {
-            return Some(ret);
-        }
-
-        self.pick_trivial_move_file(l0, level_handlers)
+        self.pick_overlapping_level(l0, &level_handlers[0], stats)
     }
 }
 
@@ -237,91 +148,10 @@ pub mod tests {
     use crate::hummock::compaction::level_selector::tests::{
         generate_l0_overlapping_sublevels, generate_table, push_table_level0_overlapping,
     };
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
     use crate::hummock::compaction::picker::{
-        CompactionInput, CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
+        CompactionPicker, LocalPickerStatistic, TierCompactionPicker,
     };
     use crate::hummock::level_handler::LevelHandler;
-
-    fn is_l0_trivial_move(compaction_input: &CompactionInput) -> bool {
-        compaction_input.input_levels.len() == 2
-            && !compaction_input.input_levels[0].table_infos.is_empty()
-            && compaction_input.input_levels[1].table_infos.is_empty()
-    }
-
-    #[test]
-    fn test_trivial_move() {
-        let levels_handler = vec![LevelHandler::new(0)];
-        let config = Arc::new(
-            CompactionConfigBuilder::new()
-                .level0_tier_compact_file_number(2)
-                .target_file_size_base(30)
-                .level0_sub_level_compact_level_count(2)
-                .level0_overlapping_sub_level_compact_level_count(4)
-                .build(),
-        );
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
-
-        // Cannot trivial move because there is only 1 sub-level.
-        let l0 = generate_l0_overlapping_sublevels(vec![vec![
-            generate_table(1, 1, 100, 110, 1),
-            generate_table(2, 1, 150, 250, 1),
-        ]]);
-        let levels = Levels {
-            l0: Some(l0),
-            levels: vec![],
-            member_table_ids: vec![1],
-            ..Default::default()
-        };
-        let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none());
-
-        // Cannot trivial move because sub-levels are overlapping
-        let l0: OverlappingLevel = generate_l0_overlapping_sublevels(vec![
-            vec![
-                generate_table(1, 1, 100, 110, 1),
-                generate_table(2, 1, 150, 250, 1),
-            ],
-            vec![generate_table(3, 1, 10, 90, 1)],
-            vec![generate_table(4, 1, 10, 90, 1)],
-            vec![generate_table(5, 1, 10, 90, 1)],
-        ]);
-        let mut levels = Levels {
-            l0: Some(l0),
-            levels: vec![],
-            member_table_ids: vec![1],
-            ..Default::default()
-        };
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(!is_l0_trivial_move(&ret));
-
-        // Cannot trivial move because latter sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Overlapping as i32;
-        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
-        assert!(ret.is_none());
-
-        // Cannot trivial move because former sub-level is overlapping
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(!is_l0_trivial_move(&ret));
-
-        // trivial move
-        levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Nonoverlapping as i32;
-        levels.l0.as_mut().unwrap().sub_levels[1].level_type = LevelType::Nonoverlapping as i32;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert!(is_l0_trivial_move(&ret));
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-    }
 
     #[test]
     fn test_pick_whole_level_basic() {
@@ -353,8 +183,7 @@ pub mod tests {
                 .level0_overlapping_sub_level_compact_level_count(4)
                 .build(),
         );
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = TierCompactionPicker::new(config);
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -411,8 +240,7 @@ pub mod tests {
         let mut local_stats = LocalPickerStatistic::default();
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = TierCompactionPicker::new(config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -458,8 +286,7 @@ pub mod tests {
         );
         let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
         let mut local_stats = LocalPickerStatistic::default();
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = TierCompactionPicker::new(config);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
     }
@@ -492,8 +319,7 @@ pub mod tests {
         );
 
         let mut local_stats = LocalPickerStatistic::default();
-        let mut picker =
-            TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = TierCompactionPicker::new(config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
