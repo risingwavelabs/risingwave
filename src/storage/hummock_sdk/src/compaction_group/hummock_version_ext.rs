@@ -452,7 +452,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                             level.total_file_size -= sst_info.file_size;
                             level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                             l0.total_file_size -= sst_info.file_size;
-                            l0.uncompressed_file_size -= sst_info.file_size;
+                            l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
                         });
                 }
             }

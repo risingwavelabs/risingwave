@@ -550,12 +550,6 @@ pub(crate) mod tests {
         )
         .await;
 
-        let compact_ctx_existing_table_id = prepare_compactor_and_filter(
-            &storage_existing_table_id,
-            &hummock_meta_client,
-            existing_table_id,
-        );
-
         prepare_data(
             hummock_meta_client.clone(),
             &storage_existing_table_id,
@@ -567,42 +561,6 @@ pub(crate) mod tests {
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
             .await;
-
-        // 2. get compact task
-        let manual_compcation_option = ManualCompactionOption {
-            level: 0,
-            ..Default::default()
-        };
-        // 2. get compact task
-        let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
-                manual_compcation_option,
-            )
-            .await
-            .unwrap()
-            .unwrap();
-
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            128
-        );
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        Compactor::compact(
-            Arc::new(compact_ctx_existing_table_id),
-            compact_task.clone(),
-            rx,
-        )
-        .await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -708,13 +666,12 @@ pub(crate) mod tests {
             storage.flush(Vec::new()).await.unwrap();
             storage.seal_current_epoch(next_epoch);
             other.seal_current_epoch(next_epoch);
-
-            let ssts = global_storage
-                .seal_and_sync_epoch(epoch)
-                .await
-                .unwrap()
-                .uncommitted_ssts;
-            hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            let is_checkpoint = index % 8 == 7;
+            global_storage.seal_epoch(epoch, is_checkpoint);
+            if is_checkpoint {
+                let ssts = global_storage.sync(epoch).await.unwrap().uncommitted_ssts;
+                hummock_meta_client.commit_epoch(epoch, ssts).await.unwrap();
+            }
         }
 
         // Mimic dropping table
@@ -751,9 +708,10 @@ pub(crate) mod tests {
                 .input_ssts
                 .iter()
                 .filter(|level| level.level_idx != compact_task.target_level)
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            kv_count
+                .flat_map(|level| level.table_infos.iter())
+                .map(|sst| sst.total_key_count)
+                .sum::<u64>(),
+            kv_count as u64,
         );
 
         // 4. compact
