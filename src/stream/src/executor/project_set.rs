@@ -222,7 +222,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
-    use risingwave_expr::table_function::repeat_tf;
+    use risingwave_expr::table_function::repeat;
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
@@ -262,11 +262,11 @@ mod tests {
         )
         .unwrap();
 
-        let tf1 = repeat_tf(
+        let tf1 = repeat(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             1,
         );
-        let tf2 = repeat_tf(
+        let tf2 = repeat(
             LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
             2,
         );

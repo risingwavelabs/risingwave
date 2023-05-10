@@ -168,7 +168,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
-    use risingwave_expr::table_function::repeat_tf;
+    use risingwave_expr::table_function::repeat;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -189,11 +189,11 @@ mod tests {
         );
 
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
-        let expr2 = repeat_tf(
+        let expr2 = repeat(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             2,
         );
-        let expr3 = repeat_tf(
+        let expr3 = repeat(
             LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
             3,
         );
@@ -250,7 +250,7 @@ mod tests {
     #[tokio::test]
     async fn test_project_set_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        let tf = repeat_tf(
+        let tf = repeat(
             LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
             2,
         );

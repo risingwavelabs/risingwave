@@ -30,11 +30,13 @@ use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
 mod regexp_matches;
+mod repeat;
 mod unnest;
 mod user_defined;
 
 use self::generate_series::*;
 use self::regexp_matches::*;
+pub use self::repeat::*;
 use self::unnest::*;
 use self::user_defined::*;
 
@@ -69,46 +71,6 @@ pub fn build_from_prost(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         Udtf => new_user_defined(prost, chunk_size),
         Unspecified => unreachable!(),
     }
-}
-
-/// Used for tests. Repeat an expression n times
-pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
-    #[derive(Debug)]
-    struct RepeatN {
-        expr: BoxedExpression,
-        n: usize,
-    }
-
-    #[async_trait::async_trait]
-    impl TableFunction for RepeatN {
-        fn return_type(&self) -> DataType {
-            self.expr.return_type()
-        }
-
-        async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
-            self.eval_inner(input)
-        }
-    }
-
-    impl RepeatN {
-        #[try_stream(boxed, ok = DataChunk, error = ExprError)]
-        async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
-            let array = self.expr.eval(input).await?;
-
-            let mut index_builder = I64ArrayBuilder::new(0x100);
-            let mut value_builder = self.return_type().create_array_builder(0x100);
-            for (i, value) in array.iter().enumerate() {
-                index_builder.append_n(self.n, Some(i as i64));
-                value_builder.append_datum_n(self.n, value);
-            }
-            let len = index_builder.len();
-            let index_array: ArrayImpl = index_builder.finish().into();
-            let value_array = value_builder.finish();
-            yield DataChunk::new(vec![index_array.into(), value_array.into()], len);
-        }
-    }
-
-    RepeatN { expr, n }.boxed()
 }
 
 /// See also [`PbProjectSetSelectItem`]
