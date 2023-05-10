@@ -177,6 +177,43 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_count(
+                    "Compaction Task L0 Select Level Count",
+                    "Avg l0 select_level_count of the compact task, and categorize it according to different cg, levels and task types",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
+                            "avg cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Compaction Task File Count",
+                    "Avg file count of the compact task, and categorize it according to different cg, levels and task types",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
+                            "avg cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compaction Task Size Distribution",
+                    "The distribution of the compact task size triggered, including p90 and max. and categorize it according to different cg, levels and task types.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('storage_compact_task_size_bucket')}[$__rate_interval])) by (le, group, type))",
+                                f"p{legend}" +
+                                " - cg{{group}}@{{type}}",
+                                ),
+                            [90, "max"],
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Compactor Running Task Count",
                     "The number of compactions from one level to another level that are running.",
@@ -374,21 +411,6 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
                             "avg_epoch_count - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_bytes(
-                    "Compact Task Size Distribution",
-                    "the size of each compact task",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_compact_task_size_bucket')}[$__rate_interval])) by (le, job, group, level))",
-                                f"p{legend}" +
-                                " - {{group}} @ {{level}}",
-                                ),
-                            [90, "max"],
                         ),
                     ],
                 ),
@@ -1759,8 +1781,8 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job)",
-                    "uploading memory - {{job}}",
+                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],
         ),

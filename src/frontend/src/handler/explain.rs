@@ -109,9 +109,17 @@ async fn do_handle_explain(
                         query,
                         name,
                         columns,
+                        emit_mode,
                         ..
-                    } => gen_create_mv_plan(&session, context.clone(), *query, name, columns)
-                        .map(|x| x.0),
+                    } => gen_create_mv_plan(
+                        &session,
+                        context.clone(),
+                        *query,
+                        name,
+                        columns,
+                        emit_mode,
+                    )
+                    .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
                         gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)

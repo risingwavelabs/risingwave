@@ -71,6 +71,7 @@ where
     pub del_agg: Arc<CompactionDeleteRanges>,
     key_range: KeyRange,
     last_table_id: u32,
+    is_target_level_l0_or_lbase: bool,
     split_by_table: bool,
 }
 
@@ -85,6 +86,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<CompactionDeleteRanges>,
         key_range: KeyRange,
+        is_target_level_l0_or_lbase: bool,
         split_by_table: bool,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
@@ -103,6 +105,7 @@ where
             last_sealed_key: start_key,
             key_range,
             last_table_id: 0,
+            is_target_level_l0_or_lbase,
             split_by_table,
         }
     }
@@ -118,6 +121,7 @@ where
             del_agg: Arc::new(CompactionDeleteRanges::for_test()),
             key_range: KeyRange::inf(),
             last_table_id: 0,
+            is_target_level_l0_or_lbase: false,
             split_by_table: false,
         }
     }
@@ -159,14 +163,30 @@ where
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
         }
+        // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
+        // then call `seal_current` later outside the `if let` instead of calling
+        // `seal_current` at where we set `need_seal_current = true`. This is because
+        // `seal_current` is an async method, and if we call `seal_current` within the `if let`,
+        // this temporary reference to `current_builder` will be captured in the future generated
+        // from the current method. Since this generated future is usually required to be `Send`,
+        // the captured reference to `current_builder` is also required to be `Send`, and then
+        // `current_builder` itself is required to be `Sync`, which is unnecessary.
+        let mut need_seal_current = false;
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
-                let monotonic_deletes = self
-                    .del_agg
-                    .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
-                self.seal_current(monotonic_deletes).await?;
-                self.last_sealed_key.extend_from_other(&full_key.user_key);
+            if is_new_user_key
+                && (switch_builder
+                    || (!(self.is_target_level_l0_or_lbase && self.split_by_table)
+                        && builder.reach_capacity()))
+            {
+                need_seal_current = true;
             }
+        }
+        if need_seal_current {
+            let monotonic_deletes = self
+                .del_agg
+                .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
+            self.seal_current(monotonic_deletes).await?;
+            self.last_sealed_key.extend_from_other(&full_key.user_key);
         }
 
         if self.current_builder.is_none() {
@@ -440,6 +460,7 @@ mod tests {
             builder.build_for_compaction(false),
             KeyRange::inf(),
             false,
+            false,
         );
         builder
             .add_full_key_for_test(
@@ -490,6 +511,7 @@ mod tests {
             None,
             builder.build_for_compaction(false),
             KeyRange::inf(),
+            false,
             false,
         );
         let results = builder.finish().await.unwrap();

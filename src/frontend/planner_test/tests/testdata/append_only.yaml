@@ -33,7 +33,7 @@
   stream_plan: |
     StreamMaterialize { columns: [max_v1], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [max(max(t1.v1))] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [max(max(t1.v1)), count] }
+      └─StreamAppendOnlySimpleAgg { aggs: [max(max(t1.v1)), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [max(t1.v1)] }
+          └─StreamStatelessSimpleAgg { aggs: [max(t1.v1)] }
             └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

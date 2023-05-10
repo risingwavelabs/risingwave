@@ -4,6 +4,9 @@
 # These queries can be used for fuzz testing.
 # Requires `$SNAPSHOT_DIR` to be set,
 # that will be where queries are stored after generation.
+#
+# Example:
+# SNAPSHOT_DIR="~/projects/sqlsmith-query-snapshots" ./gen_queries.sh
 
 ################# ENV
 

@@ -265,7 +265,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -277,7 +277,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
         operator_id: 3,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 
@@ -308,7 +308,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -320,7 +320,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
         operator_id: 5,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 

@@ -14,6 +14,5 @@ CREATE SOURCE twitter (
 ) WITH (
     connector = 'pulsar',
     pulsar.topic = 'twitter',
-    pulsar.admin.url = 'http://message_queue:8080',
     pulsar.service.url = 'pulsar://message_queue:6650'
 ) ROW FORMAT JSON;
