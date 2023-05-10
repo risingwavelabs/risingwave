@@ -452,13 +452,11 @@ impl HummockVersionUpdateExt for HummockVersion {
                     group_construct.get_new_sst_start_id(),
                 ));
 
-                let levels = self
-                    .levels
-                    .get_mut(&parent_group_id)
-                    .expect("compaction group should exist");
-                levels
-                    .member_table_ids
-                    .drain_filter(|t| group_construct.table_ids.contains(t));
+                if let Some(levels) = self.levels.get_mut(&parent_group_id) {
+                    levels
+                        .member_table_ids
+                        .drain_filter(|t| group_construct.table_ids.contains(t));
+                }
             } else if let Some(group_change) = &summary.group_table_change {
                 sst_split_info.extend(self.init_with_parent_group(
                     group_change.origin_group_id,
