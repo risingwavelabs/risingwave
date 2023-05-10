@@ -299,23 +299,27 @@ impl<S: MetaStore> HummockManager<S> {
             });
             modified_groups
                 .entry(group_id)
-                .or_insert_with(|| vec![])
+                .or_insert_with(Vec::new)
                 .push(*table_id);
         }
 
         // Remove empty group, GC SSTs and remove metric.
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut dirty_groups = vec![];
+        let mut groups_to_remove = vec![];
         for (group_id, mut removed_table_ids) in modified_groups {
             if let Some(group) = versioning.current_version.levels.get(&group_id) {
                 removed_table_ids.sort();
+                let mut origin_table_ids = group.member_table_ids.clone();
+                origin_table_ids.sort();
                 let mut dropped_sstables = vec![];
                 if group_id > StaticCompactionGroupId::End as CompactionGroupId
-                    && group.member_table_ids.eq(&removed_table_ids)
+                    && origin_table_ids.eq(&removed_table_ids)
                 {
                     // We don't bother to add IntraLevelDelta to remove SSTs from group, because the
                     // entire group is to be removed.
                     // However, we need to take care of SST GC for the removed group.
+                    groups_to_remove.push(group_id);
                     for (object_id, sst_id) in get_compaction_group_ssts(current_version, group_id)
                     {
                         if drop_sst(&mut branched_ssts, group_id, object_id, sst_id) {

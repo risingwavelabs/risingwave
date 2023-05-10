@@ -400,6 +400,8 @@ impl CompactorManager {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
                     // Refresh the expiry of the task as it is showing progress.
                     task_ref.expire_at = now + self.task_expiry_seconds;
+                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                 }
             }
         }
