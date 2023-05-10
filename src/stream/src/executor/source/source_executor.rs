@@ -263,7 +263,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         epoch: EpochPair,
         target_state: Option<Vec<SplitImpl>>,
-        trim_state: bool,
+        should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
@@ -273,9 +273,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        if let Some(target_splits) = target_state && trim_state {
-            println!("trim {:?}", target_splits);
-
+        if let Some(target_splits) = target_state && should_trim_state {
             let target_split_ids: HashSet<_> =
                 target_splits.iter().map(|split| split.id()).collect();
 
@@ -283,26 +281,14 @@ impl<S: StateStore> SourceExecutor<S> {
                 .drain_filter(|split| !target_split_ids.contains(&split.id()))
                 .collect_vec();
 
-            println!("deleting {:?}", dropped_splits);
-
             if !dropped_splits.is_empty() {
-                for split in dropped_splits.iter() {
+                for split in &dropped_splits {
                     // should be already trimmed in `replace_stream_reader_with_target_state`
                     assert!(!core.stream_source_splits.contains_key(&split.id()));
                 }
 
-                core.split_state_store.trim_state(&dropped_splits);
-
-                // for split in dropped_splits {
-                //     let x =                    core.split_state_store.get(split.id()).await.unwrap();
-                //     println!("key {} value {:?}", split.id(), x);
-                // }
-
-
-                for split in dropped_splits.iter() {
-                    let x = core.split_state_store.get(split.id()).await.unwrap();
-                    println!("key {} value {:?}", split.id(), x);
-                }
+                // trim dropped splits' state
+                core.split_state_store.trim_state(&dropped_splits).await?;
             }
         }
 
@@ -312,8 +298,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
-
-        // core.state_cache.clear();
 
         Ok(())
     }
@@ -446,8 +430,6 @@ impl<S: StateStore> SourceExecutor<S> {
                                             split_assignment,
                                         )
                                         .await?;
-
-                                    println!("target {:?}", target_state);
 
                                     target_state = target_splits;
                                     should_trim_state = true;
@@ -618,6 +600,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::time::Duration;
 
+    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
@@ -629,7 +612,6 @@ mod tests {
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
-    use futures::StreamExt;
     use tracing_test::traced_test;
 
     use super::*;
@@ -814,7 +796,7 @@ mod tests {
             )
         );
 
-        let new_assignments = vec![
+        let new_assignment = vec![
             SplitImpl::Datagen(DatagenSplit {
                 split_index: 0,
                 split_num: 3,
@@ -834,7 +816,7 @@ mod tests {
 
         let change_split_mutation =
             Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignments.clone()
+                ActorId::default() => new_assignment.clone()
             }));
 
         barrier_tx.send(change_split_mutation).unwrap();
@@ -849,7 +831,7 @@ mod tests {
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler
-            .get(new_assignments[1].id())
+            .get(new_assignment[1].id())
             .await
             .unwrap()
             .unwrap();
@@ -860,127 +842,28 @@ mod tests {
             .map(|msg| msg.unwrap().into_chunk().unwrap())
             .collect();
         let chunk_2 = StreamChunk::concat(chunks).sort_rows();
-        assert_eq!(chunk_2.cardinality(), 10,);
+        assert_eq!(chunk_2.cardinality(), 10);
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
         let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
-    }
 
-    #[traced_test]
-    #[tokio::test]
-    async fn test_split_drop_mutation() {
-        let table_id = TableId::default();
-        let schema = Schema {
-            fields: vec![Field::with_name(DataType::Int32, "v1")],
-        };
-        let row_id_index = None;
-        let pk_indices = vec![0_usize];
-        let source_info = StreamSourceInfo {
-            row_format: PbRowFormatType::Native as i32,
-            ..Default::default()
-        };
-        let properties = convert_args!(hashmap!(
-            "connector" => "datagen",
-            "fields.v1.kind" => "sequence",
-            "fields.v1.start" => "1",
-            "fields.v1.end" => "2",
-        ));
-
-        let source_desc_builder =
-            create_source_desc_builder(&schema, row_id_index, source_info, properties);
-        let mem_state_store = MemoryStateStore::new();
-
-        let column_ids = vec![ColumnId::from(0)];
-        let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let split_state_store = SourceStateTableHandler::from_table_catalog(
-            &default_source_internal_table(0x2333),
-            mem_state_store.clone(),
-        )
-        .await;
-
-        let core = StreamSourceCore::<MemoryStateStore> {
-            source_id: table_id,
-            column_ids: column_ids.clone(),
-            source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
-            source_desc_builder: Some(source_desc_builder),
-            stream_source_splits: HashMap::new(),
-            split_state_store,
-            state_cache: HashMap::new(),
-            source_name: MOCK_SOURCE_NAME.to_string(),
-        };
-
-        let executor = SourceExecutor::new(
-            ActorContext::create(0),
-            schema,
-            pk_indices,
-            Some(core),
-            Arc::new(StreamingMetrics::unused()),
-            barrier_rx,
-            u64::MAX,
-            1,
-        );
-        let boxed = Box::new(executor);
-        let mut handler = boxed.execute();
-
-        let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
-            adds: HashMap::new(),
-            added_actors: HashSet::new(),
-            splits: hashmap! {
-                ActorId::default() => vec![
-                    SplitImpl::Datagen(DatagenSplit {
-                        split_index: 0,
-                        split_num: 3,
-                        start_offset: None,
-                    }),
-                ],
-            },
-        });
-
-        println!("before init");
-        barrier_tx.send(init_barrier).unwrap();
-
-        (handler.next().await.unwrap().unwrap())
-            .into_barrier()
-            .unwrap();
-
-        let mut ready_chunks = handler.ready_chunks(10);
-
-        let new_assignments = gen_seq_datagen_split(3);
-
+        // receive all
         ready_chunks.next().await.unwrap();
 
-        let change_split_mutation =
-            Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignments.clone()
+        let prev_assignment = new_assignment;
+        let new_assignment = vec![prev_assignment[2].clone()];
+
+        let drop_split_mutation =
+            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+                ActorId::default() => new_assignment.clone()
             }));
 
-        println!("before assign 012");
-        barrier_tx.send(change_split_mutation).unwrap();
+        barrier_tx.send(drop_split_mutation).unwrap();
 
-        let _ = ready_chunks.next().await.unwrap(); // barrier
-
-        let prev = new_assignments;
-
-        let assignment = vec![SplitImpl::Datagen(DatagenSplit {
-            split_index: 2,
-            split_num: 3,
-            start_offset: None,
-        })];
-
-        let change_split_mutation =
-            Barrier::new_test_barrier(3).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => assignment.clone()
-            }));
-
-        println!("before assign 2");
-        barrier_tx.send(change_split_mutation).unwrap();
-
-        tokio::time::sleep(Duration::from_millis(1000)).await;
-
-        ready_chunks.next().await;
+        ready_chunks.next().await.unwrap(); // barrier
 
         let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
@@ -988,22 +871,24 @@ mod tests {
         )
         .await;
 
-        source_state_handler.init_epoch(EpochPair::new_test_epoch(4));
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
 
-        let x = source_state_handler.get(prev[0].id()).await.unwrap();
-        assert_eq!(x, None);
-    }
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[0])
+            .await
+            .unwrap()
+            .is_none());
 
-    fn gen_seq_datagen_split(count: i32) -> Vec<SplitImpl> {
-        (0..count)
-            .into_iter()
-            .map(|i| {
-                SplitImpl::Datagen(DatagenSplit {
-                    split_index: i,
-                    split_num: count,
-                    start_offset: None,
-                })
-            })
-            .collect()
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[1])
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[2])
+            .await
+            .unwrap()
+            .is_some());
     }
 }

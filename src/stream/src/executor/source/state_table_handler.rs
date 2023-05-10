@@ -159,9 +159,12 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    fn delete(&mut self, key: SplitId) {
-        self.state_store
-            .delete(row::once(Some(Self::string_to_scalar(key.deref()))));
+    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+        if let Some(prev_row) = self.get(key).await? {
+            self.state_store.delete(prev_row);
+        }
+
+        Ok(())
     }
 
     /// This function provides the ability to persist the source state
@@ -184,16 +187,18 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    pub fn trim_state<SS>(&mut self, to_trim: &[SS])
+    pub async fn trim_state<SS>(&mut self, to_trim: &[SS]) -> StreamExecutorResult<()>
     where
         SS: SplitMetaData,
     {
         for split in to_trim {
-            self.delete(split.id());
+            tracing::info!("trimming source state for split {}", split.id());
+            self.delete(split.id()).await?;
         }
+
+        Ok(())
     }
 
-    ///
     pub async fn try_recover_from_state_store(
         &mut self,
         stream_source_split: &SplitImpl,
