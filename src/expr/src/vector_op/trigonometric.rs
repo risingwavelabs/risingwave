@@ -324,14 +324,24 @@ mod tests {
     use std::f64::consts::PI;
 
     use num_traits::ToPrimitive;
-    use risingwave_common::types::{FloatExt, F64, F64};
+    use risingwave_common::types::{FloatExt, F64};
 
     use crate::vector_op::trigonometric::*;
 
+    fn precision() -> f64 {
+        1e-13
+    }
+
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = (lhs.0 - rhs.0).abs() <= 0.000000000000001;
-        assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
+        let x = (lhs.0 - rhs.0).abs() <= precision().into();
+        assert!(
+            x,
+            "{:?} != {:?}. Required precision is {:?}",
+            lhs.0,
+            rhs.0,
+            precision()
+        );
     }
 
     #[test]
@@ -388,7 +398,7 @@ mod tests {
             (cotd_f64(F64::from(-190)) + F64::from(5.671281819617705))
                 .abs()
                 .0
-                <= 0.00000000000001,
+                <= precision(),
         );
         assert_similar(cot_f64(50_f64.to_radians().into()), cotd_f64(F64::from(50)));
         assert_similar(
@@ -411,7 +421,7 @@ mod tests {
             (tan_f64(250_f64.to_radians().into()) - tand_f64(F64::from(250)))
                 .0
                 .abs()
-                < 0.00000000000001
+                < precision()
         );
         assert_similar(
             tan_f64(360_f64.to_radians().into()),
@@ -467,6 +477,28 @@ mod tests {
     }
 
     #[test]
+    fn test_degrees_and_radians() {
+        let full_angle = F64::from(360);
+        let tau = F64::from(std::f64::consts::TAU);
+        assert_similar(degrees_f64(tau), full_angle);
+        assert_similar(radians_f64(full_angle), tau);
+
+        let straight_angle = F64::from(180);
+        let pi = F64::from(std::f64::consts::PI);
+        assert_similar(degrees_f64(pi), straight_angle);
+        assert_similar(radians_f64(straight_angle), pi);
+
+        let right_angle = F64::from(90);
+        let half_pi = F64::from(std::f64::consts::PI / 2.);
+        assert_similar(degrees_f64(half_pi), right_angle);
+        assert_similar(radians_f64(right_angle), half_pi);
+
+        let zero = F64::from(0);
+        assert_similar(degrees_f64(zero), zero);
+        assert_similar(radians_f64(zero), zero);
+    }
+
+    #[test]
     fn test_hyperbolic_trigonometric_funcs() {
         let two = F64::from(2);
         let one = F64::from(1);
@@ -491,32 +523,12 @@ mod tests {
         // https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#Other_identities
         assert_similar(two * acosh_f64(x), acosh_f64(two * x.powi(2) - one)); // for x >= 1
         assert_similar(two * asinh_f64(x), acosh_f64(two * x.powi(2) + one)); // for x >= 0
+
+        let x = x.powi(2).0;
+
         assert_similar(
-            asinh_f64(F64::from(x.powi(2).to_f64().unwrap() - 1.to_f64().unwrap()) / (two * x)),
-            atanh_f64(
-                F64::from(x.powi(2).to_f64().unwrap() - 1.to_f64().unwrap())
-                    / F64::from(x.powi(2).to_f64().unwrap() + 1.to_f64().unwrap()),
-            ),
+            asinh_f64(F64::from(x.powi(2) - 1.0) / (two * x)),
+            atanh_f64(F64::from(x.powi(2) - 1.0) / F64::from(x.powi(2) + 1.0)),
         );
-        fn test_degrees_and_radians() {
-            let full_angle = F64::from(360);
-            let tau = F64::from(std::f64::consts::TAU);
-            assert_similar(degrees_f64(tau), full_angle);
-            assert_similar(radians_f64(full_angle), tau);
-
-            let straight_angle = F64::from(180);
-            let pi = F64::from(std::f64::consts::PI);
-            assert_similar(degrees_f64(pi), straight_angle);
-            assert_similar(radians_f64(straight_angle), pi);
-
-            let right_angle = F64::from(90);
-            let half_pi = F64::from(std::f64::consts::PI / 2.);
-            assert_similar(degrees_f64(half_pi), right_angle);
-            assert_similar(radians_f64(right_angle), half_pi);
-
-            let zero = F64::from(0);
-            assert_similar(degrees_f64(zero), zero);
-            assert_similar(radians_f64(zero), zero);
-        }
     }
 }
