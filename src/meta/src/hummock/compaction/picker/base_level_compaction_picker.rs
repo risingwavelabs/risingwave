@@ -99,7 +99,6 @@ impl LevelCompactionPicker {
 
         let mut skip_by_pending = false;
         let mut skip_by_write_amp = false;
-        let mut skip_by_count = false;
         let mut input_levels = vec![];
         for input in l0_select_tables_vec {
             let l0_select_tables = input
@@ -127,20 +126,12 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if !target_level_ssts.is_empty()
+            if (!target_level_ssts.is_empty() || input.sstable_infos.len() > 1)
                 && input.sstable_infos.len()
                     < self.config.level0_sub_level_compact_level_count as usize
-                && input.total_file_size < min_compaction_bytes
-            {
-                // not trivial move
-                skip_by_count = true;
-                continue;
-            }
-
-            if !target_level_ssts.is_empty()
-                && input.total_file_size < self.config.max_bytes_for_level_base
                 && input.total_file_size < target_level_size
             {
+                // not trivial move
                 skip_by_write_amp = true;
                 continue;
             }
