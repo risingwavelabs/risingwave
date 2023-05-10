@@ -119,9 +119,13 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
-    static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(
-        "Union Merge",
-        vec![UnionMergeRule::create()],
+    static ref SET_OPERATION_MERGE: OptimizationStage = OptimizationStage::new(
+        "Set Operation Merge",
+        vec![
+            UnionMergeRule::create(),
+            IntersectMergeRule::create(),
+            ExceptMergeRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 
@@ -146,7 +150,7 @@ lazy_static! {
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyScanRule::create(),
+            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -217,9 +221,9 @@ lazy_static! {
     );
 
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
-        "Convert Window Aggregation",
+        "Convert Window Function",
         vec![
-            OverAggToTopNRule::create(),
+            OverWindowToTopNRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
@@ -261,7 +265,10 @@ lazy_static! {
 
     static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
         "Set Operation To Join",
-        vec![IntersectToSemiJoinRule::create()],
+        vec![
+            IntersectToSemiJoinRule::create(),
+            ExceptToAntiJoinRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 }
@@ -378,9 +385,8 @@ impl LogicalOptimizer {
             }
         }
 
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-
-        plan = plan.optimize_by_rules(&UNION_MERGE);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
@@ -450,8 +456,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-        plan = plan.optimize_by_rules(&UNION_MERGE);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;

@@ -29,7 +29,7 @@ use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
@@ -841,7 +841,10 @@ where
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
                 range_end.extend(&watermark_suffix);
-                delete_ranges.push((Bytes::from(range_begin), Bytes::from(range_end)));
+                delete_ranges.push((
+                    Bound::Included(Bytes::from(range_begin)),
+                    Bound::Excluded(Bytes::from(range_end)),
+                ));
             }
         }
         self.local_store.flush(delete_ranges).await?;

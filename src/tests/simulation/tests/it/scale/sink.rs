@@ -108,7 +108,7 @@ async fn test_sink_append_only() -> Result<()> {
     let materialize_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("globalSimpleAgg"),
+            no_identity_contains("simpleAgg"),
         ])
         .await?;
 
@@ -161,7 +161,7 @@ async fn test_sink_debezium() -> Result<()> {
     let materialize_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            identity_contains("globalSimpleAgg"),
+            identity_contains("simpleAgg"),
         ])
         .await?;
 

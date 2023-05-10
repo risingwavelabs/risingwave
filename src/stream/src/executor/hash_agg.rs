@@ -30,7 +30,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
-use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
+use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -191,7 +191,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
-    pub fn new(args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(
             args.input.as_ref(),

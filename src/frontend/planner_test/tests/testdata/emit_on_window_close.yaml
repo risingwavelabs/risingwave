@@ -166,5 +166,5 @@
     └── read pk prefix len hint: 1
 
   stream_error: |-
-    Feature is not yet implemented: OverAgg to stream
+    Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124

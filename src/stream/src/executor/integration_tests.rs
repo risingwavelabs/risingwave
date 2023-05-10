@@ -33,7 +33,7 @@ use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
-use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
+use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::SharedContext;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
@@ -49,7 +49,7 @@ async fn test_merger_sum_aggr() {
         };
         let input = ReceiverExecutor::for_test(input_rx);
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = LocalSimpleAggExecutor::new(
+        let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
             input.boxed(),
             vec![

@@ -27,14 +27,14 @@ use super::error::StreamExecutorError;
 use super::*;
 use crate::error::StreamResult;
 
-pub struct LocalSimpleAggExecutor {
+pub struct StatelessSimpleAggExecutor {
     ctx: ActorContextRef,
     pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
     pub(super) agg_calls: Vec<AggCall>,
 }
 
-impl Executor for LocalSimpleAggExecutor {
+impl Executor for StatelessSimpleAggExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -52,7 +52,7 @@ impl Executor for LocalSimpleAggExecutor {
     }
 }
 
-impl LocalSimpleAggExecutor {
+impl StatelessSimpleAggExecutor {
     async fn apply_chunk(
         ctx: &ActorContextRef,
         identity: &str,
@@ -93,7 +93,7 @@ impl LocalSimpleAggExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let LocalSimpleAggExecutor {
+        let StatelessSimpleAggExecutor {
             ctx,
             input,
             info,
@@ -154,7 +154,7 @@ impl LocalSimpleAggExecutor {
     }
 }
 
-impl LocalSimpleAggExecutor {
+impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
@@ -166,10 +166,10 @@ impl LocalSimpleAggExecutor {
         let info = ExecutorInfo {
             schema,
             pk_indices,
-            identity: format!("LocalSimpleAggExecutor-{}", executor_id),
+            identity: format!("StatelessSimpleAggExecutor-{}", executor_id),
         };
 
-        Ok(LocalSimpleAggExecutor {
+        Ok(StatelessSimpleAggExecutor {
             ctx,
             input,
             info,
@@ -190,7 +190,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, LocalSimpleAggExecutor};
+    use crate::executor::{Executor, StatelessSimpleAggExecutor};
 
     #[tokio::test]
     async fn test_no_chunk() {
@@ -210,7 +210,7 @@ mod tests {
         }];
 
         let simple_agg = Box::new(
-            LocalSimpleAggExecutor::new(
+            StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
                 Box::new(source),
                 agg_calls,
@@ -256,7 +256,6 @@ mod tests {
         ));
         tx.push_barrier(3, false);
 
-        // This is local simple aggregation, so we add another row count state
         let agg_calls = vec![
             AggCall {
                 kind: AggKind::Count,
@@ -285,7 +284,7 @@ mod tests {
         ];
 
         let simple_agg = Box::new(
-            LocalSimpleAggExecutor::new(
+            StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
                 Box::new(source),
                 agg_calls,

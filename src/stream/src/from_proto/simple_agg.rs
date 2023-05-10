@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming Aggregators
+//! Streaming Simple Aggregator
 
 use risingwave_expr::agg::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
@@ -23,12 +23,12 @@ use super::agg_common::{
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
-use crate::executor::GlobalSimpleAggExecutor;
+use crate::executor::SimpleAggExecutor;
 
-pub struct GlobalSimpleAggExecutorBuilder;
+pub struct SimpleAggExecutorBuilder;
 
 #[async_trait::async_trait]
-impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
+impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
     async fn new_boxed_executor(
@@ -53,7 +53,7 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
 
-        Ok(GlobalSimpleAggExecutor::new(AggExecutorArgs {
+        Ok(SimpleAggExecutor::new(AggExecutorArgs {
             input,
             actor_ctx: params.actor_context,
             pk_indices: params.pk_indices,
