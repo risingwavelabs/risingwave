@@ -154,7 +154,7 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::{
-        ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
+        Array, ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
     };
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, ScalarImpl};
@@ -247,11 +247,11 @@ mod tests {
         )
         .into();
 
-        assert_eq!(*result.column_at(0), I16Array::from_iter([1]).into());
-        assert_eq!(*result.column_at(1), I32Array::from_iter([2]).into());
-        assert_eq!(*result.column_at(2), I64Array::from_iter([3]).into());
-        assert_eq!(*result.column_at(3), array);
-        assert_eq!(*result.column_at(4), I64Array::from_iter([0]).into());
+        assert_eq!(*result.column_at(0), I16Array::from_iter([1]).into_ref());
+        assert_eq!(*result.column_at(1), I32Array::from_iter([2]).into_ref());
+        assert_eq!(*result.column_at(2), I64Array::from_iter([3]).into_ref());
+        assert_eq!(*result.column_at(3), array.into());
+        assert_eq!(*result.column_at(4), I64Array::from_iter([0]).into_ref());
 
         // ValueExecutor should simply forward following barriers
         tx.send(Barrier::new_test_barrier(2)).unwrap();

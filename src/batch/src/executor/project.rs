@@ -20,7 +20,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
-use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -60,10 +59,7 @@ impl ProjectExecutor {
                 async move {
                     let data_chunk = data_chunk?;
                     let arrays = {
-                        let data_chunk = &data_chunk;
-                        let expr_futs = expr.iter().map(|expr| async move {
-                            Ok::<_, ExprError>(expr.eval(data_chunk).await?)
-                        });
+                        let expr_futs = expr.iter().map(|expr| expr.eval(&data_chunk));
                         futures::future::join_all(expr_futs)
                             .await
                             .into_iter()

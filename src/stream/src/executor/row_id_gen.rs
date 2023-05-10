@@ -196,7 +196,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         row_id_col.iter().for_each(|row_id| {
             // Should generate row id for insert operations.
             assert!(row_id.is_some());
@@ -216,7 +216,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for update operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(32874283748));
         assert_eq!(row_id_col.value_at(1).unwrap(), Serial::from(32874283748));
@@ -234,7 +234,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for delete operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(84629409685));
     }

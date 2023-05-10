@@ -576,11 +576,10 @@ mod tests {
         });
 
         let mut stream = executor.execute();
-        let res = stream.next().await.unwrap();
-        assert_matches!(res, Ok(_));
+        let chunk = stream.next().await.unwrap()?;
         assert_matches!(stream.next().await, None);
 
-        let actual = res?.column_at(0);
+        let actual = chunk.column_at(0);
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(55)]);

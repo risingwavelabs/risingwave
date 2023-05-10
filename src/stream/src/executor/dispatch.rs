@@ -1230,9 +1230,9 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                array.into()
+                array.into_ref()
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         let chunk = StreamChunk::new(ops, columns, None);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
