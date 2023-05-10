@@ -229,7 +229,7 @@ mod tests {
         assert_eq!("cluster id not found in meta store", err.to_error_str());
 
         ClusterId::new()
-            .put_at_meta_store(&meta_store)
+            .put_at_meta_store(meta_store.deref())
             .await
             .unwrap();
 
