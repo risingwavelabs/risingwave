@@ -20,7 +20,7 @@ mod rewrite;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
@@ -34,8 +34,8 @@ use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 
 /// The mutable state when building fragment graph.
-#[derive(Derivative)]
-#[derivative(Default)]
+#[derive(Educe)]
+#[educe(Default)]
 pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
@@ -47,7 +47,7 @@ pub struct BuildFragmentGraphState {
     next_table_id: u32,
 
     /// rewrite will produce new operators, and we need to track next operator id
-    #[derivative(Default(value = "u32::MAX - 1"))]
+    #[educe(Default(expression = "u32::MAX - 1"))]
     next_operator_id: u32,
 
     /// dependent streaming job ids.

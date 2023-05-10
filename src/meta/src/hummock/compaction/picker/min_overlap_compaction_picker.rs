@@ -21,14 +21,14 @@ use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, SstableInfo};
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct MinOverlappingPicker {
-    max_select_bytes: u64,
     level: usize,
     target_level: usize,
+    max_select_bytes: u64,
     split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
@@ -42,9 +42,9 @@ impl MinOverlappingPicker {
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
-            max_select_bytes,
             level,
             target_level,
+            max_select_bytes,
             split_by_table,
             overlap_strategy,
         }

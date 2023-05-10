@@ -40,7 +40,8 @@ impl StreamTopN {
         };
         let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let base = PlanBase::new_stream_with_logical(&logical, dist, false, watermark_columns);
+        let base =
+            PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
         StreamTopN { base, logical }
     }
 

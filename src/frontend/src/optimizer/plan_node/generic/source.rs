@@ -16,7 +16,7 @@ use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -29,8 +29,8 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::{TableCatalog, WithOptions};
 
 /// [`Source`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
@@ -42,8 +42,8 @@ pub struct Source {
     pub gen_row_id: bool,
     /// True if it is a source created when creating table with a source.
     pub for_table: bool,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
 
     /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.

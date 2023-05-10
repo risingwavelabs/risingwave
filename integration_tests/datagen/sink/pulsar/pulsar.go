@@ -53,8 +53,8 @@ func (p *PulsarSink) WriteRecord(ctx context.Context, format string, record sink
 		p.producers[topic] = producer
 	}
 	_, err = producer.Send(ctx, &pulsar.ProducerMessage{
-		Value: data,
-		Key:   key,
+		Payload: data,
+		Key:     key,
 	})
 	return err
 }

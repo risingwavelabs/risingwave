@@ -1,6 +1,6 @@
 steps:
   - label: "build"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build"
     plugins:
       - docker-compose#v4.9.0:
@@ -83,7 +83,6 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
-    soft_fail: true
 
   - label: "unit test"
     command: "ci/scripts/unit-test.sh"
@@ -179,7 +178,22 @@ steps:
           environment:
             - S3_SOURCE_TEST_CONF
     timeout_in_minutes: 20
-    
+
+  - label: "S3 source check on AWS (json parser)"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s json_file"
+    depends_on: build
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
+    timeout_in_minutes: 20
+
   - label: "S3 source check on lyvecloud.seagate.com (json parser)"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run"
     depends_on: build

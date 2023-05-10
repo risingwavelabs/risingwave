@@ -20,12 +20,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::{
     OverlapInfo, OverlapStrategy, RangeOverlapInfo,
 };
-use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, ManualCompactionOption,
-};
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {

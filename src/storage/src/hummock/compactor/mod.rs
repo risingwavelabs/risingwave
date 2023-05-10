@@ -14,7 +14,7 @@
 
 mod compaction_executor;
 mod compaction_filter;
-mod compaction_utils;
+pub mod compaction_utils;
 mod compactor_runner;
 mod context;
 mod iterator;
@@ -39,7 +39,7 @@ use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::util::resource_util;
-use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
@@ -61,8 +61,7 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_state_for_compaction, estimate_task_memory_capacity,
-    generate_splits,
+    build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -156,11 +155,6 @@ impl Compactor {
             .compact_read_sstn_next_level
             .with_label_values(&[&group_label, next_level_label.as_str()])
             .inc_by(target_table_infos.len() as u64);
-        context
-            .compactor_metrics
-            .compact_task_size
-            .with_label_values(&[&group_label, next_level_label.as_str()])
-            .observe((select_size + target_level_read_bytes) as f64);
 
         let timer = context
             .compactor_metrics
@@ -893,7 +887,9 @@ impl Compactor {
             task_progress,
             del_agg,
             self.task_config.key_range.clone(),
+            self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
+            self.task_config.split_weight_by_vnode,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,

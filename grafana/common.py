@@ -149,8 +149,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -168,8 +166,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -186,8 +182,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -204,8 +198,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -222,8 +214,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -240,8 +230,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="Qps",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -258,8 +246,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="Bps",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -276,8 +262,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -290,8 +274,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="row",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -303,8 +285,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -321,8 +301,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="kbytes",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -339,8 +317,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="$",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -353,8 +329,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -371,8 +345,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -389,8 +361,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -407,8 +377,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -425,8 +393,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="MB/s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
             **self.common_options,
         )
@@ -439,8 +405,6 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            legendDisplayMode="table",
-            legendPlacement="right",
             **self.common_options,
         )
 
@@ -484,8 +448,6 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
-            legendDisplayMode="table",
-            legendPlacement="right",
             **self.common_options,
         )
 

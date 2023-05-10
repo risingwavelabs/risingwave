@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::assert_bytes_eq;
@@ -65,7 +66,11 @@ async fn test_failpoints_table_read() {
 
     let seek_key = FullKey::for_test(
         TableId::default(),
-        format!("key_test_{:05}", 600 * 2 - 1).as_bytes().to_vec(),
+        [
+            VirtualNode::ZERO.to_be_bytes().as_slice(),
+            format!("key_test_{:05}", 600 * 2 - 1).as_bytes(),
+        ]
+        .concat(),
         0,
     );
     let result = sstable_iter.seek(seek_key.to_ref()).await;

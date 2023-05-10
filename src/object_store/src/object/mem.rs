@@ -21,6 +21,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use thiserror::Error;
 use tokio::io::AsyncRead;
 use tokio::sync::Mutex;
 
@@ -28,6 +29,30 @@ use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
     StreamingUploader,
 };
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("NotFound error: {0}")]
+    NotFound(String),
+    #[error("Other error: {0}")]
+    Other(String),
+}
+
+impl Error {
+    pub fn is_object_not_found_error(&self) -> bool {
+        matches!(self, Error::NotFound(_))
+    }
+}
+
+impl Error {
+    fn not_found(msg: impl ToString) -> Self {
+        Error::NotFound(msg.to_string())
+    }
+
+    fn other(msg: impl ToString) -> Self {
+        Error::Other(msg.to_string())
+    }
+}
 
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct InMemStreamingUploader {
@@ -52,7 +77,7 @@ impl StreamingUploader for InMemStreamingUploader {
         ));
         let obj = self.buf.freeze();
         if obj.is_empty() {
-            Err(ObjectError::internal("upload empty object"))
+            Err(Error::other("upload empty object").into())
         } else {
             let metadata = get_obj_meta(&self.path, &obj)?;
             self.objects.lock().await.insert(self.path, (metadata, obj));
@@ -82,7 +107,7 @@ impl ObjectStore for InMemObjectStore {
             "mem upload error"
         )));
         if obj.is_empty() {
-            Err(ObjectError::internal("upload empty object"))
+            Err(Error::other("upload empty object").into())
         } else {
             let metadata = get_obj_meta(path, &obj)?;
             self.objects
@@ -93,7 +118,7 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(InMemStreamingUploader {
             path: path.to_string(),
             buf: BytesMut::new(),
@@ -157,7 +182,7 @@ impl ObjectStore for InMemObjectStore {
             .get(path)
             .map(|(metadata, _)| metadata)
             .cloned()
-            .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
+            .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)).into())
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
@@ -233,14 +258,14 @@ impl InMemObjectStore {
             .await
             .get(path)
             .map(|(_, obj)| obj)
-            .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
+            .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)).into())
             .map(f)
     }
 }
 
 fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
     if block.offset + block.size > obj.len() {
-        Err(ObjectError::internal("bad block offset and size"))
+        Err(Error::other("bad block offset and size").into())
     } else {
         Ok(obj.slice(block.offset..(block.offset + block.size)))
     }
@@ -272,9 +297,11 @@ mod tests {
         s3.upload("/abc", block).await.unwrap();
 
         // No such object.
-        s3.read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
+        let err = s3
+            .read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
             .await
             .unwrap_err();
+        assert!(err.is_object_not_found_error());
 
         let bytes = s3
             .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
@@ -301,7 +328,7 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = InMemObjectStore::new();
-        let mut uploader = store.streaming_upload("/abc").unwrap();
+        let mut uploader = store.streaming_upload("/abc").await.unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();
@@ -329,6 +356,9 @@ mod tests {
 
         let obj_store = InMemObjectStore::new();
         obj_store.upload("/abc", block).await.unwrap();
+
+        let err = obj_store.metadata("/not_exist").await.unwrap_err();
+        assert!(err.is_object_not_found_error());
 
         let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
