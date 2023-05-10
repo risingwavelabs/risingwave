@@ -14,39 +14,42 @@ Table of contents generated with markdown-toc:
 http://ecotrust-canada.github.io/markdown-toc/
 -->
 
-- [Read the design docs](#read-the-design-docs)
-- [Learn about the code structure](#learn-about-the-code-structure)
-- [Set up the development environment](#set-up-the-development-environment)
-- [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
-  * [Configure additional components](#configure-additional-components)
-  * [Configure system variables](#configure-system-variables)
-  * [Start the playground with RiseDev](#start-the-playground-with-risedev)
-  * [Start the playground with cargo](#start-the-playground-with-cargo)
-- [Debug playground using vscode](#debug-playground-using-vscode)
-- [Develop the dashboard](#develop-the-dashboard)
-  * [Dashboard v1](#dashboard-v1)
-  * [Dashboard v2](#dashboard-v2)
-- [Observability components](#observability-components)
-  * [Cluster Control](#cluster-control)
-  * [Monitoring](#monitoring)
-  * [Tracing](#tracing)
-  * [Dashboard](#dashboard)
-  * [Logging](#logging)
-- [Test your code changes](#test-your-code-changes)
-  * [Lint](#lint)
-  * [Unit tests](#unit-tests)
-  * [Planner tests](#planner-tests)
-  * [End-to-end tests](#end-to-end-tests)
-  * [End-to-end tests on CI](#end-to-end-tests-on-ci)
-  * [Fuzzing tests](#fuzzing-tests)
-  * [DocSlt tests](#docslt-tests)
-  * [Deterministic simulation tests](#deterministic-simulation-tests)
-- [Miscellaneous checks](#miscellaneous-checks)
-- [Update Grafana dashboard](#update-grafana-dashboard)
-- [Add new files](#add-new-files)
-- [Add new dependencies](#add-new-dependencies)
-- [Submit PRs](#submit-prs)
-- [Profiling](#profiling)
+- [Developer guide](#developer-guide)
+  - [Table of contents](#table-of-contents)
+  - [Read the design docs](#read-the-design-docs)
+  - [Learn about the code structure](#learn-about-the-code-structure)
+  - [Set up the development environment](#set-up-the-development-environment)
+  - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+    - [Configure additional components](#configure-additional-components)
+    - [Configure system variables](#configure-system-variables)
+    - [Start the playground with RiseDev](#start-the-playground-with-risedev)
+    - [Start the playground with cargo](#start-the-playground-with-cargo)
+  - [Debug playground using vscode](#debug-playground-using-vscode)
+  - [Develop the dashboard](#develop-the-dashboard)
+    - [Dashboard v1](#dashboard-v1)
+    - [Dashboard v2](#dashboard-v2)
+  - [Observability components](#observability-components)
+    - [Cluster Control](#cluster-control)
+    - [Monitoring](#monitoring)
+    - [Tracing](#tracing)
+    - [Dashboard](#dashboard)
+    - [Logging](#logging)
+  - [Test your code changes](#test-your-code-changes)
+    - [Lint](#lint)
+    - [Unit tests](#unit-tests)
+    - [Planner tests](#planner-tests)
+    - [End-to-end tests](#end-to-end-tests)
+    - [End-to-end tests on CI](#end-to-end-tests-on-ci)
+    - [Fuzzing tests](#fuzzing-tests)
+      - [SqlSmith](#sqlsmith)
+    - [DocSlt tests](#docslt-tests)
+    - [Deterministic simulation tests](#deterministic-simulation-tests)
+  - [Miscellaneous checks](#miscellaneous-checks)
+  - [Update Grafana dashboard](#update-grafana-dashboard)
+  - [Add new files](#add-new-files)
+  - [Add new dependencies](#add-new-dependencies)
+  - [Submit PRs](#submit-prs)
+  - [Profiling](#profiling)
 
 ## Read the design docs
 
@@ -80,6 +83,15 @@ To install the dependencies on macOS, run:
 ```shell
 brew install postgresql cmake protobuf tmux cyrus-sasl llvm zstd
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+You may also need to define where your SSL lib is located, like 
+
+```shell
+export OPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl@3.1 
+export OPENSSL_LIBRARIES=/opt/homebrew/opt/openssl@3.1/lib 
+export OPENSSL_CRYPTO_LIBRARY=/opt/homebrew/opt/openssl@3.1/lib/libcrypto.dylib
+export OPENSSL_INCLUDE_DIR=/opt/homebrew/opt/openssl@3.1/include
 ```
 
 To install the dependencies on Debian-based Linux systems, run:

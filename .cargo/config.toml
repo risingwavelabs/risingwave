@@ -14,7 +14,9 @@ rustflags = [
 ]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-Ctarget-feature=+avx2"]
+rustflags = [
+    "-Ctarget-feature=+avx2"
+]
 
 [target.aarch64-apple-darwin]
 rustflags = [
