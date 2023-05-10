@@ -62,4 +62,3 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             .collect();
     }
 }
-
