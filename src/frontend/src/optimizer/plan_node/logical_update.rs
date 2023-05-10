@@ -127,8 +127,9 @@ impl PredicatePushdown for LogicalUpdate {
 impl ToBatch for LogicalUpdate {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchUpdate::new(new_logical).into())
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
+        Ok(BatchUpdate::new(new_logical, self.schema().clone()).into())
     }
 }
 

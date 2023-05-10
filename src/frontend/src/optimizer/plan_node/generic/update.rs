@@ -5,7 +5,7 @@ use educe::Educe;
 use risingwave_common::catalog::TableVersionId;
 
 use crate::catalog::TableId;
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ExprRewriter};
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -53,4 +53,13 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             }
         )
     }
+
+    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        self.exprs = self
+            .exprs
+            .iter()
+            .map(|e| r.rewrite_expr(e.clone()))
+            .collect();
+    }
 }
+
