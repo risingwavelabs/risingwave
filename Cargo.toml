@@ -129,3 +129,5 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad"
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
+# This patch bumps openidconnect v2 to use serde_with v2
+openidconnect = { git = "https://github.com/risingwavelabs/openidconnect-rs", rev = "5150eb7"}
