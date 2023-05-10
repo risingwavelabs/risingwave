@@ -513,11 +513,7 @@ impl WatermarkAnalyzer {
                             .as_literal()
                             .and_then(|literal| literal.get_data().as_ref())
                             .map_or(true, |time_zone| {
-                                if let ScalarImpl::Utf8(time_zone_str) = time_zone {
-                                    !time_zone_str.eq_ignore_ascii_case("UTC")
-                                } else {
-                                    true
-                                }
+                                !time_zone.as_utf8().eq_ignore_ascii_case("UTC")
                             })
                     {
                         WatermarkDerivation::None
