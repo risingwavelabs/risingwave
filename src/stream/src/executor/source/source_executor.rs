@@ -401,19 +401,15 @@ impl<S: StateStore> SourceExecutor<S> {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::SourceChangeSplit(split_assignment) => {
+                                Mutation::SourceChangeSplit(actor_splits) => {
                                     // In the context of split changes, we do not allow split
                                     // migration because it can lead to inconsistent states.
                                     // Therefore, all split migration must be done via update
                                     // mutation and pause/resume
-                                    assert!(!self.check_split_is_migration(split_assignment));
+                                    assert!(!self.check_split_is_migration(actor_splits));
 
                                     target_state = self
-                                        .apply_split_change(
-                                            &source_desc,
-                                            &mut stream,
-                                            split_assignment,
-                                        )
+                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?;
                                     should_trim_state = true;
                                 }
