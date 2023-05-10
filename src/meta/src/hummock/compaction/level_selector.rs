@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig};
@@ -199,18 +198,24 @@ impl DynamicLevelSelectorCore {
                 / self.config.level0_tier_compact_file_number,
         );
 
-        let total_size = levels.l0.as_ref().unwrap().total_file_size
-            - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
-        let base_level_size = levels.get_level(ctx.base_level).total_file_size;
         if idle_file_count > 0 {
-            // trigger intra-l0 compaction at first when the number of files is too large.
+            // trigger l0 compaction when the number of files is too large.
+            // The priority is as follows:
+
+            // TierCompaction
+            // 1. trivial-move
+            // 2. l0 overlapping
+
+            // BaseLevelCompaction
+            // 3. base level comapction
+            // 4. l0 intra
+
             let l0_score =
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels
                 .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            let score = total_size * SCORE_BASE
-                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-            ctx.score_levels.push((score, 0, ctx.base_level));
+
+            ctx.score_levels.push((l0_score, 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.
