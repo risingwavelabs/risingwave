@@ -119,6 +119,12 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append_n(1, value);
     }
 
+    /// Append an owned value to builder.
+    fn append_owned(&mut self, value: Option<<Self::ArrayType as Array>::OwnedItem>) {
+        let value = value.as_ref().map(|s| s.as_scalar_ref());
+        self.append(value)
+    }
+
     fn append_null(&mut self) {
         self.append(None)
     }

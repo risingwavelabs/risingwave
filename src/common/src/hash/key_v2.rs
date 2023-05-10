@@ -22,7 +22,7 @@ use itertools::Itertools;
 use tinyvec::ArrayVec;
 
 use super::{HeapNullBitmap, NullBitmap, XxHash64HashCode};
-use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
+use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_type_pairs;
 use crate::hash::{HashKeyDe, HashKeySer};
@@ -54,16 +54,25 @@ impl<const N: usize> KeyStorage for StackStorage<N> {
 pub struct StackBuffer<const N: usize>(ArrayVec<[u8; N]>);
 
 unsafe impl<const N: usize> BufMut for StackBuffer<N> {
+    #[inline]
     fn remaining_mut(&self) -> usize {
         self.0.grab_spare_slice().len()
     }
 
+    #[inline]
     unsafe fn advance_mut(&mut self, cnt: usize) {
         self.0.set_len(self.0.len() + cnt);
     }
 
+    #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        unsafe { &mut *(self.0.grab_spare_slice_mut().chunk_mut() as *mut _) }
+        // UninitSlice is repr(transparent), so safe to transmute
+        unsafe { &mut *(self.0.grab_spare_slice_mut() as *mut [u8] as *mut _) }
+    }
+
+    #[inline]
+    fn put_slice(&mut self, src: &[u8]) {
+        self.0.extend_from_slice(src);
     }
 }
 
@@ -119,7 +128,7 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         }
     }
 
-    fn serialize<'a>(&mut self, datum: Option<impl HashKeySer<'a>>) {
+    fn serialize<'a, D: HashKeySer<'a>>(&mut self, datum: Option<D>) {
         match datum {
             Some(scalar) => HashKeySer::serialize_into(scalar, &mut self.buffer),
             None => self.null_bitmap.set_true(self.idx),
@@ -127,8 +136,8 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         self.idx += 1;
     }
 
-    fn finish(self) -> GenericHashKey<S, N> {
-        GenericHashKey {
+    fn finish(self) -> HashKeyImpl<S, N> {
+        HashKeyImpl {
             hash_code: self.hash_code,
             key: self.buffer.seal(),
             null_bitmap: self.null_bitmap,
@@ -153,27 +162,32 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
         }
     }
 
-    fn deserialize(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
+    fn deserialize<D: HashKeyDe>(&mut self, data_type: &DataType) -> ArrayResult<Option<D>> {
         let datum = if !self.null_bitmap.contains(self.idx) {
-            macro_rules! deserialize {
-                ($( { $DataType:ident, $PhysicalType:ident }),*) => {
-                    match data_type {
-                        $(
-                            DataType::$DataType { .. } => ScalarImpl::$PhysicalType(
-                                HashKeyDe::deserialize(data_type, &mut self.key)
-                            ),
-                        )*
-                    }
-                }
-            }
-
-            Some(for_all_type_pairs! { deserialize })
+            Some(HashKeyDe::deserialize(data_type, &mut self.key))
         } else {
             None
         };
 
         self.idx += 1;
         Ok(datum)
+    }
+
+    fn deserialize_impl(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
+        macro_rules! deserialize {
+            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                match data_type {
+                    $(
+                        DataType::$DataType { .. } => {
+                            let datum = self.deserialize(data_type)?;
+                            datum.map(ScalarImpl::$PhysicalType)
+                        },
+                    )*
+                }
+            }
+        }
+
+        Ok(for_all_type_pairs! { deserialize })
     }
 }
 
@@ -204,13 +218,13 @@ pub trait HashKey:
 
 #[derive(Educe)]
 #[educe(Clone)]
-pub struct GenericHashKey<S: KeyStorage, N: NullBitmap> {
+pub struct HashKeyImpl<S: KeyStorage, N: NullBitmap> {
     hash_code: XxHash64HashCode,
     key: S::Key,
     null_bitmap: N,
 }
 
-impl<S: KeyStorage, N: NullBitmap> Hash for GenericHashKey<S, N> {
+impl<S: KeyStorage, N: NullBitmap> Hash for HashKeyImpl<S, N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         // TODO: note
         state.write_u64(self.hash_code.value());
@@ -218,17 +232,17 @@ impl<S: KeyStorage, N: NullBitmap> Hash for GenericHashKey<S, N> {
 }
 
 // TODO: educe
-impl<S: KeyStorage, N: NullBitmap> PartialEq for GenericHashKey<S, N> {
+impl<S: KeyStorage, N: NullBitmap> PartialEq for HashKeyImpl<S, N> {
     fn eq(&self, other: &Self) -> bool {
         self.hash_code == other.hash_code
             && self.key.as_ref() == other.key.as_ref()
             && self.null_bitmap == other.null_bitmap
     }
 }
-impl<S: KeyStorage, N: NullBitmap> Eq for GenericHashKey<S, N> {}
+impl<S: KeyStorage, N: NullBitmap> Eq for HashKeyImpl<S, N> {}
 
 // TODO: educe
-impl<S: KeyStorage, N: NullBitmap> std::fmt::Debug for GenericHashKey<S, N> {
+impl<S: KeyStorage, N: NullBitmap> std::fmt::Debug for HashKeyImpl<S, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashKey")
             .field("key", &self.key.as_ref())
@@ -236,13 +250,13 @@ impl<S: KeyStorage, N: NullBitmap> std::fmt::Debug for GenericHashKey<S, N> {
     }
 }
 
-impl<S: KeyStorage, N: NullBitmap> EstimateSize for GenericHashKey<S, N> {
+impl<S: KeyStorage, N: NullBitmap> EstimateSize for HashKeyImpl<S, N> {
     fn estimated_heap_size(&self) -> usize {
         self.key.estimated_heap_size() + self.null_bitmap.estimated_heap_size()
     }
 }
 
-impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
+impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
     type Bitmap = N;
 
     fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>> {
@@ -290,7 +304,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         let mut row = Vec::with_capacity(data_types.len());
 
         for data_type in data_types {
-            let datum = deserializer.deserialize(data_type)?;
+            let datum = deserializer.deserialize_impl(data_type)?;
             row.push(datum);
         }
 
@@ -305,8 +319,10 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
         let mut deserializer = Deserializer::<S, N>::new(&self.key, &self.null_bitmap);
 
         for (data_type, array_builder) in data_types.iter().zip_eq_fast(array_builders.iter_mut()) {
-            let datum = deserializer.deserialize(data_type)?;
-            array_builder.append_datum(datum);
+            dispatch_all_variants!(array_builder, ArrayBuilderImpl, array_builder, {
+                let datum = deserializer.deserialize(data_type)?;
+                array_builder.append_owned(datum);
+            });
         }
 
         Ok(())
@@ -317,7 +333,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for GenericHashKey<S, N> {
     }
 }
 
-pub type FixedSizeKey<const N: usize, B> = GenericHashKey<StackStorage<N>, B>;
+pub type FixedSizeKey<const N: usize, B> = HashKeyImpl<StackStorage<N>, B>;
 pub type Key8<B = HeapNullBitmap> = FixedSizeKey<1, B>;
 pub type Key16<B = HeapNullBitmap> = FixedSizeKey<2, B>;
 pub type Key32<B = HeapNullBitmap> = FixedSizeKey<4, B>;
@@ -326,4 +342,4 @@ pub type Key128<B = HeapNullBitmap> = FixedSizeKey<16, B>;
 pub type Key256<B = HeapNullBitmap> = FixedSizeKey<32, B>;
 pub type KeySerialized<B = HeapNullBitmap> = SerializedKey<B>;
 
-pub type SerializedKey<B = HeapNullBitmap> = GenericHashKey<HeapStorage, B>;
+pub type SerializedKey<B = HeapNullBitmap> = HashKeyImpl<HeapStorage, B>;
