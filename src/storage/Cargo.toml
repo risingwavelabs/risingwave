@@ -33,6 +33,7 @@ lz4 = "1.23.1"
 memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
+num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -76,14 +77,14 @@ nix = { version = "0.25", features = ["fs", "mman"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach = "0.3.2"
+mach2 = "0.4"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["async_futures"] }
-moka = { version = "0.9", features = ["future"] }
+moka = { version = "0.10", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }
 

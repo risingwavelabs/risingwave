@@ -14,20 +14,21 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-anyhow = "1"
+anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
-google-cloud-pubsub = "0.7.0"
+fs-err = "2.9.0"
+glob = "0.3"
+google-cloud-pubsub = "0.14"
 indicatif = "0.17"
-isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = "0.10"
-kafka = { version = "0.9", default-features = false }
-pulldown-cmark = "0.9"
+rdkafka = { workspace = true }
 redis = "0.22"
 regex = "1"
+reqwest = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "2"
@@ -42,5 +43,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
 workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"

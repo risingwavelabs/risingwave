@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -61,6 +62,9 @@ pub struct NestedLoopJoinExecutor {
     identity: String,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+
+    /// Memory context used for recording memory usage of executor.
+    mem_context: MemoryContext,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -86,7 +90,17 @@ impl NestedLoopJoinExecutor {
         let mut chunk_builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         // Cache the outputs of left child
-        let left = self.left_child.execute().try_collect().await?;
+        let left: Vec<DataChunk> = {
+            let mut ret = Vec::with_capacity(1024);
+            #[for_await]
+            for chunk in self.left_child.execute() {
+                let c = chunk?;
+                trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
+                self.mem_context.add(c.estimated_heap_size() as i64);
+                ret.push(c);
+            }
+            ret
+        };
 
         // Get the joined stream
         let stream = match self.join_type {
@@ -156,19 +170,24 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
             .map(|&v| v as usize)
             .collect();
 
+        let identity = source.plan_node().get_identity().clone();
+        let mem_context = source.context.create_executor_mem_context(&identity);
+
         Ok(Box::new(NestedLoopJoinExecutor::new(
             join_expr,
             join_type,
             output_indices,
             left_child,
             right_child,
-            source.plan_node().get_identity().clone(),
-            source.context.get_config().developer.batch_chunk_size,
+            identity,
+            source.context.get_config().developer.chunk_size,
+            mem_context,
         )))
     }
 }
 
 impl NestedLoopJoinExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         join_expr: BoxedExpression,
         join_type: JoinType,
@@ -177,6 +196,7 @@ impl NestedLoopJoinExecutor {
         right_child: BoxedExecutor,
         identity: String,
         chunk_size: usize,
+        mem_context: MemoryContext,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -206,6 +226,7 @@ impl NestedLoopJoinExecutor {
             right_child,
             identity,
             chunk_size,
+            mem_context,
         }
     }
 }
@@ -469,6 +490,7 @@ impl NestedLoopJoinExecutor {
 mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
@@ -593,6 +615,7 @@ mod tests {
                 right_child,
                 "NestedLoopJoinExecutor".into(),
                 CHUNK_SIZE,
+                MemoryContext::none(),
             ))
         }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::{DefaultBehavior, Merge};
 use crate::optimizer::plan_node::{BatchLimit, BatchSeqScan, BatchValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
@@ -28,8 +29,10 @@ impl ExecutionModeDecider {
 }
 
 impl PlanVisitor<bool> for ExecutionModeDecider {
-    fn merge(a: bool, b: bool) -> bool {
-        a & b
+    type DefaultBehavior = impl DefaultBehavior<bool>;
+
+    fn default_behavior() -> Self::DefaultBehavior {
+        Merge(|a, b| a & b)
     }
 
     /// Point select, index lookup and two side bound range scan.
@@ -56,7 +59,8 @@ impl PlanVisitor<bool> for ExecutionModeDecider {
     fn visit_batch_limit(&mut self, batch_limit: &BatchLimit) -> bool {
         if let Some(batch_seq_scan) = batch_limit.input().as_batch_seq_scan()
             && batch_seq_scan.scan_ranges().is_empty()
-            && batch_limit.limit() + batch_limit.offset() < 100{
+            && batch_limit.limit() + batch_limit.offset() < 100
+        {
             true
         } else {
             self.visit(batch_limit.input())

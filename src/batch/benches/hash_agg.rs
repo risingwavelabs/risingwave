@@ -19,9 +19,9 @@ use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::expr::AggKind;
-use risingwave_expr::vector_op::agg::AggStateFactory;
-use risingwave_pb::expr::{AggCall, InputRef};
+use risingwave_expr::agg;
+use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
@@ -32,12 +32,12 @@ fn create_agg_call(
     agg_kind: AggKind,
     args: Vec<usize>,
     return_type: DataType,
-) -> AggCall {
-    AggCall {
-        r#type: agg_kind.to_prost() as i32,
+) -> PbAggCall {
+    PbAggCall {
+        r#type: agg_kind.to_protobuf() as i32,
         args: args
             .into_iter()
-            .map(|col_idx| InputRef {
+            .map(|col_idx| PbInputRef {
                 index: col_idx as _,
                 r#type: Some(input_schema.fields()[col_idx].data_type().to_protobuf()),
             })
@@ -72,9 +72,9 @@ fn create_hash_agg_executor(
         return_type,
     )];
 
-    let agg_factories: Vec<_> = agg_calls
+    let agg_init_states: Vec<_> = agg_calls
         .iter()
-        .map(AggStateFactory::new)
+        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(agg::build))
         .try_collect()
         .unwrap();
 
@@ -86,13 +86,13 @@ fn create_hash_agg_executor(
     let fields = group_key_types
         .iter()
         .cloned()
-        .chain(agg_factories.iter().map(|fac| fac.get_return_type()))
+        .chain(agg_init_states.iter().map(|fac| fac.return_type()))
         .map(Field::unnamed)
         .collect_vec();
     let schema = Schema { fields };
 
     Box::new(HashAggExecutor::<hash::Key64>::new(
-        agg_factories,
+        agg_init_states,
         group_key_columns,
         group_key_types,
         schema,

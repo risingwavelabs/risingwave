@@ -25,16 +25,14 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use picker::{
-    LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
-};
+use picker::{LevelCompactionPicker, ManualCompactionPicker, TierCompactionPicker};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
-    CompactTask, CompactionConfig, GetScaleCompactorResponse, InputLevel, KeyRange, LevelType,
+    CompactTask, CompactionConfig, GetScaleCompactorResponse, KeyRange, LevelType,
 };
 
 pub use crate::hummock::compaction::level_selector::{
@@ -42,6 +40,7 @@ pub use crate::hummock::compaction::level_selector::{
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
+use crate::hummock::compaction::picker::{CompactionInput, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -80,26 +79,9 @@ impl Clone for CompactStatus {
     }
 }
 
-pub struct CompactionInput {
-    pub input_levels: Vec<InputLevel>,
-    pub target_level: usize,
-    pub target_sub_level_id: u64,
-}
-
-impl CompactionInput {
-    pub fn add_pending_task(&self, task_id: u64, level_handlers: &mut [LevelHandler]) {
-        for level in &self.input_levels {
-            level_handlers[level.level_idx as usize].add_pending_task(
-                task_id,
-                self.target_level,
-                &level.table_infos,
-            );
-        }
-    }
-}
-
 pub struct CompactionTask {
     pub input: CompactionInput,
+    pub base_level: usize,
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
@@ -163,6 +145,7 @@ impl CompactStatus {
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
             gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
+            base_level: ret.base_level as u32,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: group.group_id,
             existing_table_ids: vec![],
@@ -174,6 +157,7 @@ impl CompactStatus {
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
+            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
         };
         Some(compact_task)
     }
@@ -268,14 +252,6 @@ impl Default for ManualCompactionOption {
 }
 
 #[derive(Default)]
-pub struct LocalPickerStatistic {
-    skip_by_write_amp_limit: u64,
-    skip_by_count_limit: u64,
-    skip_by_pending_files: u64,
-    skip_by_overlapping: u64,
-}
-
-#[derive(Default)]
 pub struct LocalSelectorStatistic {
     skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
 }
@@ -314,15 +290,6 @@ impl LocalSelectorStatistic {
                 .inc();
         }
     }
-}
-
-pub trait CompactionPicker {
-    fn pick_compaction(
-        &mut self,
-        levels: &Levels,
-        level_handlers: &[LevelHandler],
-        stats: &mut LocalPickerStatistic,
-    ) -> Option<CompactionInput>;
 }
 
 #[derive(Default, Clone, Debug)]
@@ -379,6 +346,7 @@ pub fn create_compaction_task(
             base_level,
             input.target_level,
         ),
+        base_level,
         input,
         target_file_size,
         compaction_task_type,

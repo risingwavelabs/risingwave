@@ -19,20 +19,21 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::stream::StreamPlanRef;
+use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
     pub base: PlanBase,
-    logical: LogicalExpand,
+    logical: generic::Expand<PlanRef>,
 }
 
 impl StreamExpand {
-    pub fn new(logical: LogicalExpand) -> Self {
-        let input = logical.input();
-        let schema = logical.schema().clone();
+    pub fn new(logical: generic::Expand<PlanRef>) -> Self {
+        let input = logical.input.clone();
+        let schema = input.schema();
 
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
@@ -50,20 +51,18 @@ impl StreamExpand {
                 .map(|idx| idx + input.schema().len()),
         );
 
-        let base = PlanBase::new_stream(
-            logical.base.ctx.clone(),
-            schema,
-            logical.base.logical_pk.to_vec(),
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamExpand { base, logical }
     }
 
-    pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
-        self.logical.column_subsets()
+    pub fn column_subsets(&self) -> &[Vec<usize>] {
+        &self.logical.column_subsets
     }
 }
 
@@ -75,11 +74,13 @@ impl fmt::Display for StreamExpand {
 
 impl PlanTreeNodeUnary for StreamExpand {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 

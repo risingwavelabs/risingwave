@@ -107,7 +107,12 @@ select to_timestamp(extract(epoch from '2010-01-01 12:34:56.789012Z'::timestamp 
 2010-01-01 12:34:56.789012+00:00
 
 query R
-select extract(epoch from to_timestamp(1262349296.7890123));
+select extract(epoch from to_timestamp(1262349296.7890125));
+----
+1262349296.789012
+
+query R
+select extract(epoch from to_timestamp(1262349296.7890115));
 ----
 1262349296.789012
 
@@ -128,3 +133,19 @@ select TIMESTAMP WITH TIME ZONE '2022-08-09 00:00:00' - (INTERVAL '-2147483648 d
 # timestamptz_interval_add
 statement error out of range
 select TIMESTAMP WITH TIME ZONE '2022-08-09 00:00:00' + (INTERVAL '-2147483648 days');
+
+# timestamptz agg
+query T
+select max('2022-10-01 12:00:00-08:00'::timestamp with time zone);
+----
+2022-10-01 20:00:00+00:00
+
+query T
+select min('2022-10-01 12:00:00-08:00'::timestamp with time zone);
+----
+2022-10-01 20:00:00+00:00
+
+query I
+select count('2022-10-01 12:00:00-08:00'::timestamp with time zone);
+----
+1

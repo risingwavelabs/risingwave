@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
@@ -42,6 +45,16 @@ impl<PlanRef> ProjectSet<PlanRef> {
             .iter()
             .map(|e| r.rewrite_expr(e.clone()))
             .collect();
+    }
+
+    pub(crate) fn output_len(&self) -> usize {
+        self.select_list.len() + 1
+    }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        builder.field("select_list", &self.select_list);
+        builder.finish()
     }
 }
 
@@ -100,9 +113,8 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
         let input_len = self.input.schema().len();
         let mut map = vec![None; 1 + self.select_list.len()];
         for (i, item) in self.select_list.iter().enumerate() {
-            map[1 + i] = match item {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
+            if let ExprImpl::InputRef(input) = item {
+                map[1 + i] = Some(input.index())
             }
         }
         ColIndexMapping::with_target_size(map, input_len)
@@ -111,6 +123,21 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
     /// Gets the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        let input_len = self.input.schema().len();
+        let mut map = vec![None; input_len];
+        for (i, item) in self.select_list.iter().enumerate() {
+            if let ExprImpl::InputRef(input) = item {
+                map[input.index()] = Some(1 + i)
+            }
+        }
+        ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
+    }
+}
+
+impl<PlanRef: BatchPlanRef> ProjectSet<PlanRef> {
+    /// Map the order of the input to use the updated indices
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
     }
 }

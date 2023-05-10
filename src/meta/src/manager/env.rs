@@ -23,6 +23,7 @@ use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
+use crate::model::ClusterId;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -52,6 +53,12 @@ where
 
     /// system param manager.
     system_params_manager: SystemParamsManagerRef<S>,
+
+    /// Unique identifier of the cluster.
+    cluster_id: ClusterId,
+
+    /// Whether the cluster is launched for the first time.
+    cluster_first_launch: bool,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -114,6 +121,14 @@ pub struct MetaOpts {
 
     ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
     pub max_compactor_task_multiplier: u32,
+
+    /// Schedule split_compaction_group for all compaction groups with this interval.
+    pub periodic_split_compact_group_interval_sec: u64,
+
+    /// The size limit to split a large compaction group.
+    pub split_group_size_limit: u64,
+    /// The size limit to move a state-table to other group.
+    pub move_table_size_limit: u64,
 }
 
 impl MetaOpts {
@@ -139,7 +154,10 @@ impl MetaOpts {
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            periodic_split_compact_group_interval_sec: 60,
             max_compactor_task_multiplier: 2,
+            split_group_size_limit: 5 * 1024 * 1024 * 1024,
+            move_table_size_limit: 2 * 1024 * 1024 * 1024,
         }
     }
 }
@@ -158,15 +176,21 @@ where
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
+        let (cluster_id, cluster_first_launch) =
+            if let Some(id) = ClusterId::from_meta_store(meta_store.deref()).await? {
+                (id, false)
+            } else {
+                (ClusterId::new(), true)
+            };
         let system_params_manager = Arc::new(
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
                 init_system_params,
+                cluster_first_launch,
             )
             .await?,
         );
-
         Ok(Self {
             id_gen_manager,
             meta_store,
@@ -174,6 +198,8 @@ where
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            cluster_id,
+            cluster_first_launch,
             opts: opts.into(),
         })
     }
@@ -225,6 +251,14 @@ where
     pub fn stream_client_pool(&self) -> &StreamClientPool {
         self.stream_client_pool.deref()
     }
+
+    pub fn cluster_id(&self) -> &ClusterId {
+        &self.cluster_id
+    }
+
+    pub fn cluster_first_launch(&self) -> bool {
+        self.cluster_first_launch
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -241,11 +275,13 @@ impl MetaSrvEnv<MemStore> {
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
+        let (cluster_id, cluster_first_launch) = (ClusterId::new(), true);
         let system_params_manager = Arc::new(
             SystemParamsManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                risingwave_common::system_param::default_system_params(),
+                risingwave_common::system_param::system_params_for_test(),
+                true,
             )
             .await
             .unwrap(),
@@ -258,6 +294,8 @@ impl MetaSrvEnv<MemStore> {
             stream_client_pool,
             idle_manager,
             system_params_manager,
+            cluster_id,
+            cluster_first_launch,
             opts,
         }
     }

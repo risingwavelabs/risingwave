@@ -165,9 +165,15 @@ service StreamManagerService {
 // Below for cluster service.
 
 message AddWorkerNodeRequest {
+  message Property {
+    uint64 worker_node_parallelism = 1;
+    bool is_streaming = 2;
+    bool is_serving = 3;
+  }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
-  uint64 worker_node_parallelism = 3;
+  reserved 3;
+  Property property = 4;
 }
 
 message AddWorkerNodeResponse {
@@ -240,6 +246,7 @@ message MetaSnapshot {
   repeated catalog.Index indexes = 6;
   repeated catalog.View views = 7;
   repeated catalog.Function functions = 15;
+  repeated catalog.Connection connections = 17;
   repeated user.UserInfo users = 8;
   repeated FragmentParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
@@ -258,7 +265,6 @@ message Relation {
     catalog.Sink sink = 3;
     catalog.Index index = 4;
     catalog.View view = 5;
-    catalog.Function function = 6;
   }
 }
 
@@ -280,6 +286,7 @@ message SubscribeResponse {
   oneof info {
     catalog.Database database = 4;
     catalog.Schema schema = 5;
+    catalog.Function function = 6;
     user.UserInfo user = 11;
     FragmentParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
@@ -290,6 +297,7 @@ message SubscribeResponse {
     SystemParams system_params = 19;
     hummock.WriteLimits hummock_write_limits = 20;
     RelationGroup relation_group = 21;
+    catalog.Connection connection = 22;
   }
 }
 

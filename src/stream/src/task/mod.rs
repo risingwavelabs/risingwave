@@ -129,8 +129,9 @@ impl SharedContext {
         MutexGuard::map(self.channel_map.lock(), |map| {
             map.entry(ids).or_insert_with(|| {
                 let (tx, rx) = permit::channel(
-                    self.config.developer.stream_exchange_initial_permits,
-                    self.config.developer.stream_exchange_batched_permits,
+                    self.config.developer.exchange_initial_permits,
+                    self.config.developer.exchange_batched_permits,
+                    self.config.developer.exchange_concurrent_barriers,
                 );
                 (Some(tx), Some(rx))
             })

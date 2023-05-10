@@ -29,6 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
@@ -57,7 +58,7 @@ pub type AtomicU64Ref = Arc<AtomicU64>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
-    runtime: &'static tokio::runtime::Runtime,
+    runtime: BackgroundShutdownRuntime,
 
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
@@ -400,21 +401,20 @@ impl LocalStreamManagerCore {
         config: StreamingConfig,
         await_tree_config: Option<await_tree::Config>,
     ) -> Self {
-        let mut builder = tokio::runtime::Builder::new_multi_thread();
-        if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
-            builder.worker_threads(worker_threads_num);
-        }
-        let runtime = builder
-            .thread_name("risingwave-streaming-actor")
-            .enable_all()
-            .build()
-            .unwrap();
+        let runtime = {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
+                builder.worker_threads(worker_threads_num);
+            }
+            builder
+                .thread_name("risingwave-streaming-actor")
+                .enable_all()
+                .build()
+                .unwrap()
+        };
 
         Self {
-            // Leak the runtime to avoid runtime shutting-down in the main async context.
-            // TODO: may manually shutdown the runtime after we implement graceful shutdown for
-            // stream manager.
-            runtime: Box::leak(Box::new(runtime)),
+            runtime: runtime.into(),
             handles: HashMap::new(),
             context: Arc::new(context),
             actors: HashMap::new(),
@@ -552,7 +552,7 @@ impl LocalStreamManagerCore {
             actor_context.id,
             executor_id,
             self.streaming_metrics.clone(),
-            self.config.developer.stream_enable_executor_row_count,
+            self.config.developer.enable_executor_row_count,
         )
         .boxed();
 
@@ -642,9 +642,6 @@ impl LocalStreamManagerCore {
 
             let monitor = tokio_metrics::TaskMonitor::new();
 
-            let metrics = self.streaming_metrics.clone();
-            let actor_id_str = actor_id.to_string();
-
             let handle = {
                 let context = self.context.clone();
                 let actor = async move {
@@ -665,19 +662,28 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let allocation_stated = task_stats_alloc::allocation_stat(
-                    instrumented,
-                    Duration::from_millis(1000),
-                    move |bytes| {
-                        metrics
-                            .actor_memory_usage
-                            .with_label_values(&[&actor_id_str])
-                            .set(bytes as i64);
+                #[cfg(enable_task_local_alloc)]
+                {
+                    let metrics = self.streaming_metrics.clone();
+                    let actor_id_str = actor_id.to_string();
+                    let allocation_stated = task_stats_alloc::allocation_stat(
+                        instrumented,
+                        Duration::from_millis(1000),
+                        move |bytes| {
+                            metrics
+                                .actor_memory_usage
+                                .with_label_values(&[&actor_id_str])
+                                .set(bytes as i64);
 
-                        actor_context.store_mem_usage(bytes);
-                    },
-                );
-                self.runtime.spawn(allocation_stated)
+                            actor_context.store_mem_usage(bytes);
+                        },
+                    );
+                    self.runtime.spawn(allocation_stated)
+                }
+                #[cfg(not(enable_task_local_alloc))]
+                {
+                    self.runtime.spawn(instrumented)
+                }
             };
             self.handles.insert(actor_id, handle);
 
@@ -763,7 +769,7 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor{
+            if let Some(prev_actor) = ret && actor != &prev_actor {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

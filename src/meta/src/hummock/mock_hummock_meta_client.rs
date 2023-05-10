@@ -188,7 +188,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     host: "compactor".to_string(),
                     port: 0,
                 },
-                1,
+                Default::default(),
             )
             .await
             .unwrap();

@@ -71,30 +71,13 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
-            base_table.for_system_time_as_of_now,
+            base_table.for_system_time_as_of_proctime,
         )
         .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        let column_descs = source
-            .catalog
-            .columns
-            .iter()
-            .map(|column| column.column_desc.clone())
-            .collect_vec();
-        let pk_col_ids = source.catalog.pk_col_ids.clone();
-        let row_id_index = source.catalog.row_id_index;
-        let gen_row_id = source.catalog.append_only;
-        LogicalSource::create(
-            Some(Rc::new(source.catalog)),
-            column_descs,
-            pk_col_ids,
-            row_id_index,
-            gen_row_id,
-            false,
-            self.ctx(),
-        )
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx()).into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -259,7 +242,9 @@ impl Planner {
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
-        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
+        let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
+            args.next_tuple()
+        else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 

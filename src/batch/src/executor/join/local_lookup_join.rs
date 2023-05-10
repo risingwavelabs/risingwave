@@ -37,13 +37,14 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
+use tokio::sync::watch::Receiver;
 use uuid::Uuid;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -60,6 +61,7 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
+    shutdown_rx: Receiver<ShutdownMsg>,
 }
 
 /// Used to build the executor for the inner side
@@ -233,6 +235,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &task_id,
             self.context.clone(),
             self.epoch.clone(),
+            self.shutdown_rx.clone(),
         );
 
         executor_builder.build().await
@@ -367,7 +370,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
@@ -383,6 +386,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
             pu_to_scan_range_mapping: HashMap::new(),
             chunk_size,
+            shutdown_rx: source.shutdown_rx.clone(),
         };
 
         Ok(LocalLookupJoinExecutorArgs {
@@ -671,7 +675,7 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
@@ -688,7 +692,7 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
@@ -701,7 +705,7 @@ mod tests {
              2 5.5
              2 8.4",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
@@ -715,7 +719,7 @@ mod tests {
             5 9.1
             . .",
         );
-        let condition = build_from_pretty("(less_than:boolean 5:int4 $3:float4)");
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
         do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }

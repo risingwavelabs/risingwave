@@ -20,6 +20,7 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
+use super::expr_array_remove::ArrayRemoveExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
@@ -30,6 +31,7 @@ use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_proctime::ProcTimeExpression;
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ExprError, Result};
@@ -81,6 +83,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         }
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
+        E::ArrayRemove => ArrayRemoveExpression::try_from(prost).map(Expression::boxed),
+        E::Proctime => ProcTimeExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()
@@ -238,7 +242,9 @@ fn lexer(input: &str) -> Vec<Token> {
             _ => {
                 let mut literal = String::new();
                 literal.push(c);
-                while let Some(&c) = chars.peek() && !matches!(c, '(' | ')' | ':' | ' ' | '\t' | '\r' | '\n') {
+                while let Some(&c) = chars.peek()
+                    && !matches!(c, '(' | ')' | ':' | ' ' | '\t' | '\r' | '\n')
+                {
                     literal.push(chars.next().unwrap());
                 }
                 Token::Literal(literal)

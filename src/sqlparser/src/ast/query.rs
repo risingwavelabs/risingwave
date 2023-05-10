@@ -43,6 +43,23 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
+impl Query {
+    /// Simple `VALUES` without other clauses.
+    pub fn as_simple_values(&self) -> Option<&Values> {
+        match &self {
+            Query {
+                with: None,
+                body: SetExpr::Values(values),
+                order_by,
+                limit: None,
+                offset: None,
+                fetch: None,
+            } if order_by.is_empty() => Some(values),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(ref with) = self.with {
@@ -339,7 +356,8 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
-        for_system_time_as_of_now: bool,
+        /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
+        for_system_time_as_of_proctime: bool,
     },
     Derived {
         lateral: bool,
@@ -367,11 +385,11 @@ impl fmt::Display for TableFactor {
             TableFactor::Table {
                 name,
                 alias,
-                for_system_time_as_of_now,
+                for_system_time_as_of_proctime,
             } => {
                 write!(f, "{}", name)?;
-                if *for_system_time_as_of_now {
-                    write!(f, " FOR SYSTEM_TIME AS OF NOW()")?;
+                if *for_system_time_as_of_proctime {
+                    write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")?;
                 }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;

@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Date, Interval, Timestamp, USECS_PER_DAY, USECS_PER_MONTH};
+use risingwave_common::types::{Date, Interval, Timestamp};
 use risingwave_expr_macro::function;
 
 use crate::Result;
 
 #[inline(always)]
 fn interval_to_micro_second(t: Interval) -> i64 {
-    t.get_months() as i64 * USECS_PER_MONTH + t.get_days() as i64 * USECS_PER_DAY + t.get_usecs()
+    t.months() as i64 * Interval::USECS_PER_MONTH
+        + t.days() as i64 * Interval::USECS_PER_DAY
+        + t.usecs()
 }
 
 #[function("tumble_start(date, interval) -> timestamp")]
@@ -164,7 +166,7 @@ mod tests {
     fn test_remainder_necessary() {
         let mut wrong_cnt = 0;
         for i in -30..30 {
-            let timestamp_micro_second = Interval::from_minutes(i).get_usecs();
+            let timestamp_micro_second = Interval::from_minutes(i).usecs();
             let window_size = Interval::from_minutes(5);
             let window_start = get_window_start(timestamp_micro_second, window_size).unwrap();
 

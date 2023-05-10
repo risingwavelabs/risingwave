@@ -127,7 +127,8 @@ message StreamSource {
   catalog.Table state_table = 2;
   optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
-  repeated int32 pk_column_ids = 5;
+  reserved "pk_column_ids";
+  reserved 5;
   map<string, string> properties = 6;
   catalog.StreamSourceInfo info = 7;
   string source_name = 8;
@@ -216,7 +217,7 @@ message AggCallState {
 
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  // Only used for local simple agg, not used for global simple agg.
+  // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table result_table = 4;
@@ -538,14 +539,28 @@ message ValuesNode {
   repeated plan_common.Field fields = 2;
 }
 
+message DedupNode {
+  catalog.Table state_table = 1;
+  repeated uint32 dedup_column_indices = 2;
+}
+
+message NoOpNode {}
+
+message EowcOverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3; // use `repeated` in case of future extension, now only one column is allowed
+  catalog.Table state_table = 4;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
     ProjectNode project = 101;
     FilterNode filter = 102;
     MaterializeNode materialize = 103;
-    SimpleAggNode local_simple_agg = 104;
-    SimpleAggNode global_simple_agg = 105;
+    SimpleAggNode stateless_simple_agg = 104;
+    SimpleAggNode simple_agg = 105;
     HashAggNode hash_agg = 106;
     TopNNode append_only_top_n = 107;
     HashJoinNode hash_join = 108;
@@ -574,6 +589,9 @@ message StreamNode {
     TemporalJoinNode temporal_join = 131;
     BarrierRecvNode barrier_recv = 132;
     ValuesNode values = 133;
+    DedupNode append_only_dedup = 134;
+    NoOpNode no_op = 135;
+    EowcOverWindowNode eowc_over_window = 136;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

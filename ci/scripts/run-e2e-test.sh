@@ -19,46 +19,34 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile" common
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 buildkite-agent artifact download "e2e_test/generated/*" ./
 buildkite-agent artifact download risingwave_e2e_extended_mode_test-"$profile" target/debug/
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
 
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
-
-echo "--- e2e, ci-3cn-1fe, streaming"
+echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-1fe
+cargo make ci-start ci-3streaming-2serving-3fe
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-1fe, batch"
+echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-1fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
-sqllogictest -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
+sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
-echo "--- e2e, ci-3cn-1fe, udf"
+echo "--- e2e, ci-3streaming-2serving-3fe, udf"
 python3 e2e_test/udf/test.py &
 sleep 2
 sqllogictest -p 4566 -d dev './e2e_test/udf/python.slt'
@@ -67,21 +55,21 @@ pkill python3
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-1fe, generated"
+echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-1fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-1fe, extended query"
+echo "--- e2e, ci-3streaming-2serving-3fe, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-1fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
   -p 4566 \
-  -u root 
+  -u root
 
 echo "--- Kill cluster"
 cargo make ci-kill

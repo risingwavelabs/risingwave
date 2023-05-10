@@ -17,14 +17,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
-use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::HashKey;
+use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -55,7 +54,7 @@ use crate::task::AtomicU64Ref;
 pub type JoinTypePrimitive = u8;
 
 /// Evict the cache every n rows.
-const EVICT_EVERY_N_ROWS: u32 = 1024;
+const EVICT_EVERY_N_ROWS: u32 = 16;
 
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
@@ -164,8 +163,6 @@ struct JoinSide<K: HashKey, S: StateStore> {
     ht: JoinHashMap<K, S>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
-    /// The primary key indices of state table on this side after dedup
-    deduped_pk_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
@@ -181,6 +178,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     /// The second field indicates that whether the column is required less than the
     /// the corresponding column in the counterpart join side in the band join condition.
     input2inequality_index: Vec<Vec<(usize, bool)>>,
+    /// Some fields which are required non null to match due to inequalities.
+    non_null_fields: Vec<usize>,
     /// (i, j) in this `Vec` means that state data in this join side can be cleaned if the value of
     /// its ith column is less than the synthetic watermark of the jth band join condition.
     state_clean_columns: Vec<(usize, usize)>,
@@ -192,7 +191,6 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
-            .field("deduped_pk_indices", &self.deduped_pk_indices)
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
@@ -494,17 +492,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let join_key_indices_r = params_r.join_key_indices;
 
         let degree_pk_indices_l = (join_key_indices_l.len()
-            ..join_key_indices_l.len() + state_pk_indices_l.len())
+            ..join_key_indices_l.len() + params_l.deduped_pk_indices.len())
             .collect_vec();
         let degree_pk_indices_r = (join_key_indices_r.len()
-            ..join_key_indices_r.len() + state_pk_indices_r.len())
+            ..join_key_indices_r.len() + params_r.deduped_pk_indices.len())
             .collect_vec();
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, join_key_indices_r.clone());
 
         // check whether join key contains pk in both side
         let append_only_optimize = is_append_only && pk_contained_in_jk_l && pk_contained_in_jk_r;
@@ -538,13 +534,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
-        let null_matched: FixedBitSet = {
-            let mut null_matched = FixedBitSet::with_capacity(null_safe.len());
-            for (idx, col_null_matched) in null_safe.into_iter().enumerate() {
-                null_matched.set(idx, col_null_matched);
-            }
-            null_matched
-        };
+        let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
         let need_degree_table_l = need_left_degree(T) && !pk_contained_in_jk_r;
         let need_degree_table_r = need_right_degree(T) && !pk_contained_in_jk_l;
@@ -606,9 +596,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             )
             .collect_vec();
 
+        let mut l_non_null_fields = l2inequality_index
+            .iter()
+            .positions(|inequalities| !inequalities.is_empty())
+            .collect_vec();
+        let mut r_non_null_fields = r2inequality_index
+            .iter()
+            .positions(|inequalities| !inequalities.is_empty())
+            .collect_vec();
+
         if append_only_optimize {
             l_state_clean_columns.clear();
             r_state_clean_columns.clear();
+            l_non_null_fields.clear();
+            r_non_null_fields.clear();
         }
 
         let inequality_watermarks = vec![None; inequality_pairs.len()];
@@ -626,7 +627,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
-                    state_pk_indices_l.clone(),
+                    params_l.deduped_pk_indices,
                     degree_all_data_types_l,
                     degree_state_table_l,
                     degree_pk_indices_l,
@@ -642,8 +643,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
                 input2inequality_index: l2inequality_index,
+                non_null_fields: l_non_null_fields,
                 state_clean_columns: l_state_clean_columns,
-                deduped_pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
             },
@@ -653,7 +654,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
-                    state_pk_indices_r.clone(),
+                    params_r.deduped_pk_indices,
                     degree_all_data_types_r,
                     degree_state_table_r,
                     degree_pk_indices_r,
@@ -666,11 +667,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 ),
                 join_key_indices: join_key_indices_r,
                 all_data_types: state_all_data_types_r,
-                deduped_pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
                 input2inequality_index: r2inequality_index,
+                non_null_fields: r_non_null_fields,
                 state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
             },
@@ -912,7 +913,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .entry(side_update.join_key_indices.len() + inequality_index)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             let mut input_watermark = watermark.clone();
-            if *need_offset && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref() {
+            if *need_offset
+                && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref()
+            {
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
@@ -925,7 +928,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             self.ctx.on_compute_error(err, self.identity.as_str());
                         }
                         continue;
-                    },
+                    }
                 }
             };
             if let Some(selected_watermark) = buffers.handle_watermark(side, input_watermark) {
@@ -1014,8 +1017,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
-            let matched_rows: Option<HashValueType> =
-                Self::hash_eq_match(key, &mut side_match.ht).await?;
+            let matched_rows: Option<HashValueType> = if side_update
+                .non_null_fields
+                .iter()
+                .all(|column_idx| unsafe { row.datum_at_unchecked(*column_idx).is_some() })
+            {
+                Self::hash_eq_match(key, &mut side_match.ht).await?
+            } else {
+                None
+            };
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
@@ -1107,18 +1117,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 side_match.ht.delete_row(key, matched_row.row);
                             }
                         }
-                    } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
-                    {
-                        yield chunk;
-                    }
 
-                    if append_only_optimize && let Some(row) = append_only_matched_row {
-                        side_match.ht.delete(key, row);
-                    } else if side_update.need_degree_table {
-                        side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
+                        if append_only_optimize && let Some(row) = append_only_matched_row {
+                            side_match.ht.delete(key, row);
+                        } else if side_update.need_degree_table {
+                            side_update
+                                .ht
+                                .insert(key, JoinRow::new(row, degree))
+                                .await?;
+                        } else {
+                            side_update.ht.insert_row(key, row).await?;
+                        }
                     } else {
-                        side_update.ht.insert_row(key, row).await?;
+                        // Row which violates null-safe bitmap will never be matched so we need not
+                        // store.
+                        if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                        {
+                            yield chunk;
+                        }
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
@@ -1200,18 +1217,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 side_match.ht.delete_row(key, matched_row.row);
                             }
                         }
-                    } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
-                    {
-                        yield chunk;
-                    }
-                    if append_only_optimize {
-                        unreachable!();
-                    } else if side_update.need_degree_table {
-                        side_update.ht.delete(key, JoinRow::new(row, degree));
+
+                        if append_only_optimize {
+                            unreachable!();
+                        } else if side_update.need_degree_table {
+                            side_update.ht.delete(key, JoinRow::new(row, degree));
+                        } else {
+                            side_update.ht.delete_row(key, row);
+                        };
                     } else {
-                        side_update.ht.delete_row(key, row);
-                    };
+                        // We do not store row which violates null-safe bitmap.
+                        if let Some(chunk) =
+                            hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                        {
+                            yield chunk;
+                        }
+                    }
                 }
             }
         }

@@ -17,6 +17,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 assert_matches = "1"
 async-recursion = "1"
+async-stream = "0.3.4"
 async-trait = "0.1"
 either = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
@@ -27,6 +28,7 @@ itertools = "0.10"
 minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
+paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
@@ -37,7 +39,6 @@ risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 serde_json = "1"
-task_stats_alloc = { path = "../utils/task_stats_alloc" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -53,6 +54,9 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 uuid = "1"
+
+[target.'cfg(enable_task_local_alloc)'.dependencies]
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

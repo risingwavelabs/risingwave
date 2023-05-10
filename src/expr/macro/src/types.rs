@@ -14,61 +14,89 @@
 
 //! This module provides utility functions for SQL data type conversion and manipulation.
 
+//  name        data type   variant     array type      owned type      ref type        primitive?
+const TYPE_MATRIX: &str = "
+    boolean     Boolean     Bool        BoolArray       bool            bool            _
+    int16       Int16       Int16       I16Array        i16             i16             y
+    int32       Int32       Int32       I32Array        i32             i32             y
+    int64       Int64       Int64       I64Array        i64             i64             y
+    int256      Int256      Int256      Int256Array     Int256          Int256Ref<'_>   _
+    float32     Float32     Float32     F32Array        F32             F32             y
+    float64     Float64     Float64     F64Array        F64             F64             y
+    decimal     Decimal     Decimal     DecimalArray    Decimal         Decimal         y
+    serial      Serial      Serial      SerialArray     Serial          Serial          y
+    date        Date        Date        DateArray       Date            Date            y
+    time        Time        Time        TimeArray       Time            Time            y
+    timestamp   Timestamp   Timestamp   TimestampArray  Timestamp       Timestamp       y
+    timestamptz Timestamptz Int64       I64Array        i64             i64             y
+    interval    Interval    Interval    IntervalArray   Interval        Interval        y
+    varchar     Varchar     Utf8        Utf8Array       Box<str>        &str            _
+    bytea       Bytea       Bytea       BytesArray      Box<[u8]>       &[u8]           _
+    jsonb       Jsonb       Jsonb       JsonbArray      JsonbVal        JsonbRef<'_>    _
+    list        List        List        ListArray       ListValue       ListRef<'_>     _
+    struct      Struct      Struct      StructArray     StructValue     StructRef<'_>   _
+";
+
+/// Maps a data type to its corresponding data type name.
+pub fn data_type(ty: &str) -> &str {
+    lookup_matrix(ty, 1)
+}
+
+/// Maps a data type to its corresponding variant name.
+pub fn variant(ty: &str) -> &str {
+    lookup_matrix(ty, 2)
+}
+
+/// Maps a data type to its corresponding array type name.
+pub fn array_type(ty: &str) -> &str {
+    lookup_matrix(ty, 3)
+}
+
+/// Maps a data type to its corresponding `Scalar` type name.
+pub fn owned_type(ty: &str) -> &str {
+    lookup_matrix(ty, 4)
+}
+
+/// Maps a data type to its corresponding `ScalarRef` type name.
+pub fn ref_type(ty: &str) -> &str {
+    lookup_matrix(ty, 5)
+}
+
+/// Checks if a data type is primitive.
+pub fn is_primitive(ty: &str) -> bool {
+    lookup_matrix(ty, 6) == "y"
+}
+
+fn lookup_matrix(ty: &str, idx: usize) -> &str {
+    let s = TYPE_MATRIX.trim().lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        if parts.next() == Some(ty) {
+            Some(parts.nth(idx - 1).unwrap())
+        } else {
+            None
+        }
+    });
+    s.unwrap_or_else(|| panic!("unknown type: {}", ty))
+}
+
 /// Expands a type wildcard string into a list of concrete types.
 pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
     match ty {
-        "*" => vec![
-            "boolean",
-            "int16",
-            "int32",
-            "int64",
-            "float32",
-            "float64",
-            "decimal",
-            "serial",
-            "date",
-            "time",
-            "timestamp",
-            "timestamptz",
-            "interval",
-            "varchar",
-            "bytea",
-            "jsonb",
-            "struct",
-            "list",
-        ],
+        "*" => TYPE_MATRIX
+            .trim()
+            .lines()
+            .map(|l| l.split_whitespace().next().unwrap())
+            .collect(),
         "*int" => vec!["int16", "int32", "int64"],
-        "*number" => vec!["int16", "int32", "int64", "float32", "float64", "decimal"],
+        "*numeric" => vec!["decimal"],
+        "*float" => vec!["float32", "float64"],
         _ => vec![ty],
     }
 }
 
-/// Maps a data type to its corresponding type name.
-pub fn to_data_type_name(ty: &str) -> Option<&str> {
-    Some(match ty {
-        "boolean" => "Boolean",
-        "int16" => "Int16",
-        "int32" => "Int32",
-        "int64" => "Int64",
-        "float32" => "Float32",
-        "float64" => "Float64",
-        "decimal" => "Decimal",
-        "serial" => "Serial",
-        "date" => "Date",
-        "time" => "Time",
-        "timestamp" => "Timestamp",
-        "timestamptz" => "Timestamptz",
-        "interval" => "Interval",
-        "varchar" => "Varchar",
-        "bytea" => "Bytea",
-        "jsonb" => "Jsonb",
-        "struct" => "Struct",
-        "list" => "List",
-        _ => return None,
-    })
-}
-
 /// Computes the minimal compatible type between a pair of data types.
+///
+/// This function is used to determine the `auto` type.
 pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
     if types.len() == 1 {
         return types[0].as_ref();
@@ -80,43 +108,30 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("int16", "int16") => "int16",
         ("int16", "int32") => "int32",
         ("int16", "int64") => "int64",
-        ("int16", "float32") => "float64",
-        ("int16", "float64") => "float64",
-        ("int16", "decimal") => "decimal",
 
         ("int32", "int16") => "int32",
         ("int32", "int32") => "int32",
         ("int32", "int64") => "int64",
-        ("int32", "float32") => "float64",
-        ("int32", "float64") => "float64",
-        ("int32", "decimal") => "decimal",
 
         ("int64", "int16") => "int64",
         ("int64", "int32") => "int64",
         ("int64", "int64") => "int64",
-        ("int64", "float32") => "float64",
-        ("int64", "float64") => "float64",
-        ("int64", "decimal") => "decimal",
 
-        ("float32", "int16") => "float64",
-        ("float32", "int32") => "float64",
-        ("float32", "int64") => "float64",
+        ("int16", "int256") => "int256",
+        ("int32", "int256") => "int256",
+        ("int64", "int256") => "int256",
+        ("int256", "int16") => "int256",
+        ("int256", "int32") => "int256",
+        ("int256", "int64") => "int256",
+        ("int256", "float64") => "float64",
+        ("float64", "int256") => "float64",
+
         ("float32", "float32") => "float32",
         ("float32", "float64") => "float64",
-        ("float32", "decimal") => "float64",
 
-        ("float64", "int16") => "float64",
-        ("float64", "int32") => "float64",
-        ("float64", "int64") => "float64",
         ("float64", "float32") => "float64",
         ("float64", "float64") => "float64",
-        ("float64", "decimal") => "float64",
 
-        ("decimal", "int16") => "decimal",
-        ("decimal", "int32") => "decimal",
-        ("decimal", "int64") => "decimal",
-        ("decimal", "float32") => "float64",
-        ("decimal", "float64") => "float64",
         ("decimal", "decimal") => "decimal",
 
         ("date", "timestamp") => "timestamp",
@@ -125,65 +140,5 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
         ("interval", "time") => "interval",
 
         (a, b) => panic!("unknown minimal compatible type for {a:?} and {b:?}"),
-    }
-}
-
-/// Maps a data type to its corresponding array type name.
-pub fn to_array_type(ty: &str) -> &str {
-    match ty {
-        "boolean" => "BoolArray",
-        "int16" => "I16Array",
-        "int32" => "I32Array",
-        "int64" => "I64Array",
-        "float32" => "F32Array",
-        "float64" => "F64Array",
-        "decimal" => "DecimalArray",
-        "serial" => "SerialArray",
-        "date" => "DateArray",
-        "time" => "TimeArray",
-        "timestamp" => "TimestampArray",
-        "timestamptz" => "I64Array",
-        "interval" => "IntervalArray",
-        "varchar" => "Utf8Array",
-        "bytea" => "BytesArray",
-        "jsonb" => "JsonbArray",
-        "struct" => "StructArray",
-        "list" => "ListArray",
-        _ => panic!("unknown type: {ty:?}"),
-    }
-}
-
-/// Maps a data type to its corresponding `ScalarRef` type name.
-pub fn to_data_type(ty: &str) -> &str {
-    match ty {
-        "boolean" => "bool",
-        "int16" => "i16",
-        "int32" => "i32",
-        "int64" => "i64",
-        "float32" => "F32",
-        "float64" => "F64",
-        "decimal" => "Decimal",
-        "serial" => "Serial",
-        "date" => "Date",
-        "time" => "Time",
-        "timestamp" => "Timestamp",
-        "timestamptz" => "i64",
-        "interval" => "Interval",
-        "varchar" => "&str",
-        "bytea" => "&[u8]",
-        "jsonb" => "JsonbRef<'_>",
-        "struct" => "StructRef<'_>",
-        "list" => "ListRef<'_>",
-        _ => panic!("unknown type: {ty:?}"),
-    }
-}
-
-/// Checks if a data type is primitive.
-pub fn is_primitive(ty: &str) -> bool {
-    match ty {
-        "int16" | "int32" | "int64" | "float32" | "float64" | "decimal" | "date" | "time"
-        | "timestamp" | "timestamptz" | "interval" | "serial" => true,
-        "boolean" | "varchar" | "bytea" | "jsonb" | "struct" | "list" => false,
-        _ => panic!("unknown type: {ty:?}"),
     }
 }

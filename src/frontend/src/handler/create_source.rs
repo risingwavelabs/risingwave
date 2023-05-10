@@ -27,7 +27,9 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
 };
-use risingwave_connector::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+use risingwave_connector::source::cdc::{
+    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+};
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -45,16 +47,20 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
 };
+use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -173,19 +179,10 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-fn get_connector(with_properties: &HashMap<String, String>) -> Option<String> {
+fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
     with_properties
-        .get(UPSTREAM_SOURCE_KEY)
+        .get(CONNECTION_NAME_KEY)
         .map(|s| s.to_lowercase())
-}
-
-#[inline(always)]
-pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
-    let Some(connector) = get_connector(with_properties) else {
-        return false;
-    };
-
-    connector == KAFKA_CONNECTOR
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -197,9 +194,8 @@ pub(crate) async fn resolve_source_schema(
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
     validate_compatibility(&source_schema, with_properties)?;
-    check_nexmark_schema(with_properties, *row_id_index, columns)?;
 
-    let is_kafka = is_kafka_source(with_properties);
+    let is_kafka = is_kafka_connector(with_properties);
 
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -346,6 +342,78 @@ pub(crate) async fn resolve_source_schema(
                 ..Default::default()
             }
         }
+        SourceSchema::DebeziumMongoJson => {
+            if columns.is_empty() {
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                let pk_id = col_id_gen.generate("_id");
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: pk_id,
+                        name: "_id".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                });
+                columns.push(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Jsonb,
+                        column_id: col_id_gen.generate("payload"),
+                        name: "payload".to_string(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                        generated_or_default_column: None,
+                    },
+                    is_hidden: false,
+                });
+                pk_column_ids.push(pk_id);
+                row_id_index.take();
+            }
+
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+            'check_pk: {
+                if pk_column_ids.len() == 1 {
+                    let pk_column = columns
+                        .iter()
+                        .find(|col| col.column_id() == pk_column_ids[0])
+                        .unwrap();
+                    if pk_column.name() == "_id"
+                        && matches!(
+                            pk_column.data_type(),
+                            DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64
+                        )
+                    {
+                        break 'check_pk;
+                    }
+                }
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must named as `_id` with supported datatypes (Jsonb Varchar Int32 Int64)."
+                        .to_string(),
+                )));
+            }
+            let _ = columns
+                .iter()
+                .find(|col| col.name() == "payload" && matches!(col.data_type(), DataType::Jsonb))
+                .ok_or_else(|| {
+                    RwError::from(ProtocolError(
+                "A column named as `payload` with supported datatypes Jsonb must exist in table."
+                    .to_string(),
+            ))
+                })?;
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumMongoJson as i32,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::CanalJson => {
             // return err if user has not specified a pk
@@ -456,14 +524,14 @@ fn check_and_add_timestamp_column(
     column_descs: &mut Vec<ColumnDesc>,
     col_id_gen: &mut ColumnIdGenerator,
 ) {
-    if is_kafka_source(with_properties) {
+    if is_kafka_connector(with_properties) {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
             column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -475,7 +543,7 @@ pub(super) fn bind_source_watermark(
     source_watermarks: Vec<SourceWatermark>,
     column_catalogs: &[ColumnCatalog],
 ) -> Result<Vec<WatermarkDesc>> {
-    let mut binder = Binder::new(session);
+    let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(name.clone(), column_catalogs.to_vec())?;
 
     let watermark_descs = source_watermarks
@@ -498,7 +566,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
                 PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
@@ -507,6 +575,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType
                 S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
                 MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
                 POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                CITUS_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
         ))
     },
 );
@@ -517,6 +586,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
         SourceSchema::Protobuf(_) => RowFormatType::Protobuf,
         SourceSchema::Json => RowFormatType::Json,
         SourceSchema::DebeziumJson => RowFormatType::DebeziumJson,
+        SourceSchema::DebeziumMongoJson => RowFormatType::DebeziumMongoJson,
         SourceSchema::DebeziumAvro(_) => RowFormatType::DebeziumAvro,
         SourceSchema::UpsertJson => RowFormatType::UpsertJson,
         SourceSchema::UpsertAvro(_) => RowFormatType::UpsertAvro,
@@ -582,7 +652,13 @@ fn validate_compatibility(
     Ok(())
 }
 
-fn check_nexmark_schema(
+/// Performs early stage checking in frontend to see if the schema of the given `columns` is
+/// compatible with the connector extracted from the properties. Currently this only works for
+/// `nexmark` connector since it's in chunk format.
+///
+/// One should only call this function after all properties of all columns are resolved, like
+/// generated column descriptors.
+pub(super) fn check_source_schema(
     props: &HashMap<String, String>,
     row_id_index: Option<usize>,
     columns: &[ColumnCatalog],
@@ -612,9 +688,21 @@ fn check_nexmark_schema(
         }
     };
 
+    // Ignore the generated columns and map the index of row_id column.
+    let user_defined_columns = columns.iter().filter(|c| !c.is_generated());
+    let row_id_index = if let Some(index) = row_id_index {
+        let col_id = columns[index].column_id();
+        user_defined_columns
+            .clone()
+            .position(|c| c.column_id() == col_id)
+            .unwrap()
+            .into()
+    } else {
+        None
+    };
+
     let expected = get_event_data_types_with_names(event_type, row_id_index);
-    let user_defined = columns
-        .iter()
+    let user_defined = user_defined_columns
         .map(|c| {
             (
                 c.column_desc.name.to_ascii_lowercase(),
@@ -624,9 +712,9 @@ fn check_nexmark_schema(
         .collect_vec();
 
     if expected != user_defined {
+        let cmp = pretty_assertions::Comparison::new(&expected, &user_defined);
         return Err(RwError::from(ProtocolError(format!(
-            "The shema of the nexmark source must specify all columns in order, expected {:?}, but get {:?}",
-            expected, user_defined
+            "The schema of the nexmark source must specify all columns in order:\n{cmp}",
         ))));
     }
     Ok(())
@@ -642,7 +730,8 @@ pub async fn handle_create_source(
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     if handler_args.with_options.is_empty() {
         return Err(RwError::from(InvalidInputSyntax(
@@ -650,12 +739,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let mut with_properties = handler_args
-        .with_options
-        .inner()
-        .clone()
-        .into_iter()
-        .collect();
+    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
@@ -693,10 +777,12 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
-    if columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow generated columns on source
+    check_source_schema(&with_properties, row_id_index, &columns)?;
+
+    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow delete from a non append only source
         return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns on source has not been implemented.".to_string(),
+            "Generated columns are only allowed in an append only source.".to_string(),
         )));
     }
 
@@ -704,6 +790,27 @@ pub async fn handle_create_source(
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
+
+    let connection_name = get_connection_name(&with_properties);
+    let is_kafka_connector = is_kafka_connector(&with_properties);
+    let mut with_options = WithOptions::new(with_properties);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection = session
+                .get_connection_by_name(schema_name, &connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka_connector {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Create source with connection is only supported for kafka connectors."
+                        .to_string(),
+                )));
+            }
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
+        }
+        None => None,
+    };
+    let definition = handler_args.normalized_sql;
 
     let source = PbSource {
         id: TableId::placeholder().table_id,
@@ -713,10 +820,12 @@ pub async fn handle_create_source(
         row_id_index,
         columns,
         pk_column_ids,
-        properties: with_properties.into_iter().collect(),
+        properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs,
+        definition,
+        connection_id,
         optional_associated_table_id: None,
     };
 

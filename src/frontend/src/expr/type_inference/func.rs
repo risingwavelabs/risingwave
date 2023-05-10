@@ -15,8 +15,7 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 
@@ -69,11 +68,11 @@ pub fn infer_some_all(
 ) -> Result<DataType> {
     let element_type = if inputs[1].is_unknown() {
         None
-    } else if let DataType::List { datatype } = inputs[1].return_type() {
+    } else if let DataType::List(datatype) = inputs[1].return_type() {
         Some(DataTypeName::from(*datatype))
     } else {
         return Err(ErrorCode::BindError(
-            "op ANY/ALL (array) requires array on right side".to_string(),
+            "op SOME/ANY/ALL (array) requires array on right side".to_string(),
         )
         .into());
     };
@@ -105,9 +104,9 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         }
-        inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
-            datatype: Box::new(sig.inputs_type[1].into()),
-        })?;
+        inputs[1] = inputs[1]
+            .clone()
+            .cast_implicit(DataType::List(Box::new(sig.inputs_type[1].into())))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -441,7 +440,8 @@ fn infer_type_for_special(
                                 let ScalarImpl::Utf8(flag) = flag else {
                                     return Err(ErrorCode::BindError(
                                         "flag in regexp_match must be a literal string".to_string(),
-                                    ).into());
+                                    )
+                                    .into());
                                 };
                                 for c in flag.chars() {
                                     if c == 'g' {
@@ -473,23 +473,14 @@ fn infer_type_for_special(
                     }
                 }
             }
-            Ok(Some(DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            }))
+            Ok(Some(DataType::List(Box::new(DataType::Varchar))))
         }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
-                (
-                    DataType::List {
-                        datatype: left_elem_type,
-                    },
-                    DataType::List {
-                        datatype: right_elem_type,
-                    },
-                ) => {
+                (DataType::List(left_elem_type), DataType::List(right_elem_type)) => {
                     if let Ok(res) = align_types(inputs.iter_mut()) {
                         Some(res)
                     } else if **left_elem_type == right_type {
@@ -540,6 +531,32 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayRemove => {
+            ensure_arity!("array_remove", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot remove {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
+        ExprType::ArrayPositions => {
+            ensure_arity!("array_positions", | inputs | == 2);
+            let common_type = align_array_and_element(0, 1, inputs);
+            match common_type {
+                Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot get position of {} in {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
             let ret_type = inputs[0].return_type();
@@ -551,11 +568,7 @@ fn infer_type_for_special(
                 .into());
             }
             match ret_type {
-                DataType::List {
-                    datatype: list_elem_type,
-                } => Ok(Some(DataType::List {
-                    datatype: list_elem_type,
-                })),
+                DataType::List(list_elem_type) => Ok(Some(DataType::List(list_elem_type))),
                 _ => Ok(None),
             }
         }
@@ -571,12 +584,11 @@ fn infer_type_for_special(
             }
 
             match return_type {
-                DataType::List {
-                    datatype: _list_elem_type,
-                } => Ok(Some(DataType::Int64)),
+                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
                 _ => Ok(None),
             }
         }
+        ExprType::StringToArray => Ok(Some(DataType::List(Box::new(DataType::Varchar)))),
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
@@ -589,9 +601,18 @@ fn infer_type_for_special(
             }
 
             match return_type {
-                DataType::List {
-                    datatype: _list_elem_type,
-                } => Ok(Some(DataType::Int64)),
+                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
+                _ => Ok(None),
+            }
+        }
+        ExprType::TrimArray => {
+            ensure_arity!("trim_array", | inputs | == 2);
+
+            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+
+            match inputs[0].return_type() {
+                DataType::List(typ) => Ok(Some(DataType::List(typ))),
                 _ => Ok(None),
             }
         }
@@ -599,8 +620,8 @@ fn infer_type_for_special(
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
         }
-        ExprType::Now => {
-            ensure_arity!("now", | inputs | <= 1);
+        ExprType::Proctime => {
+            ensure_arity!("proctime", | inputs | == 0);
             Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),
@@ -793,39 +814,46 @@ fn narrow_category<'a>(
     inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     const BIASED_TYPE: DataTypeName = DataTypeName::Varchar;
-    let Ok(categories) = inputs.iter().enumerate().map(|(i, actual)| {
-        // This closure returns
-        // * Err(()) when a category cannot be selected
-        // * Ok(None) when actual argument is non-null and can skip selection
-        // * Ok(Some(t)) when the selected category is `t`
-        //
-        // Here `t` is actually just one type within that selected category, rather than the
-        // category itself. It is selected to be the [`super::least_restrictive`] over all
-        // candidates. This makes sure that `t` is the preferred type if any candidate accept it.
-        if actual.is_some() {
-            return Ok(None);
-        }
-        let mut category = Ok(candidates[0].inputs_type[i]);
-        for sig in &candidates[1..] {
-            let formal = sig.inputs_type[i];
-            if formal == BIASED_TYPE || category == Ok(BIASED_TYPE) {
-                category = Ok(BIASED_TYPE);
-                break;
+    let Ok(categories) = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, actual)| {
+            // This closure returns
+            // * Err(()) when a category cannot be selected
+            // * Ok(None) when actual argument is non-null and can skip selection
+            // * Ok(Some(t)) when the selected category is `t`
+            //
+            // Here `t` is actually just one type within that selected category, rather than the
+            // category itself. It is selected to be the [`super::least_restrictive`] over all
+            // candidates. This makes sure that `t` is the preferred type if any candidate accept
+            // it.
+            if actual.is_some() {
+                return Ok(None);
             }
-            // formal != BIASED_TYPE && category.is_err():
-            // - Category conflict err can only be solved by a later varchar. Skip this candidate.
-            let Ok(selected) = category else { continue };
-            // least_restrictive or mark temporary conflict err
-            if implicit_ok(formal, selected, true) {
-                // noop
-            } else if implicit_ok(selected, formal, false) {
-                category = Ok(formal);
-            } else {
-                category = Err(());
+            let mut category = Ok(candidates[0].inputs_type[i]);
+            for sig in &candidates[1..] {
+                let formal = sig.inputs_type[i];
+                if formal == BIASED_TYPE || category == Ok(BIASED_TYPE) {
+                    category = Ok(BIASED_TYPE);
+                    break;
+                }
+                // formal != BIASED_TYPE && category.is_err():
+                // - Category conflict err can only be solved by a later varchar. Skip this
+                //   candidate.
+                let Ok(selected) = category else { continue };
+                // least_restrictive or mark temporary conflict err
+                if implicit_ok(formal, selected, true) {
+                    // noop
+                } else if implicit_ok(selected, formal, false) {
+                    category = Ok(formal);
+                } else {
+                    category = Err(());
+                }
             }
-        }
-        category.map(Some)
-    }).try_collect::<_, Vec<_>, _>() else {
+            category.map(Some)
+        })
+        .try_collect::<_, Vec<_>, _>()
+    else {
         // First phase failed.
         return candidates;
     };
@@ -878,7 +906,7 @@ fn narrow_same_type<'a>(
         (None, t) => Ok(*t),
         (t, None) => Ok(t),
         (Some(l), Some(r)) if l == *r => Ok(Some(l)),
-        _ => Err(())
+        _ => Err(()),
     }) else {
         return candidates;
     };
@@ -1181,7 +1209,6 @@ mod tests {
             let mut sig_map = FuncSigMap::default();
             for formals in candidates {
                 sig_map.insert(FuncSign {
-                    name: "add",
                     func: DUMMY_FUNC,
                     inputs_type: formals,
                     ret_type: DUMMY_RET,

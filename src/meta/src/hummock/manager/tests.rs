@@ -36,6 +36,7 @@ use risingwave_pb::hummock::{
     CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::{
     default_level_selector, LevelSelector, ManualCompactionOption, SpaceReclaimCompactionSelector,
@@ -397,7 +398,11 @@ async fn test_release_context_resource() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();
@@ -479,7 +484,11 @@ async fn test_hummock_manager_basic() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();
@@ -847,9 +856,7 @@ async fn test_trigger_manual_compaction() {
     {
         let option = ManualCompactionOption {
             level: 6,
-            key_range: KeyRange {
-                ..Default::default()
-            },
+            key_range: KeyRange::default(),
             ..Default::default()
         };
 
@@ -1996,4 +2003,65 @@ async fn test_move_tables_between_compaction_group() {
         info.keys().cloned().sorted().collect_vec(),
         vec![2, new_group_id]
     );
+}
+
+#[tokio::test]
+async fn test_gc_stats() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let assert_eq_gc_stats = |stale_object_size,
+                              stale_object_count,
+                              old_version_object_size,
+                              old_version_object_count,
+                              current_version_object_count,
+                              current_version_object_size| {
+        assert_eq!(
+            hummock_manager.metrics.stale_object_size.get(),
+            stale_object_size
+        );
+        assert_eq!(
+            hummock_manager.metrics.stale_object_count.get(),
+            stale_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.old_version_object_size.get(),
+            old_version_object_size
+        );
+        assert_eq!(
+            hummock_manager.metrics.old_version_object_count.get(),
+            old_version_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.current_version_object_count.get(),
+            current_version_object_count
+        );
+        assert_eq!(
+            hummock_manager.metrics.current_version_object_size.get(),
+            current_version_object_size
+        );
+    };
+    assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
+    assert_eq!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+
+    hummock_manager.pin_version(context_id).await.unwrap();
+    let _ = add_test_tables(&hummock_manager, context_id).await;
+    assert_eq_gc_stats(0, 0, 0, 0, 0, 0);
+    assert_ne!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+    assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
+    hummock_manager
+        .unpin_version_before(context_id, HummockVersionId::MAX)
+        .await
+        .unwrap();
+    assert_eq_gc_stats(0, 0, 6, 3, 2, 4);
+    assert_eq!(
+        hummock_manager.create_version_checkpoint(0).await.unwrap(),
+        0
+    );
+    assert_eq_gc_stats(6, 3, 0, 0, 2, 4);
 }

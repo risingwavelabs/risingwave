@@ -15,8 +15,7 @@
 use std::fmt::Debug;
 use std::io::Write;
 
-use super::{F32, F64};
-use crate::array::serial_array::Serial;
+use super::{Serial, F32, F64};
 use crate::array::ArrayResult;
 
 pub trait NativeType:
@@ -53,13 +52,13 @@ impl NativeType for Serial {
 
 impl NativeType for F32 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
+        output.write(&self.0.to_be_bytes()).map_err(Into::into)
     }
 }
 
 impl NativeType for F64 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
-        output.write(&self.to_be_bytes()).map_err(Into::into)
+        output.write(&self.0.to_be_bytes()).map_err(Into::into)
     }
 }
 

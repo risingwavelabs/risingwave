@@ -286,6 +286,28 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-gen-cpu-flamegraph:
+    steps:
+      # NOTE(kwannoel): We do not use aws-s3 here, to avoid
+      # contention over s3 bucket when multiple benchmarks at run at once.
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+        parallelism: 8
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+      # Do not use kafka and zookeeper here, we will spawn it separately,
+      # so we don't have to re-generate data each time.
+      # - use: zookeeper
+      #   persist-data: true
+      # RW will still be ale to talk to it.
+      # - use: kafka
+      #   port: 9092
+      #   persist-data: true
+
   ######################################
   ### Configurations used in Compose ###
   ######################################
@@ -549,6 +571,57 @@ profile:
         health-check-port: 6788
       - use: compactor
 
+  ci-3streaming-2serving-3fe:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+        role: streaming
+        parallelism: 4
+      - use: compute-node
+        port: 5685
+        exporter-port: 1225
+        enable-tiered-cache: true
+        role: serving
+        parallelism: 6
+      - use: compute-node
+        port: 5686
+        exporter-port: 1226
+        enable-tiered-cache: true
+        role: serving
+        parallelism: 6
+      - use: frontend
+        port: 4565
+        exporter-port: 2222
+        health-check-port: 6786
+      - use: frontend
+        port: 4566
+        exporter-port: 2223
+        health-check-port: 6787
+      - use: frontend
+        port: 4567
+        exporter-port: 2224
+        health-check-port: 6788
+      - use: compactor
+
   ci-pubsub:
     config-path: src/config/ci.toml
     steps:
@@ -778,15 +851,10 @@ template:
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
 
-    # The policy for compute node memory control.
-    memory-control-policy: streaming-only
-
-    #  The proportion of streaming memory to all available memory for computing. Only works when
-    # `memory_control_policy` is set to "streaming-batch".
-    streaming-memory-proportion: 0.7
-
     # Parallelism of tasks per compute node
     parallelism: 4
+
+    role: both
 
   meta-node:
     # Meta-node advertise address

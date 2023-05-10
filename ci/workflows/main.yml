@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build (dev mode)"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -p ci-dev"
     key: "build-dev"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -25,7 +25,7 @@ steps:
     timeout_in_minutes: 15
 
   - label: "build (release mode)"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -208,7 +208,7 @@ steps:
     timeout_in_minutes: 15
 
   - label: "scaling test (deterministic simulation)"
-    command: "TEST_NUM=30 ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -216,7 +216,18 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 40 # TODO: split into multiple jobs
+    timeout_in_minutes: 40
+
+  - label: "recovery integration test (deterministic simulation)"
+    command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
+    depends_on: "build-simulation"
+    plugins:
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 40
 
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 ci/scripts/deterministic-e2e-test.sh"
@@ -265,7 +276,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    timeout_in_minutes: 35
 
   - label: "end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
@@ -291,7 +302,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    # Extra 2 minutes to account for docker-compose latency.
+    # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
+    timeout_in_minutes: 7
 
   - label: "release"
     command: "ci/scripts/release.sh"

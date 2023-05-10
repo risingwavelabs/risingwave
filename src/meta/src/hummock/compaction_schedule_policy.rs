@@ -476,17 +476,11 @@ mod tests {
                 level_idx: 0,
                 level_type: 0,
                 table_infos: vec![SstableInfo {
-                    object_id: 0,
-                    sst_id: 0,
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
-                    meta_offset: 0,
-                    stale_key_count: 0,
-                    total_key_count: 0,
                     uncompressed_file_size: input_file_size,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }],
             }],
             splits: vec![],
@@ -495,6 +489,7 @@ mod tests {
             task_id,
             target_level: 0,
             gc_delete_keys: false,
+            base_level: 0,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id: StaticCompactionGroupId::StateDefault.into(),
             existing_table_ids: vec![],
@@ -506,6 +501,7 @@ mod tests {
             target_sub_level_id: 0,
             task_type: compact_task::TaskType::Dynamic as i32,
             split_by_state_table: false,
+            split_weight_by_vnode: 0,
         }
     }
 
@@ -561,6 +557,8 @@ mod tests {
         let config = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(1)
             .max_bytes_for_level_base(1)
+            .level0_sub_level_compact_level_count(1)
+            .level0_overlapping_sub_level_compact_level_count(1)
             .build();
         let (_, hummock_manager, _, worker_node) = setup_compute_env_with_config(80, config).await;
         let context_id = worker_node.id;

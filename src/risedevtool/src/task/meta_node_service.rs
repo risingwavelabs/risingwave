@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_storage_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -36,7 +36,9 @@ impl MetaNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("meta-node")))
+            Ok(Command::new(
+                Path::new(&prefix_bin).join("risingwave").join("meta-node"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
         }
@@ -119,7 +121,7 @@ impl MetaNodeService {
                     "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
                 ));
             }
-            (_, provide_minio, provide_aws_s3, provide_opendal) => add_storage_backend(
+            (_, provide_minio, provide_aws_s3, provide_opendal) => add_hummock_backend(
                 &config.id,
                 provide_opendal,
                 provide_minio,
@@ -148,6 +150,8 @@ impl MetaNodeService {
             ));
         }
 
+        cmd.arg("--data-directory").arg("hummock_001");
+
         Ok(())
     }
 }
@@ -160,6 +164,8 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(

@@ -16,8 +16,9 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
-arrow-array = "34"
-arrow-schema = "34"
+arrow-array = "36"
+arrow-buffer = "36"
+arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
 bitflags = "2"
@@ -31,23 +32,27 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
-derivative = "2"
 easy-ext = "1"
+educe = "0.4"
 either = "1"
 enum-as-inner = "0.5"
+ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
+hytra = { workspace = true }
 itertools = "0.10"
 itoa = "1.0"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.1", features = ["decimal"] }
 num-traits = "0.2"
+number_prefix = "0.4.0"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
-postgres-types = { version = "0.2.4", features = [
+postgres-types = { version = "0.2.5", features = [
     "derive",
     "with-chrono-0_4",
     "with-serde_json-1",
@@ -57,11 +62,16 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
+risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_pb = { path = "../prost" }
-rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
+serde_default = "0.1"
 serde_json = "1"
+serde_with = "2"
+smallbitset = "0.6.1"
+speedate = "0.7.0"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
@@ -78,6 +88,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+twox-hash = "1"
 url = "2"
 uuid = "1.2.2"
 
@@ -91,14 +102,14 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
 libc = "0.2.72"
-mach = "0.3.2"
+mach2 = "0.4"
 
 [dev-dependencies]
 criterion = "0.4"
 more-asserts = "0.3"
+pretty_assertions = "1"
 rand = "0.8"
 tempfile = "3"
-twox-hash = "1"
 
 [[bench]]
 name = "bench_encoding"
@@ -114,6 +125,18 @@ harness = false
 
 [[bench]]
 name = "bench_hash_key_encoding"
+harness = false
+
+[[bench]]
+name = "bench_data_chunk_encoding"
+harness = false
+
+[[bench]]
+name = "bench_data_chunk_compact"
+harness = false
+
+[[bench]]
+name = "bench_array"
 harness = false
 
 [[bin]]

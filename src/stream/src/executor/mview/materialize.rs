@@ -25,20 +25,22 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
@@ -59,6 +61,7 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache<SD>,
+
     conflict_behavior: ConflictBehavior,
 }
 
@@ -77,19 +80,25 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
+        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = input.schema().clone();
 
-        // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
-        // with the new version of serializer is the same as the old one, even if they can be
-        // decoded into the same value. The table is now performing consistency check on the raw
-        // bytes, so we need to turn off the check here. We may turn it on if we can compare the
-        // decoded row.
-        let state_table =
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await;
+        let state_table = if table_catalog.version.is_some() {
+            // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
+            // with the new version of serializer is the same as the old one, even if they can be
+            // decoded into the same value. The table is now performing consistency check on the raw
+            // bytes, so we need to turn off the check here. We may turn it on if we can compare the
+            // decoded row.
+            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
+        } else {
+            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
+        };
 
+        let actor_id = actor_context.id;
+        let table_id = table_catalog.id;
         Self {
             input,
             state_table,
@@ -100,7 +109,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
             conflict_behavior,
         }
     }
@@ -119,6 +128,8 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         #[for_await]
         for msg in input {
             let msg = msg?;
+            self.materialize_cache.evict();
+
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
@@ -175,7 +186,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
-                    self.materialize_cache.evict();
+                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
@@ -224,7 +235,12 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
+            materialize_cache: MaterializeCache::new(
+                watermark_epoch,
+                Arc::new(StreamingMetrics::unused()),
+                0,
+                0,
+            ),
             conflict_behavior,
         }
     }
@@ -419,8 +435,11 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 
 /// A cache for materialize executors.
 pub struct MaterializeCache<SD> {
-    data: ExecutorCache<Vec<u8>, CacheValue>,
+    data: ManagedLruCache<Vec<u8>, CacheValue>,
     _serde: PhantomData<SD>,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: String,
+    table_id: String,
 }
 
 #[derive(EnumAsInner)]
@@ -431,12 +450,28 @@ pub enum CacheValue {
 
 type EmptyValue = ();
 
+impl EstimateSize for CacheValue {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
+}
+
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics: Arc<StreamingMetrics>,
+        actor_id: u32,
+        table_id: u32,
+    ) -> Self {
+        let cache = new_unbounded(watermark_epoch);
         Self {
             data: cache,
             _serde: PhantomData,
+            metrics,
+            actor_id: actor_id.to_string(),
+            table_id: table_id.to_string(),
         }
     }
 
@@ -577,10 +612,17 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
+            self.metrics
+                .materialize_cache_total_count
+                .with_label_values(&[&self.table_id, &self.actor_id])
+                .inc();
             if self.data.contains(key) {
+                self.metrics
+                    .materialize_cache_hit_count
+                    .with_label_values(&[&self.table_id, &self.actor_id])
+                    .inc();
                 continue;
             }
-
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 (key.to_vec(), table.get_compacted_row(&key_row).await)

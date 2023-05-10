@@ -24,7 +24,6 @@ mod tests {
     use std::str::FromStr;
 
     use itertools::Itertools;
-    use num_traits::FromPrimitive;
 
     use super::*;
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
@@ -32,13 +31,13 @@ mod tests {
 
     #[test]
     fn test_decimal_builder() {
-        let v = (0..1000).map(Decimal::from_i64).collect_vec();
+        let v = (0..1000).map(Decimal::from).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(*i);
+            builder.append(Some(*i));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b);
         assert!(res);
     }
 
@@ -80,28 +79,28 @@ mod tests {
         let vecs: [Vec<Option<Decimal>>; ARR_NUM] = [
             (0..ARR_LEN)
                 .map(|x| match x % 2 {
-                    0 => Decimal::from_u32(0),
+                    0 => Some(Decimal::from(0)),
                     1 => None,
                     _ => unreachable!(),
                 })
                 .collect_vec(),
             (0..ARR_LEN)
                 .map(|x| match x % 3 {
-                    0 => Decimal::from_u32(0),
+                    0 => Some(Decimal::from(0)),
                     #[expect(clippy::approx_constant)]
-                    1 => Decimal::from_f32(3.14),
+                    1 => Decimal::try_from(3.14).ok(),
                     2 => None,
                     _ => unreachable!(),
                 })
                 .collect_vec(),
             (0..ARR_LEN)
                 .map(|x| match x % 5 {
-                    0 => Decimal::from_u32(0),
-                    1 => Decimal::from_u8(123),
+                    0 => Some(Decimal::from(0)),
+                    1 => Some(Decimal::from(123)),
                     #[expect(clippy::approx_constant)]
-                    2 => Decimal::from_f64(3.1415926),
+                    2 => Decimal::try_from(3.1415926).ok(),
                     #[expect(clippy::approx_constant)]
-                    3 => Decimal::from_f32(3.14),
+                    3 => Decimal::try_from(3.14).ok(),
                     4 => None,
                     _ => unreachable!(),
                 })

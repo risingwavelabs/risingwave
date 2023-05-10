@@ -188,7 +188,7 @@ impl ObjectStore for DiskObjectStore {
         }
     }
 
-    fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, _path: &str) -> ObjectResult<BoxedStreamingUploader> {
         unimplemented!("streaming upload is not implemented for disk object store");
     }
 
@@ -294,8 +294,7 @@ impl ObjectStore for DiskObjectStore {
         // `DiskObjectStore::delete()` behaves the same way as `S3ObjectStore::delete()`.
         if let Err(e) = &result && e.kind() == ErrorKind::NotFound {
             Ok(())
-        }
-        else {
+        } else {
             result.map_err(|e| ObjectError::disk(format!("failed to delete {}", path), e))
         }
     }
@@ -412,6 +411,11 @@ mod tests {
             .upload("test.obj", Bytes::from(payload.clone()))
             .await
             .unwrap();
+        assert!(store
+            .metadata("not_exist.obj")
+            .await
+            .unwrap_err()
+            .is_object_not_found_error());
         let metadata = store.metadata("test.obj").await.unwrap();
         assert_eq!(payload.len(), metadata.total_size);
 
@@ -585,8 +589,8 @@ mod tests {
         let test_dir = TempDir::new().unwrap();
         let test_root_path = test_dir.path().to_str().unwrap();
         let store = DiskObjectStore::new(test_root_path);
-
-        assert!(store.read("non-exist.obj", None).await.is_err());
+        let err = store.read("non-exist.obj", None).await.unwrap_err();
+        assert!(err.is_object_not_found_error());
     }
 
     #[tokio::test]

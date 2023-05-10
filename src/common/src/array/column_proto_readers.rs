@@ -21,13 +21,11 @@ use risingwave_pb::data::PbArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, DateArrayBuilder,
-    IntervalArrayBuilder, PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder,
-    TimestampArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayResult, BoolArray, DateArrayBuilder, IntervalArrayBuilder,
+    PrimitiveArrayBuilder, PrimitiveArrayItemType, TimeArrayBuilder, TimestampArrayBuilder,
 };
 use crate::buffer::Bitmap;
-use crate::types::interval::Interval;
-use crate::types::{Date, Time, Timestamp};
+use crate::types::{Date, Interval, Time, Timestamp};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
@@ -169,7 +167,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
     let offset_buff = array.get_values()[0].get_body().as_slice();
     let data_buf = array.get_values()[1].get_body().as_slice();
 
-    let mut builder = B::with_meta(cardinality, ArrayMeta::Simple);
+    let mut builder = B::new(cardinality);
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
     let mut offset_cursor = Cursor::new(offset_buff);
     let mut data_cursor = Cursor::new(data_buf);

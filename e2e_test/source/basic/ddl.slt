@@ -1,3 +1,46 @@
+statement error topic invalid_topic not found
+create source s with (
+  connector = 'kafka',
+  topic = 'invalid_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement error properties `scan_startup_mode` only support earliest and latest or leave it empty
+create source invalid_startup_mode with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  scan.startup.mode = 'invalid',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+# TODO: Better to refine the error message.
+statement error internal error: invalid digit found in string
+create source invalid_startup_timestamp with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  scan.startup.timestamp_millis	= 'abc',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement ok
+create source upsert_source with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  upsert = 'true',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format json;
+
+statement ok
+drop source upsert_source;
+
+# Will fail at the parser phase.
+statement error
+create source invalid_format with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+) row format abc;
+
 statement ok
 create table s with (
   connector = 'kafka',
@@ -83,3 +126,70 @@ s
 
 statement ok
 drop table s
+
+# Test create source with connection
+statement ok 
+CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
+
+# Reference to non-existant connection
+statement error
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format json;
+
+# `DEBEZIUM_MONGO_JSON` requires the source table have `_id` and `payload` columns.
+statement error
+create source s (
+  a int,
+  b int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+# `DEBEZIUM_MONGO_JSON` requires the `_id` column is primary key.
+statement error
+create source s (
+  _id jsonb,
+  payload jsonb
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+# `DEBEZIUM_MONGO_JSON` requires the `payload` column is jsonb type.
+statement error
+create source s (
+  _id varchar primary key,
+  payload int
+) with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'nonexist',
+) row format DEBEZIUM_MONGO_JSON;
+
+statement ok
+create source s with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'mock',
+) row format json;
+
+# Drop a connection in use
+statement error
+drop connection mock;
+
+statement ok
+drop source s;
+
+statement ok
+drop connection mock;

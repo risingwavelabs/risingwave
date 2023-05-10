@@ -27,7 +27,6 @@ use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
     StagingSstableInfo, VersionUpdate,
@@ -60,6 +59,7 @@ async fn test_read_version_basic() {
             vec![],
             TableId::from(table_id),
             None,
+            None,
         );
 
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
@@ -75,13 +75,11 @@ async fn test_read_version_basic() {
                 .staging()
                 .prune_overlap(0, epoch, TableId::default(), &key_range);
 
-        let staging_imm = staging_imm_iter
-            .cloned()
-            .collect::<Vec<ImmutableMemtable>>();
+        let staging_imm = staging_imm_iter.cloned().collect_vec();
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst_iter.count());
-        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
     }
 
     {
@@ -98,6 +96,7 @@ async fn test_read_version_basic() {
                 size,
                 vec![],
                 TableId::from(table_id),
+                None,
                 None,
             );
 
@@ -116,13 +115,11 @@ async fn test_read_version_basic() {
                     .staging()
                     .prune_overlap(0, epoch, TableId::default(), &key_range);
 
-            let staging_imm = staging_imm_iter
-                .cloned()
-                .collect::<Vec<ImmutableMemtable>>();
+            let staging_imm = staging_imm_iter.cloned().collect_vec();
 
             assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
-            assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+            assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
         }
     }
 
@@ -143,7 +140,7 @@ async fn test_read_version_basic() {
             .imm
             .iter()
             .rev()
-            .map(|imm| imm.epoch())
+            .map(|imm| imm.min_epoch())
             .take(3)
             .rev()
             .collect::<Vec<_>>();
@@ -164,8 +161,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
                     object_id: 2,
@@ -181,8 +177,7 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     uncompressed_file_size: 1,
-                    min_epoch: 0,
-                    max_epoch: 0,
+                    ..Default::default()
                 }),
             ],
             epoch_id_vec_for_clear,
@@ -229,7 +224,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].epoch());
+        assert_eq!(4, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -253,7 +248,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].epoch());
+        assert_eq!(4, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
@@ -285,6 +280,7 @@ async fn test_read_filter_basic() {
             vec![],
             TableId::from(table_id),
             None,
+            None,
         );
 
         read_version
@@ -311,7 +307,7 @@ async fn test_read_filter_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst.len());
-        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
 
         // build for local
         {

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use pgwire::types::Format;
-use risingwave_common::error::{Result, RwError};
+use pgwire::types::{Format, FormatIterator};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::ScalarImpl;
 
 use super::statement::RewriteExprsRecursive;
@@ -44,6 +44,7 @@ impl ExprRewriter for ParamRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
 
@@ -85,8 +86,10 @@ impl BoundStatement {
         param_formats: Vec<Format>,
     ) -> Result<BoundStatement> {
         let mut rewriter = ParamRewriter {
+            param_formats: FormatIterator::new(&param_formats, params.len())
+                .map_err(ErrorCode::BindError)?
+                .collect(),
             params,
-            param_formats,
             error: None,
         };
 

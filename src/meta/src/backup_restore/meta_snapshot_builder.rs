@@ -21,15 +21,16 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
 use crate::manager::model::SystemParamsModel;
-use crate::model::MetadataModel;
+use crate::model::{ClusterId, MetadataModel};
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
-use crate::telemetry::TrackingId;
 
 const VERSION: u32 = 1;
 
@@ -109,14 +110,15 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let connection = Connection::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
 
         // tracking_id is always created in meta store
-        let tracking_id = TrackingId::from_snapshot::<S>(&meta_store_snapshot)
-            .await
-            .map_err(|_| anyhow!("tracking id not found in meta store"))?
+        let cluster_id = ClusterId::from_snapshot::<S>(&meta_store_snapshot)
+            .await?
+            .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
             .into();
 
         self.snapshot.metadata = ClusterMetadata {
@@ -134,8 +136,9 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             table_fragments,
             user_info,
             function,
+            connection,
             system_param,
-            tracking_id,
+            cluster_id,
         };
         Ok(())
     }
@@ -166,14 +169,13 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot::MetaSnapshot;
     use risingwave_common::error::ToErrorStr;
-    use risingwave_common::system_param::default_system_params;
+    use risingwave_common::system_param::system_params_for_test;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
     use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
     use crate::manager::model::SystemParamsModel;
-    use crate::model::MetadataModel;
+    use crate::model::{ClusterId, MetadataModel};
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
-    use crate::telemetry::TrackingId;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -214,7 +216,7 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("system params not found in meta store", err.to_error_str());
 
-        default_system_params()
+        system_params_for_test()
             .insert(meta_store.deref())
             .await
             .unwrap();
@@ -224,10 +226,10 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("tracking id not found in meta store", err.to_error_str());
+        assert_eq!("cluster id not found in meta store", err.to_error_str());
 
-        TrackingId::new()
-            .put_at_meta_store(&meta_store)
+        ClusterId::new()
+            .put_at_meta_store(meta_store.deref())
             .await
             .unwrap();
 

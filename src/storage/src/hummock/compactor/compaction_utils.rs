@@ -20,15 +20,15 @@ use std::sync::Arc;
 use itertools::Itertools;
 use minstant::Instant;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
-use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec};
 
 pub use super::context::CompactorContext;
+use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::{
     MultiCompactionFilter, StateCleanUpCompactionFilter, TtlCompactionFilter,
 };
@@ -76,7 +76,8 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)?;
+            .create_sst_writer(table_id, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -124,27 +125,9 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
+    pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
-}
-
-pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
-    let mut total_memory_size = 0;
-    let mut total_file_count = 0;
-    for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-            }
-        } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-            }
-        }
-
-        total_file_count += level.table_infos.len();
-    }
-
-    (total_memory_size, total_file_count)
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -181,7 +164,10 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
     multi_filter
 }
 
-pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<CompactorContext>) {
+pub async fn generate_splits(
+    compact_task: &mut CompactTask,
+    context: Arc<CompactorContext>,
+) -> HummockResult<()> {
     let sstable_infos = compact_task
         .input_ssts
         .iter()
@@ -204,8 +190,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
                 context
                     .sstable_store
                     .sstable(sstable_info, &mut StoreLocalStatistic::default())
-                    .await
-                    .unwrap()
+                    .await?
                     .value()
                     .meta
                     .block_metas
@@ -253,5 +238,25 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
             }
             compact_task.splits = splits;
         }
+    }
+
+    Ok(())
+}
+
+pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
+    let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
+    let total_file_size = task
+        .input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .map(|table| table.file_size)
+        .sum::<u64>();
+
+    let capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
+    let total_file_size = (total_file_size as f64 * 1.2).round() as usize;
+
+    match task.compression_algorithm {
+        0 => std::cmp::min(capacity, total_file_size),
+        _ => capacity,
     }
 }

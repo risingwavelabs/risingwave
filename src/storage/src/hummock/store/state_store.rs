@@ -38,8 +38,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
-    filter_with_delete_range, ENABLE_SANITY_CHECK,
+    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
+    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
@@ -236,9 +236,12 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
         async move {
-            debug_assert!(delete_ranges.iter().map(|(key, _)| key).is_sorted());
+            debug_assert!(delete_ranges
+                .iter()
+                .map(|(key, _)| key)
+                .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
             let buffer = self.mem_table.drain().into_parts();
             let mut kv_pairs = Vec::with_capacity(buffer.len());
             for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter())
@@ -339,7 +342,7 @@ impl LocalHummockStorage {
     async fn flush_inner(
         &mut self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         if kv_pairs.is_empty() && delete_ranges.is_empty() {
@@ -387,12 +390,14 @@ impl LocalHummockStorage {
             tracker
         };
 
+        let instance_id = self.instance_guard.instance_id;
         let imm = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
             sorted_items,
             size,
             delete_ranges,
             table_id,
+            Some(instance_id),
             Some(tracker),
         );
         let imm_size = imm.size();
@@ -465,7 +470,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
     HummockIteratorUnion<
         Forward,
         StagingDataIterator,
-        OrderedMergeIteratorInner<SstableIterator>,
+        SstableIterator,
         ConcatIteratorInner<SstableIterator>,
     >,
 >;

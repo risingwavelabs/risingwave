@@ -21,16 +21,20 @@ use std::ops::{Add, Neg, Sub};
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
+///
 /// Note that the difference between Interval and Instant.
 /// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
 /// with months = 61, days = 25, usecs = (57 + 23 * 3600 + 22 * 60) * 1000000),
@@ -38,16 +42,16 @@ use crate::error::{ErrorCode, Result, RwError};
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, EstimateSize)]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
 }
 
-pub const USECS_PER_SEC: i64 = 1_000_000;
-pub const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
-pub const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+const USECS_PER_SEC: i64 = 1_000_000;
+const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl Interval {
     /// Smallest interval value.
@@ -56,7 +60,11 @@ impl Interval {
         days: i32::MIN,
         usecs: i64::MIN,
     };
+    pub const USECS_PER_DAY: i64 = USECS_PER_DAY;
+    pub const USECS_PER_MONTH: i64 = USECS_PER_MONTH;
+    pub const USECS_PER_SEC: i64 = USECS_PER_SEC;
 
+    /// Creates a new `Interval` from the given number of months, days, and microseconds.
     pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {
         Interval {
             months,
@@ -65,20 +73,161 @@ impl Interval {
         }
     }
 
-    pub fn get_days(&self) -> i32 {
-        self.days
-    }
-
-    pub fn get_months(&self) -> i32 {
+    /// Returns the total number of whole months.
+    ///
+    /// Note the difference between `months` and `months_field`.
+    ///
+    /// We have: `months = years_field * 12 + months_field`
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "5 yrs 1 month".parse().unwrap();
+    /// assert_eq!(interval.months(), 61);
+    /// assert_eq!(interval.months_field(), 1);
+    /// ```
+    pub fn months(&self) -> i32 {
         self.months
     }
 
-    pub fn get_usecs(&self) -> i64 {
+    /// Returns the number of days.
+    pub fn days(&self) -> i32 {
+        self.days
+    }
+
+    /// Returns the number of microseconds.
+    ///
+    /// Note the difference between `usecs` and `seconds_in_micros`.
+    ///
+    /// We have: `usecs = (hours_field * 3600 + minutes_field * 60) * 1_000_000 +
+    /// seconds_in_micros`.
+    pub fn usecs(&self) -> i64 {
         self.usecs
     }
 
-    pub fn get_usecs_of_day(&self) -> u64 {
+    /// Calculates the remaining number of microseconds.
+    /// range: `0..86_400_000_000`
+    ///
+    /// Note the difference between `usecs` and `usecs_of_day`.
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "-1:00:00".parse().unwrap();
+    /// assert_eq!(interval.usecs(), -1 * 60 * 60 * 1_000_000);
+    /// assert_eq!(interval.usecs_of_day(), 23 * 60 * 60 * 1_000_000);
+    /// ```
+    pub fn usecs_of_day(&self) -> u64 {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
+    }
+
+    /// Returns the years field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "2332 yrs 12 months".parse().unwrap();
+    /// assert_eq!(interval.years_field(), 2333);
+    /// ```
+    pub fn years_field(&self) -> i32 {
+        self.months / 12
+    }
+
+    /// Returns the months field. range: `-11..=11`
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "15 months".parse().unwrap();
+    /// assert_eq!(interval.months_field(), 3);
+    ///
+    /// let interval: Interval = "-15 months".parse().unwrap();
+    /// assert_eq!(interval.months_field(), -3);
+    /// ```
+    pub fn months_field(&self) -> i32 {
+        self.months % 12
+    }
+
+    /// Returns the days field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "1 months 100 days 25:00:00".parse().unwrap();
+    /// assert_eq!(interval.days_field(), 100);
+    /// ```
+    pub fn days_field(&self) -> i32 {
+        self.days
+    }
+
+    /// Returns the hours field. range: unlimited
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "25:00:00".parse().unwrap();
+    /// assert_eq!(interval.hours_field(), 25);
+    ///
+    /// let interval: Interval = "-25:00:00".parse().unwrap();
+    /// assert_eq!(interval.hours_field(), -25);
+    /// ```
+    pub fn hours_field(&self) -> i64 {
+        self.usecs / USECS_PER_SEC / 3600
+    }
+
+    /// Returns the minutes field. range: `-59..=-59`
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "00:20:00".parse().unwrap();
+    /// assert_eq!(interval.minutes_field(), 20);
+    ///
+    /// let interval: Interval = "-00:20:00".parse().unwrap();
+    /// assert_eq!(interval.minutes_field(), -20);
+    /// ```
+    pub fn minutes_field(&self) -> i32 {
+        (self.usecs / USECS_PER_SEC / 60 % 60) as i32
+    }
+
+    /// Returns the seconds field, including fractional parts, in microseconds.
+    /// range: `-59_999_999..=59_999_999`
+    ///
+    /// # Example
+    /// ```
+    /// # use risingwave_common::types::Interval;
+    /// let interval: Interval = "01:02:03.45678".parse().unwrap();
+    /// assert_eq!(interval.seconds_in_micros(), 3_456_780);
+    ///
+    /// let interval: Interval = "-01:02:03.45678".parse().unwrap();
+    /// assert_eq!(interval.seconds_in_micros(), -3_456_780);
+    /// ```
+    pub fn seconds_in_micros(&self) -> i32 {
+        (self.usecs % (USECS_PER_SEC * 60)) as i32
+    }
+
+    /// Returns the total number of microseconds, as defined by PostgreSQL `extract`.
+    ///
+    /// Note this value is not used by interval ordering (`IntervalCmpValue`) and is not consistent
+    /// with it.
+    pub fn epoch_in_micros(&self) -> i128 {
+        // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L5304
+
+        const DAYS_PER_YEAR_X4: i32 = 365 * 4 + 1;
+        const DAYS_PER_MONTH: i32 = 30;
+        const SECS_PER_DAY: i32 = 86400;
+        const MONTHS_PER_YEAR: i32 = 12;
+
+        // To do this calculation in integer arithmetic even though
+        // DAYS_PER_YEAR is fractional, multiply everything by 4 and then
+        // divide by 4 again at the end.  This relies on DAYS_PER_YEAR
+        // being a multiple of 0.25 and on SECS_PER_DAY being a multiple
+        // of 4.
+        let secs_from_day_month = ((DAYS_PER_YEAR_X4 as i64)
+            * (self.months / MONTHS_PER_YEAR) as i64
+            + (4 * DAYS_PER_MONTH as i64) * (self.months % MONTHS_PER_YEAR) as i64
+            + 4 * self.days as i64)
+            * (SECS_PER_DAY / 4) as i64;
+
+        secs_from_day_month as i128 * USECS_PER_SEC as i128 + self.usecs as i128
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
@@ -110,12 +259,12 @@ impl Interval {
     fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
         // TSROUND in include/datatype/timestamp.h
         // round eagerly at usecs precision because floats are imprecise
-        // should round to even #5576
-        let months_round_usecs =
-            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+        let months_round_usecs = |months: f64| {
+            (months * (USECS_PER_MONTH as f64)).round_ties_even() / (USECS_PER_MONTH as f64)
+        };
 
         let days_round_usecs =
-            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+            |days: f64| (days * (USECS_PER_DAY as f64)).round_ties_even() / (USECS_PER_DAY as f64);
 
         let trunc_fract = |num: f64| (num.trunc(), num.fract());
 
@@ -149,7 +298,7 @@ impl Interval {
 
         // Handle usecs
         let result_usecs = usecs + leftover_usecs;
-        let usecs = result_usecs.round();
+        let usecs = result_usecs.round_ties_even();
         if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
             return None;
         }
@@ -588,12 +737,7 @@ impl Serialize for Interval {
         S: serde::Serializer,
     {
         let cmp_value = IntervalCmpValue::from(*self);
-        // split i128 as (i64, u64), which is equivalent
-        (
-            (cmp_value.0 >> 64) as i64,
-            cmp_value.0 as u64, // truncate to get the lower part
-        )
-            .serialize(serializer)
+        cmp_value.0.serialize(serializer)
     }
 }
 
@@ -669,8 +813,7 @@ impl<'de> Deserialize<'de> for Interval {
     where
         D: serde::Deserializer<'de>,
     {
-        let (hi, lo) = <(i64, u64)>::deserialize(deserializer)?;
-        let cmp_value = IntervalCmpValue(((hi as i128) << 64) | (lo as i128));
+        let cmp_value = IntervalCmpValue(i128::deserialize(deserializer)?);
         let interval = cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate());
@@ -840,6 +983,28 @@ impl ToText for crate::types::Interval {
             DataType::Interval => self.write(f),
             _ => unreachable!(),
         }
+    }
+}
+
+impl Interval {
+    pub fn as_iso_8601(&self) -> String {
+        // ISO pattern - PnYnMnDTnHnMnS
+        let years = self.months / 12;
+        let months = self.months % 12;
+        let days = self.days;
+        let secs_fract = (self.usecs % USECS_PER_SEC).abs();
+        let total_secs = (self.usecs / USECS_PER_SEC).abs();
+        let hours = total_secs / 3600;
+        let minutes = (total_secs / 60) % 60;
+        let seconds = total_secs % 60;
+        let mut buf = [0u8; 7];
+        let fract_str = if secs_fract != 0 {
+            write!(buf.as_mut_slice(), ".{:06}", secs_fract).unwrap();
+            std::str::from_utf8(&buf).unwrap().trim_end_matches('0')
+        } else {
+            ""
+        };
+        format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
     }
 }
 
@@ -1082,43 +1247,35 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
         return None;
     }
-    const HOUR: usize = 0;
-    const MINUTE: usize = 1;
-    const SECOND: usize = 2;
     let mut is_neg = false;
-    for (i, s) in c.iter().enumerate() {
-        match i {
-            HOUR => {
-                let v = s.parse().ok()?;
-                is_neg = v < 0;
-                t.push(TimeStrToken::Num(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
-            }
-            MINUTE => {
-                let mut v: i64 = s.parse().ok()?;
-                if !(0..60).contains(&v) {
-                    return None;
-                }
-                if is_neg {
-                    v = v.checked_neg()?;
-                }
-                t.push(TimeStrToken::Num(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
-            }
-            SECOND => {
-                let mut v: F64 = s.parse().ok()?;
-                // PostgreSQL allows '60.x' for seconds.
-                if !(0f64 <= *v && *v < 61f64) {
-                    return None;
-                }
-                if is_neg {
-                    v = v.checked_neg()?;
-                }
-                t.push(TimeStrToken::Second(v));
-                t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
-            }
-            _ => unreachable!(),
+    if let Some(s) = c.get(0) {
+        let v = s.parse().ok()?;
+        is_neg = s.starts_with('-');
+        t.push(TimeStrToken::Num(v));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
+    }
+    if let Some(s) = c.get(1) {
+        let mut v: i64 = s.parse().ok()?;
+        if !(0..60).contains(&v) {
+            return None;
         }
+        if is_neg {
+            v = v.checked_neg()?;
+        }
+        t.push(TimeStrToken::Num(v));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
+    }
+    if let Some(s) = c.get(2) {
+        let mut v: f64 = s.parse().ok()?;
+        // PostgreSQL allows '60.x' for seconds.
+        if !(0f64..61f64).contains(&v) {
+            return None;
+        }
+        if is_neg {
+            v = -v;
+        }
+        t.push(TimeStrToken::Second(v.into()));
+        t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
     }
     Some(())
 }
@@ -1172,7 +1329,7 @@ impl Interval {
     fn parse_postgres(s: &str) -> Result<Self> {
         use DateTimeField::*;
         let mut tokens = parse_interval(s)?;
-        if tokens.len()%2!=0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+        if tokens.len() % 2 != 0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
             tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
         }
         if tokens.len() % 2 != 0 {
@@ -1204,22 +1361,30 @@ impl Interval {
                         }
                     })()
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
+                    })?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = match interval_unit {
                         Second => {
-                            // If unsatisfied precision is passed as input, we should not return None (Error).
-                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
+                            // If unsatisfied precision is passed as input, we should not return
+                            // None (Error).
+                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64))
+                                .round_ties_even() as i64;
                             Some(Interval::from_month_day_usec(0, 0, usecs))
                         }
                         _ => None,
                     }
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
+                    })?;
                 }
                 _ => {
-                    return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+                    return Err(
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                    );
                 }
             }
         }
@@ -1483,9 +1648,9 @@ mod tests {
                 }
                 Some((rhs_months, rhs_days, rhs_usecs, rhs_str)) => {
                     // We should test individual fields rather than using custom `Eq`
-                    assert_eq!(actual_deserialize.unwrap().get_months(), rhs_months);
-                    assert_eq!(actual_deserialize.unwrap().get_days(), rhs_days);
-                    assert_eq!(actual_deserialize.unwrap().get_usecs(), rhs_usecs);
+                    assert_eq!(actual_deserialize.unwrap().months(), rhs_months);
+                    assert_eq!(actual_deserialize.unwrap().days(), rhs_days);
+                    assert_eq!(actual_deserialize.unwrap().usecs(), rhs_usecs);
                     assert_eq!(actual_deserialize.unwrap().to_string(), rhs_str);
                 }
             }
@@ -1495,9 +1660,9 @@ mod tests {
         let input = Interval::from_month_day_usec(i32::MIN, -30, 1);
         let actual_deserialize = IntervalCmpValue::from(input).as_justified();
         // It has a justified interval within range, and can be obtained by our deserialization.
-        assert_eq!(actual_deserialize.unwrap().get_months(), i32::MIN);
-        assert_eq!(actual_deserialize.unwrap().get_days(), -29);
-        assert_eq!(actual_deserialize.unwrap().get_usecs(), -USECS_PER_DAY + 1);
+        assert_eq!(actual_deserialize.unwrap().months(), i32::MIN);
+        assert_eq!(actual_deserialize.unwrap().days(), -29);
+        assert_eq!(actual_deserialize.unwrap().usecs(), -USECS_PER_DAY + 1);
     }
 
     #[test]
@@ -1534,5 +1699,11 @@ mod tests {
             <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
         })
         .unwrap_err();
+    }
+
+    #[test]
+    fn test_interval_estimate_size() {
+        let interval = Interval::MIN;
+        assert_eq!(interval.estimated_size(), 16);
     }
 }

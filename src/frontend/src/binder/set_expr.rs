@@ -58,6 +58,16 @@ pub enum BoundSetOperation {
     Intersect,
 }
 
+impl From<SetOperator> for BoundSetOperation {
+    fn from(value: SetOperator) -> Self {
+        match value {
+            SetOperator::Union => BoundSetOperation::Union,
+            SetOperator::Intersect => BoundSetOperation::Intersect,
+            SetOperator::Except => BoundSetOperation::Except,
+        }
+    }
+}
+
 impl BoundSetExpr {
     /// The schema returned by this [`BoundSetExpr`].
 
@@ -114,7 +124,7 @@ impl Binder {
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
-            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?.0))),
+            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
             SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(*q)?))),
             SetExpr::SetOperation {
                 op,
@@ -123,17 +133,18 @@ impl Binder {
                 right,
             } => {
                 match op {
-                    SetOperator::Union => {
+                    SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
                         let left = Box::new(self.bind_set_expr(*left)?);
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
-                        self.context.cte_to_relation = new_context.cte_to_relation;
+                        self.context.cte_to_relation = new_context.cte_to_relation.clone();
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {
-                            return Err(ErrorCode::InvalidInputSyntax(
-                                "each UNION query must have the same number of columns".to_string(),
-                            )
+                            return Err(ErrorCode::InvalidInputSyntax(format!(
+                                "each {} query must have the same number of columns",
+                                op
+                            ))
                             .into());
                         }
 
@@ -145,7 +156,8 @@ impl Binder {
                         {
                             if a.data_type != b.data_type {
                                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                                    "UNION types {} of column {} is different from types {} of column {}",
+                                    "{} types {} of column {} is different from types {} of column {}",
+                                    op,
                                     a.data_type.prost_type_name().as_str_name(),
                                     a.name,
                                     b.data_type.prost_type_name().as_str_name(),
@@ -155,23 +167,32 @@ impl Binder {
                             }
                         }
 
+                        if all {
+                            match op {
+                                SetOperator::Union => {}
+                                SetOperator::Intersect | SetOperator::Except => {
+                                    return Err(ErrorCode::NotImplemented(
+                                        format!("{} all", op),
+                                        None.into(),
+                                    )
+                                    .into())
+                                }
+                            }
+                        }
+
                         // Reset context for the set operation.
                         // Consider this case:
                         // select a from t2 union all select b from t2 order by a+1; should throw an
                         // error.
                         self.context = BindContext::default();
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
-                            op: BoundSetOperation::Union,
+                            op: op.into(),
                             all,
                             left,
                             right,
                         })
                     }
-                    SetOperator::Intersect | SetOperator::Except => Err(ErrorCode::NotImplemented(
-                        format!("set expr: {:?}", op),
-                        None.into(),
-                    )
-                    .into()),
                 }
             }
         }

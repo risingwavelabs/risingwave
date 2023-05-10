@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derivative::Derivative;
+use educe::Educe;
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
@@ -24,15 +24,15 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
 /// the common fields of all nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+/// every planNode and correctly value it when construct the planNode.
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty logical_pk vec means there is no pk
@@ -46,6 +46,8 @@ pub struct PlanBase {
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.
     pub append_only: bool,
+    /// Whether the output is emitted on window close.
+    pub emit_on_window_close: bool,
     pub functional_dependency: FunctionalDependencySet,
     /// The watermark column indices of the PlanNode's output. There could be watermark output from
     /// this stream operator.
@@ -78,6 +80,15 @@ impl stream::StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
         self.append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
+    }
+}
+impl batch::BatchPlanRef for PlanBase {
+    fn order(&self) -> &Order {
+        &self.order
+    }
 }
 impl PlanBase {
     pub fn new_logical(
@@ -97,6 +108,7 @@ impl PlanBase {
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
             append_only: true,
+            emit_on_window_close: false,
             functional_dependency,
             watermark_columns,
         }
@@ -111,6 +123,26 @@ impl PlanBase {
         )
     }
 
+    pub fn new_stream_with_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        append_only: bool,
+        emit_on_window_close: bool,
+        watermark_columns: FixedBitSet,
+    ) -> Self {
+        Self::new_stream(
+            logical.ctx(),
+            logical.schema(),
+            logical.logical_pk().unwrap_or_default().to_vec(),
+            logical.functional_dependency(),
+            dist,
+            append_only,
+            emit_on_window_close,
+            watermark_columns,
+        )
+    }
+
+    #[expect(clippy::too_many_arguments)]
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -118,6 +150,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
+        emit_on_window_close: bool,
         watermark_columns: FixedBitSet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
@@ -130,9 +163,18 @@ impl PlanBase {
             order: Order::any(),
             logical_pk,
             append_only,
+            emit_on_window_close,
             functional_dependency,
             watermark_columns,
         }
+    }
+
+    pub fn new_batch_from_logical(
+        logical: &impl GenericPlanNode,
+        dist: Distribution,
+        order: Order,
+    ) -> Self {
+        Self::new_batch(logical.ctx(), logical.schema(), dist, order)
     }
 
     pub fn new_batch(
@@ -153,6 +195,7 @@ impl PlanBase {
             logical_pk: vec![],
             // Batch plan node won't touch `append_only` field
             append_only: true,
+            emit_on_window_close: false, // TODO(rc): batch EOWC support?
             functional_dependency,
             watermark_columns,
         }
@@ -166,6 +209,7 @@ impl PlanBase {
             plan_node.functional_dependency().clone(),
             plan_node.distribution().clone(),
             plan_node.append_only(),
+            plan_node.emit_on_window_close(),
             plan_node.watermark_columns().clone(),
         )
     }
@@ -201,6 +245,9 @@ macro_rules! impl_base_delegate {
                 }
                 pub fn append_only(&self) -> bool {
                     self.plan_base().append_only
+                }
+                pub fn emit_on_window_close(&self) -> bool {
+                    self.plan_base().emit_on_window_close
                 }
                 pub fn functional_dependency(&self) -> &FunctionalDependencySet {
                     &self.plan_base().functional_dependency

@@ -223,7 +223,7 @@ macro_rules! impl_common_parser_logic {
                                             "_rw_kafka_timestamp" => Some(
                                                 kafka_meta
                                                     .timestamp
-                                                    .map(|ts| risingwave_expr::vector_op::cast::i64_to_timestamptz(ts).unwrap().into()),
+                                                    .map(|ts| risingwave_common::cast::i64_to_timestamptz(ts).unwrap().into()),
                                             ),
                                             _ => unreachable!(
                                                 "kafka will not have this meta column: {}",
@@ -270,7 +270,7 @@ macro_rules! impl_common_split_reader_logic {
                 let data_stream = self.into_data_stream();
 
                 let data_stream = data_stream
-                    .map_ok(move |data_batch| {
+                    .inspect_ok(move |data_batch| {
                         metrics
                             .partition_input_count
                             .with_label_values(&[&actor_id, &source_id, &split_id])
@@ -286,7 +286,6 @@ macro_rules! impl_common_split_reader_logic {
                             .partition_input_bytes
                             .with_label_values(&[&actor_id, &source_id, &split_id])
                             .inc_by(sum_bytes);
-                        data_batch
                     })
                     .boxed();
                 let parser =

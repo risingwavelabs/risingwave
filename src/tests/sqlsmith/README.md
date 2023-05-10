@@ -15,6 +15,27 @@ This test will be run as a unit test:
 ./risedev test -E "package(risingwave_sqlsmith)" --features enable_sqlsmith_unit_test
 ```
 
+## Generate snapshots
+
+Take a look at [`gen_queries.sh`](scripts/gen_queries.sh).
+
+Caveat: Even with a given snapshot, certain parts of the system are non-determninistic.
+For instance with scheduler errors, the same query may not trigger errors when executed.
+
+## Running with Madsim
+
+You can check [`ci/scripts/build-simulation.sh`](../../../ci/scripts/build-simulation.sh) 
+for the latest madsim build instructions.
+
+```sh
+# Build madsim
+cargo make sslt-build-all --profile ci-sim
+# The target bin can be found here:
+# target/sim/ci-sim/risingwave_simulation
+# Run fuzzing
+RUST_BACKTRACE=1 MADSIM_TEST_SEED=1 ./target/sim/ci-sim/risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata
+```
+
 ## E2E
 
 In the second mode, it will test the entire query handling end-to-end. We provide a CLI tool that represents a Postgres client. You can run this tool via:

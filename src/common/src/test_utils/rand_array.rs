@@ -19,15 +19,15 @@
 use std::sync::Arc;
 
 use chrono::Datelike;
-use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::serial_array::Serial;
-use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
-use crate::types::{Date, Decimal, Interval, NativeType, Scalar, Time, Timestamp};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
+use crate::types::{
+    Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
+};
 
 pub trait RandValue {
     fn rand_value<R: Rng>(rand: &mut R) -> Self;
@@ -67,7 +67,7 @@ impl RandValue for Box<[u8]> {
 
 impl RandValue for Decimal {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        Decimal::from_f64((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
+        Decimal::try_from((rand.gen::<u32>() as f64) + 0.1f64).unwrap()
     }
 }
 
@@ -115,6 +115,14 @@ impl RandValue for Serial {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         // TODO(peng), serial should be in format of RowId
         i64::rand_value(rand).into()
+    }
+}
+
+impl RandValue for Int256 {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let mut bytes = [0u8; 32];
+        rand.fill_bytes(&mut bytes);
+        Int256::from_ne_bytes(bytes)
     }
 }
 
@@ -178,7 +186,6 @@ where
 mod tests {
     use super::*;
     use crate::array::interval_array::IntervalArray;
-    use crate::array::serial_array::SerialArray;
     use crate::array::*;
     use crate::for_all_variants;
 

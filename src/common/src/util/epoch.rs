@@ -18,6 +18,8 @@ use std::time::{Duration, SystemTime};
 
 use parse_display::Display;
 
+use crate::types::ScalarImpl;
+
 static UNIX_RISINGWAVE_DATE_SEC: u64 = 1_617_235_200;
 
 /// [`UNIX_RISINGWAVE_DATE_EPOCH`] represents the risingwave date of the UNIX epoch:
@@ -78,6 +80,12 @@ impl Epoch {
         UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
     }
 
+    /// Returns the epoch in a Int64(Timestamptz) scalar.
+    pub fn as_scalar(&self) -> ScalarImpl {
+        // Timestamptz is in microseconds.
+        ScalarImpl::Int64(self.as_unix_millis() as i64 * 1000)
+    }
+
     /// Returns the epoch in real system time.
     pub fn as_system_time(&self) -> SystemTime {
         *UNIX_RISINGWAVE_DATE_EPOCH + Duration::from_millis(self.physical_time())
@@ -124,6 +132,51 @@ impl EpochPair {
         Self::new(curr, curr - 1)
     }
 }
+
+/// Task-local storage for the epoch pair.
+pub mod task_local {
+    use futures::Future;
+    use tokio::task_local;
+
+    use super::{Epoch, EpochPair};
+
+    task_local! {
+        static TASK_LOCAL_EPOCH_PAIR: EpochPair;
+    }
+
+    /// Retrieve the current epoch from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn curr_epoch() -> Option<Epoch> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| Epoch(e.curr)).ok()
+    }
+
+    /// Retrieve the previous epoch from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn prev_epoch() -> Option<Epoch> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| Epoch(e.prev)).ok()
+    }
+
+    /// Retrieve the epoch pair from the task local storage.
+    ///
+    /// This value is updated after every yield of the barrier message. Returns `None` if the first
+    /// barrier message is not yielded.
+    pub fn epoch() -> Option<EpochPair> {
+        TASK_LOCAL_EPOCH_PAIR.try_with(|e| *e).ok()
+    }
+
+    /// Provides the given epoch pair in the task local storage for the scope of the given future.
+    pub async fn scope<F>(epoch: EpochPair, f: F) -> F::Output
+    where
+        F: Future,
+    {
+        TASK_LOCAL_EPOCH_PAIR.scope(epoch, f).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{Local, TimeZone, Utc};

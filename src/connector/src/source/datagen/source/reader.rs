@@ -18,7 +18,7 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::util::iter_util::zip_eq_fast;
 
 use super::generator::DatagenEventGenerator;
@@ -151,8 +151,22 @@ impl SplitReader for DatagenSplitReader {
         // spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE).boxed()
         match self.parser_config.specific {
             SpecificParserConfig::Native => {
-                spawn_data_generation_stream(self.generator.into_native_stream(), BUFFER_SIZE)
-                    .boxed()
+                let actor_id = self.source_ctx.source_info.actor_id.to_string();
+                let source_id = self.source_ctx.source_info.source_id.to_string();
+                let split_id = self.split_id.to_string();
+                let metrics = self.source_ctx.metrics.clone();
+                spawn_data_generation_stream(
+                    self.generator
+                        .into_native_stream()
+                        .inspect_ok(move |chunk_with_states| {
+                            metrics
+                                .partition_input_count
+                                .with_label_values(&[&actor_id, &source_id, &split_id])
+                                .inc_by(chunk_with_states.chunk.cardinality() as u64);
+                        }),
+                    BUFFER_SIZE,
+                )
+                .boxed()
             }
             _ => self.into_chunk_stream(),
         }
@@ -225,8 +239,14 @@ fn generator_from_data_type(
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
-            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
-            FieldGeneratorImpl::with_varchar(length_value, random_seed)
+            let length_value = fields_option_map
+                .get(&length_key)
+                .map(|s| s.parse::<usize>())
+                .transpose()?;
+            Ok(FieldGeneratorImpl::with_varchar(
+                &VarcharProperty::RandomFixedLength(length_value),
+                random_seed,
+            ))
         }
         DataType::Struct(struct_type) => {
             let struct_fields =
@@ -245,7 +265,7 @@ fn generator_from_data_type(
                     .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
-        DataType::List { datatype } => {
+        DataType::List(datatype) => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
             let generator = generator_from_data_type(
@@ -260,11 +280,12 @@ fn generator_from_data_type(
         }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
-            if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
+            if let Some(kind) = fields_option_map.get(&kind_key)
+                && kind.as_str() == SEQUENCE_FIELD_KIND
+            {
                 let start_key = format!("fields.{}.start", name);
                 let end_key = format!("fields.{}.end", name);
-                let start_value =
-                    fields_option_map.get(&start_key).map(|s| s.to_string());
+                let start_value = fields_option_map.get(&start_key).map(|s| s.to_string());
                 let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
                 FieldGeneratorImpl::with_number_sequence(
                     data_type,
@@ -279,12 +300,7 @@ fn generator_from_data_type(
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
-                FieldGeneratorImpl::with_number_random(
-                    data_type,
-                    min_value,
-                    max_value,
-                    random_seed
-                )
+                FieldGeneratorImpl::with_number_random(data_type, min_value, max_value, random_seed)
             }
         }
     }
@@ -297,8 +313,7 @@ mod tests {
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::row::Row;
-    use risingwave_common::types::struct_type::StructType;
-    use risingwave_common::types::{ScalarImpl, ToDatumRef};
+    use risingwave_common::types::{ScalarImpl, StructType, ToDatumRef};
 
     use super::*;
 

@@ -18,6 +18,7 @@ import com.risingwave.connector.api.PkComparator;
 import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import org.apache.iceberg.data.Record;
 
@@ -63,6 +64,10 @@ public class SinkRowMap {
                 map.remove(key);
             }
         }
+    }
+
+    public Map<List<Comparable<Object>>, SinkRowOp> getMap() {
+        return map;
     }
 
     private void assertRowValuesEqual(SinkRow insert, SinkRow delete) {

@@ -15,12 +15,10 @@
 use anyhow::anyhow;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use pg_interval::Interval;
-use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
+use tokio::select;
 use tokio_postgres::types::Type;
-use tokio_postgres::NoTls;
-
-use crate::opts::Opts;
+use tokio_postgres::{Client, NoTls};
 
 pub struct TestSuite {
     config: String,
@@ -32,8 +30,10 @@ macro_rules! test_eq {
             (left_val, right_val) => {
                 if !(*left_val == *right_val) {
                     return Err(anyhow!(
-                        "assertion failed: `(left == right)` \
+                        "{}:{} assertion failed: `(left == right)` \
                                 (left: `{:?}`, right: `{:?}`)",
+                        file!(),
+                        line!(),
                         left_val,
                         right_val
                     ));
@@ -44,20 +44,22 @@ macro_rules! test_eq {
 }
 
 impl TestSuite {
-    pub fn new(opts: Opts) -> Self {
-        let config = if !opts.pg_password.is_empty() {
+    pub fn new(
+        db_name: String,
+        user_name: String,
+        server_host: String,
+        server_port: u16,
+        password: String,
+    ) -> Self {
+        let config = if !password.is_empty() {
             format!(
                 "dbname={} user={} host={} port={} password={}",
-                opts.pg_db_name,
-                opts.pg_user_name,
-                opts.pg_server_host,
-                opts.pg_server_port,
-                opts.pg_password
+                db_name, user_name, server_host, server_port, password
             )
         } else {
             format!(
                 "dbname={} user={} host={} port={}",
-                opts.pg_db_name, opts.pg_user_name, opts.pg_server_host, opts.pg_server_port
+                db_name, user_name, server_host, server_port
             )
         };
         Self { config }
@@ -67,11 +69,16 @@ impl TestSuite {
         self.binary_param_and_result().await?;
         self.dql_dml_with_param().await?;
         self.max_row().await?;
+        self.multiple_on_going_portal().await?;
+        self.create_with_parameter().await?;
+        self.simple_cancel(false).await?;
+        self.simple_cancel(true).await?;
+        self.complex_cancel(false).await?;
+        self.complex_cancel(true).await?;
         Ok(())
     }
 
-    pub async fn binary_param_and_result(&self) -> anyhow::Result<()> {
-        // Connect to the database.
+    async fn create_client(&self, is_distributed: bool) -> anyhow::Result<Client> {
         let (client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
 
         // The connection object performs the actual communication with the database,
@@ -81,6 +88,18 @@ impl TestSuite {
                 eprintln!("connection error: {}", e);
             }
         });
+
+        if is_distributed {
+            client.execute("set query_mode = distributed", &[]).await?;
+        } else {
+            client.execute("set query_mode = local", &[]).await?;
+        }
+
+        Ok(client)
+    }
+
+    pub async fn binary_param_and_result(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
 
         for row in client.query("select $1::SMALLINT;", &[&1024_i16]).await? {
             let data: i16 = row.try_get(0)?;
@@ -98,11 +117,14 @@ impl TestSuite {
         }
 
         for row in client
-            .query("select $1::DECIMAL;", &[&Decimal::from_f32(2.33454_f32)])
+            .query(
+                "select $1::DECIMAL;",
+                &[&Decimal::try_from(2.33454_f32).ok()],
+            )
             .await?
         {
             let data: Decimal = row.try_get(0)?;
-            test_eq!(data, Decimal::from_f32(2.33454_f32).unwrap());
+            test_eq!(data, Decimal::try_from(2.33454_f32).unwrap());
         }
 
         for row in client.query("select $1::BOOL;", &[&true]).await? {
@@ -115,16 +137,8 @@ impl TestSuite {
             test_eq!(data, 1.234234);
         }
 
-        // TODO(ZENOTME): After #8112, risingwave should support this case. (DOUBLE PRECISION TYPE)
-        // for row in client
-        //     .query("select $1::DOUBLE PRECISION;", &[&234234.23490238483_f64])
-        //     .await?
-        // {
-        //     let data: f64 = row.try_get(0)?;
-        //     test_eq!(data, 234234.23490238483);
-        // }
         for row in client
-            .query("select $1::FLOAT8;", &[&234234.23490238483_f64])
+            .query("select $1::DOUBLE PRECISION;", &[&234234.23490238483_f64])
             .await?
         {
             let data: f64 = row.try_get(0)?;
@@ -199,23 +213,13 @@ impl TestSuite {
         Ok(())
     }
 
-    /// TODO(ZENOTME): After #8112, risingwave should support to change all `prepare_typed` to
-    /// `prepare`. We don't need to provide the type explicitly.
     async fn dql_dml_with_param(&self) -> anyhow::Result<()> {
-        let (client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
+        let client = self.create_client(false).await?;
 
         client.query("create table t(id int)", &[]).await?;
 
         let insert_statement = client
-            .prepare_typed("insert INTO t (id) VALUES ($1)", &[Type::INT4])
+            .prepare_typed("insert INTO t (id) VALUES ($1)", &[])
             .await?;
 
         for i in 0..20 {
@@ -275,20 +279,12 @@ impl TestSuite {
     }
 
     async fn max_row(&self) -> anyhow::Result<()> {
-        let (mut client, connection) = tokio_postgres::connect(&self.config, NoTls).await?;
-
-        // The connection object performs the actual communication with the database,
-        // so spawn it off to run on its own.
-        tokio::spawn(async move {
-            if let Err(e) = connection.await {
-                eprintln!("connection error: {}", e);
-            }
-        });
+        let mut client = self.create_client(false).await?;
 
         client.query("create table t(id int)", &[]).await?;
 
         let insert_statement = client
-            .prepare_typed("insert INTO t (id) VALUES ($1)", &[Type::INT4])
+            .prepare_typed("insert INTO t (id) VALUES ($1)", &[])
             .await?;
 
         for i in 0..10 {
@@ -329,6 +325,221 @@ impl TestSuite {
 
         client.execute("drop table t", &[]).await?;
 
+        Ok(())
+    }
+
+    async fn multiple_on_going_portal(&self) -> anyhow::Result<()> {
+        let mut client = self.create_client(false).await?;
+
+        let transaction = client.transaction().await?;
+        let statement = transaction
+            .prepare_typed("SELECT generate_series(1,5,1)", &[])
+            .await?;
+        let portal_1 = transaction.bind(&statement, &[]).await?;
+        let portal_2 = transaction.bind(&statement, &[]).await?;
+
+        let rows = transaction.query_portal(&portal_1, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+
+        let rows = transaction.query_portal(&portal_2, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+
+        let rows = transaction.query_portal(&portal_2, 3).await?;
+        test_eq!(rows.len(), 3);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.get(1).unwrap().get::<usize, i32>(0), 3);
+        test_eq!(rows.get(2).unwrap().get::<usize, i32>(0), 4);
+
+        let rows = transaction.query_portal(&portal_1, 1).await?;
+        test_eq!(rows.len(), 1);
+        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+
+        Ok(())
+    }
+
+    // Can't support these sql
+    async fn create_with_parameter(&self) -> anyhow::Result<()> {
+        let client = self.create_client(false).await?;
+
+        test_eq!(
+            client
+                .query("create table t as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
+        test_eq!(
+            client
+                .query("create view v as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
+        test_eq!(
+            client
+                .query("create materialized view v as select $1", &[])
+                .await
+                .is_err(),
+            true
+        );
+
+        Ok(())
+    }
+
+    async fn simple_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
+        let client = self.create_client(is_distributed).await?;
+
+        client.execute("create table t(id int)", &[]).await?;
+
+        let insert_statement = client
+            .prepare_typed("insert INTO t (id) VALUES ($1)", &[])
+            .await?;
+
+        for i in 0..1000 {
+            client.execute(&insert_statement, &[&i]).await?;
+        }
+
+        client.execute("flush", &[]).await?;
+
+        let cancel_token = client.cancel_token();
+
+        let query_handle = tokio::spawn(async move {
+            client.query("select * from t", &[]).await.unwrap();
+        });
+
+        select! {
+            _ = query_handle => {
+                tracing::error!("Failed to cancel query")
+            },
+            _ = cancel_token.cancel_query(NoTls) => {
+                tracing::trace!("Cancel query successfully")
+            },
+        }
+
+        let new_client = self.create_client(is_distributed).await?;
+
+        let rows = new_client
+            .query("select * from t order by id limit 10", &[])
+            .await?;
+
+        test_eq!(rows.len(), 10);
+        for (expect_id, row) in rows.iter().enumerate() {
+            let id: i32 = row.get(0);
+            test_eq!(id, expect_id as i32);
+        }
+
+        new_client.execute("drop table t", &[]).await?;
+
+        Ok(())
+    }
+
+    async fn complex_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
+        let client = self.create_client(is_distributed).await?;
+
+        client
+            .execute("create table t1(name varchar, id int)", &[])
+            .await?;
+        client
+            .execute("create table t2(name varchar, id int)", &[])
+            .await?;
+        client
+            .execute("create table t3(name varchar, id int)", &[])
+            .await?;
+
+        let insert_statement = client
+            .prepare_typed("insert INTO t1 (name, id) VALUES ($1, $2)", &[])
+            .await?;
+        let insert_statement2 = client
+            .prepare_typed("insert INTO t2 (name, id) VALUES ($1, $2)", &[])
+            .await?;
+        let insert_statement3 = client
+            .prepare_typed("insert INTO t3 (name, id) VALUES ($1, $2)", &[])
+            .await?;
+        for i in 0..1000 {
+            client
+                .execute(&insert_statement, &[&i.to_string(), &i])
+                .await?;
+            client
+                .execute(&insert_statement2, &[&i.to_string(), &i])
+                .await?;
+            client
+                .execute(&insert_statement3, &[&i.to_string(), &i])
+                .await?;
+        }
+
+        client.execute("flush", &[]).await?;
+
+        client.execute("set query_mode=local", &[]).await?;
+
+        let cancel_token = client.cancel_token();
+
+        let query_sql = "SELECT t1.name, t2.id, t3.name
+        FROM t1
+        INNER JOIN (
+          SELECT id, name
+          FROM t2
+          WHERE id IN (
+            SELECT id
+            FROM t1
+            WHERE name LIKE '%1%'
+          )
+        ) AS t2 ON t1.id = t2.id
+        LEFT JOIN t3 ON t2.name = t3.name
+        WHERE t3.id IN (
+          SELECT MAX(id)
+          FROM t3
+          GROUP BY name
+        )
+        ORDER BY t1.name ASC, t3.id DESC
+        ";
+
+        let query_handle = tokio::spawn(async move {
+            client.query(query_sql, &[]).await.unwrap();
+        });
+
+        select! {
+            _ = query_handle => {
+                tracing::error!("Failed to cancel query")
+            },
+            _ = cancel_token.cancel_query(NoTls) => {
+                tracing::trace!("Cancel query successfully")
+            },
+        }
+
+        let new_client = self.create_client(is_distributed).await?;
+
+        let rows = new_client
+            .query(&format!("{} LIMIT 10", query_sql), &[])
+            .await?;
+        let expect_ans = vec![
+            (1, 1, 1),
+            (10, 10, 10),
+            (100, 100, 100),
+            (101, 101, 101),
+            (102, 102, 102),
+            (103, 103, 103),
+            (104, 104, 104),
+            (105, 105, 105),
+            (106, 106, 106),
+            (107, 107, 107),
+        ];
+        for (i, row) in rows.iter().enumerate() {
+            test_eq!(
+                row.get::<_, String>(0).parse::<i32>().unwrap(),
+                expect_ans[i].0
+            );
+            test_eq!(row.get::<_, i32>(1), expect_ans[i].1);
+            test_eq!(
+                row.get::<_, String>(2).parse::<i32>().unwrap(),
+                expect_ans[i].2
+            );
+        }
+
+        new_client.execute("drop table t1", &[]).await?;
+        new_client.execute("drop table t2", &[]).await?;
+        new_client.execute("drop table t3", &[]).await?;
         Ok(())
     }
 }

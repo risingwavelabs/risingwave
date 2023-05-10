@@ -19,12 +19,13 @@ use std::fmt::Debug;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
+use super::{GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{GroupKey, ManagedTopNState};
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
@@ -61,6 +62,14 @@ pub struct TopNCache<const WITH_TIES: bool> {
     ///
     /// For debug formatting only.
     data_types: Vec<DataType>,
+}
+
+impl<const WITH_TIES: bool> EstimateSize for TopNCache<WITH_TIES> {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/8957
+        0
+    }
 }
 
 impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
@@ -255,8 +264,7 @@ impl TopNCacheTrait for TopNCache<false> {
             return;
         }
         let elem_to_compare_with_middle =
-            if let Some(low_last) = self.low.last_entry()
-                && cache_key <= *low_last.key() {
+            if let Some(low_last) = self.low.last_entry() && cache_key <= *low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
                 self.low.insert(cache_key, (&row).into());
@@ -325,7 +333,7 @@ impl TopNCacheTrait for TopNCache<false> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        Some(self.middle.last_key_value().unwrap().0.clone()),
                         self.high_capacity,
                     )
                     .await?;
@@ -359,7 +367,7 @@ impl TopNCacheTrait for TopNCache<false> {
                         .fill_high_cache(
                             group_key,
                             self,
-                            self.middle.last_key_value().unwrap().0.clone(),
+                            Some(self.middle.last_key_value().unwrap().0.clone()),
                             self.high_capacity,
                         )
                         .await?;
@@ -425,7 +433,8 @@ impl TopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,0,0]
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && middle_last.key().0 == middle_last_order_by.clone() {
+                        && middle_last.key().0 == middle_last_order_by.clone()
+                    {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
@@ -501,7 +510,9 @@ impl TopNCacheTrait for TopNCache<true> {
                     .fill_high_cache(
                         group_key,
                         self,
-                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.middle
+                            .last_key_value()
+                            .map(|(key, _value)| key.clone()),
                         self.high_capacity,
                     )
                     .await?;
@@ -580,8 +591,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         }
 
         let elem_to_insert_into_middle =
-            if let Some(low_last) = self.low.last_entry()
-                && &cache_key <= low_last.key() {
+            if let Some(low_last) = self.low.last_entry() && &cache_key <= low_last.key() {
                 // Take the last element of `cache.low` and insert input row to it.
                 let low_last = low_last.remove_entry();
                 self.low.insert(cache_key, row_ref.into());
@@ -667,11 +677,13 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                 // insert 0 -> [0,0,0]
                 if self.middle.len() - num_ties + 1 >= self.limit {
                     while let Some(middle_last) = self.middle.last_entry()
-                    && &middle_last.key().0 == middle_last_order_by {
+                        && &middle_last.key().0 == middle_last_order_by
+                    {
                         let middle_last = middle_last.remove_entry();
                         res_ops.push(Op::Delete);
                         res_rows.push(middle_last.1.clone());
-                        managed_state.delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+                        managed_state
+                            .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
                     }
                 }
 

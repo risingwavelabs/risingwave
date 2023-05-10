@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::rc::Rc;
 
@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
 use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -72,6 +72,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
+            false,
             logical.watermark_columns(),
         );
         Self {
@@ -95,11 +96,15 @@ impl StreamTableScan {
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
+        function_mapping: &HashMap<FunctionCall, usize>,
         chain_type: ChainType,
     ) -> StreamTableScan {
-        let logical_index_scan =
-            self.logical
-                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping);
+        let logical_index_scan = self.logical.to_index_scan(
+            index_name,
+            index_table_desc,
+            primary_to_secondary_mapping,
+            function_mapping,
+        );
         logical_index_scan
             .distribution_key()
             .expect("distribution key of stream chain must exist in output columns");

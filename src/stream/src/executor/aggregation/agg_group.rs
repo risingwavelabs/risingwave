@@ -21,14 +21,15 @@ use risingwave_common::array::stream_record::{Record, RecordType};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
-use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::StreamExecutorResult;
@@ -139,9 +140,18 @@ impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     }
 }
 
+impl<S: StateStore, Strtg: Strategy> EstimateSize for AggGroup<S, Strtg> {
+    fn estimated_heap_size(&self) -> usize {
+        self.states
+            .iter()
+            .map(|state| state.estimated_heap_size())
+            .sum()
+    }
+}
+
 impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
-    /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
+    /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
         group_key: Option<OwnedRow>,

@@ -45,8 +45,8 @@ enum HummockErrorInner {
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
     WaitEpoch(String),
-    #[error("ReadCurrentEpoch error {0}.")]
-    ReadCurrentEpoch(String),
+    #[error("Barrier read is unavailable for now. Likely the cluster is recovering.")]
+    ReadCurrentEpoch,
     #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
     ExpiredEpoch { safe_epoch: u64, epoch: u64 },
     #[error("CompactionExecutor error {0}.")]
@@ -118,8 +118,8 @@ impl HummockError {
         HummockErrorInner::WaitEpoch(error.to_string()).into()
     }
 
-    pub fn read_current_epoch(error: impl ToString) -> HummockError {
-        HummockErrorInner::ReadCurrentEpoch(error.to_string()).into()
+    pub fn read_current_epoch() -> HummockError {
+        HummockErrorInner::ReadCurrentEpoch.into()
     }
 
     pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {
@@ -128,6 +128,10 @@ impl HummockError {
 
     pub fn is_expired_epoch(&self) -> bool {
         matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
+    }
+
+    pub fn is_meta_error(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::MetaError(..))
     }
 
     pub fn compaction_executor(error: impl ToString) -> HummockError {

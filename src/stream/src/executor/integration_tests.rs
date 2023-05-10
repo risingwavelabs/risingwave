@@ -21,19 +21,19 @@ use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
+use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
-use crate::executor::aggregation::{AggArgs, AggCall};
 use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
-use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
+use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::SharedContext;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
@@ -48,9 +48,8 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::for_test(input_rx);
-        let append_only = false;
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = LocalSimpleAggExecutor::new(
+        let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
             input.boxed(),
             vec![
@@ -59,7 +58,6 @@ async fn test_merger_sum_aggr() {
                     args: AggArgs::None,
                     return_type: DataType::Int64,
                     column_orders: vec![],
-                    append_only,
                     filter: None,
                     distinct: false,
                 },
@@ -68,7 +66,6 @@ async fn test_merger_sum_aggr() {
                     args: AggArgs::Unary(DataType::Int64, 0),
                     return_type: DataType::Int64,
                     column_orders: vec![],
-                    append_only,
                     filter: None,
                     distinct: false,
                 },
@@ -146,18 +143,18 @@ async fn test_merger_sum_aggr() {
     let merger = MergeExecutor::for_test(outputs, schema);
 
     // for global aggregator, we need to sum data and sum row count
-    let append_only = false;
+    let is_append_only = false;
     let aggregator = new_boxed_simple_agg_executor(
         actor_ctx.clone(),
         MemoryStateStore::new(),
         merger.boxed(),
+        is_append_only,
         vec![
             AggCall {
                 kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -166,7 +163,6 @@ async fn test_merger_sum_aggr() {
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },
@@ -175,7 +171,6 @@ async fn test_merger_sum_aggr() {
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 column_orders: vec![],
-                append_only,
                 filter: None,
                 distinct: false,
             },

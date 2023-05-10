@@ -17,12 +17,12 @@ use std::collections::HashSet;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
-use crate::cache::{new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<OwnedRow, HashSet<OwnedRow>>,
+    data: ManagedLruCache<OwnedRow, HashSet<OwnedRow>>,
 }
 
 impl LookupCache {
@@ -40,7 +40,7 @@ impl LookupCache {
     pub fn apply_batch(&mut self, chunk: StreamChunk, arrange_join_keys: &[usize]) {
         for (op, row) in chunk.rows() {
             let key = row.project(arrange_join_keys).into_owned_row();
-            if let Some(values) = self.data.get_mut(&key) {
+            if let Some(mut values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
                 match op {
                     Op::Insert | Op::UpdateInsert => {
@@ -54,9 +54,8 @@ impl LookupCache {
         }
     }
 
-    /// Flush the cache and evict the items.
-    pub fn flush(&mut self) {
-        self.data.evict();
+    pub fn evict(&mut self) {
+        self.data.evict()
     }
 
     /// Update the current epoch.
@@ -70,7 +69,7 @@ impl LookupCache {
     }
 
     pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
+        let cache = new_unbounded(watermark_epoch);
         Self { data: cache }
     }
 }

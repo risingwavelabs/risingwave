@@ -21,6 +21,8 @@ use itertools::Itertools;
 use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
+#[cfg(debug_assertions)]
+use crate::Explain;
 
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {
@@ -49,6 +51,9 @@ impl<'a> HeuristicOptimizer<'a> {
     fn optimize_node(&mut self, mut plan: PlanRef) -> PlanRef {
         for rule in self.rules {
             if let Some(applied) = rule.apply(plan.clone()) {
+                #[cfg(debug_assertions)]
+                Self::check_equivalent_plan(rule, &plan, &applied);
+
                 plan = applied;
                 self.stats.count_rule(rule);
             }
@@ -80,6 +85,19 @@ impl<'a> HeuristicOptimizer<'a> {
 
     pub fn get_stats(&self) -> &Stats {
         &self.stats
+    }
+
+    #[cfg(debug_assertions)]
+    fn check_equivalent_plan(rule: &BoxedRule, input_plan: &PlanRef, output_plan: &PlanRef) {
+        if !input_plan.schema().type_eq(output_plan.schema()) {
+            panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
+                   rule.description(),
+                   input_plan.schema(),
+                   input_plan.explain_to_string().unwrap(),
+                   output_plan.schema(),
+                   output_plan.explain_to_string().unwrap(),
+                   output_plan.ctx().sql());
+        }
     }
 }
 

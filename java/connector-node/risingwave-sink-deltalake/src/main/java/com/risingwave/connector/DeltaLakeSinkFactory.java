@@ -16,35 +16,30 @@ package com.risingwave.connector;
 
 import static io.grpc.Status.*;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
-import com.risingwave.java.utils.MinioUrlParser;
+import com.risingwave.connector.common.S3Utils;
+import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.types.StructType;
 import io.grpc.Status;
-import java.nio.file.Paths;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
 
 public class DeltaLakeSinkFactory implements SinkFactory {
-
-    private static final String LOCATION_PROP = "location";
-    private static final String LOCATION_TYPE_PROP = "location.type";
-    private static final String confEndpoint = "fs.s3a.endpoint";
-    private static final String confKey = "fs.s3a.access.key";
-    private static final String confSecret = "fs.s3a.secret.key";
-
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String location = tableProperties.get(LOCATION_PROP);
-        String locationType = tableProperties.get(LOCATION_TYPE_PROP);
+        ObjectMapper mapper = new ObjectMapper();
+        DeltaLakeSinkConfig config =
+                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
-        Configuration hadoopConf = new Configuration();
-        location = getConfig(location, locationType, hadoopConf);
+        Configuration hadoopConf = getConfig(config.getLocation(), config);
 
-        DeltaLog log = DeltaLog.forTable(hadoopConf, location);
+        DeltaLog log = DeltaLog.forTable(hadoopConf, config.getLocation());
         StructType schema = log.snapshot().getMetadata().getSchema();
         DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
         return new DeltaLakeSink(tableSchema, hadoopConf, log);
@@ -59,20 +54,14 @@ public class DeltaLakeSinkFactory implements SinkFactory {
                     .asRuntimeException();
         }
 
-        if (!tableProperties.containsKey(LOCATION_PROP)
-                || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
-            throw INVALID_ARGUMENT
-                    .withDescription(
-                            String.format(
-                                    "%s or %s is not specified", LOCATION_PROP, LOCATION_TYPE_PROP))
-                    .asRuntimeException();
-        }
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        DeltaLakeSinkConfig config =
+                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
-        String location = tableProperties.get(LOCATION_PROP);
-        String locationType = tableProperties.get(LOCATION_TYPE_PROP);
+        String location = config.getLocation();
 
-        Configuration hadoopConf = new Configuration();
-        location = getConfig(location, locationType, hadoopConf);
+        Configuration hadoopConf = getConfig(config.getLocation(), config);
 
         DeltaLog log = DeltaLog.forTable(hadoopConf, location);
         StructType schema = log.snapshot().getMetadata().getSchema();
@@ -80,26 +69,20 @@ public class DeltaLakeSinkFactory implements SinkFactory {
         DeltaLakeSinkUtil.convertSchema(log, tableSchema);
     }
 
-    private String getConfig(String location, String locationType, Configuration hadoopConf) {
-        switch (locationType) {
-            case "local":
-                location = "file://" + Paths.get(location).toAbsolutePath();
-                break;
+    private Configuration getConfig(String location, DeltaLakeSinkConfig config) {
+        String scheme = UrlParser.parseLocationScheme(location);
+        switch (scheme) {
+            case "file":
+                return new Configuration();
             case "s3":
-                location = "s3a:" + location.substring(location.indexOf('/'));
-                break;
-            case "minio":
-                MinioUrlParser minioUrlParser = new MinioUrlParser(location);
-                hadoopConf.set(confEndpoint, minioUrlParser.getEndpoint());
-                hadoopConf.set(confKey, minioUrlParser.getKey());
-                hadoopConf.set(confSecret, minioUrlParser.getSecret());
-                location = "s3a://" + minioUrlParser.getBucket();
-                break;
+            case "s3a":
+                return S3Utils.getHadoopConf(config);
             default:
                 throw UNIMPLEMENTED
-                        .withDescription("unsupported deltalake sink type: " + locationType)
+                        .withDescription(
+                                String.format(
+                                        "unsupported deltalake sink location scheme: %s", scheme))
                         .asRuntimeException();
         }
-        return location;
     }
 }

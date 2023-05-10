@@ -22,7 +22,6 @@ use risingwave_common::types::DataType;
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
-    pub name_in_lower_case: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub fields: Vec<ColumnDesc>,
@@ -41,10 +40,8 @@ impl SourceColumnDesc {
             "called `SourceColumnDesc::simple` with a composite type."
         );
         let name = name.into();
-        let name_in_lower_case = name.to_ascii_lowercase();
         Self {
             name,
-            name_in_lower_case,
             data_type,
             column_id,
             fields: vec![],
@@ -64,7 +61,6 @@ impl From<&ColumnDesc> for SourceColumnDesc {
         let is_meta = c.name.starts_with("_rw_kafka_timestamp");
         Self {
             name: c.name.clone(),
-            name_in_lower_case: c.name.to_ascii_lowercase(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
@@ -82,7 +78,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name: s.name.clone(),
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
-            generated_column: None,
+            generated_or_default_column: None,
         }
     }
 }

@@ -38,6 +38,7 @@ mod alter_relation_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
+pub mod create_connection;
 mod create_database;
 pub mod create_function;
 pub mod create_index;
@@ -50,6 +51,7 @@ pub mod create_table_as;
 pub mod create_user;
 pub mod create_view;
 mod describe;
+mod drop_connection;
 mod drop_database;
 pub mod drop_function;
 mod drop_index;
@@ -148,6 +150,11 @@ impl HandlerArgs {
             } => {
                 *if_not_exists = false;
             }
+            Statement::CreateConnection {
+                stmt: CreateConnectionStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
             _ => {}
         }
         stmt.to_string()
@@ -172,6 +179,9 @@ pub async fn handle(
             create_source::handle_create_source(handler_args, stmt).await
         }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateConnection { stmt } => {
+            create_connection::handle_create_connection(handler_args, stmt).await
+        }
         Statement::CreateFunction {
             or_replace,
             temporary,
@@ -309,6 +319,9 @@ pub async fn handle(
             ObjectType::View => {
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
             }
+            ObjectType::Connection => {
+                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
+            }
         },
         Statement::DropFunction {
             if_exists,
@@ -335,15 +348,8 @@ pub async fn handle(
                 )
                 .into());
             }
-            if emit_mode == Some(EmitMode::OnWindowClose) {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE MATERIALIZED VIEW EMIT ON WINDOW CLOSE".to_string(),
-                    None.into(),
-                )
-                .into());
-            }
             if materialized {
-                create_mv::handle_create_mv(handler_args, name, *query, columns).await
+                create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode).await
             } else {
                 create_view::handle_create_view(handler_args, name, columns, *query).await
             }

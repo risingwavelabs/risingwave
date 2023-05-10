@@ -16,9 +16,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
-};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -26,6 +23,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManagerRef};
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::write_limiter::WriteLimiterRef;

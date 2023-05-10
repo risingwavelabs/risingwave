@@ -107,12 +107,15 @@ impl<S: MetaStore> BarrierScheduler<S> {
     pub async fn try_cancel_scheduled_create(&self, table_id: TableId) -> bool {
         let mut queue = self.inner.queue.write().await;
         if let Some(idx) = queue.iter().position(|scheduled| {
-            if let Command::CreateStreamingJob {table_fragments, ..} = &scheduled.command
-                    && table_fragments.table_id() == table_id {
-                    true
-                } else {
-                    false
-                }
+            if let Command::CreateStreamingJob {
+                table_fragments, ..
+            } = &scheduled.command
+                && table_fragments.table_id() == table_id
+            {
+                true
+            } else {
+                false
+            }
         }) {
             queue.remove(idx).unwrap();
             true

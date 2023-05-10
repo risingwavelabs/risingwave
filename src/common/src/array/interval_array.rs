@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{PrimitiveArray, PrimitiveArrayBuilder};
-use crate::types::interval::Interval;
+use crate::types::Interval;
 
 pub type IntervalArray = PrimitiveArray<Interval>;
 pub type IntervalArrayBuilder = PrimitiveArrayBuilder<Interval>;
@@ -23,7 +23,7 @@ mod tests {
     use super::IntervalArray;
     use crate::array::interval_array::{Interval, IntervalArrayBuilder};
     use crate::array::{Array, ArrayBuilder};
-    use crate::types::interval::test_utils::IntervalTestExt;
+    use crate::types::test_utils::IntervalTestExt;
 
     #[test]
     fn test_interval_array() {
@@ -35,17 +35,17 @@ mod tests {
         }
         let ret_arr = array_builder.finish();
         for v in ret_arr.iter().flatten() {
-            assert_eq!(v.get_months(), 12);
-            assert_eq!(v.get_days(), 0);
+            assert_eq!(v.months(), 12);
+            assert_eq!(v.days(), 0);
         }
         let ret_arr = IntervalArray::from_iter([Some(Interval::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
-        assert_eq!(v.get_months(), 12);
-        assert_eq!(v.get_days(), 0);
+        assert_eq!(v.months(), 12);
+        assert_eq!(v.days(), 0);
         let v = ret_arr.value_at(1);
         assert_eq!(v, None);
         let v = unsafe { ret_arr.value_at_unchecked(0).unwrap() };
-        assert_eq!(v.get_months(), 12);
-        assert_eq!(v.get_days(), 0);
+        assert_eq!(v.months(), 12);
+        assert_eq!(v.days(), 0);
     }
 }

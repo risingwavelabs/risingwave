@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{AggCall, AggStateStorage};
+use super::aggregation::AggStateStorage;
 use super::Executor;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
@@ -53,10 +54,10 @@ pub struct SimpleAggExecutorExtraArgs {}
 impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 
 /// Extra arguments needed to construct an `HashAggExecutor`.
-pub struct GroupAggExecutorExtraArgs {
+pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
     pub emit_on_window_close: bool,
     pub metrics: Arc<StreamingMetrics>,
 }
-impl AggExecutorExtraArgs for GroupAggExecutorExtraArgs {}
+impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}
