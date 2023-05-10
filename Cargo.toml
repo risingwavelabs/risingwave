@@ -121,8 +121,8 @@ opt-level = 2
 incremental = false
 debug = 1 # line tables only
 
-# Patch third-party crates for deterministic simulation.
 [patch.crates-io]
+# Patches for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
@@ -130,4 +130,7 @@ tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev =
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
 # This patch bumps openidconnect v2 to use serde_with v2
-openidconnect = { git = "https://github.com/risingwavelabs/openidconnect-rs", rev = "5150eb7"}
+openidconnect = { git = "https://github.com/risingwavelabs/openidconnect-rs.git", rev = "5150eb7" }
+# This patch removes async-std dependency
+minitrace-jaeger = { git = "https://github.com/risingwavelabs/minitrace-rust.git", rev = "3523931" }
+minitrace = { git = "https://github.com/risingwavelabs/minitrace-rust.git", rev = "3523931" }
