@@ -761,14 +761,17 @@ impl HummockVersionReader {
                     continue;
                 }
                 if sstables.len() > 1 {
-                    delete_range_iter.add_concat_iter(
-                        sstables
-                            .iter()
-                            .filter(|sst| sst.get_range_tombstone_count() > 0)
-                            .cloned()
-                            .collect_vec(),
-                        self.sstable_store.clone(),
-                    );
+                    let ssts_which_have_delete_range = sstables
+                        .iter()
+                        .filter(|sst| sst.get_range_tombstone_count() > 0)
+                        .cloned()
+                        .collect_vec();
+                    if !ssts_which_have_delete_range.is_empty() {
+                        delete_range_iter.add_concat_iter(
+                            ssts_which_have_delete_range,
+                            self.sstable_store.clone(),
+                        );
+                    }
                     non_overlapping_iters.push(ConcatIterator::new(
                         sstables,
                         self.sstable_store.clone(),
