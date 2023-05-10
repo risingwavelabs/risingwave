@@ -21,7 +21,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
-opendal = "0.33.2"
+opendal = "0.34"
 prometheus = { version = "0.13", features = ["process"] }
 random-string = "1.0"
 risingwave_common = { path = "../common" }

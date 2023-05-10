@@ -555,15 +555,11 @@ impl SharedBufferBatch {
         epoch: HummockEpoch,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         table_id: TableId,
         instance_id: Option<LocalInstanceId>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
-        let delete_ranges = delete_ranges
-            .into_iter()
-            .map(|(begin_key, end_key)| (Bound::Included(begin_key), Bound::Excluded(end_key)))
-            .collect_vec();
         let inner = SharedBufferBatchInner::new(
             table_id,
             epoch,
@@ -946,8 +942,14 @@ mod tests {
             vec![],
             1,
             vec![
-                (Bytes::from("a"), Bytes::from("c")),
-                (Bytes::from("b"), Bytes::from("d")),
+                (
+                    Bound::Included(Bytes::from("a")),
+                    Bound::Excluded(Bytes::from("c")),
+                ),
+                (
+                    Bound::Included(Bytes::from("b")),
+                    Bound::Excluded(Bytes::from("d")),
+                ),
             ],
             TableId::new(0),
             None,
@@ -1104,9 +1106,18 @@ mod tests {
     async fn test_shared_buffer_batch_delete_range() {
         let epoch = 1;
         let delete_ranges = vec![
-            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
-            (Bytes::from(b"ccc".to_vec()), Bytes::from(b"ddd".to_vec())),
-            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"aaa".to_vec())),
+                Bound::Excluded(Bytes::from(b"bbb".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"ccc".to_vec())),
+                Bound::Excluded(Bytes::from(b"ddd".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"ddd".to_vec())),
+                Bound::Excluded(Bytes::from(b"eee".to_vec())),
+            ),
         ];
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
@@ -1371,9 +1382,18 @@ mod tests {
         let table_id = TableId { table_id: 1004 };
         let epoch = 1;
         let delete_ranges = vec![
-            (Bytes::from(b"111".to_vec()), Bytes::from(b"222".to_vec())),
-            (Bytes::from(b"555".to_vec()), Bytes::from(b"777".to_vec())),
-            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"ddd".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"111".to_vec())),
+                Bound::Excluded(Bytes::from(b"222".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"555".to_vec())),
+                Bound::Excluded(Bytes::from(b"777".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"aaa".to_vec())),
+                Bound::Excluded(Bytes::from(b"ddd".to_vec())),
+            ),
         ];
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
@@ -1403,9 +1423,18 @@ mod tests {
 
         let epoch = 2;
         let delete_ranges = vec![
-            (Bytes::from(b"444".to_vec()), Bytes::from(b"555".to_vec())),
-            (Bytes::from(b"888".to_vec()), Bytes::from(b"999".to_vec())),
-            (Bytes::from(b"bbb".to_vec()), Bytes::from(b"ccc".to_vec())),
+            (
+                Bound::Included(Bytes::from(b"444".to_vec())),
+                Bound::Excluded(Bytes::from(b"555".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"888".to_vec())),
+                Bound::Excluded(Bytes::from(b"999".to_vec())),
+            ),
+            (
+                Bound::Included(Bytes::from(b"bbb".to_vec())),
+                Bound::Excluded(Bytes::from(b"ccc".to_vec())),
+            ),
         ];
         let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (

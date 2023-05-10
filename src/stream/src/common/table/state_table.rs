@@ -841,7 +841,10 @@ where
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
                 range_end.extend(&watermark_suffix);
-                delete_ranges.push((Bytes::from(range_begin), Bytes::from(range_end)));
+                delete_ranges.push((
+                    Bound::Included(Bytes::from(range_begin)),
+                    Bound::Excluded(Bytes::from(range_end)),
+                ));
             }
         }
         self.local_store.flush(delete_ranges).await?;
