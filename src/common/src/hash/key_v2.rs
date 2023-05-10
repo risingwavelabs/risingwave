@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 
 use bytes::BufMut;
 use educe::Educe;
+use either::{for_both, Either};
 use itertools::Itertools;
 use tinyvec::ArrayVec;
 
@@ -31,19 +32,33 @@ use crate::types::{DataType, Datum, ScalarImpl};
 use crate::util::hash_util::XxHash64Builder;
 use crate::util::iter_util::ZipEqFast;
 
+/// The storage where the hash key resides in memory.
 pub trait KeyStorage: 'static {
+    /// The key type that is used to store the hash key.
     type Key: AsRef<[u8]> + EstimateSize + Clone + Send + Sync + 'static;
-    type Buffer: Buffer<Self::Key>;
+
+    /// The buffer type that is used to build the hash key.
+    type Buffer: Buffer<Sealed = Self::Key>;
 }
 
-pub trait Buffer<K>: BufMut + 'static {
+/// Associated type for [`KeyStorage`] used to build the hash key.
+pub trait Buffer: BufMut + 'static {
+    /// The sealed key type.
+    type Sealed;
+
+    /// Returns whether this buffer allocates on the heap.
     fn alloc() -> bool;
 
+    /// Creates a new buffer with the given capacity.
     fn with_capacity(cap: usize) -> Self;
 
-    fn seal(self) -> K;
+    /// Seals the buffer and returns the sealed key.
+    fn seal(self) -> Self::Sealed;
 }
 
+/// Key storage that uses a on-stack buffer and key, backed by a byte array with length `N`.
+///
+/// Used when the encoded length of the hash key is known to be less than or equal to `N`.
 pub struct StackStorage<const N: usize>;
 
 impl<const N: usize> KeyStorage for StackStorage<N> {
@@ -51,6 +66,7 @@ impl<const N: usize> KeyStorage for StackStorage<N> {
     type Key = [u8; N];
 }
 
+/// The buffer for building a hash key on a fixed-size byte array on the stack.
 pub struct StackBuffer<const N: usize>(ArrayVec<[u8; N]>);
 
 unsafe impl<const N: usize> BufMut for StackBuffer<N> {
@@ -66,38 +82,49 @@ unsafe impl<const N: usize> BufMut for StackBuffer<N> {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        // SAFETY: copied from the implementation of `impl BufMut for &mut [u8]`.
         // UninitSlice is repr(transparent), so safe to transmute
         unsafe { &mut *(self.0.grab_spare_slice_mut() as *mut [u8] as *mut _) }
     }
 
     #[inline]
     fn put_slice(&mut self, src: &[u8]) {
+        // Specialize this method to avoid the `while` loop for inconsecutive slices in the default
+        // implementation.
         self.0.extend_from_slice(src);
     }
 }
 
-impl<const N: usize> Buffer<[u8; N]> for StackBuffer<N> {
+impl<const N: usize> Buffer for StackBuffer<N> {
+    type Sealed = [u8; N];
+
     fn alloc() -> bool {
         false
     }
 
     fn with_capacity(_cap: usize) -> Self {
+        // Ignore the capacity.
         Self(ArrayVec::new())
     }
 
-    fn seal(self) -> [u8; N] {
+    fn seal(self) -> Self::Sealed {
         self.0.into_inner()
     }
 }
 
+/// Key storage that uses a in-heap buffer and key, backed by a boxed slice.
+///
+/// Used when the encoded length of the hash key might be arbitrarily large.
 pub struct HeapStorage;
 
 impl KeyStorage for HeapStorage {
     type Buffer = Vec<u8>;
-    type Key = Box<[u8]>;
+    type Key = Box<[u8]>; // To avoid unnecessary spare spaces.
 }
 
-impl Buffer<Box<[u8]>> for Vec<u8> {
+impl Buffer for Vec<u8> {
+    type Sealed = Box<[u8]>;
+
     fn alloc() -> bool {
         true
     }
@@ -106,11 +133,12 @@ impl Buffer<Box<[u8]>> for Vec<u8> {
         Self::with_capacity(cap)
     }
 
-    fn seal(self) -> Box<[u8]> {
+    fn seal(self) -> Self::Sealed {
         self.into_boxed_slice()
     }
 }
 
+/// Serializer for building a hash key from datums on the specified storage.
 struct Serializer<S: KeyStorage, N: NullBitmap> {
     buffer: S::Buffer,
     null_bitmap: N,
@@ -128,6 +156,7 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         }
     }
 
+    /// Serializes a generic datum into the hash key.
     fn serialize<'a, D: HashKeySer<'a>>(&mut self, datum: Option<D>) {
         match datum {
             Some(scalar) => HashKeySer::serialize_into(scalar, &mut self.buffer),
@@ -136,6 +165,7 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
         self.idx += 1;
     }
 
+    /// Finishes serialization and returns the hash key.
     fn finish(self) -> HashKeyImpl<S, N> {
         HashKeyImpl {
             hash_code: self.hash_code,
@@ -145,6 +175,7 @@ impl<S: KeyStorage, N: NullBitmap> Serializer<S, N> {
     }
 }
 
+/// Deserializer for deserializing a hash key into datums.
 struct Deserializer<'a, S: KeyStorage, N: NullBitmap> {
     key: &'a [u8],
     null_bitmap: &'a N,
@@ -162,7 +193,8 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
         }
     }
 
-    fn deserialize<D: HashKeyDe>(&mut self, data_type: &DataType) -> ArrayResult<Option<D>> {
+    /// Deserializes a generic datum from the hash key.
+    fn deserialize<D: HashKeyDe>(&mut self, data_type: &DataType) -> Option<D> {
         let datum = if !self.null_bitmap.contains(self.idx) {
             Some(HashKeyDe::deserialize(data_type, &mut self.key))
         } else {
@@ -170,16 +202,17 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
         };
 
         self.idx += 1;
-        Ok(datum)
+        datum
     }
 
-    fn deserialize_impl(&mut self, data_type: &DataType) -> ArrayResult<Datum> {
+    /// Deserializes a type-erased datum from the hash key.
+    fn deserialize_impl(&mut self, data_type: &DataType) -> Datum {
         macro_rules! deserialize {
             ($( { $DataType:ident, $PhysicalType:ident }),*) => {
                 match data_type {
                     $(
                         DataType::$DataType { .. } => {
-                            let datum = self.deserialize(data_type)?;
+                            let datum = self.deserialize(data_type);
                             datum.map(ScalarImpl::$PhysicalType)
                         },
                     )*
@@ -187,7 +220,7 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
             }
         }
 
-        Ok(for_all_type_pairs! { deserialize })
+        for_all_type_pairs! { deserialize }
     }
 }
 
@@ -199,23 +232,31 @@ impl<'a, S: KeyStorage, N: NullBitmap> Deserializer<'a, S, N> {
 pub trait HashKey:
     EstimateSize + Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static
 {
-    // TODO: rename to `NullBitmap`
+    // TODO: rename to `NullBitmap` and note that high bit represents null!
     type Bitmap: NullBitmap;
 
     // TODO: remove result and rename to `build_many`
+    /// Build hash keys from the given `data_chunk` with `column_indices` in a batch.
     fn build(column_indices: &[usize], data_chunk: &DataChunk) -> ArrayResult<Vec<Self>>;
 
+    /// Deserializes the hash key into a row.
     fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
 
+    /// Deserializes the hash key into array builders.
     fn deserialize_to_builders(
         &self,
         array_builders: &mut [ArrayBuilderImpl],
         data_types: &[DataType],
     ) -> ArrayResult<()>;
 
+    /// Get the null bitmap of the hash key.
     fn null_bitmap(&self) -> &Self::Bitmap;
 }
 
+/// The implementation of the hash key.
+///
+/// - Precompute the hash code of the key to accelerate the hash table look-up.
+/// - Serialize the key into a compact byte buffer to save the memory usage.
 #[derive(Educe)]
 #[educe(Clone)]
 pub struct HashKeyImpl<S: KeyStorage, N: NullBitmap> {
@@ -226,14 +267,14 @@ pub struct HashKeyImpl<S: KeyStorage, N: NullBitmap> {
 
 impl<S: KeyStorage, N: NullBitmap> Hash for HashKeyImpl<S, N> {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: note
+        // Caveat: this should only be used along with `PrecomputedHashBuilder`.
         state.write_u64(self.hash_code.value());
     }
 }
 
-// TODO: educe
 impl<S: KeyStorage, N: NullBitmap> PartialEq for HashKeyImpl<S, N> {
     fn eq(&self, other: &Self) -> bool {
+        // Compare the hash code first for short-circuit.
         self.hash_code == other.hash_code
             && self.key.as_ref() == other.key.as_ref()
             && self.null_bitmap == other.null_bitmap
@@ -241,7 +282,6 @@ impl<S: KeyStorage, N: NullBitmap> PartialEq for HashKeyImpl<S, N> {
 }
 impl<S: KeyStorage, N: NullBitmap> Eq for HashKeyImpl<S, N> {}
 
-// TODO: educe
 impl<S: KeyStorage, N: NullBitmap> std::fmt::Debug for HashKeyImpl<S, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HashKey")
@@ -263,31 +303,34 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         let hash_codes = data_chunk.get_hash_values(column_indices, XxHash64Builder);
 
         let mut serializers = {
-            if S::Buffer::alloc() {
+            let buffers = if S::Buffer::alloc() {
+                // Pre-estimate the key size to avoid reallocation as much as possible.
+                // FIXME(bugen): hash key encoding is not value encoding, the implementation needs
+                // to be revisited and updated.
                 let estimated_key_sizes = data_chunk.compute_key_sizes_by_columns(column_indices);
-                let buffers = estimated_key_sizes
-                    .into_iter()
-                    .map(|cap| S::Buffer::with_capacity(cap));
 
-                hash_codes
-                    .into_iter()
-                    .zip_eq_fast(buffers)
-                    .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
-                    .collect_vec()
+                Either::Left(
+                    estimated_key_sizes
+                        .into_iter()
+                        .map(S::Buffer::with_capacity),
+                )
             } else {
-                let buffers = (0..data_chunk.capacity()).map(|_| S::Buffer::with_capacity(0));
+                Either::Right((0..data_chunk.capacity()).map(|_| S::Buffer::with_capacity(0)))
+            };
 
+            for_both!(buffers, buffers =>
                 hash_codes
                     .into_iter()
                     .zip_eq_fast(buffers)
                     .map(|(hash_code, buffer)| Serializer::new(buffer, hash_code))
                     .collect_vec()
-            }
+            )
         };
 
         for &i in column_indices {
             let array = data_chunk.column_at(i).array_ref();
 
+            // Dispatch types once to accelerate the inner call.
             dispatch_all_variants!(array, ArrayImpl, array, {
                 for (scalar, serializer) in array.iter().zip_eq_fast(&mut serializers) {
                     serializer.serialize(scalar);
@@ -304,7 +347,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         let mut row = Vec::with_capacity(data_types.len());
 
         for data_type in data_types {
-            let datum = deserializer.deserialize_impl(data_type)?;
+            let datum = deserializer.deserialize_impl(data_type);
             row.push(datum);
         }
 
@@ -319,8 +362,9 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         let mut deserializer = Deserializer::<S, N>::new(&self.key, &self.null_bitmap);
 
         for (data_type, array_builder) in data_types.iter().zip_eq_fast(array_builders.iter_mut()) {
+            // Dispatch types once to accelerate the inner call.
             dispatch_all_variants!(array_builder, ArrayBuilderImpl, array_builder, {
-                let datum = deserializer.deserialize(data_type)?;
+                let datum = deserializer.deserialize(data_type);
                 array_builder.append_owned(datum);
             });
         }

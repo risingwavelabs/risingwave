@@ -8722,6 +8722,7 @@ dependencies = [
  "syn 2.0.15",
  "time 0.3.17",
  "time-macros",
+ "tinyvec",
  "tokio",
  "tokio-postgres",
  "tokio-stream",
