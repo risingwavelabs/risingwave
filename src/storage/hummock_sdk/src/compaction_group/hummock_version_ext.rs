@@ -139,7 +139,7 @@ pub trait HummockVersionUpdateExt {
     ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
     fn collect_dropped_sstable_infos(
-        &mut self,
+        &self,
         group_id: CompactionGroupId,
         state_table_ids: Vec<u32>,
     ) -> Vec<(HummockSstableObjectId, HummockSstableId)>;
@@ -425,11 +425,11 @@ impl HummockVersionUpdateExt for HummockVersion {
     }
 
     fn collect_dropped_sstable_infos(
-        &mut self,
+        &self,
         group_id: CompactionGroupId,
         state_table_ids: Vec<u32>,
     ) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
-        if let Some(group) = self.levels.get_mut(&group_id) {
+        if let Some(group) = self.levels.get(&group_id) {
             collect_empty_sstable_infos(group, HashSet::from_iter(state_table_ids))
         } else {
             vec![]
@@ -480,6 +480,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 let parent_group_id = group_construct.parent_group_id;
                 new_levels.parent_group_id = parent_group_id;
                 new_levels.member_table_ids = group_construct.table_ids.clone();
+                new_levels.member_table_ids.sort();
                 self.levels.insert(*compaction_group_id, new_levels);
                 sst_split_info.extend(self.init_with_parent_group(
                     parent_group_id,
@@ -503,11 +504,12 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .member_table_ids
                     .drain_filter(|t| group_change.table_ids.contains(t))
                     .collect_vec();
-                self.levels
+                let target_levels = self
+                    .levels
                     .get_mut(compaction_group_id)
-                    .expect("compaction group should exist")
-                    .member_table_ids
-                    .append(&mut moving_tables);
+                    .expect("compaction group should exist");
+                target_levels.member_table_ids.append(&mut moving_tables);
+                target_levels.member_table_ids.sort();
             }
             let has_destroy = summary.group_destroy.is_some();
             let levels = self
@@ -704,8 +706,8 @@ pub fn collect_empty_sstable_infos(
     remove_table_ids: HashSet<u32>,
 ) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
     let mut removed_sstable_infos = vec![];
-    if let Some(ref mut l0) = group.l0 {
-        for sub_level in &mut l0.sub_levels {
+    if let Some(l0) = &group.l0 {
+        for sub_level in &l0.sub_levels {
             removed_sstable_infos.extend(
                 sub_level
                     .table_infos
