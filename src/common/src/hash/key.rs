@@ -274,17 +274,85 @@ impl BuildHasher for PrecomputedBuildHasher {
     }
 }
 
-/// Trait for value types that can be serialized to or deserialized from hash keys.
+/// Extension of scalars to be serialized into hash keys.
 ///
-/// Note that this trait is more like a marker suggesting that types that implement it can be
-/// encoded into the hash key. The actual encoding/decoding method is not limited to
-/// [`HashKeySerDe`]'s fixed-size implementation.
+/// NOTE: The hash key encoding algorithm needs to respect the implementation of `Hash` and `Eq` on
+/// scalar types, which is exactly the same behavior of the data types under `GROUP BY` or
+/// `PARTITION BY` in PostgreSQL. For example, `Decimal(1.0)` vs `Decimal(1.00)`, or `Interval(24
+/// hour)` vs `Interval(1 day)` are considered equal here.
+///
+/// This means that...
+/// - delegating to the value encoding can be **incorrect** for some types, as they reflect the
+///   in-memory representation faithfully;
+/// - delegating to the memcmp encoding should be always safe, but they put extra effort to also
+///   preserve the property of `Ord`.
+///
+/// So for some scalar types we have to maintain a separate implementation here. For those that can
+/// be delegated to other encoding algorithms, we can use macros of
+/// `impl_memcmp_encoding_hash_key_serde!` and `impl_value_encoding_hash_key_serde!` here.
 pub trait HashKeySer<'a>: ScalarRef<'a> {
     fn serialize_into(self, buf: impl BufMut);
 }
 
+/// The deserialization counterpart of [`HashKeySer`].
 pub trait HashKeyDe: Scalar {
     fn deserialize(data_type: &DataType, buf: impl Buf) -> Self;
+}
+
+macro_rules! impl_value_encoding_hash_key_serde {
+    ($owned_ty:ty) => {
+        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
+            fn serialize_into(self, mut buf: impl BufMut) {
+                // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
+                // unncessary here. After we resolve them, we can make more types directly delegate
+                // to this implementation.
+                value_encoding::serialize_datum_into(Some(ScalarRefImpl::from(self)), &mut buf);
+            }
+        }
+        impl HashKeyDe for $owned_ty {
+            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
+                let scalar = value_encoding::deserialize_datum(buf, data_type)
+                    .expect("in-memory deserialize should never fail")
+                    .expect("datum should never be NULL");
+
+                // TODO: extra unboxing from `ScalarRefImpl` is unncessary here.
+                scalar.try_into().unwrap()
+            }
+        }
+    };
+}
+
+macro_rules! impl_memcmp_encoding_hash_key_serde {
+    ($owned_ty:ty) => {
+        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
+            fn serialize_into(self, buf: impl BufMut) {
+                let mut serializer = memcomparable::Serializer::new(buf);
+                // TODO: extra boxing to `ScalarRefImpl` and encoding for `NonNull` tag is
+                // unncessary here.
+                memcmp_encoding::serialize_datum(
+                    Some(ScalarRefImpl::from(self)),
+                    OrderType::ascending(),
+                    &mut serializer,
+                )
+                .expect("serialize should never fail");
+            }
+        }
+        impl HashKeyDe for $owned_ty {
+            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
+                let mut deserializer = memcomparable::Deserializer::new(buf);
+                let scalar = memcmp_encoding::deserialize_datum(
+                    data_type,
+                    OrderType::ascending(),
+                    &mut deserializer,
+                )
+                .expect("in-memory deserialize should never fail")
+                .expect("datum should never be NULL");
+
+                // TODO: extra unboxing from `ScalarRefImpl` is unncessary here.
+                scalar.try_into().unwrap()
+            }
+        }
+    };
 }
 
 impl HashKeySer<'_> for bool {
@@ -443,55 +511,6 @@ impl HashKeyDe for Time {
         let nano = buf.get_u32_ne();
         Time::with_secs_nano(secs, nano).unwrap()
     }
-}
-
-macro_rules! impl_value_encoding_hash_key_serde {
-    ($owned_ty:ty) => {
-        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
-            fn serialize_into(self, mut buf: impl BufMut) {
-                value_encoding::serialize_datum_into(Some(ScalarRefImpl::from(self)), &mut buf);
-            }
-        }
-        impl HashKeyDe for $owned_ty {
-            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
-                let scalar = value_encoding::deserialize_datum(buf, data_type)
-                    .expect("in-memory deserialize should never fail")
-                    .expect("datum should never be NULL");
-
-                scalar.try_into().unwrap()
-            }
-        }
-    };
-}
-
-macro_rules! impl_memcmp_encoding_hash_key_serde {
-    ($owned_ty:ty) => {
-        impl<'a> HashKeySer<'a> for <$owned_ty as Scalar>::ScalarRefType<'a> {
-            fn serialize_into(self, buf: impl BufMut) {
-                let mut serializer = memcomparable::Serializer::new(buf);
-                memcmp_encoding::serialize_datum(
-                    Some(ScalarRefImpl::from(self)),
-                    OrderType::ascending(),
-                    &mut serializer,
-                )
-                .expect("serialize should never fail");
-            }
-        }
-        impl HashKeyDe for $owned_ty {
-            fn deserialize(data_type: &DataType, buf: impl Buf) -> Self {
-                let mut deserializer = memcomparable::Deserializer::new(buf);
-                let scalar = memcmp_encoding::deserialize_datum(
-                    data_type,
-                    OrderType::ascending(),
-                    &mut deserializer,
-                )
-                .expect("in-memory deserialize should never fail")
-                .expect("datum should never be NULL");
-
-                scalar.try_into().unwrap()
-            }
-        }
-    };
 }
 
 impl_value_encoding_hash_key_serde!(Box<str>);
