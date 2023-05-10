@@ -133,7 +133,7 @@ impl Binder {
                 right,
             } => {
                 match op {
-                    SetOperator::Union | SetOperator::Intersect => {
+                    SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
                         let left = Box::new(self.bind_set_expr(*left)?);
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
@@ -193,11 +193,6 @@ impl Binder {
                             right,
                         })
                     }
-                    SetOperator::Except => Err(ErrorCode::NotImplemented(
-                        format!("set expr: {:?}", op),
-                        None.into(),
-                    )
-                    .into()),
                 }
             }
         }

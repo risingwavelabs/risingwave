@@ -14,7 +14,6 @@
 
 use std::cmp;
 use std::ops::{Add, Deref};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -137,7 +136,7 @@ impl ClusterId {
     }
 
     pub(crate) async fn from_meta_store<S: MetaStore>(
-        meta_store: &Arc<S>,
+        meta_store: &S,
     ) -> MetadataModelResult<Option<Self>> {
         Self::from_snapshot::<S>(&meta_store.snapshot().await).await
     }
@@ -154,9 +153,9 @@ impl ClusterId {
         }
     }
 
-    pub(crate) async fn put_at_meta_store(
+    pub(crate) async fn put_at_meta_store<S: MetaStore>(
         &self,
-        meta_store: &Arc<impl MetaStore>,
+        meta_store: &S,
     ) -> MetadataModelResult<()> {
         Ok(meta_store
             .put_cf(

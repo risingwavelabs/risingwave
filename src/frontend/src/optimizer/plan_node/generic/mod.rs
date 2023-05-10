@@ -47,9 +47,11 @@ pub use share::*;
 mod dedup;
 pub use dedup::*;
 mod intersect;
-mod over_window;
 pub use intersect::*;
+mod over_window;
 pub use over_window::*;
+mod except;
+pub use except::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;

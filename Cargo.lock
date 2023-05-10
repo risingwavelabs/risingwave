@@ -6420,6 +6420,7 @@ dependencies = [
  "minstant",
  "moka",
  "nix 0.25.1",
+ "num-integer",
  "parking_lot 0.12.1",
  "procfs 0.12.0",
  "prometheus",
