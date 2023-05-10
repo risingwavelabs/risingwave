@@ -138,6 +138,16 @@ pub trait HummockVersionUpdateExt {
         new_sst_start_id: u64,
     ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
+    fn collect_dropped_sstable_infos(
+        &mut self,
+        group_id: CompactionGroupId,
+        state_table_ids: Vec<u32>,
+    ) -> Vec<(HummockSstableObjectId, HummockSstableId)>;
+    fn clear_dropped_sstable_infos(
+        &mut self,
+        group_id: CompactionGroupId,
+        sstable_ids: Vec<HummockSstableId>,
+    );
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo>;
@@ -414,6 +424,50 @@ impl HummockVersionUpdateExt for HummockVersion {
         split_id_vers
     }
 
+    fn collect_dropped_sstable_infos(
+        &mut self,
+        group_id: CompactionGroupId,
+        state_table_ids: Vec<u32>,
+    ) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
+        if let Some(group) = self.levels.get_mut(&group_id) {
+            collect_empty_sstable_infos(group, HashSet::from_iter(state_table_ids))
+        } else {
+            vec![]
+        }
+    }
+
+    fn clear_dropped_sstable_infos(
+        &mut self,
+        group_id: CompactionGroupId,
+        sstable_ids: Vec<HummockSstableId>,
+    ) {
+        let removed_sstable_ids: HashSet<HummockSstableId> = HashSet::from_iter(sstable_ids);
+        if let Some(group) = self.levels.get_mut(&group_id) {
+            if let Some(ref mut l0) = group.l0 {
+                for level in &mut l0.sub_levels {
+                    level
+                        .table_infos
+                        .drain_filter(|sst_info| removed_sstable_ids.contains(&sst_info.sst_id))
+                        .for_each(|sst_info| {
+                            level.total_file_size -= sst_info.file_size;
+                            level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                            l0.total_file_size -= sst_info.file_size;
+                            l0.uncompressed_file_size -= sst_info.file_size;
+                        });
+                }
+            }
+            for level in &mut group.levels {
+                level
+                    .table_infos
+                    .drain_filter(|sst_info| removed_sstable_ids.contains(&sst_info.sst_id))
+                    .for_each(|sst_info| {
+                        level.total_file_size -= sst_info.file_size;
+                        level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                    });
+            }
+        }
+    }
+
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo> {
         let mut sst_split_info = vec![];
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
@@ -643,6 +697,44 @@ impl HummockLevelsExt for Levels {
                 .sum::<u64>();
         }
     }
+}
+
+pub fn collect_empty_sstable_infos(
+    group: &Levels,
+    remove_table_ids: HashSet<u32>,
+) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
+    let mut removed_sstable_infos = vec![];
+    if let Some(ref mut l0) = group.l0 {
+        for sub_level in &mut l0.sub_levels {
+            removed_sstable_infos.extend(
+                sub_level
+                    .table_infos
+                    .iter()
+                    .filter(|sst_info| {
+                        sst_info
+                            .table_ids
+                            .iter()
+                            .all(|table_id| remove_table_ids.contains(table_id))
+                    })
+                    .map(|sst_info| (sst_info.object_id, sst_info.sst_id)),
+            );
+        }
+    }
+    for level in &group.levels {
+        removed_sstable_infos.extend(
+            level
+                .table_infos
+                .iter()
+                .filter(|sst_info| {
+                    sst_info
+                        .table_ids
+                        .iter()
+                        .all(|table_id| remove_table_ids.contains(table_id))
+                })
+                .map(|sst_info| (sst_info.object_id, sst_info.sst_id)),
+        );
+    }
+    removed_sstable_infos
 }
 
 pub fn build_initial_compaction_group_levels(
