@@ -19,30 +19,31 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalIntersect` returns the intersect of the rows of its inputs.
-/// If `all` is false, it needs to eliminate duplicates.
+/// `LogicalExcept` returns the rows of its first input except any
+///  matching rows from its other inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalIntersect {
+pub struct LogicalExcept {
     pub base: PlanBase,
-    core: generic::Intersect<PlanRef>,
+    core: generic::Except<PlanRef>,
 }
 
-impl LogicalIntersect {
+impl LogicalExcept {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
         assert!(Schema::all_type_eq(inputs.iter().map(|x| x.schema())));
-        let core = generic::Intersect { all, inputs };
+        let core = generic::Except { all, inputs };
         let base = PlanBase::new_logical_with_core(&core);
-        LogicalIntersect { base, core }
+        LogicalExcept { base, core }
     }
 
     pub fn create(all: bool, inputs: Vec<PlanRef>) -> PlanRef {
-        LogicalIntersect::new(all, inputs).into()
+        LogicalExcept::new(all, inputs).into()
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -58,7 +59,7 @@ impl LogicalIntersect {
     }
 }
 
-impl PlanTreeNode for LogicalIntersect {
+impl PlanTreeNode for LogicalExcept {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
@@ -68,13 +69,13 @@ impl PlanTreeNode for LogicalIntersect {
     }
 }
 
-impl fmt::Display for LogicalIntersect {
+impl fmt::Display for LogicalExcept {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalIntersect")
+        self.fmt_with_name(f, "LogicalExcept")
     }
 }
 
-impl ColPrunable for LogicalIntersect {
+impl ColPrunable for LogicalExcept {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let new_inputs = self
             .inputs()
@@ -85,9 +86,9 @@ impl ColPrunable for LogicalIntersect {
     }
 }
 
-impl ExprRewritable for LogicalIntersect {}
+impl ExprRewritable for LogicalExcept {}
 
-impl PredicatePushdown for LogicalIntersect {
+impl PredicatePushdown for LogicalExcept {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -102,13 +103,13 @@ impl PredicatePushdown for LogicalIntersect {
     }
 }
 
-impl ToBatch for LogicalIntersect {
+impl ToBatch for LogicalExcept {
     fn to_batch(&self) -> Result<PlanRef> {
         unimplemented!()
     }
 }
 
-impl ToStream for LogicalIntersect {
+impl ToStream for LogicalExcept {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         unimplemented!()
     }

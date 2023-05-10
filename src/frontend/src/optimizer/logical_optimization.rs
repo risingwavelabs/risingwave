@@ -124,6 +124,7 @@ lazy_static! {
         vec![
             UnionMergeRule::create(),
             IntersectMergeRule::create(),
+            ExceptMergeRule::create(),
         ],
         ApplyOrder::BottomUp,
     );
@@ -149,7 +150,7 @@ lazy_static! {
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyScanRule::create(),
+            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -264,7 +265,10 @@ lazy_static! {
 
     static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
         "Set Operation To Join",
-        vec![IntersectToSemiJoinRule::create()],
+        vec![
+            IntersectToSemiJoinRule::create(),
+            ExceptToAntiJoinRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 }

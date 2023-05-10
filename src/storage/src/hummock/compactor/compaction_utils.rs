@@ -76,7 +76,8 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)?;
+            .create_sst_writer(table_id, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -126,6 +127,7 @@ pub struct TaskConfig {
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
