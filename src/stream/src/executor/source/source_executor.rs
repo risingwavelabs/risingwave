@@ -133,21 +133,6 @@ impl<S: StateStore> SourceExecutor<S> {
         false
     }
 
-    fn check_split_is_changed(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
-        let core = self.stream_source_core.as_ref().unwrap();
-
-        let split_ids: HashSet<_> = actor_splits
-            .get(&self.ctx.id)
-            .unwrap()
-            .iter()
-            .map(SplitImpl::id)
-            .collect();
-
-        let owned_split_ids: HashSet<_> = core.state_cache.keys().cloned().collect();
-
-        split_ids != owned_split_ids
-    }
-
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
@@ -423,27 +408,20 @@ impl<S: StateStore> SourceExecutor<S> {
                                     // mutation and pause/resume
                                     assert!(!self.check_split_is_migration(split_assignment));
 
-                                    let target_splits = self
+                                    target_state = self
                                         .apply_split_change(
                                             &source_desc,
                                             &mut stream,
                                             split_assignment,
                                         )
                                         .await?;
-
-                                    target_state = target_splits;
                                     should_trim_state = true;
                                 }
 
                                 Mutation::Update { actor_splits, .. } => {
-                                    // In the scenario of scaling, our splits will not change.
-                                    assert!(!self.check_split_is_changed(actor_splits));
-
-                                    let target_splits = self
+                                    target_state = self
                                         .apply_split_change(&source_desc, &mut stream, actor_splits)
                                         .await?;
-
-                                    target_state = target_splits;
                                 }
                                 _ => {}
                             }
