@@ -26,10 +26,10 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
-use crate::handler::create_source::CONNECTION_NAME_KEY;
+
+
 use crate::handler::privilege::resolve_query_privileges;
-use crate::handler::util::is_kafka_connector;
+
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
@@ -37,7 +37,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_connection_in_with_option;
-use crate::{Planner, WithOptions};
+use crate::{Planner};
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {

@@ -47,7 +47,7 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
+
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
