@@ -566,17 +566,17 @@ mod tests {
     use more_asserts::{assert_gt, assert_lt};
 
     use super::*;
-    use crate::{array, empty_array, try_match_expand};
+    use crate::try_match_expand;
 
     #[test]
     fn test_list_with_values() {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -614,7 +614,7 @@ mod tests {
 
         let part1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
             ],
             DataType::Int32,
@@ -622,8 +622,8 @@ mod tests {
 
         let part2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -641,7 +641,7 @@ mod tests {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [Some(
-                array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
+                F32Array::from_iter([Some(2.0), Some(42.0), Some(1.0)]).into(),
             )],
             DataType::Float32,
         );
@@ -700,23 +700,23 @@ mod tests {
 
         let listarray1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
-                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2)]).into()),
+                Some(I32Array::from_iter([Some(3), Some(4)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(5), Some(6), Some(7)]).into()),
                 None,
-                Some(array! { I32Array, [Some(8)] }.into()),
+                Some(I32Array::from_iter([Some(8)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray3 = ListArray::from_iter(
-            [Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+            [Some(I32Array::from_iter([Some(9), Some(10)]).into())],
             DataType::Int32,
         );
 
@@ -950,9 +950,9 @@ mod tests {
         use crate::types;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2), Some(3)]).into()),
                 None,
-                Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(4), Some(5), Some(6), Some(7)]).into()),
             ],
             DataType::Int32,
         );

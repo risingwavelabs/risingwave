@@ -306,7 +306,7 @@ mod tests {
             let res = res.unwrap();
             assert_eq!(res.cardinality(), 3);
             assert_eq!(
-                res.column_at(0).array().as_int32().iter().collect_vec(),
+                res.column_at(0).as_int32().iter().collect_vec(),
                 vec![Some(4), Some(3), Some(2)]
             );
         }

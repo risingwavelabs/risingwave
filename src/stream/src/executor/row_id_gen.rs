@@ -14,9 +14,10 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, Op, SerialArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
+};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -73,11 +74,11 @@ impl RowIdGenExecutor {
     }
 
     /// Generate a row ID column according to ops.
-    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
-        let len = column.array_ref().len();
+    fn gen_row_id_column_by_op(&mut self, column: &ArrayRef, ops: Ops<'_>) -> ArrayRef {
+        let len = column.len();
         let mut builder = SerialArrayBuilder::new(len);
 
-        for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
+        for (datum, op) in column.iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
@@ -85,7 +86,7 @@ impl RowIdGenExecutor {
             }
         }
 
-        builder.finish().into()
+        builder.finish().into_ref()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -195,7 +196,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
         row_id_col.iter().for_each(|row_id| {
             // Should generate row id for insert operations.
             assert!(row_id.is_some());
@@ -215,7 +216,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
         // Should not generate row id for update operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(32874283748));
         assert_eq!(row_id_col.value_at(1).unwrap(), Serial::from(32874283748));
@@ -233,7 +234,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).into();
         // Should not generate row id for delete operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(84629409685));
     }

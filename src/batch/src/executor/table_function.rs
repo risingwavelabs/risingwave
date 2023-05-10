@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
@@ -68,7 +67,7 @@ impl TableFunctionExecutor {
             }
             let data_chunk = match array.as_ref() {
                 ArrayImpl::Struct(s) => DataChunk::from(s),
-                _ => DataChunk::new(vec![Column::new(array.clone())], len),
+                _ => DataChunk::new(vec![array.clone()], len),
             };
 
             for chunk in data_chunk_builder.append_chunk(data_chunk) {

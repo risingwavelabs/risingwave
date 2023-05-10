@@ -18,7 +18,6 @@ mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
-pub mod column;
 mod column_proto_readers;
 mod data_chunk;
 pub mod data_chunk_iter;
@@ -28,7 +27,6 @@ pub mod interval_array;
 mod iterator;
 mod jsonb_array;
 pub mod list_array;
-mod macros;
 mod num256_array;
 mod primitive_array;
 pub mod stream_chunk;
@@ -276,6 +274,11 @@ pub trait Array:
     }
 
     fn data_type(&self) -> DataType;
+
+    /// Converts the array into an [`ArrayRef`].
+    fn into_ref(self) -> ArrayRef {
+        Arc::new(self.into())
+    }
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.

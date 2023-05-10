@@ -245,7 +245,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 

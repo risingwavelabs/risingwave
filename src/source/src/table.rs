@@ -203,7 +203,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await.unwrap()?, chunk => {
-                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

@@ -141,7 +141,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                 let cur_chunk = top_elem.chunk;
                 let row_idx = top_elem.elem_idx;
                 for (idx, builder) in builders.iter_mut().enumerate() {
-                    let chunk_arr = cur_chunk.column_at(idx).array();
+                    let chunk_arr = cur_chunk.column_at(idx);
                     let chunk_arr = chunk_arr.as_ref();
                     let datum = chunk_arr.value_at(row_idx).to_owned_datum();
                     builder.append_datum(&datum);
@@ -291,12 +291,12 @@ mod tests {
             let res = res.unwrap();
             assert_eq!(res.capacity(), 3 * num_sources);
             let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_int32().value_at(0), Some(1));
-            assert_eq!(col0.array().as_int32().value_at(1), Some(1));
-            assert_eq!(col0.array().as_int32().value_at(2), Some(2));
-            assert_eq!(col0.array().as_int32().value_at(3), Some(2));
-            assert_eq!(col0.array().as_int32().value_at(4), Some(3));
-            assert_eq!(col0.array().as_int32().value_at(5), Some(3));
+            assert_eq!(col0.as_int32().value_at(0), Some(1));
+            assert_eq!(col0.as_int32().value_at(1), Some(1));
+            assert_eq!(col0.as_int32().value_at(2), Some(2));
+            assert_eq!(col0.as_int32().value_at(3), Some(2));
+            assert_eq!(col0.as_int32().value_at(4), Some(3));
+            assert_eq!(col0.as_int32().value_at(5), Some(3));
         }
         let res = stream.next().await;
         assert!(res.is_none());

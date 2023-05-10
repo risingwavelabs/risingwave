@@ -375,7 +375,7 @@ mod tests {
 
         let chunk = res?;
         assert_eq!(chunk.cardinality(), 1);
-        let actual = chunk.column_at(0).array();
+        let actual = chunk.column_at(0);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
 
@@ -476,7 +476,7 @@ mod tests {
 
         let chunk = res?;
         assert_eq!(chunk.cardinality(), 3);
-        let actual = chunk.column_at(2).array();
+        let actual = chunk.column_at(2);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
 
@@ -490,7 +490,7 @@ mod tests {
 
         let chunk = res?;
         assert_eq!(chunk.cardinality(), 3);
-        let actual = chunk.column_at(2).array();
+        let actual = chunk.column_at(2);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
 
@@ -504,7 +504,7 @@ mod tests {
 
         let chunk = res?;
         assert_eq!(chunk.cardinality(), 3);
-        let actual = chunk.column_at(2).array();
+        let actual = chunk.column_at(2);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
 
@@ -580,7 +580,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         assert_matches!(stream.next().await, None);
 
-        let actual = res?.column_at(0).array();
+        let actual = res?.column_at(0);
         let actual: &I64Array = actual.as_ref().into();
         let v = actual.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(55)]);
@@ -681,7 +681,7 @@ mod tests {
         assert_matches!(res, Ok(_));
 
         let chunk = res?;
-        let actual = chunk.column_at(2).array();
+        let actual = chunk.column_at(2);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
 
@@ -694,7 +694,7 @@ mod tests {
         assert_matches!(res, Ok(_));
 
         let chunk = res?;
-        let actual2 = chunk.column_at(2).array();
+        let actual2 = chunk.column_at(2);
         let actual_agg2: &I64Array = actual2.as_ref().into();
         let v = actual_agg2.iter().collect::<Vec<Option<i64>>>();
 
@@ -796,7 +796,7 @@ mod tests {
         assert_matches!(res, Ok(_));
 
         let chunk = res?;
-        let actual = chunk.column_at(2).array();
+        let actual = chunk.column_at(2);
         let actual_agg: &I64Array = actual.as_ref().into();
         let v = actual_agg.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(1), Some(2), Some(7)]);
@@ -808,7 +808,7 @@ mod tests {
         assert_matches!(res, Ok(_));
 
         let chunk = res?;
-        let actual2 = chunk.column_at(2).array();
+        let actual2 = chunk.column_at(2);
         let actual_agg2: &I64Array = actual2.as_ref().into();
         let v = actual_agg2.iter().collect::<Vec<Option<i64>>>();
         assert_eq!(v, vec![Some(11), Some(15), Some(20)]);
@@ -820,7 +820,7 @@ mod tests {
         assert_matches!(res, Ok(_));
 
         let chunk = res?;
-        let actual2 = chunk.column_at(2).array();
+        let actual2 = chunk.column_at(2);
         let actual_agg2: &I64Array = actual2.as_ref().into();
         let v = actual_agg2.iter().collect::<Vec<Option<i64>>>();
 
@@ -836,7 +836,6 @@ mod tests {
         assert_eq!(
             actual
                 .column_at(col_idx)
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),

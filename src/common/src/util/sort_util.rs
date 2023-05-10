@@ -381,8 +381,8 @@ pub fn compare_rows_in_chunk(
     column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
     for column_order in column_orders.iter() {
-        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
-        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {

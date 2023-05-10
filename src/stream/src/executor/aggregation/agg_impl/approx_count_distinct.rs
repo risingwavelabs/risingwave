@@ -222,7 +222,6 @@ impl<const DENSE_BITS: usize> EstimateSize for UpdatableStreamingApproxCountDist
 mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::*;
-    use risingwave_common::array_nonnull;
 
     use super::*;
     use crate::executor::aggregation::agg_impl::StreamingAggImpl;

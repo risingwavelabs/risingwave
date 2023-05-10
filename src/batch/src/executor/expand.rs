@@ -14,7 +14,6 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};

@@ -18,8 +18,7 @@ use either::{for_both, Either};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -186,7 +185,7 @@ impl ProjectSetExecutor {
                     }
 
                     let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-                    let projected_row_id: Column = projected_row_id_builder.finish().into();
+                    let projected_row_id = projected_row_id_builder.finish().into_ref();
                     let cardinality = projected_row_id.len();
                     columns.push(projected_row_id);
                     for builder in builders {
