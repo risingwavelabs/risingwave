@@ -158,13 +158,13 @@ impl StreamNode for StreamDeltaJoin {
         } else {
             unreachable!();
         };
-        let left_table_desc = left_table.table_desc();
+        let left_table_desc = &*left_table.table_desc;
         let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();
         };
-        let right_table_desc = right_table.table_desc();
+        let right_table_desc = &*right_table.table_desc;
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
