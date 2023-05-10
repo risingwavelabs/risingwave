@@ -22,11 +22,10 @@ use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
@@ -148,26 +147,13 @@ impl fmt::Display for LogicalProject {
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let input_col_num = self.input().schema().len();
-        let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
-
-        // Record each InputRef's index.
-        let mut input_ref_collector = CollectInputRef::with_capacity(input_col_num);
-        required_cols.iter().for_each(|i| {
-            if let ExprImpl::InputRef(ref input_ref) = self.exprs()[*i] {
-                let input_idx = input_ref.index;
-                input_required_appeared.put(input_idx);
-            } else {
-                input_ref_collector.visit_expr(&self.exprs()[*i]);
-            }
-        });
-        let input_required_cols = {
-            let mut tmp = FixedBitSet::from(input_ref_collector);
-            tmp.union_with(&input_required_appeared);
-            tmp
-        };
-
-        let input_required_cols = input_required_cols.ones().collect_vec();
+        let input_col_num: usize = self.input().schema().len();
+        let input_required_cols = collect_input_refs(
+            input_col_num,
+            required_cols.iter().map(|i| &self.exprs()[*i]),
+        )
+        .ones()
+        .collect_vec();
         let new_input = self.input().prune_col(&input_required_cols, ctx);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,

@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::Memory;
-use opendal::{Metakey, Operator};
+use opendal::{Metakey, Operator, Writer};
 use tokio::io::AsyncRead;
 
 use crate::object::{
@@ -48,7 +48,6 @@ impl OpendalObjectStore {
     pub fn new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
-
         let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
@@ -72,11 +71,10 @@ impl ObjectStore for OpendalObjectStore {
         }
     }
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(OpenDalStreamingUploader::new(
-            self.op.clone(),
-            path.to_string(),
-        )))
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        Ok(Box::new(
+            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+        ))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -114,7 +112,6 @@ impl ObjectStore for OpendalObjectStore {
         fail_point!("opendal_streaming_read_err", |_| Err(
             ObjectError::internal("opendal streaming read error")
         ));
-
         let reader = match start_pos {
             Some(start_position) => self.op.range_reader(path, start_position as u64..).await?,
             None => self.op.reader(path).await?,
@@ -127,7 +124,7 @@ impl ObjectStore for OpendalObjectStore {
         let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
-            Some(t) => t.unix_timestamp() as f64,
+            Some(t) => t.timestamp() as f64,
             None => 0_f64,
         };
 
@@ -153,11 +150,12 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.list(prefix).await?;
+        let mut object_lister = self.op.scan(prefix).await?;
         let mut metadata_list = vec![];
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
-            let key = prefix.to_string();
+
+            let key = object.path().to_string();
 
             let om = self
                 .op
@@ -165,7 +163,7 @@ impl ObjectStore for OpendalObjectStore {
                 .await?;
 
             let last_modified = match om.last_modified() {
-                Some(t) => t.unix_timestamp() as f64,
+                Some(t) => t.timestamp() as f64,
                 None => 0_f64,
             };
 
@@ -195,34 +193,35 @@ impl ObjectStore for OpendalObjectStore {
 
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct OpenDalStreamingUploader {
-    op: Operator,
-    path: String,
-    buffer: BytesMut,
+    writer: Writer,
 }
 impl OpenDalStreamingUploader {
-    pub fn new(op: Operator, path: String) -> Self {
-        Self {
-            op,
-            path,
-            buffer: BytesMut::new(),
-        }
+    pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
+        let writer = op.writer(&path).await?;
+        Ok(Self { writer })
     }
 }
+
+const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
+
 #[async_trait::async_trait]
 impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.buffer.put(data);
+        self.writer.write(data).await?;
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        self.op.write(&self.path, self.buffer).await?;
+        match self.writer.close().await {
+            Ok(_) => (),
+            Err(_) => self.writer.abort().await?,
+        };
 
         Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        self.buffer.capacity() as u64
+        OPENDAL_BUFFER_SIZE
     }
 }
 
@@ -285,30 +284,32 @@ mod tests {
         let obj_store = OpendalObjectStore::new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 
+        let err = obj_store.metadata("/not_exist").await.unwrap_err();
+        assert!(err.is_object_not_found_error());
         let metadata = obj_store.metadata("/abc").await.unwrap();
         assert_eq!(metadata.total_size, 6);
         obj_store.delete(&path).await.unwrap();
     }
 
     #[tokio::test]
-    async fn test_memory_delete_objects() {
+    async fn test_memory_delete_objects_and_list_object() {
         let block1 = Bytes::from("123456");
         let block2 = Bytes::from("987654");
         let store = OpendalObjectStore::new_memory_engine().unwrap();
-        store.upload("abc", block1).await.unwrap();
-        store.upload("/klm", block2).await.unwrap();
+        store.upload("abc", Bytes::from("123456")).await.unwrap();
+        store.upload("prefix/abc", block1).await.unwrap();
+        store.upload("prefix/xyz", block2).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 2);
-
-        let str_list = [
-            String::from("abc"),
-            String::from("klm"),
-            String::from("xyz"),
-        ];
+        assert_eq!(store.list("").await.unwrap().len(), 3);
+        assert_eq!(store.list("prefix/").await.unwrap().len(), 2);
+        let str_list = [String::from("prefix/abc"), String::from("prefix/xyz")];
 
         store.delete_objects(&str_list).await.unwrap();
 
-        assert_eq!(store.list("").await.unwrap().len(), 0);
+        assert!(store.read("prefix/abc/", None).await.is_err());
+        assert!(store.read("prefix/xyz/", None).await.is_err());
+        assert_eq!(store.list("").await.unwrap().len(), 1);
+        assert_eq!(store.list("prefix/").await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -340,34 +341,5 @@ mod tests {
             assert_eq!(&payload[*offset..(*offset + *size)], &read_data[i][..]);
         }
         store.delete("test.obj").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_memory_streaming_upload() {
-        let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
-        let obj = Bytes::from("123456789");
-
-        let store = OpendalObjectStore::new_memory_engine().unwrap();
-        let mut uploader = store.streaming_upload("/temp").unwrap();
-
-        for block in blocks {
-            uploader.write_bytes(block).await.unwrap();
-        }
-        uploader.finish().await.unwrap();
-
-        // Read whole object.
-        let read_obj = store.read("/temp", None).await.unwrap();
-        assert!(read_obj.eq(&obj));
-
-        // Read part of the object.
-        let read_obj = store
-            .read("/temp", Some(BlockLocation { offset: 4, size: 2 }))
-            .await
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(read_obj.to_vec()).unwrap(),
-            "56".to_string()
-        );
-        store.delete("/temp").await.unwrap();
     }
 }

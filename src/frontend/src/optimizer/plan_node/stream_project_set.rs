@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
+use super::stream::StreamPlanRef;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -53,6 +54,7 @@ impl StreamProjectSet {
             &logical,
             distribution,
             input.append_only(),
+            input.emit_on_window_close(),
             watermark_columns,
         );
         StreamProjectSet { base, logical }

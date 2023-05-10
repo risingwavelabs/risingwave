@@ -25,7 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::top_n_cache::CacheKey;
