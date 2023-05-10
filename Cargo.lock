@@ -5593,7 +5593,7 @@ name = "risedev-config"
 version = "1.0.0-alpha"
 dependencies = [
  "anyhow",
- "clap 4.1.11",
+ "clap 4.2.7",
  "console",
  "dialoguer",
  "enum-iterator",
