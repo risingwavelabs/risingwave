@@ -26,7 +26,9 @@ use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvide
 use risingwave_pb::catalog::{connection, PbConnection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
+use crate::session::SessionImpl;
 use crate::user::UserId;
+use crate::WithOptions;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConnectionCatalog {

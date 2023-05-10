@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -34,8 +34,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
 
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::catalog::connection_catalog::resolve_private_link_connection;
+use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
+use crate::WithOptions;
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -212,6 +214,13 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     };
 
     connector == KAFKA_CONNECTOR
+}
+
+#[inline(always)]
+pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
+    with_properties
+        .get(CONNECTION_NAME_KEY)
+        .map(|s| s.to_lowercase())
 }
 
 #[cfg(test)]
