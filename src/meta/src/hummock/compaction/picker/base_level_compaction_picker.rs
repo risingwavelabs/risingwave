@@ -17,9 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
@@ -83,8 +81,9 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-            self.config.sub_level_max_compaction_bytes,
+            min_compaction_bytes,
             self.config.max_compaction_bytes,
             self.config.level0_sub_level_compact_level_count as usize,
             // The maximum number of sub_level compact level per task
@@ -101,61 +100,55 @@ impl LevelCompactionPicker {
         let mut skip_by_pending = false;
         let mut skip_by_write_amp = false;
         let mut skip_by_count = false;
-        let (mut level_select_files, mut target_level_files): (
-            Vec<Vec<SstableInfo>>,
-            Vec<SstableInfo>,
-        ) = (vec![], vec![]);
+        let mut input_levels = vec![];
+        for input in l0_select_tables_vec {
+            let l0_select_tables = input
+                .sstable_infos
+                .iter()
+                .flat_map(|select_tables| select_tables.clone())
+                .collect_vec();
 
-        {
-            for input in l0_select_tables_vec {
-                let l0_select_tables = input
-                    .sstable_infos
-                    .iter()
-                    .flat_map(|select_tables| select_tables.clone())
-                    .collect_vec();
+            let target_level_ssts = overlap_strategy
+                .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
 
-                let target_level_ssts = overlap_strategy
-                    .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
-
-                let mut target_level_size = 0;
-                let mut pending_compact = false;
-                for sst in &target_level_ssts {
-                    if level_handlers[target_level.level_idx as usize]
-                        .is_pending_compact(&sst.sst_id)
-                    {
-                        pending_compact = true;
-                        break;
-                    }
-
-                    target_level_size += sst.file_size;
+            let mut target_level_size = 0;
+            let mut pending_compact = false;
+            for sst in &target_level_ssts {
+                if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id) {
+                    pending_compact = true;
+                    break;
                 }
 
-                if pending_compact {
-                    skip_by_pending = true;
-                    continue;
-                }
-
-                if !target_level_ssts.is_empty()
-                    && input.sstable_infos.len()
-                        < self.config.level0_sub_level_compact_level_count as usize
-                {
-                    // not trivial move
-                    skip_by_count = true;
-                    continue;
-                }
-
-                if input.total_file_size < target_level_size {
-                    skip_by_write_amp = true;
-                    continue;
-                }
-
-                level_select_files = input.sstable_infos;
-                target_level_files = target_level_ssts;
-                break;
+                target_level_size += sst.file_size;
             }
-        };
 
-        if level_select_files.is_empty() && target_level_files.is_empty() {
+            if pending_compact {
+                skip_by_pending = true;
+                continue;
+            }
+
+            if !target_level_ssts.is_empty()
+                && input.sstable_infos.len()
+                    < self.config.level0_sub_level_compact_level_count as usize
+                && input.total_file_size < min_compaction_bytes
+            {
+                // not trivial move
+                skip_by_count = true;
+                continue;
+            }
+
+            if !target_level_ssts.is_empty()
+                && input.total_file_size < self.config.max_bytes_for_level_base
+                && input.total_file_size < target_level_size
+            {
+                skip_by_write_amp = true;
+                continue;
+            }
+
+            input_levels.push((input, target_level_size, target_level_ssts));
+        }
+
+        if input_levels.is_empty() {
             if skip_by_pending {
                 stats.skip_by_pending_files += 1;
             }
@@ -167,35 +160,48 @@ impl LevelCompactionPicker {
             if skip_by_count {
                 stats.skip_by_count_limit += 1;
             }
-
             return None;
         }
 
-        let mut select_level_inputs = Vec::with_capacity(level_select_files.len() + 1);
-        for select_tables in level_select_files {
-            if select_tables.is_empty() {
+        let mb_size = 1024 * 1024;
+        let (min_write_amp_input, target_level_size, _) = input_levels
+            .iter()
+            .min_by(
+                |(input, target_level_size, _), (input2, target_level_size2, _)| {
+                    let score1 = *target_level_size / mb_size * (input2.total_file_size / mb_size);
+                    let score2 = *target_level_size2 / mb_size * (input.total_file_size / mb_size);
+                    score1.cmp(&score2)
+                },
+            )
+            .unwrap();
+        let min_write_amp_meet = min_write_amp_input.total_file_size >= *target_level_size;
+        for (input, target_file_size, target_level_files) in input_levels {
+            if min_write_amp_meet && input.total_file_size < target_file_size {
                 continue;
             }
 
+            let mut select_level_inputs = input
+                .sstable_infos
+                .into_iter()
+                .map(|table_infos| InputLevel {
+                    level_idx: 0,
+                    level_type: LevelType::Nonoverlapping as i32,
+                    table_infos,
+                })
+                .collect_vec();
+            select_level_inputs.reverse();
             select_level_inputs.push(InputLevel {
-                level_idx: 0,
-                level_type: LevelType::Nonoverlapping as i32,
-                table_infos: select_tables,
+                level_idx: target_level.level_idx,
+                level_type: target_level.level_type,
+                table_infos: target_level_files,
+            });
+            return Some(CompactionInput {
+                input_levels: select_level_inputs,
+                target_level: self.target_level,
+                target_sub_level_id: 0,
             });
         }
-
-        select_level_inputs.reverse();
-        select_level_inputs.push(InputLevel {
-            level_idx: target_level.level_idx,
-            level_type: target_level.level_type,
-            table_infos: target_level_files,
-        });
-
-        Some(CompactionInput {
-            input_levels: select_level_inputs,
-            target_level: self.target_level,
-            target_sub_level_id: 0,
-        })
+        None
     }
 }
 
@@ -483,7 +489,7 @@ pub mod tests {
             .max_compaction_bytes(1000)
             .sub_level_max_compaction_bytes(150)
             .max_bytes_for_level_multiplier(1)
-            .level0_sub_level_compact_level_count(1)
+            .level0_sub_level_compact_level_count(2)
             .build();
         let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
 
@@ -635,16 +641,15 @@ pub mod tests {
         let config = Arc::new(
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
-                .level0_sub_level_compact_level_count(1)
+                .level0_sub_level_compact_level_count(2)
                 .build(),
         );
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
         let mut picker = LevelCompactionPicker::new(1, config.clone());
-        assert!(picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .is_none());
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
 
         // Free the pending sub-level.
         for pending_task_id in &levels_handler[0].pending_tasks_ids() {

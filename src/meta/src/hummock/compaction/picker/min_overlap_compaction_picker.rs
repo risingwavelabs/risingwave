@@ -15,7 +15,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -210,7 +209,7 @@ impl NonOverlapSubLevelPicker {
                 continue;
             }
             let mut pending_compact = false;
-            let mut all_file_size = 0;
+            let mut add_files_size = 0;
             for other in &overlap_files {
                 if level_handler.is_pending_compact(&other.sst_id) {
                     pending_compact = true;
@@ -218,7 +217,7 @@ impl NonOverlapSubLevelPicker {
                 }
                 overlap_info.update(other);
                 select_sst_id_set.insert(other.sst_id);
-                all_file_size += other.file_size;
+                add_files_size += other.file_size;
             }
 
             if pending_compact {
@@ -236,17 +235,18 @@ impl NonOverlapSubLevelPicker {
                 let overlap_files = overlap_info.check_multiple_overlap(target_tables);
                 let mut extra_overlap_sst = Vec::with_capacity(overlap_files.len());
                 for other in overlap_files {
-                    if level_handler.is_pending_compact(&other.sst_id) {
-                        pending_compact = true;
-                        break;
-                    }
                     if select_sst_id_set.contains(&other.sst_id) {
                         // Since some of the files have already been selected when selecting
                         // upwards, we filter here to avoid adding sst repeatedly
                         continue;
                     }
 
-                    all_file_size += other.file_size;
+                    if level_handler.is_pending_compact(&other.sst_id) {
+                        pending_compact = true;
+                        break;
+                    }
+
+                    add_files_size += other.file_size;
                     overlap_info.update(&other);
                     select_sst_id_set.insert(other.sst_id);
                     extra_overlap_sst.push(other);
@@ -267,6 +267,12 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            let add_files_count = overlap_files.len()
+                + extra_overlap_levels
+                    .iter()
+                    .map(|(_, files)| files.len())
+                    .sum::<usize>();
+
             if ret
                 .sstable_infos
                 .iter()
@@ -274,16 +280,16 @@ impl NonOverlapSubLevelPicker {
                 .count()
                 > self.min_depth
                 && ret.total_file_size > self.min_compaction_bytes
-                && !extra_overlap_levels.is_empty()
+                && (ret.total_file_size + add_files_size > self.max_compaction_bytes
+                    || ret.total_file_count + add_files_count > self.max_file_count as usize)
             {
                 break;
             }
 
-            ret.total_file_count += overlap_files.len();
-            ret.total_file_size += all_file_size;
+            ret.total_file_count += add_files_count;
+            ret.total_file_size += add_files_size;
             ret.sstable_infos[target_index].extend(overlap_files);
             for (reverse_index, files) in extra_overlap_levels {
-                ret.total_file_count += files.len();
                 ret.sstable_infos[reverse_index].extend(files);
             }
         }
@@ -320,11 +326,6 @@ impl NonOverlapSubLevelPicker {
             ret.sstable_infos[0].extend(vec![sst.clone()]);
             self.pick_sub_level(l0, level_handler, &mut ret);
             ret.sstable_infos.retain(|ssts| !ssts.is_empty());
-            if ret.sstable_infos.len() < self.min_depth
-                && ret.total_file_size < self.min_compaction_bytes
-            {
-                continue;
-            }
             scores.push(ret);
         }
 
