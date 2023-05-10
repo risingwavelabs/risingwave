@@ -291,10 +291,10 @@ impl AvroParser {
 mod test {
     use std::collections::HashMap;
     use std::env;
-    use std::fs::{File, OpenOptions};
+    use std::fs::OpenOptions;
     use std::io::Write;
     use std::ops::Sub;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
@@ -303,7 +303,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, ScalarRef};
+    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
     use serde::__private::from_utf8_lossy;
     use url::Url;
 
@@ -656,7 +656,7 @@ mod test {
             .truncate(true)
             .open(e2e_file_path("avro_bin.1"))
             .unwrap();
-        file.write(encoded.as_slice()).unwrap();
+        file.write_all(encoded.as_slice()).unwrap();
         println!("encoded = {:?}", from_utf8_lossy(encoded.as_slice()));
     }
 }
