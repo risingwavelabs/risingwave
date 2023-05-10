@@ -479,7 +479,6 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
     use risingwave_common::types::F64;
-    use risingwave_common::{array, array_nonnull};
     use test::Bencher;
 
     use super::*;
@@ -502,7 +501,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -510,7 +509,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -522,7 +521,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -530,7 +529,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -578,7 +577,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([10, 1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-7);
@@ -586,7 +585,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-8);
@@ -603,7 +602,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
+            &[&I64Array::from_iter([1, 2, 1, 2]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -611,7 +610,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![false, true, false, true]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);

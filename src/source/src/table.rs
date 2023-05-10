@@ -169,7 +169,6 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -191,7 +190,7 @@ mod tests {
                 let source = source.clone();
                 let chunk = StreamChunk::new(
                     vec![Op::Insert],
-                    vec![column_nonnull!(I64Array, [$i])],
+                    vec![I64Array::from_iter([$i]).into_ref()],
                     None,
                 );
                 source.write_chunk_ready(chunk).unwrap();

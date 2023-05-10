@@ -31,7 +31,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -339,8 +338,8 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { SerialArray, [ col_row_ids[0]] }, // row id column
-        column_nonnull! { F64Array, [1.14] },
+        SerialArray::from_iter([col_row_ids[0]]).into_ref(), // row id column
+        F64Array::from_iter([1.14]).into_ref(),
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
