@@ -47,8 +47,8 @@ mod apply_filter_transpose_rule;
 pub use apply_filter_transpose_rule::*;
 mod apply_project_transpose_rule;
 pub use apply_project_transpose_rule::*;
-mod apply_scan_rule;
-pub use apply_scan_rule::*;
+mod apply_eliminate_rule;
+pub use apply_eliminate_rule::*;
 mod translate_apply_rule;
 pub use translate_apply_rule::*;
 mod merge_multijoin_rule;
@@ -115,7 +115,7 @@ macro_rules! for_all_rules {
               { ApplyAggTransposeRule }
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
-            , { ApplyScanRule }
+            , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
             , { ApplyShareEliminateRule }
             , { ApplyToJoinRule }
