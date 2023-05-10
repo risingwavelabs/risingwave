@@ -115,9 +115,10 @@ message ExprNode {
     COSD = 254;
     COTD = 255;
     TAND = 256;
-    SQRT = 257;
-    DEGREES = 258;
-    RADIANS = 259;
+    ASIND = 257;
+    SQRT = 258;
+    DEGREES = 259;
+    RADIANS = 260;
 
     // Boolean comparison
     IS_TRUE = 301;
