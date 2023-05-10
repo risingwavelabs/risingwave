@@ -153,14 +153,11 @@ impl LevelCompactionPicker {
 
                 // FIXME: Adjust the parameters passed to NonOverlapSubLevelPicker #9699
                 let waiting_enough_files = {
-                    if target_level_size + total_select_size > self.config.max_compaction_bytes {
-                        false
-                    } else if l0_select_tables.len() + target_level_ssts.len()
-                        > self.config.level0_max_compact_file_number as usize
-                    {
+                    if total_select_size > self.config.max_compaction_bytes {
                         false
                     } else {
-                        true
+                        l0_select_tables.len()
+                            <= self.config.level0_max_compact_file_number as usize
                     }
                 };
 
