@@ -323,7 +323,6 @@ pub fn radians_f64(input: F64) -> F64 {
 mod tests {
     use std::f64::consts::PI;
 
-    use num_traits::ToPrimitive;
     use risingwave_common::types::{FloatExt, F64};
 
     use crate::vector_op::trigonometric::*;
@@ -334,7 +333,7 @@ mod tests {
 
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = (lhs.0 - rhs.0).abs() <= precision().into();
+        let x = (lhs.0 - rhs.0).abs() <= precision();
         assert!(
             x,
             "{:?} != {:?}. Required precision is {:?}",
