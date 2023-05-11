@@ -220,14 +220,17 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
+    // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+    // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+    // 2. should be after merge the multiple projects
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
         "Convert Window Function",
         vec![
-            OverWindowToTopNRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -424,10 +427,8 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
-        // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
-        // 2. should be after merge the multiple projects
-        plan = plan.optimize_by_rules_until_fix_point(&CONVERT_WINDOW_AGG);
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
@@ -488,10 +489,8 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
-        // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
-        // 2. should be after merge the multiple projects
-        plan = plan.optimize_by_rules_until_fix_point(&CONVERT_WINDOW_AGG);
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
