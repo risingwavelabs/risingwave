@@ -223,7 +223,7 @@ macro_rules! impl_common_parser_logic {
                                             "_rw_kafka_timestamp" => Some(
                                                 kafka_meta
                                                     .timestamp
-                                                    .map(|ts| risingwave_expr::vector_op::cast::i64_to_timestamptz(ts).unwrap().into()),
+                                                    .map(|ts| risingwave_common::cast::i64_to_timestamptz(ts).unwrap().into()),
                                             ),
                                             _ => unreachable!(
                                                 "kafka will not have this meta column: {}",

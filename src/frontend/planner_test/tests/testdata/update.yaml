@@ -86,3 +86,14 @@
     create table t (v1 int primary key, v2 int);
     update t set (v2, v1) = (v1, v2);
   binder_error: 'Bind error: update modifying the PK column is banned'
+- sql: |
+    create table t (v1 int default 1+1, v2 int);
+    update t set v1 = default;
+  logical_plan: |
+    LogicalUpdate { table: t, exprs: [(1:Int32 + 1:Int32), $1, $2] }
+    └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchUpdate { table: t, exprs: [2:Int32, $1, $2] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }

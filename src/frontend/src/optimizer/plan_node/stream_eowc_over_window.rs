@@ -22,6 +22,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanWindowFunction};
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -37,6 +38,7 @@ impl StreamEowcOverWindow {
 
         let input = &logical.input;
         assert!(input.append_only());
+        assert!(input.emit_on_window_close());
 
         // Should order by a single watermark column.
         let order_key = &logical.window_functions[0].order_by;
@@ -53,6 +55,7 @@ impl StreamEowcOverWindow {
         let base = PlanBase::new_stream_with_logical(
             &logical,
             input.distribution().clone(),
+            true,
             true,
             watermark_columns,
         );
