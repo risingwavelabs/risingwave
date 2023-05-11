@@ -68,3 +68,8 @@ echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile
 
 echo "--- Show sccache stats"
 sccache --show-stats
+
+echo "--- Hello"
+echo "Hello, world!"
+
+exit 0
