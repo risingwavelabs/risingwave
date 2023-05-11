@@ -739,6 +739,9 @@ impl S3ObjectStore {
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
+                tracing::warn!(
+                    "The limitation of maximum HTTP connections is triggered, trying to retry S3 get_object request. The max retry times is 10.",
+                );
                 return true;
             }
         }
