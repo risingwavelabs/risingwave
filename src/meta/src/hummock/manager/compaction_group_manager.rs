@@ -278,7 +278,8 @@ impl<S: MetaStore> HummockManager<S> {
             build_version_delta_after_version(current_version),
         );
 
-        let mut modified_groups: HashMap<CompactionGroupId, Vec<u32>> = HashMap::new();
+        let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
+            HashMap::new();
         // Remove member tables
         for table_id in table_ids.iter().unique() {
             let group_id = match try_get_compaction_group_id_by_table_id(current_version, *table_id)
@@ -286,67 +287,58 @@ impl<S: MetaStore> HummockManager<S> {
                 Some(group_id) => group_id,
                 None => continue,
             };
-            modified_groups
-                .entry(group_id)
-                .or_insert_with(Vec::new)
-                .push(*table_id);
-        }
-
-        // Remove empty group, GC SSTs and remove metric.
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
-        let mut dirty_groups = vec![];
-        let mut groups_to_remove = vec![];
-        for (group_id, mut removed_table_ids) in modified_groups {
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(group_id)
                 .or_default()
                 .group_deltas;
-            removed_table_ids.sort();
             group_deltas.push(GroupDelta {
                 delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                    table_ids_remove: removed_table_ids.clone(),
+                    table_ids_remove: vec![*table_id],
                     ..Default::default()
                 })),
             });
-            if let Some(group) = versioning.current_version.levels.get(&group_id) {
-                let mut origin_table_ids = group.member_table_ids.clone();
-                origin_table_ids.sort();
-                let mut dropped_sstables = vec![];
-                if group_id > StaticCompactionGroupId::End as CompactionGroupId
-                    && origin_table_ids.eq(&removed_table_ids)
+            modified_groups
+                .entry(group_id)
+                .and_modify(|count| *count -= 1)
+                .or_insert(
+                    current_version
+                        .get_compaction_group_levels(group_id)
+                        .member_table_ids
+                        .len() as u64
+                        - 1,
+                );
+        }
+
+        // Remove empty group, GC SSTs and remove metric.
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let groups_to_remove = modified_groups
+            .into_iter()
+            .filter_map(|(group_id, member_count)| {
+                if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
                 {
-                    // We don't bother to add IntraLevelDelta to remove SSTs from group, because the
-                    // entire group is to be removed.
-                    // However, we need to take care of SST GC for the removed group.
-                    groups_to_remove.push(group_id);
-                    for (object_id, sst_id) in get_compaction_group_ssts(current_version, group_id)
-                    {
-                        if drop_sst(&mut branched_ssts, group_id, object_id, sst_id) {
-                            new_version_delta.gc_object_ids.push(object_id);
-                        }
-                    }
-                    let group_deltas = &mut new_version_delta
-                        .group_deltas
-                        .entry(group_id)
-                        .or_default()
-                        .group_deltas;
-                    group_deltas.push(GroupDelta {
-                        delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
-                    });
-                } else {
-                    let ssts = versioning
-                        .current_version
-                        .collect_dropped_sstable_infos(group_id, removed_table_ids);
-                    for (object_id, sst_id) in ssts {
-                        if drop_sst(&mut branched_ssts, group_id, object_id, sst_id) {
-                            new_version_delta.gc_object_ids.push(object_id);
-                        }
-                        dropped_sstables.push(sst_id);
-                    }
-                    dirty_groups.push((group_id, dropped_sstables));
+                    return Some(group_id);
+                }
+                None
+            })
+            .collect_vec();
+        for group_id in &groups_to_remove {
+            // We don't bother to add IntraLevelDelta to remove SSTs from group, because the entire
+            // group is to be removed.
+            // However, we need to take care of SST GC for the removed group.
+            for (object_id, sst_id) in get_compaction_group_ssts(current_version, *group_id) {
+                if drop_sst(&mut branched_ssts, *group_id, object_id, sst_id) {
+                    new_version_delta.gc_object_ids.push(object_id);
                 }
             }
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(*group_id)
+                .or_default()
+                .group_deltas;
+            group_deltas.push(GroupDelta {
+                delta_type: Some(DeltaType::GroupDestroy(GroupDestroy {})),
+            });
         }
 
         let mut trx = Transaction::default();
@@ -571,6 +563,17 @@ impl<S: MetaStore> HummockManager<S> {
                 );
 
                 new_group = Some((new_compaction_group_id, config));
+                new_version_delta.group_deltas.insert(
+                    parent_group_id,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                                table_ids_remove: table_ids.to_vec(),
+                                ..Default::default()
+                            })),
+                        }],
+                    },
+                );
                 new_compaction_group_id
             }
         };
