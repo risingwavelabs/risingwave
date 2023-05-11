@@ -280,15 +280,19 @@ pub fn tand_f64(input: F64) -> F64 {
 // degrees respectively).
 pub fn asind_q1(x: f64) -> f64 {
     // Stitch together inverse sine and cosine functions for the ranges [0,
-    // 0.5] and (0.5, 1].  Each expression below is guaranteed to return
+    // 0.5] and (0.5, 1]. Each expression below is guaranteed to return
     // exactly 30 for x=0.5, so the result is a continuous monotonic function
     // over the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
-        return (asin_x / ASIN_0_5) * 30.0;
+        return if asin_x == 0.0 {
+            0.0
+        } else {
+            (asin_x / ASIN_0_5) * 30.0
+        };
     }
 
-    let acos_x = f64::acos(x);
+    let acos_x = f64::acos(x.to_degrees());
     return 90.0 - (acos_x / ASIN_0_5) * 60.0;
 }
 
