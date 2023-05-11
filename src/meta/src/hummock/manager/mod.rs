@@ -1269,16 +1269,26 @@ where
                 "report pending compaction task"
             );
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
-                // if member_table_ids changes, the data of sstable may stale.
+                let member_table_ids: HashSet<u32> = HashSet::from_iter(
+                    current_version
+                        .levels
+                        .get(&compact_task.compaction_group_id)
+                        .unwrap()
+                        .member_table_ids
+                        .clone(),
+                );
+                let is_state_table_stale = compact_task
+                    .input_ssts
+                    .iter()
+                    .flat_map(|level| level.table_infos.iter())
+                    .flat_map(|sst| sst.table_ids.iter())
+                    .any(|table_id| !member_table_ids.contains(table_id));
                 let is_expired =
                     Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
-                if is_expired {
+                if is_expired || is_state_table_stale {
                     compact_task.set_task_status(TaskStatus::InputOutdatedCanceled);
                     false
                 } else {
-                    assert!(current_version
-                        .levels
-                        .contains_key(&compact_task.compaction_group_id));
                     true
                 }
             } else {
