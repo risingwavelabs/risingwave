@@ -1277,12 +1277,17 @@ where
                         .member_table_ids
                         .clone(),
                 );
+                let last_existing_table_ids: HashSet<u32> =
+                    HashSet::from_iter(compact_task.existing_table_ids.clone());
                 let is_state_table_stale = compact_task
                     .input_ssts
                     .iter()
                     .flat_map(|level| level.table_infos.iter())
                     .flat_map(|sst| sst.table_ids.iter())
-                    .any(|table_id| !member_table_ids.contains(table_id));
+                    .any(|table_id| {
+                        last_existing_table_ids.contains(table_id)
+                            && !member_table_ids.contains(table_id)
+                    });
                 let is_expired =
                     Self::is_compact_task_expired(compact_task, &versioning.branched_ssts);
                 if is_expired || is_state_table_stale {
