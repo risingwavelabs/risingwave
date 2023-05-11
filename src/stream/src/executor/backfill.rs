@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
-use std::thread::current;
 
 use await_tree::InstrumentAwait;
 use either::Either;
