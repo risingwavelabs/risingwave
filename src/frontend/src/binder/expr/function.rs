@@ -399,6 +399,7 @@ impl Binder {
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sign", raw_call(ExprType::Sign)),
                 ("sin", raw_call(ExprType::Sin)),
                 ("cos", raw_call(ExprType::Cos)),
                 ("tan", raw_call(ExprType::Tan)),

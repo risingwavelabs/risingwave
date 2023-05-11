@@ -405,6 +405,15 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
     }
 }
 
+#[function("sign(int16) -> int16")]
+#[function("sign(int32) -> int32")]
+#[function("sign(int64) -> int64")]
+#[function("sign(float32) -> float32")]
+#[function("sign(float64) -> float64")]
+pub fn general_sign<T: Signed>(expr:T) -> Result<T> {
+    Ok(expr.signum())
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

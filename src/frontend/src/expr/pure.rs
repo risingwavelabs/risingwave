@@ -111,6 +111,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ToAscii
             | expr_node::Type::ToHex
             | expr_node::Type::QuoteIdent
+            | expr_node::Type::Sign
             | expr_node::Type::Sin
             | expr_node::Type::Cos
             | expr_node::Type::Tan
