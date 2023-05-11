@@ -16,11 +16,11 @@ class UserDefinedFunction:
     _input_schema: pa.Schema
     _result_schema: pa.Schema
 
-    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+    def eval_batch(self, batch: pa.RecordBatch) -> Iterator[pa.RecordBatch]:
         """
         Apply the function on a batch of inputs.
         """
-        pass
+        return iter([])
 
 
 class ScalarFunction(UserDefinedFunction):
@@ -35,7 +35,7 @@ class ScalarFunction(UserDefinedFunction):
         """
         pass
 
-    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+    def eval_batch(self, batch: pa.RecordBatch) -> Iterator[pa.RecordBatch]:
         # parse value from json string for jsonb columns
         inputs = [[v.as_py() for v in array] for array in batch]
         inputs = [
@@ -50,7 +50,7 @@ class ScalarFunction(UserDefinedFunction):
         if self._result_schema.types[0] == pa.large_string():
             column = [(json.dumps(v) if v is not None else None) for v in column]
         array = pa.array(column, type=self._result_schema.types[0])
-        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
+        yield pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 def _process_input_array(array: list, type: pa.DataType) -> list:
@@ -67,8 +67,10 @@ def _process_input_array(array: list, type: pa.DataType) -> list:
 class TableFunction(UserDefinedFunction):
     """
     Base interface for user-defined table function. A user-defined table functions maps zero, one,
-    or multiple table values to a new table value.
+    or multiple scalar values to a new table value.
     """
+
+    BATCH_SIZE = 1024
 
     def eval(self, *args) -> Iterator:
         """
@@ -76,16 +78,51 @@ class TableFunction(UserDefinedFunction):
         """
         yield
 
-    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        result_rows = []
+    def eval_batch(self, batch: pa.RecordBatch) -> Iterator[pa.RecordBatch]:
+        class RecordBatchBuilder:
+            """A utility class for constructing Arrow RecordBatch by row."""
+
+            schema: pa.Schema
+            columns: List[List]
+
+            def __init__(self, schema: pa.Schema):
+                self.schema = schema
+                self.columns = [[] for _ in self.schema.types]
+
+            def len(self) -> int:
+                """Returns the number of rows in the RecordBatch being built."""
+                return len(self.columns[0])
+
+            def append(self, index: int, args: Tuple):
+                """Appends a new row to the RecordBatch being built."""
+                self.columns[0].append(index)
+                for column, val in zip(self.columns[1:], args):
+                    column.append(val)
+
+            def build(self) -> pa.RecordBatch:
+                """Builds the RecordBatch from the accumulated data and clears the state."""
+                # Convert the columns to arrow arrays
+                arrays = [
+                    pa.array(col, type)
+                    for col, type in zip(self.columns, self.schema.types)
+                ]
+                # Reset columns
+                self.columns = [[] for _ in self.schema.types]
+                return pa.RecordBatch.from_arrays(arrays, schema=self.schema)
+
+        builder = RecordBatchBuilder(self._result_schema)
+
         # Iterate through rows in the input RecordBatch
         for row_index in range(batch.num_rows):
             row = tuple(column[row_index].as_py() for column in batch)
-            result_rows.append(list(self.eval(*row)))
-
-        # Convert the result columns to arrow arrays
-        array = pa.array(result_rows, self._result_schema.types[0])
-        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
+            for result_row in self.eval(*row):
+                if not isinstance(result_row, tuple):
+                    result_row = (result_row,)
+                builder.append(row_index, result_row)
+                if builder.len() == self.BATCH_SIZE:
+                    yield builder.build()
+        if builder.len() != 0:
+            yield builder.build()
 
 
 class UserDefinedScalarFunctionWrapper(ScalarFunction):
@@ -130,13 +167,10 @@ class UserDefinedTableFunctionWrapper(TableFunction):
                 [_to_data_type(t) for t in _to_list(input_types)],
             )
         )
-        result_types = _to_list(result_types)
-        result_type = pa.list_(
-            _to_data_type(result_types[0])
-            if len(result_types) == 1
-            else pa.struct([pa.field("", _to_data_type(t)) for t in result_types])
+        self._result_schema = pa.schema(
+            [("row_index", pa.int64())]
+            + [("", _to_data_type(t)) for t in _to_list(result_types)]
         )
-        self._result_schema = pa.schema([("", result_type)])
         self._name = name or (
             func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
         )
@@ -221,10 +255,12 @@ class UdfServer(pa.flight.FlightServerBase):
     # UDF server based on Apache Arrow Flight protocol.
     # Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
 
+    _location: str
     _functions: Dict[str, UserDefinedFunction]
 
     def __init__(self, location="0.0.0.0:8815", **kwargs):
         super(UdfServer, self).__init__("grpc://" + location, **kwargs)
+        self._location = location
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
@@ -253,17 +289,18 @@ class UdfServer(pa.flight.FlightServerBase):
         """Call a function from the client."""
         udf = self._functions[descriptor.path[0].decode("utf-8")]
         writer.begin(udf._result_schema)
-        for chunk in reader:
-            # print(pa.Table.from_batches([chunk.data]))
-            try:
-                result = udf.eval_batch(chunk.data)
-            except Exception as e:
-                print(traceback.print_exc())
-                raise e
-            writer.write_batch(result)
+        try:
+            for batch in reader:
+                # print(pa.Table.from_batches([batch.data]))
+                for output_batch in udf.eval_batch(batch.data):
+                    writer.write_batch(output_batch)
+        except Exception as e:
+            print(traceback.print_exc())
+            raise e
 
     def serve(self):
         """Start the server."""
+        print(f"listening on {self._location}")
         super(UdfServer, self).serve()
 
 

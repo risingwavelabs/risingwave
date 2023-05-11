@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use risingwave_common::array::{ArrayImpl, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -53,10 +53,8 @@ impl TableFunctionExecutor {
         #[for_await]
         for chunk in self.table_function.eval(&dummy_chunk).await {
             let chunk = chunk?;
-            yield match chunk.column_at(1).array_ref() {
-                ArrayImpl::Struct(s) => DataChunk::from(s),
-                _ => chunk.reorder_columns(&[1]),
-            };
+            // remove the first column
+            yield chunk.split_column_at(1).1;
         }
     }
 }

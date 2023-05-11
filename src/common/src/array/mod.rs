@@ -643,6 +643,13 @@ macro_rules! impl_array {
                     $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
                 }
             }
+
+            /// Returns the `DataType` of this array.
+            pub fn data_type(&self) -> DataType {
+                match self {
+                    $( Self::$variant_name(inner) => inner.data_type(), )*
+                }
+            }
         }
     }
 }

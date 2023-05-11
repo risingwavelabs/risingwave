@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder, StructArray,
 };
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -113,7 +115,7 @@ impl ProjectSetSelectItem {
     ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
         match self {
             Self::TableFunction(tf) => Ok(Either::Left(
-                TableFunctionOutputIter::new(tf.eval(input).await).await?,
+                TableFunctionOutputIter::new(tf.return_type(), tf.eval(input).await).await?,
             )),
             Self::Expr(expr) => expr.eval(input).await.map(Either::Right),
         }
@@ -122,43 +124,61 @@ impl ProjectSetSelectItem {
 
 /// A wrapper over the output of table function that allows iteration by rows.
 pub struct TableFunctionOutputIter<'a> {
+    data_type: DataType,
     stream: BoxStream<'a, Result<DataChunk>>,
-    chunk: Option<DataChunk>,
+    chunk: Option<(ArrayRef, ArrayRef)>,
     index: usize,
 }
 
 impl<'a> TableFunctionOutputIter<'a> {
     pub async fn new(
-        mut stream: BoxStream<'a, Result<DataChunk>>,
+        data_type: DataType,
+        stream: BoxStream<'a, Result<DataChunk>>,
     ) -> Result<TableFunctionOutputIter<'a>> {
-        Ok(Self {
-            chunk: stream.next().await.transpose()?,
+        let mut iter = Self {
+            data_type,
             stream,
+            chunk: None,
             index: 0,
-        })
+        };
+        iter.pop_from_stream().await?;
+        Ok(iter)
     }
 
+    /// Gets the current row.
     pub fn peek(&'a self) -> Option<(usize, DatumRef<'a>)> {
-        let chunk = self.chunk.as_ref()?;
-        let index = chunk
-            .column_at(0)
-            .array_ref()
-            .as_int64()
-            .value_at(self.index)
-            .unwrap() as usize;
-        let value = chunk.column_at(1).array_ref().value_at(self.index);
+        let (indexes, values) = self.chunk.as_ref()?;
+        let index = indexes.as_int64().value_at(self.index).unwrap() as usize;
+        let value = values.value_at(self.index);
         Some((index, value))
     }
 
+    /// Moves to the next row.
     pub async fn next(&mut self) -> Result<()> {
-        let Some(chunk) = &self.chunk else {
+        let Some((indexes, _)) = &self.chunk else {
             return Ok(());
         };
         self.index += 1;
-        if self.index == chunk.capacity() {
-            self.chunk = self.stream.next().await.transpose()?;
+        if self.index == indexes.len() {
+            self.pop_from_stream().await?;
             self.index = 0;
         }
+        Ok(())
+    }
+
+    /// Gets the next chunk from stream.
+    async fn pop_from_stream(&mut self) -> Result<()> {
+        let chunk = self.stream.next().await.transpose()?;
+        self.chunk = chunk.map(|c| {
+            let (c1, c2) = c.split_column_at(1);
+            let indexes = c1.column_at(0).array();
+            let values = if let DataType::Struct(_) = &self.data_type {
+                Arc::new(StructArray::from(c2).into())
+            } else {
+                c2.column_at(0).array()
+            };
+            (indexes, values)
+        });
         Ok(())
     }
 }
