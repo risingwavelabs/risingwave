@@ -667,7 +667,7 @@ def section_streaming(panels):
             [
                 panels.target(
                     f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
-                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                    "sink={{sink_name}} {{sink_id}} @ {{instance}}",
                 ),
             ],
         ),
