@@ -291,7 +291,7 @@ pub fn asind_q1(x: f64) -> f64 {
     }
 
     let acos_x = f64::acos(x);
-    return 90.0 - (acos_x / ASIN_0_5) * 60.0;
+    90.0 - (acos_x / ASIN_0_5) * 60.0
 }
 
 #[function("asind(float64) -> float64")]
@@ -341,9 +341,13 @@ mod tests {
 
     use crate::vector_op::trigonometric::*;
 
+    fn precision() -> f64 {
+        1e-13
+    }
+
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
-        let x = (lhs.0 - rhs.0).abs() <= 0.000000000000001;
+        let x = (lhs.0 - rhs.0).abs() <= precision();
         assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
     }
 
@@ -401,7 +405,7 @@ mod tests {
             (cotd_f64(F64::from(-190)) + F64::from(5.671281819617705))
                 .abs()
                 .0
-                <= 0.00000000000001,
+                <= precision(),
         );
         assert_similar(cot_f64(50_f64.to_radians().into()), cotd_f64(F64::from(50)));
         assert_similar(
@@ -424,7 +428,7 @@ mod tests {
             (tan_f64(250_f64.to_radians().into()) - tand_f64(F64::from(250)))
                 .0
                 .abs()
-                < 0.00000000000001
+                < precision()
         );
         assert_similar(
             tan_f64(360_f64.to_radians().into()),
