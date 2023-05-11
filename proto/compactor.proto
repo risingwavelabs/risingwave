@@ -5,8 +5,7 @@ package compactor;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message EchoRequest {
-}
+message EchoRequest {}
 
 message EchoResponse {}
 
