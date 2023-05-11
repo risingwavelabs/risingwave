@@ -25,9 +25,18 @@ pub struct MonitoredAlloc<A: Allocator> {
 }
 
 impl<A: Allocator> MonitoredAlloc<A> {
-    #[allow(dead_code)]
     pub fn new(ctx: MemoryContext, alloc: A) -> Self {
         Self { ctx, alloc }
+    }
+}
+
+impl MonitoredGlobalAlloc {
+    pub fn with_memory_context(ctx: MemoryContext) -> Self {
+        Self { ctx, alloc: Global }
+    }
+
+    pub fn for_test() -> Self {
+        Self::with_memory_context(MemoryContext::none())
     }
 }
 
@@ -41,5 +50,14 @@ unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         self.alloc.deallocate(ptr, layout);
         self.ctx.add(-(layout.size() as i64))
+    }
+}
+
+impl<A: Allocator + Clone> Clone for MonitoredAlloc<A> {
+    fn clone(&self) -> Self {
+        Self {
+            ctx: self.ctx.clone(),
+            alloc: self.alloc.clone(),
+        }
     }
 }

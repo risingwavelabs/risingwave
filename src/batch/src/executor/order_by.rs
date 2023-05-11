@@ -78,7 +78,9 @@ impl BoxedExecutorBuilder for SortExecutor {
             column_orders,
             identity.clone(),
             source.context.get_config().developer.chunk_size,
-            MonitoredAlloc::new(source.context.create_executor_mem_context(identity)),
+            MonitoredAlloc::with_memory_context(
+                source.context.create_executor_mem_context(identity),
+            ),
         )))
     }
 }
@@ -189,6 +191,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -238,6 +241,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Float32);
@@ -287,6 +291,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Varchar);
@@ -361,6 +366,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -434,6 +440,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -527,6 +534,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -686,6 +694,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
