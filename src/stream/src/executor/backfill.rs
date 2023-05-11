@@ -173,7 +173,7 @@ where
         let mut current_pos: Option<OwnedRow> = None;
 
         // NOTE(kwannoel): Only updated when flushing to state table.
-        let old_pos: Option<OwnedRow> = None;
+        let mut old_pos: Option<OwnedRow> = None;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -276,7 +276,7 @@ where
                                 );
 
                                 // Flush data out
-                                if let Some(ref current_pos) = current_pos {
+                                if let Some(current_pos) = &current_pos {
                                     Self::flush_data(
                                         &mut self.state_table,
                                         barrier.epoch,
@@ -284,6 +284,7 @@ where
                                         current_pos,
                                     );
                                 }
+                                old_pos = current_pos.clone();
 
                                 yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
