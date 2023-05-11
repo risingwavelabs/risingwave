@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, Timelike, NaiveDateTime};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -321,6 +321,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
+            let secs = v.div_euclid(1_000_000);
+            let nsecs = v.rem_euclid(1_000_000) * 1000;
+            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
+            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
