@@ -40,8 +40,6 @@ impl OverWindowToTopNRule {
 
 impl Rule for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let ctx = plan.ctx();
-
         let (project, plan) = {
             if let Some(project) = plan.as_logical_project() {
                 (Some(project), project.input())
@@ -88,7 +86,8 @@ impl Rule for OverWindowToTopNRule {
 
         if offset > 0 && with_ties {
             tracing::error!("Failed to optimize with ties and offset");
-            ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+            // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/9747
+            // ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
             return None;
         }
 
@@ -111,7 +110,8 @@ impl Rule for OverWindowToTopNRule {
                 return Some(project.clone_with_input(filter).into());
             }
         }
-        ctx.warn_to_user("fail to transform overAgg to groupTopN: the rank cannot be included in the outer select_list, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+        // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/9747
+        // ctx.warn_to_user("fail to transform overAgg to groupTopN: the rank cannot be included in the outer select_list, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
         None
     }
 }
