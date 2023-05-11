@@ -64,7 +64,7 @@ static SIND_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
-static ASIN_0_5: f64 = 0.0;
+static ASIN_0_5: f64 = 0.523_598_775_598_298_82;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -271,6 +271,7 @@ pub fn tand_f64(input: F64) -> F64 {
     result.into()
 }
 
+// TODO: clean up these comments
 // returns the inverse sine of x in degrees, for x in
 // the range [0, 1].  The result is an angle in the
 // first quadrant --- [0, 90] degrees.
@@ -279,20 +280,17 @@ pub fn tand_f64(input: F64) -> F64 {
 // function will return exact values (0, 30 and 90
 // degrees respectively).
 pub fn asind_q1(x: f64) -> f64 {
+    // x is measured in degrees
     // Stitch together inverse sine and cosine functions for the ranges [0,
     // 0.5] and (0.5, 1]. Each expression below is guaranteed to return
     // exactly 30 for x=0.5, so the result is a continuous monotonic function
     // over the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
-        return if asin_x == 0.0 {
-            0.0
-        } else {
-            (asin_x / ASIN_0_5) * 30.0
-        };
+        return (asin_x / ASIN_0_5) * 30.0;
     }
 
-    let acos_x = f64::acos(x.to_degrees());
+    let acos_x = f64::acos(x);
     return 90.0 - (acos_x / ASIN_0_5) * 60.0;
 }
 
@@ -302,6 +300,14 @@ pub fn asind_f64(input: F64) -> F64 {
 
     // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
     if input.0.is_nan() || input.0.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+
+    // The principal branch of the inverse sine function maps values in the range [-1, 1] to values
+    // in the range [-90, 90], so we should reject any inputs outside that range and the result will
+    // always be finite.
+    if input.0 < -1.0 || input.0 > 1.0 {
+        // TODO: Log "input is out of range"
         return F64::from(f64::NAN);
     }
 
@@ -426,19 +432,16 @@ mod tests {
         );
 
         // asind
-        assert!(asin_f64(360_f64.to_radians().into()).is_nan());
+        assert!(asind_f64(2_f64.into()).is_nan());
         assert_similar(asin_f64(0_f64.to_radians().into()), asind_f64(F64::from(0)));
         assert_similar(
-            asin_f64(20_f64.to_radians().into()),
-            asind_f64(F64::from(20)),
+            asin_f64(0.5_f64.to_radians().into()),
+            asind_f64(F64::from(0.5)),
         );
+        assert_similar(asin_f64(1_f64.to_radians().into()), asind_f64(F64::from(1)));
         assert_similar(
-            asin_f64(365_f64.to_radians().into()),
-            asind_f64(F64::from(365)),
-        );
-        assert_similar(
-            asin_f64(50_f64.to_radians().into()),
-            asind_f64(F64::from(50)),
+            asin_f64(0.75_f64.to_radians().into()),
+            asind_f64(F64::from(0.75)),
         );
 
         // exact matches
