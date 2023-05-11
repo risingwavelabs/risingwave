@@ -157,6 +157,11 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Asind
             | expr_node::Type::Decode
             | expr_node::Type::Encode
+            | expr_node::Type::Sha1
+            | expr_node::Type::Sha224
+            | expr_node::Type::Sha256
+            | expr_node::Type::Sha384
+            | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray =>
