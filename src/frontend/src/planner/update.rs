@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
-use crate::optimizer::plan_node::{LogicalProject, LogicalUpdate};
+use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
@@ -31,14 +31,14 @@ impl Planner {
             scan
         };
         let returning = !update.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalUpdate::create(
+        let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
             input,
             update.table_name.clone(),
             update.table_id,
             update.table_version_id,
             update.exprs,
             returning,
-        )?
+        ))
         .into();
 
         if returning {
