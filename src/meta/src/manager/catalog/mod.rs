@@ -1604,7 +1604,7 @@ where
 
                 // Commit point
                 commit_meta!(self, tables, sources, indexes, users)?;
-                
+
                 refcnt_dec_connection(database_core, source.connection_id);
 
                 indexes_removed.iter().for_each(|index| {
