@@ -107,6 +107,8 @@ impl ProjectSetExecutor {
                 .collect(),
             self.chunk_size,
         );
+        // a temporary row buffer
+        let mut row = vec![None as DatumRef<'_>; builder.num_columns()];
 
         #[for_await]
         for msg in self.input.execute() {
@@ -132,17 +134,17 @@ impl ProjectSetExecutor {
                         };
                         // for each output row
                         for projected_row_id in 0i64.. {
-                            // a temporary row buffer
-                            // XXX: avoid allocation every time
-                            let mut row = vec![None as DatumRef<'_>; builder.num_columns()];
+                            // SAFETY:
+                            // We use `row` as a buffer and don't read elements from the previous
+                            // loop. The `transmute` is used for bypassing the borrow checker.
+                            let row: &mut [DatumRef<'_>] =
+                                unsafe { std::mem::transmute(row.as_mut_slice()) };
 
                             row[0] = Some(projected_row_id.into());
                             // if any of the set columns has a value
                             let mut valid = false;
                             // for each column
-                            for (item, value) in
-                                results.iter_mut().zip_eq_fast(row.iter_mut().skip(1))
-                            {
+                            for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                                 *value = match item {
                                     Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
                                         valid = true;
@@ -154,17 +156,18 @@ impl ProjectSetExecutor {
                                 };
                             }
                             if !valid {
-                                // no more outputs for the input row
+                                // no more output rows for the input row
                                 break;
                             }
                             ops_builder.push(op);
-                            if let Some(chunk) = builder.append_one_row(row.as_slice()) {
+                            if let Some(chunk) = builder.append_one_row(&*row) {
                                 let ops = std::mem::replace(
                                     &mut ops_builder,
                                     Vec::with_capacity(self.chunk_size),
                                 );
                                 yield StreamChunk::from_parts(ops, chunk).into();
                             }
+                            // move to the next row
                             for item in &mut results {
                                 if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
                                     state.next().await?;
