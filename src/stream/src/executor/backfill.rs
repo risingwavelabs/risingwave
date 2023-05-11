@@ -63,7 +63,7 @@ use crate::task::{ActorId, CreateMviewProgress};
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
     /// Upstream table
-    table: StorageTable<S>,
+    upstream_table: StorageTable<S>,
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
@@ -86,7 +86,7 @@ where
     S: StateStore,
 {
     pub fn new(
-        table: StorageTable<S>,
+        upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
@@ -100,7 +100,7 @@ where
                 pk_indices,
                 identity: "BackfillExecutor".to_owned(),
             },
-            table,
+            upstream_table,
             upstream,
             output_indices,
             actor_id: progress.actor_id(),
@@ -111,11 +111,11 @@ where
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // The primary key columns, in the output columns of the table scan.
-        let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
-        let pk_order = self.table.pk_serializer().get_order_types();
+        // The primary key columns, in the output columns of the upstream_table scan.
+        let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+        let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
-        let table_id = self.table.table_id().table_id;
+        let upstream_table_id = self.upstream_table.table_id().table_id;
 
         let mut upstream = self.upstream.execute();
 
@@ -129,7 +129,7 @@ where
         let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
-            let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
+            let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
@@ -158,7 +158,7 @@ where
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
 
-        // Current position of the table storage primary key.
+        // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
@@ -194,7 +194,7 @@ where
             let left_upstream = upstream.by_ref().map(Either::Left);
 
             let right_snapshot = pin!(Self::snapshot_read(
-                &self.table,
+                &self.upstream_table,
                 snapshot_read_epoch,
                 current_pos.clone(),
                 true
@@ -240,7 +240,7 @@ where
                                 self.metrics
                                     .backfill_snapshot_read_row_count
                                     .with_label_values(&[
-                                        table_id.to_string().as_str(),
+                                        upstream_table_id.to_string().as_str(),
                                         self.actor_id.to_string().as_str(),
                                     ])
                                     .inc_by(cur_barrier_snapshot_processed_rows);
@@ -248,7 +248,7 @@ where
                                 self.metrics
                                     .backfill_upstream_output_row_count
                                     .with_label_values(&[
-                                        table_id.to_string().as_str(),
+                                        upstream_table_id.to_string().as_str(),
                                         self.actor_id.to_string().as_str(),
                                     ])
                                     .inc_by(cur_barrier_upstream_processed_rows);
@@ -343,7 +343,7 @@ where
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read(
-        table: &StorageTable<S>,
+        upstream_table: &StorageTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
@@ -355,7 +355,7 @@ where
             // has been consumed. The iter interface doesn't support
             // `Excluded(empty_row)` range bound, so we can simply return `None`.
             if current_pos.is_empty() {
-                assert!(table.pk_indices().is_empty());
+                assert!(upstream_table.pk_indices().is_empty());
                 yield None;
                 return Ok(());
             }
@@ -366,7 +366,7 @@ where
         };
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
-        let iter = table
+        let iter = upstream_table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::NoWait(epoch),
                 row::empty(),
@@ -379,7 +379,7 @@ where
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
-            .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
+            .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
             .instrument_await("backfill_snapshot_read")
             .await?
         {
