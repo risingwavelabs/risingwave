@@ -49,6 +49,7 @@ pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 
 const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
+const STATE_TABLE_VNODE_SPLIT_WEIGHT: u32 = 4;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
@@ -535,7 +536,7 @@ where
                     &[table_id],
                     target_compact_group_id,
                     false,
-                    2,
+                    STATE_TABLE_VNODE_SPLIT_WEIGHT,
                 )
                 .await;
             match ret {
