@@ -31,6 +31,7 @@ use super::{
     StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
