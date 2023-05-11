@@ -24,7 +24,8 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::utils::IndicesDisplay;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -155,7 +156,7 @@ impl StreamNode for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self) -> PbStreamNode {
+    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
@@ -205,6 +206,13 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
+        let properties = self.ctx().with_options().internal_table_subset(); // TODO: Is this even needed? Why is it needed for simple_agg?
+        let catalog_builder = TableCatalogBuilder::new(properties);
+        let catalog = catalog_builder
+            .build(self.base.distribution().dist_column_indices().into(), 0)
+            .with_id(state.gen_table_id_wrapped())
+            .to_internal_table_prost();
+
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
@@ -234,7 +242,7 @@ impl StreamTableScan {
                 upstream_column_ids,
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc.to_protobuf()),
-                state_table: None,
+                state_table: Some(catalog),
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
