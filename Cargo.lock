@@ -5589,6 +5589,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risedev-config"
+version = "1.0.0-alpha"
+dependencies = [
+ "anyhow",
+ "clap 4.2.7",
+ "console",
+ "dialoguer",
+ "enum-iterator",
+ "fs-err",
+ "itertools",
+ "tempfile",
+]
+
+[[package]]
 name = "risingwave_backup"
 version = "1.0.0-alpha"
 dependencies = [
@@ -5811,6 +5825,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "toml 0.7.3",
  "tracing",
  "twox-hash",
@@ -6085,6 +6100,8 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "serde_json",
+ "sha1",
+ "sha2",
  "static_assertions",
  "thiserror",
  "tracing",
@@ -8815,8 +8832,8 @@ name = "workspace-config"
 version = "1.0.0-alpha"
 dependencies = [
  "log",
- "madsim-rdkafka",
- "openssl",
+ "openssl-sys",
+ "sasl2-sys",
  "tracing",
  "zstd-sys",
 ]
@@ -8898,6 +8915,7 @@ dependencies = [
  "syn 2.0.15",
  "time 0.3.21",
  "time-macros",
+ "tinyvec",
  "tokio",
  "tokio-postgres",
  "tokio-stream",

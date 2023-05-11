@@ -132,6 +132,11 @@ message ExprNode {
     // string/bytea expressions
     ENCODE = 310;
     DECODE = 311;
+    SHA1 = 312;
+    SHA224 = 313;
+    SHA256 = 314;
+    SHA384 = 315;
+    SHA512 = 316;
 
     // Unary operators
     NEG = 401;
