@@ -6100,6 +6100,8 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "serde_json",
+ "sha1",
+ "sha2",
  "static_assertions",
  "thiserror",
  "tracing",
