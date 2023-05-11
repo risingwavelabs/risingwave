@@ -454,6 +454,11 @@ impl<'a> ListRef<'a> {
         }
     }
 
+    /// Returns `true` if the list has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
             it.flat_map(|datum_ref| {

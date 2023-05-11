@@ -141,6 +141,11 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Return the number of elements in the builder.
     fn len(&self) -> usize;
 
+    /// Return `true` if the array has a length of 0.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Finish build and return a new array.
     fn finish(self) -> Self::ArrayType;
 }
@@ -532,6 +537,10 @@ macro_rules! impl_array_builder {
                 match self {
                     $( Self::$variant_name(inner) => inner.len(), )*
                 }
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.len() == 0
             }
         }
     }

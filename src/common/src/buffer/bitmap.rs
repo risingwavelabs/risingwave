@@ -172,6 +172,11 @@ impl BitmapBuilder {
     pub fn len(&self) -> usize {
         self.len
     }
+
+    /// Returns `true` if the bitmap has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
 }
 
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.

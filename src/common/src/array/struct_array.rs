@@ -145,7 +145,7 @@ impl ArrayBuilder for StructArrayBuilder {
             .into_iter()
             .map(|b| Arc::new(b.finish()))
             .collect::<Vec<ArrayRef>>();
-        StructArray::new(self.bitmap.finish(), children, self.type_.clone())
+        StructArray::new(self.bitmap.finish(), children, self.type_)
     }
 }
 
