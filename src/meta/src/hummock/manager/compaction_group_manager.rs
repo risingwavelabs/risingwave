@@ -429,6 +429,7 @@ impl<S: MetaStore> HummockManager<S> {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
+        // 0 represents no vnode partition
         self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
             .await
     }
