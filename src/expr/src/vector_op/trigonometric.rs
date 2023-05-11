@@ -271,20 +271,14 @@ pub fn tand_f64(input: F64) -> F64 {
     result.into()
 }
 
-// TODO: clean up these comments
-// returns the inverse sine of x in degrees, for x in
-// the range [0, 1].  The result is an angle in the
-// first quadrant --- [0, 90] degrees.
-//
-// For the 3 special case inputs (0, 0.5 and 1), this
-// function will return exact values (0, 30 and 90
-// degrees respectively).
+// returns the inverse sine of x in degrees, for x in the range [0,
+// 1].  The result is an angle in the first quadrant --- [0, 90] degrees.
+// For the 3 special case inputs (0, 0.5 and 1), this function will return exact values (0, 30 and
+// 90 degrees respectively).
 pub fn asind_q1(x: f64) -> f64 {
-    // x is measured in degrees
-    // Stitch together inverse sine and cosine functions for the ranges [0,
-    // 0.5] and (0.5, 1]. Each expression below is guaranteed to return
-    // exactly 30 for x=0.5, so the result is a continuous monotonic function
-    // over the full range.
+    // Stitch together inverse sine and cosine functions for the ranges [0,0.5] and (0.5, 1]. Each
+    // expression below is guaranteed to returnexactly 30 for x=0.5, so the result is a continuous
+    // monotonic functionover the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
         return (asin_x / ASIN_0_5) * 30.0;
@@ -303,11 +297,8 @@ pub fn asind_f64(input: F64) -> F64 {
         return F64::from(f64::NAN);
     }
 
-    // The principal branch of the inverse sine function maps values in the range [-1, 1] to values
-    // in the range [-90, 90], so we should reject any inputs outside that range and the result will
-    // always be finite.
+    // Return NaN if input is out of range. Slightly different from PSQL implementation
     if input.0 < -1.0 || input.0 > 1.0 {
-        // TODO: Log "input is out of range"
         return F64::from(f64::NAN);
     }
 
