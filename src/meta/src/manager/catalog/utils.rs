@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_sqlparser::ast::{
