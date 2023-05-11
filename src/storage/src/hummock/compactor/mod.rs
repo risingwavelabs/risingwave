@@ -114,6 +114,7 @@ impl Compactor {
                 sstable_object_id_manager.remove_watermark_object_id(tracker_id);
             },
         );
+
         let group_label = compact_task.compaction_group_id.to_string();
         let cur_level_label = compact_task.input_ssts[0].level_idx.to_string();
         let select_table_infos = compact_task
@@ -177,8 +178,6 @@ impl Compactor {
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
-        let existing_table_ids: HashSet<u32> =
-            HashSet::from_iter(compact_task.existing_table_ids.clone());
         let mut compact_table_ids = compact_task
             .input_ssts
             .iter()
@@ -190,7 +189,7 @@ impl Compactor {
         let compact_table_ids = HashSet::from_iter(
             compact_table_ids
                 .into_iter()
-                .filter(|table_id| existing_table_ids.contains(table_id)),
+                .filter(|table_id| compact_task.existing_table_ids.contains(table_id)),
         );
         let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
@@ -223,11 +222,38 @@ impl Compactor {
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
         let mut task_status = TaskStatus::Success;
-        if let Err(e) = generate_splits(&mut compact_task, context.clone()).await {
-            tracing::warn!("Failed to generate_splits {:#?}", e);
-            task_status = TaskStatus::ExecuteFailed;
-            Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
-            return task_status;
+        // skip sst related to non-existent able_id to reduce io
+        let sstable_infos = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .filter(|table_info| {
+                let table_ids = &table_info.table_ids;
+                table_ids
+                    .iter()
+                    .any(|table_id| compact_task.existing_table_ids.contains(table_id))
+            })
+            .cloned()
+            .collect_vec();
+        let compaction_size = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|table_info| table_info.file_size)
+            .sum::<u64>();
+        match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
+            Ok(splits) => {
+                if !splits.is_empty() {
+                    compact_task.splits = splits;
+                }
+            }
+
+            Err(e) => {
+                tracing::warn!("Failed to generate_splits {:#?}", e);
+                task_status = TaskStatus::ExecuteFailed;
+                Self::compact_done(&mut compact_task, context.clone(), vec![], task_status).await;
+                return task_status;
+            }
         }
         // Number of splits (key ranges) is equal to number of compaction tasks
         let parallelism = compact_task.splits.len();
@@ -237,7 +263,8 @@ impl Compactor {
         let task_progress_guard =
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
-            &compact_task,
+            &sstable_infos,
+            compact_task.gc_delete_keys,
             &compactor_context.sstable_store,
             &mut multi_filter,
         )
