@@ -25,7 +25,8 @@ steps:
                 command: "ci/build-ci-image.sh"
                 label: "ci build images"
   - wait
-
+  - label: "test"
+    command: "docker info"
   - label: "build"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
