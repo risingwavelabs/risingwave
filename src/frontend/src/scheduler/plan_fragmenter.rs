@@ -948,7 +948,7 @@ impl BatchPlanFragmenter {
         if let Some(insert) = node.as_batch_insert() {
             Some(insert.logical.table_id())
         } else if let Some(update) = node.as_batch_update() {
-            Some(update.logical.table_id())
+            Some(update.logical.table_id)
         } else if let Some(delete) = node.as_batch_delete() {
             Some(delete.logical.table_id())
         } else {

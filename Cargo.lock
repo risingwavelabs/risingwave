@@ -8839,7 +8839,6 @@ dependencies = [
  "clap 4.2.7",
  "clap_builder",
  "combine",
- "criterion",
  "crossbeam-epoch",
  "crossbeam-utils",
  "either",
