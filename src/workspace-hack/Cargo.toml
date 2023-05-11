@@ -69,7 +69,7 @@ petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { git = "https://github.com/mrcroxx/rust-prometheus.git", rev = "257f715", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }
@@ -153,7 +153,7 @@ phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
 postgres-types = { version = "0.2", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { git = "https://github.com/mrcroxx/rust-prometheus.git", rev = "257f715", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3" }

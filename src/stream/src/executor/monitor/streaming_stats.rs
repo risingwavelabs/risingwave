@@ -636,14 +636,11 @@ impl<T: prometheus::core::MetricVecBuilder> From<MetricVec<T>> for ManagedMetric
 
 impl<T: prometheus::core::MetricVecBuilder> Drop for ManagedMetricVec<T> {
     fn drop(&mut self) {
-        match self.label_values.get() {
-            Some(label_values) => {
-                let vals = label_values.iter().map(String::as_str).collect_vec();
-                self.metric_vec
-                    .remove_label_values(&vals)
-                    .expect("Metric labels are removed twice!!")
-            }
-            None => return,
+        if let Some(label_values) = self.label_values.get() {
+            let vals = label_values.iter().map(String::as_str).collect_vec();
+            self.metric_vec
+                .remove_label_values(&vals)
+                .expect("Metric labels are removed twice!!")
         }
     }
 }
