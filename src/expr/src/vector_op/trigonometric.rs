@@ -64,7 +64,7 @@ static SIND_30: f64 = 0.499_999_999_999_999_94;
 static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
-static ASIN_0_5: f64 = 0.523_598_775_598_298_82;
+static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
