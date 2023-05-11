@@ -186,10 +186,13 @@ impl Compactor {
             .collect_vec();
         compact_table_ids.sort();
         compact_table_ids.dedup();
+
+        let existing_table_ids: HashSet<u32> =
+            HashSet::from_iter(compact_task.existing_table_ids.clone());
         let compact_table_ids = HashSet::from_iter(
             compact_table_ids
                 .into_iter()
-                .filter(|table_id| compact_task.existing_table_ids.contains(table_id)),
+                .filter(|table_id| existing_table_ids.contains(table_id)),
         );
         let multi_filter_key_extractor = match context
             .filter_key_extractor_manager
@@ -231,7 +234,7 @@ impl Compactor {
                 let table_ids = &table_info.table_ids;
                 table_ids
                     .iter()
-                    .any(|table_id| compact_task.existing_table_ids.contains(table_id))
+                    .any(|table_id| existing_table_ids.contains(table_id))
             })
             .cloned()
             .collect_vec();
