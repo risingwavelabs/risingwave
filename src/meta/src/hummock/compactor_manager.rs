@@ -398,15 +398,10 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
-                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
-                    {
-                        // Refresh the expiry of the task as it is showing progress.
-                        task_ref.expire_at = now + self.task_expiry_seconds;
-                        // Update the task state to the latest state.
-                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
-                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
-                    }
+                    // Refresh the expiry of the task as it is showing progress.
+                    task_ref.expire_at = now + self.task_expiry_seconds;
+                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                 }
             }
         }
@@ -500,7 +495,7 @@ mod tests {
                 num_ssts_uploaded: 0,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(
@@ -511,7 +506,7 @@ mod tests {
                 num_ssts_uploaded: 1,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(

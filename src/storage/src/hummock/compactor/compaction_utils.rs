@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
 
 pub use super::context::CompactorContext;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -76,7 +76,8 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)?;
+            .create_sst_writer(table_id, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -126,26 +127,7 @@ pub struct TaskConfig {
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
-}
-
-pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
-    let mut total_memory_size = 0;
-    let mut total_file_count = 0;
-    for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-            }
-        } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-            }
-        }
-
-        total_file_count += level.table_infos.len();
-    }
-
-    (total_memory_size, total_file_count)
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
@@ -183,22 +165,10 @@ pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompact
 }
 
 pub async fn generate_splits(
-    compact_task: &mut CompactTask,
+    sstable_infos: &Vec<SstableInfo>,
+    compaction_size: u64,
     context: Arc<CompactorContext>,
-) -> HummockResult<()> {
-    let sstable_infos = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .collect_vec();
-
-    let compaction_size = compact_task
-        .input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .map(|table_info| table_info.file_size)
-        .sum::<u64>();
-
+) -> HummockResult<Vec<KeyRange_vec>> {
     let sstable_size = (context.storage_opts.sstable_size_mb as u64) << 20;
     if compaction_size > sstable_size * 2 {
         let mut indexes = vec![];
@@ -227,7 +197,7 @@ pub async fn generate_splits(
         }
         // sort by key, as for every data block has the same size;
         indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
-        let mut splits: Vec<KeyRange_vec> = vec![];
+        let mut splits = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
             indexes.len() as u64,
@@ -254,11 +224,11 @@ pub async fn generate_splits(
                 remaining_size -= data_size;
                 last_key = key;
             }
-            compact_task.splits = splits;
+            return Ok(splits);
         }
     }
 
-    Ok(())
+    Ok(vec![])
 }
 
 pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {

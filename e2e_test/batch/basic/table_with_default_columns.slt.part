@@ -21,4 +21,15 @@ select * from t1 where v1 = 1;
 1 5
 
 statement ok
+update t1 set v2 = default where v1 = 0;
+
+query II
+select * from t1 where v1 = 0;
+----
+0 5
+
+statement error
+update t1 set (v1, v2) = (0, default);
+
+statement ok
 drop table t1;

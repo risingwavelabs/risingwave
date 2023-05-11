@@ -4,6 +4,8 @@
 # The feedback loop is too long otherwise.
 set -euo pipefail
 
+source ci/scripts/common.sh
+
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.

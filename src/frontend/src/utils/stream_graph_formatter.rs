@@ -167,7 +167,7 @@ impl StreamGraphFormatter {
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
             )),
-            stream_node::NodeBody::GlobalSimpleAgg(inner) => {
+            stream_node::NodeBody::SimpleAgg(inner) => {
                 fields.push((
                     "result table",
                     self.pretty_add_table(inner.get_result_table().unwrap()),

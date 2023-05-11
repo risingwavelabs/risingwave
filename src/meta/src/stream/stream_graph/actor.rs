@@ -224,6 +224,11 @@ impl ActorBuilder {
             .into_values()
             .flat_map(|ActorUpstream { actors, .. }| actors.as_global_ids())
             .collect();
+        // Only fill the definition when debug assertions enabled, otherwise use name instead.
+        #[cfg(not(debug_assertions))]
+        let mview_definition = job.name();
+        #[cfg(debug_assertions)]
+        let mview_definition = job.definition();
 
         Ok(StreamActor {
             actor_id: self.actor_id.as_global_id(),
@@ -232,7 +237,7 @@ impl ActorBuilder {
             dispatcher: self.downstreams.into_values().collect(),
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
-            mview_definition: job.mview_definition(),
+            mview_definition,
         })
     }
 }
@@ -429,19 +434,24 @@ impl ActorGraphBuildStateInner {
         match dt {
             // For `NoShuffle`, make n "1-1" links between the actors.
             DispatcherType::NoShuffle => {
-                for (upstream_id, downstream_id) in upstream
+                assert_eq!(upstream.actor_ids.len(), downstream.actor_ids.len());
+                let upstream_locations: HashMap<_, _> = upstream
                     .actor_ids
                     .iter()
-                    .zip_eq_fast(downstream.actor_ids.iter())
-                {
-                    // Assert that the each actor pair is in the same location.
-                    let upstream_location = self.get_location(*upstream_id);
-                    let downstream_location = self.get_location(*downstream_id);
-                    assert_eq!(upstream_location, downstream_location);
+                    .map(|id| (self.get_location(*id), *id))
+                    .collect();
+                let downstream_locations: HashMap<_, _> = downstream
+                    .actor_ids
+                    .iter()
+                    .map(|id| (self.get_location(*id), *id))
+                    .collect();
+
+                for (location, upstream_id) in upstream_locations {
+                    let downstream_id = downstream_locations.get(&location).unwrap();
 
                     // Create a new dispatcher just between these two actors.
                     self.add_dispatcher(
-                        *upstream_id,
+                        upstream_id,
                         Self::new_normal_dispatcher(
                             &edge.dispatch_strategy,
                             downstream.fragment_id,
@@ -454,7 +464,7 @@ impl ActorGraphBuildStateInner {
                         *downstream_id,
                         ActorUpstream {
                             edge_id: edge.id,
-                            actors: vec![*upstream_id],
+                            actors: vec![upstream_id],
                             fragment_id: upstream.fragment_id,
                         },
                     );

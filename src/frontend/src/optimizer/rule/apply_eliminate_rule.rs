@@ -20,17 +20,18 @@ use risingwave_pb::plan_common::JoinType;
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
+use crate::optimizer::plan_visitor::PlanCorrelatedIdFinder;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-/// Remove `LogicalApply` at leaf.
+/// Eliminate `LogicalApply` if we can't find its `correlated_id` in its RHS.
 ///
 /// Before:
 ///
 /// ```text
 ///    LogicalApply
 ///    /           \
-///  Domain      LogicalScan
+///  Domain       RHS
 /// ```
 ///
 /// If it can remove DAG.
@@ -41,7 +42,7 @@ use crate::utils::Condition;
 ///        |
 ///  LogicalFilter (Null reject for equal)
 ///        |
-///  LogicalScan
+///       RHS
 /// ```
 ///
 ///
@@ -51,31 +52,26 @@ use crate::utils::Condition;
 /// ```text
 ///     LogicalJoin
 ///    /           \
-///  Domain   LogicalScan
+///  Domain       RHS
 /// ```
-pub struct ApplyScanRule {}
-impl Rule for ApplyScanRule {
+pub struct ApplyEliminateRule {}
+impl Rule for ApplyEliminateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
-        let (left, right, on, join_type, _correlated_id, correlated_indices, max_one_row) =
+        let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =
             apply.clone().decompose();
 
         if max_one_row {
             return None;
         }
 
-        let apply_left_len = left.schema().len();
-        assert_eq!(join_type, JoinType::Inner);
-
-        // LogicalJoin with correlated inputs in join condition has been handled by ApplyJoin. This
-        // handles the ones without correlation
-        if let (None, None, None) = (
-            right.as_logical_scan(),
-            right.as_logical_join(),
-            right.as_logical_values(),
-        ) {
+        // Still can find `correlated_id`, so bail out.
+        if PlanCorrelatedIdFinder::find_correlated_id(right.clone(), &correlated_id) {
             return None;
         }
+
+        let apply_left_len = left.schema().len();
+        assert_eq!(join_type, JoinType::Inner);
 
         // Record the mapping from `CorrelatedInputRef`'s index to `InputRef`'s index.
         // We currently can remove DAG only if ALL the `CorrelatedInputRef` are equal joined to
@@ -140,9 +136,9 @@ impl Rule for ApplyScanRule {
     }
 }
 
-impl ApplyScanRule {
+impl ApplyEliminateRule {
     pub fn create() -> BoxedRule {
-        Box::new(ApplyScanRule {})
+        Box::new(ApplyEliminateRule {})
     }
 
     /// Check whether the `func_call` is like v1 = v2, in which v1 and v2 belong respectively to
