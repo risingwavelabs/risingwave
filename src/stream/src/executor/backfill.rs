@@ -34,10 +34,10 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
-use crate::common::table::state_table::StateTable;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
+use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
@@ -93,7 +93,7 @@ where
     pub fn new(
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
-        state: StateTable<S>,
+        state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -156,7 +156,7 @@ where
                 let message = message?;
                 // flush if barrier
                 if let Message::Barrier(barrier) = &message {
-                    Self::flush_data(&mut self.state_table, barrier.epoch.clone()).await;
+                    Self::flush_data(&mut self.state_table, barrier.epoch).await;
                 };
                 // Then forward messages directly to the downstream.
                 if let Some(message) = Self::mapping_message(message, &self.output_indices) {

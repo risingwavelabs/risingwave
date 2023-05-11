@@ -234,6 +234,7 @@ impl StreamTableScan {
                 upstream_column_ids,
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc.to_protobuf()),
+                state_table: None,
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,

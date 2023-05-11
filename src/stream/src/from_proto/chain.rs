@@ -20,6 +20,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{BackfillExecutor, ChainExecutor, RearrangedChainExecutor};
 
 pub struct ChainExecutorBuilder;
@@ -133,8 +134,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
-                let table = StorageTable::new_partial(
-                    state_store,
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
                     table_id,
                     column_descs,
                     column_ids,
@@ -146,10 +147,17 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     prefix_hint_len,
                     versioned,
                 );
+                let state_table = StateTable::from_table_catalog(
+                    node.get_state_table().unwrap(),
+                    state_store,
+                    None, // TODO: should this be none? I guess yes?
+                )
+                .await;
 
                 BackfillExecutor::new(
-                    table,
+                    upstream_table,
                     mview,
+                    state_table,
                     output_indices,
                     progress,
                     schema,
