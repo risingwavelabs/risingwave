@@ -203,6 +203,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            state_store_metrics.clone(),
         );
 
         let instance = Self {

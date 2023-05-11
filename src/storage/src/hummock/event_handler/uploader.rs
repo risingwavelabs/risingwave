@@ -40,6 +40,7 @@ use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -549,6 +550,7 @@ impl UploaderContext {
 /// Data are mostly stored in `VecDeque`, and the order stored in the `VecDeque` indicates the data
 /// order. Data at the front represents ***newer*** data.
 pub struct HummockUploader {
+    stats: Arc<HummockStateStoreMetrics>,
     /// The maximum epoch that is sealed
     max_sealed_epoch: HummockEpoch,
     /// The maximum epoch that has started syncing
@@ -577,6 +579,7 @@ pub struct HummockUploader {
 
 impl HummockUploader {
     pub(crate) fn new(
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
@@ -585,6 +588,7 @@ impl HummockUploader {
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
+            stats: state_store_metrics,
             max_sealed_epoch: initial_epoch,
             max_syncing_epoch: initial_epoch,
             max_synced_epoch: initial_epoch,
@@ -929,7 +933,23 @@ impl HummockUploader {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<MergeImmTaskOutput>> {
-        self.sealed_data.poll_success_merge_imm(cx)
+        let poll_ret = self.sealed_data.poll_success_merge_imm(cx);
+        if let Poll::Ready(Some(output)) = &poll_ret {
+            let table_id_label = output.table_id.to_string();
+            let shard_id_label = output.instance_id.to_string();
+
+            // monitor finished task
+            self.stats
+                .merge_imm_task_counts
+                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .inc();
+            // monitor merged imms
+            self.stats
+                .merge_imm_batch_counts
+                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .inc_by(output.merged_imm.get_imm_ids().len() as _);
+        }
+        poll_ret
     }
 }
 
