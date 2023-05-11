@@ -270,6 +270,19 @@ pub fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, V
     Ok(mappings)
 }
 
+pub fn record_pk_to_json(row: RowRef<'_>, schema: &[Field], pk_indices: &Vec<usize>) -> Result<Map<String, Value>> {
+    let mut mappings = Map::with_capacity(pk_indices.len());
+    for (_, (field, datum_ref)) in schema.iter().zip_eq_fast(row.iter())
+                                              .enumerate()
+                                              .filter(|(i,_)| pk_indices.contains(i)) {
+        let key = field.name.clone();
+        let value = datum_to_json_object(field, datum_ref)
+            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        mappings.insert(key, value);
+    }
+    Ok(mappings)
+}
+
 fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),

@@ -34,7 +34,7 @@ use super::{
     Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::{datum_to_json_object, record_to_json, Result};
+use crate::sink::{datum_to_json_object, record_to_json, record_pk_to_json, Result};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -237,6 +237,15 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         let mut update_cache: Option<Map<String, Value>> = None;
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
+            let event_key_object = Some(json!({
+                "schema": json!({
+                    "type": "struct",
+                    "fields": fields_pk_to_json(&schema.fields, &self.pk_indices),
+                    "optional": false,
+                    "name": "RisingWave.RisingWave.RisingWave.Key",
+                }),
+                "payload": record_pk_to_json(row, &schema.fields, &self.pk_indices)?,
+            }));
             let event_object = match op {
                 Op::Insert => Some(json!({
                     "schema": schema_to_json(schema),
@@ -280,10 +289,10 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     }
                 }
             };
-            if let Some(obj) = event_object {
+            if let (Some(key_obj), Some(obj)) = (event_key_object, event_object) {
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
-                        .key(self.gen_message_key().as_bytes())
+                        .key(key_obj.to_string().as_bytes())
                         .payload(obj.to_string().as_bytes()),
                 )
                 .await?;
@@ -438,44 +447,59 @@ pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>>
     Ok(records)
 }
 
+fn field_to_json(field: &Field) -> Value {
+    // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
+    let r#type = match field.data_type() {
+        risingwave_common::types::DataType::Boolean => "boolean",
+        risingwave_common::types::DataType::Int16 => "int16",
+        risingwave_common::types::DataType::Int32 => "int32",
+        risingwave_common::types::DataType::Int64 => "int64",
+        risingwave_common::types::DataType::Int256 => "string",
+        risingwave_common::types::DataType::Float32 => "float",
+        risingwave_common::types::DataType::Float64 => "double",
+        // currently, we only support handling decimal as string.
+        // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
+        risingwave_common::types::DataType::Decimal => "string",
+
+        risingwave_common::types::DataType::Varchar => "string",
+
+        risingwave_common::types::DataType::Date => "int32",
+        risingwave_common::types::DataType::Time => "int64",
+        risingwave_common::types::DataType::Timestamp => "int64",
+        risingwave_common::types::DataType::Timestamptz => "string",
+        risingwave_common::types::DataType::Interval => "string",
+
+        risingwave_common::types::DataType::Bytea => "bytes",
+        risingwave_common::types::DataType::Jsonb => "string",
+        risingwave_common::types::DataType::Serial => "int32",
+        // since the original debezium pg support HSTORE via encoded as json string by default,
+        // we do the same here
+        risingwave_common::types::DataType::Struct(_) => "string",
+        risingwave_common::types::DataType::List { .. } => "string",
+    };
+    json!({
+        "field": field.name,
+        "optional": true,
+        "type": r#type,
+    })
+}
+
+fn fields_pk_to_json(fields: &[Field], pk_indices: &[usize]) -> Value {
+    let mut res = Vec::new();
+
+    fields.iter().enumerate()
+                 .filter(|(i, _)| pk_indices.contains(i))
+                 .for_each(|(_, field)| {
+                     res.push(field_to_json(field) )
+                 });
+    json!(res)
+}
+
 fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
 
     fields.iter().for_each(|field| {
-        // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
-        let r#type = match field.data_type() {
-            risingwave_common::types::DataType::Boolean => "boolean",
-            risingwave_common::types::DataType::Int16 => "int16",
-            risingwave_common::types::DataType::Int32 => "int32",
-            risingwave_common::types::DataType::Int64 => "int64",
-            risingwave_common::types::DataType::Int256 => "string",
-            risingwave_common::types::DataType::Float32 => "float32",
-            risingwave_common::types::DataType::Float64 => "float64",
-            // currently, we only support handling decimal as string.
-            // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
-            risingwave_common::types::DataType::Decimal => "string",
-
-            risingwave_common::types::DataType::Varchar => "string",
-
-            risingwave_common::types::DataType::Date => "int32",
-            risingwave_common::types::DataType::Time => "int64",
-            risingwave_common::types::DataType::Timestamp => "int64",
-            risingwave_common::types::DataType::Timestamptz => "string",
-            risingwave_common::types::DataType::Interval => "string",
-
-            risingwave_common::types::DataType::Bytea => "bytes",
-            risingwave_common::types::DataType::Jsonb => "string",
-            risingwave_common::types::DataType::Serial => "int32",
-            // since the original debezium pg support HSTORE via encoded as json string by default,
-            // we do the same here
-            risingwave_common::types::DataType::Struct(_) => "string",
-            risingwave_common::types::DataType::List { .. } => "string",
-        };
-        res.push(json!({
-            "field": field.name,
-            "optional": true,
-            "type": r#type,
-        }))
+        res.push(field_to_json(field))
     });
 
     json!(res)
@@ -488,17 +512,49 @@ fn schema_to_json(schema: &Schema) -> Value {
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "before",
+        "name": "RisingWave.RisingWave.RisingWave.Key",
     }));
     schema_fields.push(json!({
         "type": "struct",
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "after",
+        "name": "RisingWave.RisingWave.RisingWave.Key",
     }));
+
+    schema_fields.push(json!({
+        "type": "struct",
+        "optional": false,
+        "name": "RisingWave.RisingWave.RisingWave.Source",
+        "fields": vec![
+            json!({
+                "type": "string",
+                "optional": false,
+                "field": "db"
+            }),
+            json!({
+                "type": "string",
+                "optional": true,
+                "field": "table"
+            })],
+        "field": "source"
+    }));
+    schema_fields.push(json!({
+        "type": "string",
+        "optional": false,
+        "field": "op"
+    }));
+    schema_fields.push(json!({
+        "type": "int64",
+        "optional": false,
+        "field": "ts_ms"
+    }));
+
     json!({
         "type": "struct",
         "fields": schema_fields,
         "optional": false,
+        "name": "RisingWave.RisingWave.RisingWave.Envelope",
     })
 }
 
