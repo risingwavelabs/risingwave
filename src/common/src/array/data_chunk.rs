@@ -18,7 +18,7 @@ use std::{fmt, usize};
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_pb::data::{PbColumn, PbDataChunk};
+use risingwave_pb::data::PbDataChunk;
 
 use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray, Vis};
 use crate::array::data_chunk_iter::RowRef;
@@ -203,9 +203,7 @@ impl DataChunk {
         };
         let column_ref = &mut proto.columns;
         for array in &self.columns {
-            column_ref.push(PbColumn {
-                array: Some(array.to_protobuf()),
-            });
+            column_ref.push(array.to_protobuf());
         }
         proto
     }
@@ -245,7 +243,7 @@ impl DataChunk {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
-            columns.push(ArrayImpl::from_protobuf(any_col.get_array()?, cardinality)?.into());
+            columns.push(ArrayImpl::from_protobuf(any_col, cardinality)?.into());
         }
 
         let chunk = DataChunk::new(columns, proto.cardinality as usize);

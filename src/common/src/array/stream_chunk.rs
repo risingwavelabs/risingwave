@@ -16,7 +16,7 @@ use std::fmt;
 use std::mem::size_of;
 
 use itertools::Itertools;
-use risingwave_pb::data::{PbColumn, PbOp, PbStreamChunk};
+use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
 use crate::array::{DataChunk, Vis};
@@ -193,13 +193,7 @@ impl StreamChunk {
         PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
-            columns: self
-                .columns()
-                .iter()
-                .map(|col| PbColumn {
-                    array: Some(col.to_protobuf()),
-                })
-                .collect(),
+            columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
         }
     }
 
@@ -211,7 +205,7 @@ impl StreamChunk {
         }
         let mut columns = vec![];
         for column in prost.get_columns() {
-            columns.push(ArrayImpl::from_protobuf(column.get_array()?, cardinality)?.into());
+            columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
         Ok(StreamChunk::new(ops, columns, None))
     }
