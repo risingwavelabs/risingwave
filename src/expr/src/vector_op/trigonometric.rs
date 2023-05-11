@@ -432,17 +432,11 @@ mod tests {
         );
 
         // asind
-        assert!(asind_f64(2_f64.into()).is_nan());
-        assert_similar(asin_f64(0_f64.to_radians().into()), asind_f64(F64::from(0)));
-        assert_similar(
-            asin_f64(0.5_f64.to_radians().into()),
-            asind_f64(F64::from(0.5)),
-        );
-        assert_similar(asin_f64(1_f64.to_radians().into()), asind_f64(F64::from(1)));
-        assert_similar(
-            asin_f64(0.75_f64.to_radians().into()),
-            asind_f64(F64::from(0.75)),
-        );
+        assert_similar(asind_f64(F64::from(-1)), F64::from(-90));
+        assert_similar(asind_f64(F64::from(-0.5)), F64::from(-30));
+        assert_similar(asind_f64(F64::from(0)), F64::from(0));
+        assert_similar(asind_f64(F64::from(0.5)), F64::from(30));
+        assert_similar(asind_f64(F64::from(1)), F64::from(90));
 
         // exact matches
         assert!(tand_f64(F64::from(-270)).0.is_infinite());
