@@ -47,7 +47,7 @@ pub(crate) fn avro_field_to_column_desc(
                 name: name.to_owned(),
                 field_descs: vec_column,
                 type_name: schema_name.to_string(),
-                generated_column: None,
+                generated_or_default_column: None,
             })
         }
         _ => {
@@ -75,6 +75,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
+        Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
         Schema::Record { fields, .. } => {
             let struct_fields = fields
@@ -86,9 +87,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         }
         Schema::Array(item_schema) => {
             let item_type = avro_type_mapping(item_schema.as_ref())?;
-            DataType::List {
-                datatype: Box::new(item_type),
-            }
+            DataType::List(Box::new(item_type))
         }
         Schema::Union(union_schema) => {
             let nested_schema = union_schema
@@ -290,6 +289,7 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
             let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
             ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
         }
+        Value::Bytes(value) => ScalarImpl::Bytea(value.into_boxed_slice()),
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
             let rw_values = descs
@@ -324,8 +324,6 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
 
 #[cfg(test)]
 mod tests {
-    use num_traits::FromPrimitive;
-
     use super::*;
     #[test]
     fn test_convert_decimal() {
@@ -333,13 +331,13 @@ mod tests {
         let v = vec![1, 24];
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 0).unwrap();
-        assert_eq!(rust_decimal, rust_decimal::Decimal::from_i32(280).unwrap());
+        assert_eq!(rust_decimal, rust_decimal::Decimal::from(280));
 
         // 28.1
         let v = vec![1, 25];
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
-        assert_eq!(rust_decimal, rust_decimal::Decimal::from_f32(28.1).unwrap());
+        assert_eq!(rust_decimal, rust_decimal::Decimal::try_from(28.1).unwrap());
     }
 
     #[test]

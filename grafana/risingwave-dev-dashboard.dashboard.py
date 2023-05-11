@@ -1,18 +1,23 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
-import logging
 import os
+import logging
 import sys
 p = os.path.dirname(__file__)
 sys.path.append(p)
 from common import *
+from jsonmerge import merge
 
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Ecy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
 datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 
+datasource_const = "datasource"
+if dynamic_source_enabled:
+    datasource = {"type": "prometheus", "uid": "${datasource}"}
+
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
+
 
 def section_actor_info(panels):
     excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
@@ -26,6 +31,7 @@ def section_actor_info(panels):
                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
 
     ]
+
 
 def section_cluster_node(panels):
     return [
@@ -177,6 +183,43 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_count(
+                    "Compaction Task L0 Select Level Count",
+                    "Avg l0 select_level_count of the compact task, and categorize it according to different cg, levels and task types",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
+                            "avg cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Compaction Task File Count",
+                    "Avg file count of the compact task, and categorize it according to different cg, levels and task types",
+                    [
+                        panels.target(
+                            f"sum by(le, group, type)(rate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
+                            "avg cg{{group}}@{{type}}",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Compaction Task Size Distribution",
+                    "The distribution of the compact task size triggered, including p90 and max. and categorize it according to different cg, levels and task types.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('storage_compact_task_size_bucket')}[$__rate_interval])) by (le, group, type))",
+                                f"p{legend}" +
+                                " - cg{{group}}@{{type}}",
+                                ),
+                            [90, "max"],
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Compactor Running Task Count",
                     "The number of compactions from one level to another level that are running.",
@@ -302,62 +345,39 @@ def section_compaction(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "KBs Read from Next Level",
+                    "KBs Read/Write by Level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Read from Current Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Current Level",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes_per_sec(
-                    "KBs Written to Next Level",
-                    "",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Count of SSTs Written to Next Level",
+                    "Count of SSTs Read/Write by level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write to next level",
                         ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Count of SSTs Read from Next Level",
-                    "num of SSTs read from next level during history compactions to next level",
-                    [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
-                            "cg{{group}}-L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read from next level",
+                        ),
+
+                        panels.target(
+                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
+                            "cg{{group}}-L{{level_index}} read from current level",
                         ),
                     ],
                 ),
@@ -642,6 +662,16 @@ def section_streaming(panels):
             ]
         ),
         panels.timeseries_rowsps(
+            "Sink Throughput(rows/s)",
+            "The figure shows the number of rows output by each sink per second.",
+            [
+                panels.target(
+                    f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
+                    "sink={{sink_name}} {{sink_id}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
             "Backfill Snapshot Read Throughput(rows)",
             "Total number of rows that have been read from the backfill snapshot",
             [
@@ -856,6 +886,172 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_actor_ops(
+                    "Join Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
+                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
+                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
+                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Materialize Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            "cache hit count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            "total cached count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Executor Cache Miss Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
+                        ),
+
+                    ],
+                ),
+                panels.timeseries_actor_latency(
+                    "Join Executor Barrier Align",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, actor_id, wait_side, job, instance))",
+                                f"p{legend} {{{{actor_id}}}}.{{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
+                            ),
+                            [90, 99, 999, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, actor_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
+                            "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Join Actor Input Blocking Time Ratio",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Join Actor Match Duration Per Second",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}.{{side}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Join Cached Entries",
+                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
+                    "number of join keys in the executor cache.",
+                    [
+                        panels.target(f"{metric('stream_join_cached_entries')}",
+                                      "{{actor_id}} {{side}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Join Cached Rows",
+                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
+                    "number of rows in the executor cache.",
+                    [
+                        panels.target(f"{metric('stream_join_cached_rows')}",
+                                      "{{actor_id}} {{side}}"),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Join Cached Estimated Size",
+                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
+                    "size of rows in the executor cache.",
+                    [
+                        panels.target(f"{metric('stream_join_cached_estimated_size')}",
+                                      "{{actor_id}} {{side}}"),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Aggregation Executor Cache Statistics For Each Key/State",
+                    "Lookup miss count counts the number of aggregation key's cache miss per second."
+                    "Lookup total count counts the number of rows processed per second."
+                    "By diving these two metrics, one can derive the cache miss rate per second.",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
+                            "cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
+                            "total lookups - table {{table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Aggregation Executor Cache Statistics For Each StreamChunk",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
+                            "chunk-level cache miss  - table {{table_id}} actor {{actor_id}}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
+                            "chunk-level total lookups  - table {{table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Aggregation Cached Keys",
+                    "The number of keys cached in each hash aggregation executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_agg_cached_keys')}",
+                                      "table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+            ],
+        )
+    ]
+
+
+def section_streaming_actors_tokio(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Streaming Actors (Tokio)",
+            [
                 panels.timeseries_actor_latency_small(
                     "Tokio: Actor Fast Poll Time",
                     "",
@@ -1006,162 +1202,7 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_ops(
-                    "Join Executor Cache",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops(
-                    "Materialize Executor Cache",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
-                            "cache hit count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
-                            "total cached count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Executor Cache Miss Ratio",
-                    "",
-                    [
-                        panels.target(
-                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
-                            "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                            ),
-
-                        panels.target(
-                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
-                            "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
-                            ),
-
-                        panels.target(
-                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
-                            "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
-                            ),
-
-                    ],
-                ),
-                panels.timeseries_actor_latency(
-                    "Join Executor Barrier Align",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_barrier_align_duration_bucket')}[$__rate_interval])) by (le, actor_id, wait_side, job, instance))",
-                                f"p{legend} {{{{actor_id}}}}.{{{{wait_side}}}} - {{{{job}}}} @ {{{{instance}}}}",
-                            ),
-                            [90, 99, 999, "max"],
-                        ),
-                        panels.target(
-                            f"sum by(le, actor_id, wait_side, job, instance)(rate({metric('stream_join_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,actor_id,wait_side,job,instance) (rate({metric('stream_join_barrier_align_duration_count')}[$__rate_interval]))",
-                            "avg {{actor_id}}.{{wait_side}} - {{job}} @ {{instance}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Join Actor Input Blocking Time Ratio",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Join Actor Match Duration Per Second",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000",
-                            "{{actor_id}}.{{side}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Join Cached Entries",
-                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
-                    "number of join keys in the executor cache.",
-                    [
-                        panels.target(f"{metric('stream_join_cached_entries')}",
-                                      "{{actor_id}} {{side}}"),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Join Cached Rows",
-                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
-                    "number of rows in the executor cache.",
-                    [
-                        panels.target(f"{metric('stream_join_cached_rows')}",
-                                      "{{actor_id}} {{side}}"),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Join Cached Estimated Size",
-                    "Multiple rows with distinct primary keys may have the same join key. This metric counts the "
-                    "size of rows in the executor cache.",
-                    [
-                        panels.target(f"{metric('stream_join_cached_estimated_size')}",
-                                      "{{actor_id}} {{side}}"),
-                    ],
-                ),
-                panels.timeseries_actor_ops(
-                    "Aggregation Executor Cache Statistics For Each Key/State",
-                    "Lookup miss count counts the number of aggregation key's cache miss per second."
-                    "Lookup total count counts the number of rows processed per second."
-                    "By diving these two metrics, one can derive the cache miss rate per second.",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops(
-                    "Aggregation Executor Cache Statistics For Each StreamChunk",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
-                            "chunk-level cache miss  - table {{table_id}} actor {{actor_id}}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
-                            "chunk-level total lookups  - table {{table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Aggregation Cached Keys",
-                    "The number of keys cached in each hash aggregation executor's executor cache.",
-                    [
-                        panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "table {{table_id}} actor {{actor_id}}"),
-                    ],
-                ),
-            ],
+            ]
         )
     ]
 
@@ -1228,7 +1269,7 @@ def section_streaming_errors(outer_panels):
     ]
 
 
-def section_batch_exchange(outer_panels):
+def section_batch(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1250,6 +1291,16 @@ def section_batch_exchange(outer_panels):
                     [
                         panels.target(
                             f"{metric('batch_task_num')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_row(
+                    "Batch Mem Usage",
+                    "All memory usage of batch executors in bytes",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem')}",
                             "",
                         ),
                     ],
@@ -1387,16 +1438,26 @@ def section_hummock(panels):
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
+                    f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job, instance, type)",
+                    "total_meta_miss_count - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
+                    "preload iops",
+                ),
+            ],
+        ),
+        panels.timeseries_ops(
+            "File Cache Ops",
+            "",
+            [
+                panels.target(
                     f"sum(rate({metric('file_cache_latency_count')}[$__rate_interval])) by (op, instance)",
                     "file cache {{op}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)",
                     "file cache miss @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('sstable_preload_io_count')}[$__rate_interval])) ",
-                    "preload iops",
                 ),
             ],
         ),
@@ -1728,8 +1789,8 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job)",
-                    "uploading memory - {{job}}",
+                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2339,11 +2400,21 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_memory(
-                    "The memory allocated by jemalloc",
+                    "The allocated memory of jemalloc",
                     "",
                     [
                         panels.target(
                             f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_active_bytes')}",
                             "",
                         ),
                     ],
@@ -2384,31 +2455,75 @@ def section_connector_node(outer_panels):
     ]
 
 
-templating = Templating()
-if namespace_filter_enabled:
-    templating = Templating(
-        list=[
-            {
-                "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
-                "description": "Kubernetes namespace.",
-                "hide": 0,
-                "includeAll": False,
-                "label": "Namespace",
-                "multi": True,
-                "name": "namespace",
-                "options": [],
-                "query": {
-                    "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
-                    "refId": "StandardVariableQuery"
-                },
-                "refresh": 2,
-                "regex": "",
-                "skipUrlSync": False,
-                "sort": 0,
-                "type": "query"
-            }
-        ]
+templating_list = []
+if dynamic_source_enabled:
+    templating_list.append(
+        {
+            "hide": 0,
+            "includeAll": False,
+            "multi": False,
+            "name": f"{datasource_const}",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 2,
+            "skipUrlSync": False,
+            "type": "datasource"
+        }
     )
+
+if namespace_filter_enabled:
+    namespace_json = {
+        "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+        "description": "Kubernetes namespace.",
+        "hide": 0,
+        "includeAll": False,
+        "label": "Namespace",
+        "multi": False,
+        "name": "namespace",
+        "options": [],
+        "query": {
+            "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 0,
+        "type": "query",
+    }
+
+    name_json = {
+        "current": {
+            "selected": False,
+            "text": "risingwave",
+            "value": "risingwave"
+        },
+        "definition": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+        "hide": 0,
+        "includeAll": False,
+        "label": "RisingWave",
+        "multi": False,
+        "name": "instance",
+        "options": [],
+        "query": {
+            "query": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 6,
+        "type": "query",
+    }
+    if dynamic_source_enabled:
+        namespace_json = merge(namespace_json, {"datasource": datasource})
+        name_json = merge(name_json, {"datasource": datasource})
+
+    templating_list.append(namespace_json)
+    templating_list.append(name_json)
+
+templating = Templating(templating_list)
 
 dashboard = Dashboard(
     title="risingwave_dev_dashboard",
@@ -2427,9 +2542,10 @@ dashboard = Dashboard(
         *section_recovery_node(panels),
         *section_streaming(panels),
         *section_streaming_actors(panels),
+        *section_streaming_actors_tokio(panels),
         *section_streaming_exchange(panels),
         *section_streaming_errors(panels),
-        *section_batch_exchange(panels),
+        *section_batch(panels),
         *section_hummock(panels),
         *section_compaction(panels),
         *section_object_storage(panels),

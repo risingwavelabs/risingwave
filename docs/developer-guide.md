@@ -72,12 +72,12 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 * Tmux (>= v3.2a)
-* LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205).
+* LLVM 16 (For macOS only, to workaround some bugs in macOS toolchain. See https://github.com/risingwavelabs/risingwave/issues/6205)
 
 To install the dependencies on macOS, run:
 
 ```shell
-brew install postgresql cmake protobuf openssl tmux cyrus-sasl llvm
+brew install postgresql cmake protobuf tmux cyrus-sasl llvm
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 

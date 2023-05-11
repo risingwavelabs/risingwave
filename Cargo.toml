@@ -20,6 +20,7 @@ members = [
   "src/prost",
   "src/prost/helpers",
   "src/risedevtool",
+  "src/risedevtool/config",
   "src/rpc_client",
   "src/source",
   "src/sqlparser",
@@ -66,6 +67,8 @@ aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+hytra = "0.1"
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 
 [profile.dev]
 lto = 'off'
@@ -98,6 +101,7 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
+debug = 1 # line tables only
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -116,6 +120,7 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
+debug = 1 # line tables only
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]

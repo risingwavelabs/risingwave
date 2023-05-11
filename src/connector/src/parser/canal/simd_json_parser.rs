@@ -16,13 +16,13 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
+use risingwave_common::cast::{
+    str_to_date, str_to_time, str_to_timestamp, str_with_time_zone_to_timestamptz,
+};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_time, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use crate::parser::canal::operators::*;
@@ -241,9 +241,9 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
+    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;

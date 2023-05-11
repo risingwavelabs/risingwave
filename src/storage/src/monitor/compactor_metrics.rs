@@ -77,6 +77,7 @@ impl CompactorMetrics {
         );
         let compact_task_duration =
             register_histogram_vec_with_registry!(opts, &["group", "level"], registry).unwrap();
+
         let opts = histogram_opts!(
             "compactor_get_table_id_total_time_duration",
             "Total time of compact that have been issued to state store",

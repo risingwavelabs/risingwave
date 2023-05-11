@@ -137,13 +137,9 @@ impl SplitReader for KafkaSplitReader {
             bytes_per_second,
             max_num_messages,
             split_id,
+            enable_upsert: parser_config.specific.is_upsert(),
             parser_config,
             source_ctx,
-            enable_upsert: properties
-                .upsert
-                .as_ref()
-                .filter(|x| *x == "true")
-                .is_some(),
         })
     }
 
@@ -156,7 +152,7 @@ impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
         if let Some(stop_offset) = self.stop_offset {
-            if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
+            if let Some(start_offset) = self.start_offset && (start_offset + 1) >= stop_offset {
                 yield Vec::new();
                 return Ok(());
             } else if stop_offset == 0 {

@@ -44,6 +44,7 @@ impl StreamDynamicFilter {
             core.left().distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
         Self { base, core }

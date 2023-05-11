@@ -349,14 +349,16 @@ where
             let session = session.clone();
 
             // execute query
-            let mut res = session
-                .run_one_query(stmt, Format::Text)
-                .await
-                .map_err(|err| PsqlError::QueryError(err))?;
-
-            if let Some(notice) = res.get_notice() {
+            let res = session.clone().run_one_query(stmt, Format::Text).await;
+            for notice in session.take_notices() {
                 self.stream
                     .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+            }
+            let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+
+            for notice in res.get_notices() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(notice))?;
             }
 
             if res.is_query() {

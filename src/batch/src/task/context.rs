@@ -15,9 +15,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use prometheus::IntGauge;
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -63,6 +65,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn store_mem_usage(&self, val: usize);
 
     fn mem_usage(&self) -> usize;
+
+    fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 }
 
 /// Batch task context on compute node.
@@ -71,6 +75,8 @@ pub struct ComputeNodeContext {
     env: BatchEnvironment,
     // None: Local mode don't record metrics.
     batch_metrics: Option<BatchMetricsWithTaskLabels>,
+
+    mem_context: MemoryContext,
 
     // Last mem usage value. Init to be 0. Should be the last value of `cur_mem_val`.
     last_mem_val: Arc<AtomicUsize>,
@@ -133,6 +139,18 @@ impl BatchTaskContext for ComputeNodeContext {
     fn mem_usage(&self) -> usize {
         self.cur_mem_val.load(Ordering::Relaxed)
     }
+
+    fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext {
+        if let Some(metrics) = &self.batch_metrics {
+            let mut labels = metrics.task_labels();
+            labels.push(executor_id);
+            let executor_mem_usage =
+                metrics.create_collector_for_mem_usage(vec![executor_id.to_string()]);
+            MemoryContext::new(Some(self.mem_context.clone()), executor_mem_usage)
+        } else {
+            MemoryContext::none()
+        }
+    }
 }
 
 impl ComputeNodeContext {
@@ -143,20 +161,30 @@ impl ComputeNodeContext {
             batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
+            mem_context: MemoryContext::none(),
         }
     }
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
+        let batch_mem_context = env.task_manager().memory_context_ref();
         let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
             env.task_metrics(),
             env.executor_metrics(),
             task_id,
         ));
+        let mem_context = MemoryContext::new(
+            Some(batch_mem_context),
+            batch_metrics
+                .get_task_metrics()
+                .task_mem_usage
+                .with_label_values(&batch_metrics.task_labels()),
+        );
         Self {
             env,
             batch_metrics: Some(batch_metrics),
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
+            mem_context,
         }
     }
 
@@ -166,6 +194,8 @@ impl ComputeNodeContext {
             batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
+            // Leave it for now, it should be None
+            mem_context: MemoryContext::root(IntGauge::new("test", "test").unwrap()),
         }
     }
 

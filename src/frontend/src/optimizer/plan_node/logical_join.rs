@@ -23,14 +23,14 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
+use super::generic::{
+    push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+};
 use super::{
-    generic, ColPrunable, CollectInputRef, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary,
-    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
+    StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::plan_node::generic::{
-    push_down_into_join, push_down_join_condition, DynamicFilter, GenericPlanRef,
-};
+use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -446,7 +446,7 @@ impl LogicalJoin {
         let new_join_on = new_eq_cond.and(new_other_cond);
         let new_predicate = EqJoinPredicate::create(
             left_schema_len,
-            new_scan.base.schema().len(),
+            new_scan.schema().len(),
             new_join_on.clone(),
         );
 
@@ -1056,7 +1056,7 @@ impl LogicalJoin {
         let new_join_on = new_eq_cond.and(new_other_cond);
         let new_predicate = EqJoinPredicate::create(
             left_schema_len,
-            new_scan.base.schema().len(),
+            new_scan.schema().len(),
             new_join_on.clone(),
         );
 

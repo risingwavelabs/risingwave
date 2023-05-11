@@ -14,7 +14,7 @@ cargo-cache: &cargo-cache
 
 steps:
   - label: "build (dev mode)"
-    command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
+    command: "ci/scripts/build.sh -p ci-dev"
     key: "build-dev"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -25,7 +25,7 @@ steps:
     timeout_in_minutes: 15
 
   - label: "build (release mode)"
-    command: "ci/scripts/build.sh -t ci-release -p ci-release"
+    command: "ci/scripts/build.sh -p ci-release"
     key: "build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -302,7 +302,9 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 5
+    # Extra 2 minutes to account for docker-compose latency.
+    # See: https://github.com/risingwavelabs/risingwave/issues/9423#issuecomment-1521222169
+    timeout_in_minutes: 7
 
   - label: "release"
     command: "ci/scripts/release.sh"

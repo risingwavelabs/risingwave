@@ -32,8 +32,8 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 crc32fast = "1"
-derivative = "2"
 easy-ext = "1"
+educe = "0.4"
 either = "1"
 enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
@@ -42,6 +42,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
+hytra = { workspace = true }
 itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
@@ -61,6 +62,7 @@ prost = "0.11"
 rand = "0.8"
 regex = "1"
 reqwest = { version = "0.11", features = ["json"] }
+risingwave_common_proc_macro = { path = "./proc_macro" }
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
 ryu = "1.0"
@@ -69,11 +71,13 @@ serde_default = "0.1"
 serde_json = "1"
 serde_with = "2"
 smallbitset = "0.6.1"
+speedate = "0.7.0"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
 sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
+tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -104,6 +108,7 @@ mach2 = "0.4"
 [dev-dependencies]
 criterion = "0.4"
 more-asserts = "0.3"
+pretty_assertions = "1"
 rand = "0.8"
 tempfile = "3"
 
@@ -129,6 +134,10 @@ harness = false
 
 [[bench]]
 name = "bench_data_chunk_compact"
+harness = false
+
+[[bench]]
+name = "bench_array"
 harness = false
 
 [[bin]]

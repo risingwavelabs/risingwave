@@ -21,16 +21,20 @@ use std::ops::{Add, Neg, Sub};
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
+///
 /// Note that the difference between Interval and Instant.
 /// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
 /// with months = 61, days = 25, usecs = (57 + 23 * 3600 + 22 * 60) * 1000000),
@@ -38,16 +42,16 @@ use crate::error::{ErrorCode, Result, RwError};
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, EstimateSize)]
 pub struct Interval {
     months: i32,
     days: i32,
     usecs: i64,
 }
 
-pub const USECS_PER_SEC: i64 = 1_000_000;
-pub const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
-pub const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+const USECS_PER_SEC: i64 = 1_000_000;
+const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl Interval {
     /// Smallest interval value.
@@ -56,6 +60,9 @@ impl Interval {
         days: i32::MIN,
         usecs: i64::MIN,
     };
+    pub const USECS_PER_DAY: i64 = USECS_PER_DAY;
+    pub const USECS_PER_MONTH: i64 = USECS_PER_MONTH;
+    pub const USECS_PER_SEC: i64 = USECS_PER_SEC;
 
     /// Creates a new `Interval` from the given number of months, days, and microseconds.
     pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {
@@ -252,12 +259,12 @@ impl Interval {
     fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
         // TSROUND in include/datatype/timestamp.h
         // round eagerly at usecs precision because floats are imprecise
-        // should round to even #5576
-        let months_round_usecs =
-            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+        let months_round_usecs = |months: f64| {
+            (months * (USECS_PER_MONTH as f64)).round_ties_even() / (USECS_PER_MONTH as f64)
+        };
 
         let days_round_usecs =
-            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+            |days: f64| (days * (USECS_PER_DAY as f64)).round_ties_even() / (USECS_PER_DAY as f64);
 
         let trunc_fract = |num: f64| (num.trunc(), num.fract());
 
@@ -291,7 +298,7 @@ impl Interval {
 
         // Handle usecs
         let result_usecs = usecs + leftover_usecs;
-        let usecs = result_usecs.round();
+        let usecs = result_usecs.round_ties_even();
         if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
             return None;
         }
@@ -817,17 +824,18 @@ impl<'de> Deserialize<'de> for Interval {
     }
 }
 
-impl crate::hash::HashKeySerDe<'_> for Interval {
-    type S = [u8; 16];
-
-    fn serialize(self) -> Self::S {
+impl crate::hash::HashKeySer<'_> for Interval {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let cmp_value = IntervalCmpValue::from(self);
-        cmp_value.0.to_ne_bytes()
+        let b = cmp_value.0.to_ne_bytes();
+        buf.put_slice(&b);
     }
+}
 
-    fn deserialize<R: std::io::Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
+impl crate::hash::HashKeyDe for Interval {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let value = buf.get_i128_ne();
+        let cmp_value = IntervalCmpValue(value);
         cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate())
@@ -1322,7 +1330,7 @@ impl Interval {
     fn parse_postgres(s: &str) -> Result<Self> {
         use DateTimeField::*;
         let mut tokens = parse_interval(s)?;
-        if tokens.len()%2!=0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+        if tokens.len() % 2 != 0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
             tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
         }
         if tokens.len() % 2 != 0 {
@@ -1354,22 +1362,30 @@ impl Interval {
                         }
                     })()
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
+                    })?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = match interval_unit {
                         Second => {
-                            // If unsatisfied precision is passed as input, we should not return None (Error).
-                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
+                            // If unsatisfied precision is passed as input, we should not return
+                            // None (Error).
+                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64))
+                                .round_ties_even() as i64;
                             Some(Interval::from_month_day_usec(0, 0, usecs))
                         }
                         _ => None,
                     }
                     .and_then(|rhs| result.checked_add(&rhs))
-                    .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
+                    .ok_or_else(|| {
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s))
+                    })?;
                 }
                 _ => {
-                    return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
+                    return Err(
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into(),
+                    );
                 }
             }
         }
@@ -1681,8 +1697,14 @@ mod tests {
 
         let buf = i128::MIN.to_ne_bytes();
         std::panic::catch_unwind(|| {
-            <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
+            <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();
+    }
+
+    #[test]
+    fn test_interval_estimate_size() {
+        let interval = Interval::MIN;
+        assert_eq!(interval.estimated_size(), 16);
     }
 }

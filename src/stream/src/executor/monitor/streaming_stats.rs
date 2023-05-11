@@ -78,6 +78,8 @@ pub struct StreamingMetrics {
 
     pub sink_commit_duration: HistogramVec,
 
+    pub sink_output_row_count: GenericCounterVec<AtomicU64>,
+
     // Memory management
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
@@ -85,6 +87,7 @@ pub struct StreamingMetrics {
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
+    pub jemalloc_active_bytes: IntGauge,
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
@@ -414,6 +417,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let sink_output_row_count = register_int_counter_vec_with_registry!(
+            "stream_sink_output_rows_counts",
+            "Total number of rows that have been output to sink",
+            &["sink_id", "sink_name"],
+            registry
+        )
+        .unwrap();
+
         let lru_current_watermark_time_ms = register_int_gauge_with_registry!(
             "lru_current_watermark_time_ms",
             "Current LRU manager watermark time(ms)",
@@ -444,7 +455,14 @@ impl StreamingMetrics {
 
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
-            "The memory jemalloc allocated, got from jemalloc_ctl",
+            "The allocated memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_active_bytes = register_int_gauge_with_registry!(
+            "jemalloc_active_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
             registry
         )
         .unwrap();
@@ -514,11 +532,13 @@ impl StreamingMetrics {
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
+            sink_output_row_count,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
             user_compute_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,

@@ -220,6 +220,10 @@ where
         &self.info
     }
 
+    fn update_epoch(&mut self, epoch: u64) {
+        self.caches.update_epoch(epoch);
+    }
+
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         let (_previous_vnode_bitmap, cache_may_stale) = self
             .managed_state

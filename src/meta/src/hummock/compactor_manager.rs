@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use fail::fail_point;
 use itertools::Itertools;
@@ -39,6 +39,10 @@ use crate::MetaResult;
 
 pub type CompactorManagerRef = Arc<CompactorManager>;
 
+pub const TASK_RUN_TOO_LONG: &str = "running too long";
+pub const TASK_NOT_FOUND: &str = "task not found";
+pub const TASK_NORMAL: &str = "task is normal, please wait some time";
+
 /// Wraps the stream between meta node and compactor node.
 /// Compactor node will re-establish the stream when the previous one fails.
 #[derive(Debug)]
@@ -55,6 +59,7 @@ struct TaskHeartbeat {
     task: CompactTask,
     num_ssts_sealed: u32,
     num_ssts_uploaded: u32,
+    create_time: Instant,
     expire_at: u64,
 }
 
@@ -282,46 +287,50 @@ impl CompactorManager {
         self.task_heartbeats.write().remove(&context_id).is_some()
     }
 
-    pub fn get_expired_tasks(
+    pub fn check_tasks_status(
         &self,
-        split_cancel: Vec<HummockCompactionTaskId>,
-    ) -> Vec<(HummockContextId, CompactTask)> {
+        tasks: &[HummockCompactionTaskId],
+        slow_task_duration: Duration,
+    ) -> HashMap<HummockCompactionTaskId, (Duration, &'static str)> {
+        let guard = self.task_heartbeats.read();
+        let task_heartbeats = guard.deref();
+        let tasks_ids: HashSet<u64> = HashSet::from_iter(tasks.to_vec());
+        let mut ret = HashMap::default();
+        for heartbeats in task_heartbeats.values() {
+            for TaskHeartbeat {
+                task, create_time, ..
+            } in heartbeats.values()
+            {
+                if !tasks_ids.contains(&task.task_id) {
+                    continue;
+                }
+                let pending_time = create_time.elapsed();
+                if pending_time > slow_task_duration {
+                    ret.insert(task.task_id, (pending_time, TASK_RUN_TOO_LONG));
+                } else {
+                    ret.insert(task.task_id, (pending_time, TASK_NORMAL));
+                }
+            }
+        }
+        for task_id in tasks {
+            if !ret.contains_key(task_id) {
+                ret.insert(*task_id, (Duration::from_secs(0), TASK_NOT_FOUND));
+            }
+        }
+        ret
+    }
+
+    pub fn get_expired_tasks(&self) -> Vec<(HummockContextId, CompactTask)> {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_secs();
-        let cancellable_tasks;
-        {
-            let guard = self.task_heartbeats.read();
-            let task_heartbeats = guard.deref();
-            let mut split_cancel_tasks =
-                Self::get_group_split_expired_tasks(task_heartbeats, &split_cancel);
-            for (task_id, info) in Self::get_heartbeat_expired_tasks(task_heartbeats, now) {
-                split_cancel_tasks.insert(task_id, info);
-            }
-            cancellable_tasks = split_cancel_tasks.into_values().collect_vec();
-        }
-        cancellable_tasks
-    }
-
-    fn get_group_split_expired_tasks(
-        task_heartbeats: &HashMap<
-            HummockContextId,
-            HashMap<HummockCompactionTaskId, TaskHeartbeat>,
-        >,
-        split_cancel: &[HummockCompactionTaskId],
-    ) -> BTreeMap<HummockCompactionTaskId, (HummockContextId, CompactTask)> {
-        let mut ret = BTreeMap::new();
-        for (context_id, heartbeats) in task_heartbeats {
-            {
-                for TaskHeartbeat { task, .. } in heartbeats.values() {
-                    if split_cancel.binary_search(&task.task_id).is_ok() {
-                        ret.insert(task.get_task_id(), (*context_id, task.clone()));
-                    }
-                }
-            }
-        }
-        ret
+        let guard = self.task_heartbeats.read();
+        let task_heartbeats = guard.deref();
+        Self::get_heartbeat_expired_tasks(task_heartbeats, now)
+            .into_iter()
+            .map(|(_, info)| info)
+            .collect_vec()
     }
 
     fn get_heartbeat_expired_tasks(
@@ -360,6 +369,7 @@ impl CompactorManager {
                 task,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                create_time: Instant::now(),
                 expire_at: now + self.task_expiry_seconds,
             },
         );
@@ -388,15 +398,10 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
-                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
-                    {
-                        // Refresh the expiry of the task as it is showing progress.
-                        task_ref.expire_at = now + self.task_expiry_seconds;
-                        // Update the task state to the latest state.
-                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
-                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
-                    }
+                    // Refresh the expiry of the task as it is showing progress.
+                    task_ref.expire_at = now + self.task_expiry_seconds;
+                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                 }
             }
         }
@@ -477,7 +482,7 @@ mod tests {
 
         // Ensure task is expired.
         tokio::time::sleep(Duration::from_secs(2)).await;
-        let expired = compactor_manager.get_expired_tasks(vec![]);
+        let expired = compactor_manager.get_expired_tasks();
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0].0, context_id);
 
@@ -490,7 +495,7 @@ mod tests {
                 num_ssts_uploaded: 0,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks(vec![]).len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(
@@ -501,7 +506,7 @@ mod tests {
                 num_ssts_uploaded: 1,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks(vec![]).len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(
@@ -512,7 +517,7 @@ mod tests {
                 num_ssts_uploaded: 1,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks(vec![]).len(), 0);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
         assert!(compactor_manager.purge_heartbeats_for_context(context_id));
 
         // Test add

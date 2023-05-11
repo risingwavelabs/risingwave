@@ -31,7 +31,7 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Project Remove:
+    Convert Window Function:
 
     apply TrivialProjectToValuesRule 1 time(s)
 
@@ -58,7 +58,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 10028,
+            "plan_node_id": 10026,
             "plan_node_type": "BatchValues",
             "schema": [
               {
@@ -126,7 +126,7 @@
       ├─LogicalScan { table: t1, columns: [v1, _row_id] }
       └─LogicalScan { table: t2, columns: [v2, _row_id] }
 
-    Push Down the Calculation of Inputs of Join's Condition:
+    Push down the calculation of inputs of join's condition:
 
     apply PushCalculationOfJoinRule 1 time(s)
 
@@ -149,7 +149,7 @@
       ├─LogicalScan { table: t1, columns: [v1] }
       └─LogicalScan { table: t2, columns: [v2] }
 
-    Project Remove:
+    Convert Window Function:
 
     apply ProjectEliminateRule 1 time(s)
 

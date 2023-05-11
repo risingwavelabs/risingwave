@@ -21,3 +21,6 @@ drop table tz
 
 statement ok
 drop table t
+
+query error unexpected arguments number
+select now(1);

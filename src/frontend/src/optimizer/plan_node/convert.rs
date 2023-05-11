@@ -58,6 +58,38 @@ pub trait ToStream {
     }
 }
 
+pub fn stream_enforce_eowc_requirement(
+    ctx: OptimizerContextRef,
+    plan: PlanRef,
+    emit_on_window_close: bool,
+) -> Result<PlanRef> {
+    if emit_on_window_close && !plan.emit_on_window_close() {
+        let watermark_cols = plan.watermark_columns();
+        let n_watermark_cols = watermark_cols.count_ones(..);
+        if n_watermark_cols == 0 {
+            Err(ErrorCode::NotSupported(
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
+                "Try define a watermark column in the source, or avoid aggregation without GROUP BY"
+                    .to_string(),
+            )
+            .into())
+        } else {
+            if n_watermark_cols > 1 {
+                ctx.warn_to_user("There are multiple watermark columns in the query, currently only the first one will be used.");
+            }
+            let watermark_col_idx = watermark_cols.ones().next().unwrap();
+            Ok(StreamSort::new(plan, watermark_col_idx).into())
+        }
+    } else if !emit_on_window_close && plan.emit_on_window_close() {
+        Err(ErrorCode::InternalError(
+            "Some bad thing happened, the generated plan is not correct.".to_string(),
+        )
+        .into())
+    } else {
+        Ok(plan)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
     share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,
@@ -84,12 +116,20 @@ impl RewriteStreamContext {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ToStreamContext {
     share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
+    emit_on_window_close: bool,
 }
 
 impl ToStreamContext {
+    pub fn new(emit_on_window_close: bool) -> Self {
+        Self {
+            share_to_stream_map: HashMap::new(),
+            emit_on_window_close,
+        }
+    }
+
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
         self.share_to_stream_map
             .try_insert(plan_node_id, plan_ref)
@@ -98,6 +138,10 @@ impl ToStreamContext {
 
     pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
         self.share_to_stream_map.get(&plan_node_id)
+    }
+
+    pub fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
     }
 }
 

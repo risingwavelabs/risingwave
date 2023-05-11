@@ -1,0 +1,101 @@
+---
+version: "3"
+services:
+  risingwave:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    ports:
+      - 4566:4566
+      - 5691:5691
+    command:
+      - playground
+    container_name: risingwave
+
+  postgres:
+    image: debezium/postgres:13
+    ports:
+      - 5432:5432
+    environment:
+      POSTGRES_PASSWORD: postgrespw
+      POSTGRES_USER: postgresuser
+      POSTGRES_DB: mydb
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -U postgresuser -d mydb"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    container_name: postgres
+    volumes:
+      - ./postgres/postgres_bootstrap.sql:/docker-entrypoint-initdb.d/postgres_bootstrap.sql
+
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+
+  debezium:
+    image: debezium/connect:1.9
+    environment:
+      BOOTSTRAP_SERVERS: message_queue:29092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://message_queue:8081
+    ports:
+      - 8083:8083
+    healthcheck:
+      test: curl -f localhost:8083
+      interval: 1s
+      start_period: 120s
+    depends_on:
+      message_queue: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+    container_name: debezium
+
+  debezium_deploy:
+    image: debezium/connect:1.9
+    depends_on:
+      debezium:
+        condition: service_healthy
+    volumes:
+      - ./postgres/postgres_dbz.sh:/postgres_dbz.sh
+    entrypoint: [ bash, -c, /postgres_dbz.sh ]
+    container_name: debezium_deploy
+    restart: on-failure
+
+  datagen:
+    image: postgres
+    depends_on:
+      postgres: { condition: service_healthy }
+    command:
+      - /bin/sh
+      - -c 
+      - psql "postgresql://postgresuser:postgrespw@postgres:5432/mydb" -f ./postgres_prepare.sql
+    volumes:
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
+    container_name: datagen
+    restart: on-failure
+
+  # Check out the connectors via 127.0.0.1:8000
+  kafka-connect-ui:
+    image: landoop/kafka-connect-ui
+    ports:
+      - 8000:8000
+    environment:
+      CONNECT_URL: http://debezium:8083
+    container_name: kafka-connect-ui
+    depends_on: 
+      message_queue: { condition: service_healthy }
+
+volumes:
+  message_queue:
+    external: false
+
+name: risingwave-compose
+ 

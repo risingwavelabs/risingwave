@@ -34,9 +34,9 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamFilter { predicate: (initial_bid = 1:Int32) }
@@ -64,8 +64,8 @@
       FROM
         HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
       GROUP BY
-        bid.auction,
-        window_start
+        window_start,
+        bid.auction
     ) AS AuctionBids
     JOIN (
       SELECT
@@ -88,8 +88,8 @@
     LogicalProject { exprs: [auction, count] }
     └─LogicalJoin { type: Inner, on: (window_start = window_start) AND (count >= max(count)), output: all }
       ├─LogicalProject { exprs: [auction, count, window_start] }
-      | └─LogicalAgg { group_key: [auction, window_start], aggs: [count] }
-      |   └─LogicalProject { exprs: [auction, window_start] }
+      | └─LogicalAgg { group_key: [window_start, auction], aggs: [count] }
+      |   └─LogicalProject { exprs: [window_start, auction] }
       |     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       |       └─LogicalFilter { predicate: IsNotNull(date_time) }
       |         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
@@ -156,17 +156,17 @@
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
       |   └─StreamShare { id = 5 }
       |     └─StreamProject { exprs: [sum0(count)] }
-      |       └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+      |       └─StreamSimpleAgg { aggs: [sum0(count), count] }
       |         └─StreamExchange { dist: Single }
-      |           └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+      |           └─StreamStatelessSimpleAgg { aggs: [count] }
       |             └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamShare { id = 5 }
             └─StreamProject { exprs: [sum0(count)] }
-              └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+              └─StreamSimpleAgg { aggs: [sum0(count), count] }
                 └─StreamExchange { dist: Single }
-                  └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+                  └─StreamStatelessSimpleAgg { aggs: [count] }
                     └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     set rw_enable_share_plan=false;
@@ -177,15 +177,15 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       | └─StreamProject { exprs: [sum0(count), 0:Int32] }
-      |   └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+      |   └─StreamSimpleAgg { aggs: [sum0(count), count] }
       |     └─StreamExchange { dist: Single }
-      |       └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+      |       └─StreamStatelessSimpleAgg { aggs: [count] }
       |         └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
-          └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+          └─StreamSimpleAgg { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
-              └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+              └─StreamStatelessSimpleAgg { aggs: [count] }
                 └─StreamTableScan { table: t, columns: [t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: force_share_source_for_self_join
   before:
@@ -196,9 +196,9 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamShare { id = 3 }
@@ -217,9 +217,9 @@
   stream_plan: |
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [count] }
+          └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamHashJoin { type: Inner, predicate: t.a = t.a, output: all }
               ├─StreamShare { id = 4 }
               | └─StreamProject { exprs: [t.a] }
@@ -236,14 +236,14 @@
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [sum0(count)] }
-        └── StreamGlobalSimpleAgg { aggs: [sum0(count), count] }
+        └── StreamSimpleAgg { aggs: [sum0(count), count] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
             └──  StreamExchange Single from 1
 
     Fragment 1
-    StreamStatelessLocalSimpleAgg { aggs: [count] }
+    StreamStatelessSimpleAgg { aggs: [count] }
     └── StreamHashJoin { type: Inner, predicate: t.a = t.a, output: all }
         ├── left table: 1
         ├── right table: 3

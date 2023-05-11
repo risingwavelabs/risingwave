@@ -43,6 +43,7 @@ use crate::optimizer::{
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
     LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
@@ -256,7 +257,6 @@ struct BatchPlanFragmenterResult {
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
     pub(crate) _dependent_relations: Vec<TableId>,
-    pub(crate) notice: String,
 }
 
 fn gen_batch_plan_fragmenter(
@@ -271,20 +271,21 @@ fn gen_batch_plan_fragmenter(
         dependent_relations,
     } = plan_result;
 
-    let context = plan.plan_base().ctx.clone();
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
         plan.explain_to_string()?,
         query_mode
     );
-    let plan_fragmenter = BatchPlanFragmenter::new(
+    let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
+        !session.config().only_checkpoint_visible(),
+    );
+    let plan_fragmenter = BatchPlanFragmenter::new(
+        worker_node_manager_reader,
         session.env().catalog_reader().clone(),
         session.config().get_batch_parallelism(),
         plan,
     )?;
-    let mut notice = String::new();
-    context.append_notice(&mut notice);
 
     Ok(BatchPlanFragmenterResult {
         plan_fragmenter,
@@ -292,7 +293,6 @@ fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         _dependent_relations: dependent_relations,
-        notice,
     })
 }
 
@@ -306,7 +306,6 @@ async fn execute(
         query_mode,
         schema,
         stmt_type,
-        notice,
         ..
     } = plan_fragmenter_result;
 
@@ -442,7 +441,12 @@ async fn execute(
     };
 
     Ok(PgResponse::new_for_stream_extra(
-        stmt_type, rows_count, row_stream, pg_descs, notice, callback,
+        stmt_type,
+        rows_count,
+        row_stream,
+        pg_descs,
+        vec![],
+        callback,
     ))
 }
 

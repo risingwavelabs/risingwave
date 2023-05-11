@@ -72,7 +72,7 @@ pub async fn compactor_serve(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
-        0,
+        Default::default(),
         &config.meta,
     )
     .await
@@ -102,7 +102,7 @@ pub async fn compactor_serve(
         &storage_memory_config,
     )));
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64 * 0.9) as usize;
+        (resource_util::memory::total_memory_available_bytes() as f64 * 0.8) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),

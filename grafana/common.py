@@ -1,6 +1,6 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating, Table
-import logging
 import os
+
+from grafanalib.core import *
 
 # We use DASHBOARD_NAMESPACE_ENABLED env variable to indicate whether to add
 # a filter for the namespace field in the prometheus metric.
@@ -14,6 +14,8 @@ SOURCE_UID = "DASHBOARD_SOURCE_UID"
 DASHBOARD_UID = "DASHBOARD_UID"
 # We use DASHBOARD_VERSION env variable to pass custom version
 DASHBOARD_VERSION = "DASHBOARD_VERSION"
+# We use DASHBOARD_VERSION env variable to indicate whether to use a variable as the datasource
+DASHBOARD_DYNAMIC_SOURCE = "DASHBOARD_DYNAMIC_SOURCE"
 
 namespace_filter_enabled = os.environ.get(
     NAMESPACE_FILTER_ENABLED, "") == "true"
@@ -23,6 +25,10 @@ risingwave_name_filter_enabled = os.environ.get(
     RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
 if risingwave_name_filter_enabled:
     print("Enable filter for namespace_filter field in the generated prometheus query")
+dynamic_source_enabled = os.environ.get(
+    DASHBOARD_DYNAMIC_SOURCE, "") == "true"
+if dynamic_source_enabled:
+    print("Enable use the datasource variable as the dashboard datasource")
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -90,14 +96,19 @@ class Layout:
 
 
 class Panels:
+    common_options = {
+        "fillOpacity": 10,
+        "interval": "1s",
+        "maxDataPoints": 1000,
+    }
 
     def __init__(self, datasource):
         self.layout = Layout()
         self.datasource = datasource
 
     def row(
-        self,
-        title,
+            self,
+            title,
     ):
         gridPos = self.layout.next_row()
         return RowPanel(title=title, gridPos=gridPos)
@@ -126,10 +137,11 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_count(self,
@@ -140,13 +152,12 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_percentage(self,
@@ -158,14 +169,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_latency(self,
@@ -176,14 +186,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_latency(self,
@@ -194,14 +203,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_latency_small(self,
@@ -212,14 +220,13 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_query_per_sec(self,
@@ -230,14 +237,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="Qps",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytes_per_sec(self,
@@ -248,14 +254,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="Bps",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytes(self,
@@ -266,41 +271,38 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_row(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="row",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_ms(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_kilobytes(self,
@@ -311,14 +313,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="kbytes",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_dollar(self,
@@ -329,28 +330,26 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="$",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_ops(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_ops(self,
@@ -361,14 +360,13 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_ops_small(self,
@@ -379,14 +377,13 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="ops",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_rowsps(self,
@@ -397,90 +394,89 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_bytesps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
+                           title,
+                           description,
+                           targets,
+                           legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="MB/s",
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
             legendCalcs=legendCols,
+            **self.common_options,
         )
 
     def timeseries_actor_rowsps(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
-            fillOpacity=0,
-            legendDisplayMode="table",
-            legendPlacement="right",
+            **self.common_options,
         )
 
     def timeseries_memory(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_cpu(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_latency_small(self, title, description, targets):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
             unit="s",
-            fillOpacity=10,
+            **self.common_options,
         )
 
     def timeseries_id(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
-            fillOpacity=10,
-            legendDisplayMode="table",
-            legendPlacement="right",
+            **self.common_options,
         )
 
     def table_info(self, title, description, targets, excluded_columns):
@@ -490,6 +486,7 @@ class Panels:
             "excludeByName": excludedByName}}]
         return Table(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,

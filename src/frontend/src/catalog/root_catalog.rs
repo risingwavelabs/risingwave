@@ -568,6 +568,31 @@ impl Catalog {
                     .get_schema_by_name(db_name, schema_name)?
                     .get_function_by_name_args(function_name, args))
             })?
+            .ok_or_else(|| {
+                CatalogError::NotFound(
+                    "function",
+                    format!(
+                        "{}({})",
+                        function_name,
+                        args.iter().map(|a| a.to_string()).join(", ")
+                    ),
+                )
+            })
+    }
+
+    /// Gets all functions with the given name.
+    pub fn get_functions_by_name<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+    ) -> CatalogResult<(Vec<&Arc<FunctionCatalog>>, &'a str)> {
+        schema_path
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_functions_by_name(function_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
