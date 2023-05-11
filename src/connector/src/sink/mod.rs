@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{Datelike, Timelike, NaiveDateTime};
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};

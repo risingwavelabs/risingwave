@@ -503,9 +503,9 @@ fn fields_pk_to_json(fields: &[Field], pk_indices: &[usize]) -> Value {
 fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
 
-    fields.iter().for_each(|field| {
-        res.push(field_to_json(field))
-    });
+    fields
+        .iter()
+        .for_each(|field| res.push(field_to_json(field)));
 
     json!(res)
 }
