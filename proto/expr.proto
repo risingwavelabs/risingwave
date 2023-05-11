@@ -111,20 +111,20 @@ message ExprNode {
     ACOS = 250;
     ATAN = 251;
     ATAN2 = 252;
-    SINH = 253;
-    COSH = 254;
-    TANH = 255;
-    COTH = 256;
-    ASINH = 257;
-    ACOSH = 258;
-    ATANH = 259;
-    SIND = 260;
-    COSD = 261;
-    COTD = 262;
-    TAND = 263;
-    SQRT = 264;
-    DEGREES = 265;
-    RADIANS = 266;
+    SIND = 253;
+    COSD = 254;
+    COTD = 255;
+    TAND = 256;
+    SQRT = 257;
+    DEGREES = 258;
+    RADIANS = 259;
+    SINH = 260;
+    COSH = 261;
+    TANH = 262;
+    COTH = 263;
+    ASINH = 264;
+    ACOSH = 265;
+    ATANH = 266;
 
     // Boolean comparison
     IS_TRUE = 301;
