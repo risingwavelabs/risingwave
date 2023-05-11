@@ -1376,10 +1376,7 @@ where
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
-                if let Some(connection_id) = source.connection_id {
-                    // TODO(weili): wait for yezizp to refactor ref cnt
-                    database_core.decrease_ref_count(connection_id);
-                }
+                refcnt_dec_connection(database_core, source.connection_id);
 
                 for user in users_need_update {
                     self.notify_frontend(Operation::Update, Info::User(user))
