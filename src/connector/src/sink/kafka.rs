@@ -34,7 +34,7 @@ use super::{
     Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::{datum_to_json_object, record_to_json, record_pk_to_json, Result};
+use crate::sink::{datum_to_json_object, record_to_json, Result};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -249,7 +249,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     "optional": false,
                     "name": "RisingWave.RisingWave.RisingWave.Key",
                 }),
-                "payload": record_pk_to_json(row, &schema.fields, &self.pk_indices)?,
+                "payload": pk_to_json(row, &schema.fields, &self.pk_indices)?,
             }));
             let event_object = match op {
                 Op::Insert => Some(json!({
@@ -494,12 +494,9 @@ fn field_to_json(field: &Field) -> Value {
 
 fn fields_pk_to_json(fields: &[Field], pk_indices: &[usize]) -> Value {
     let mut res = Vec::new();
-
-    fields.iter().enumerate()
-                 .filter(|(i, _)| pk_indices.contains(i))
-                 .for_each(|(_, field)| {
-                     res.push(field_to_json(field) )
-                 });
+    for idx in pk_indices {
+        res.push(field_to_json(&fields[*idx]));
+    }
     json!(res)
 }
 
