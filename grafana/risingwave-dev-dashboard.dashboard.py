@@ -1697,7 +1697,7 @@ def section_hummock(panels):
             [
                 panels.target(
                     f"sum(rate({metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
-                    "finished merge imm tasks - {{table_id}} @ {{instance}} ",
+                    "merge imm tasks - {{table_id}} @ {{instance}} ",
                 ),
             ],
         ),
