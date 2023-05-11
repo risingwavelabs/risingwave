@@ -191,32 +191,32 @@ SELECT * FROM FLOAT8_TBL;
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
 -- tend to produce results that vary in the last place.
---@ SELECT sinh(double precision '1');
---@ SELECT cosh(double precision '1');
---@ SELECT tanh(double precision '1');
---@ SELECT asinh(double precision '1');
---@ SELECT acosh(double precision '2');
---@ SELECT atanh(double precision '0.5');
+SELECT sinh(double precision '1');
+SELECT cosh(double precision '1');
+SELECT tanh(double precision '1');
+SELECT asinh(double precision '1');
+SELECT acosh(double precision '2');
+SELECT atanh(double precision '0.5');
 -- test Inf/NaN cases for hyperbolic functions
---@ SELECT sinh(double precision 'infinity');
---@ SELECT sinh(double precision '-infinity');
---@ SELECT sinh(double precision 'nan');
---@ SELECT cosh(double precision 'infinity');
---@ SELECT cosh(double precision '-infinity');
---@ SELECT cosh(double precision 'nan');
---@ SELECT tanh(double precision 'infinity');
---@ SELECT tanh(double precision '-infinity');
---@ SELECT tanh(double precision 'nan');
---@ SELECT asinh(double precision 'infinity');
---@ SELECT asinh(double precision '-infinity');
---@ SELECT asinh(double precision 'nan');
+SELECT sinh(double precision 'infinity');
+SELECT sinh(double precision '-infinity');
+SELECT sinh(double precision 'nan');
+SELECT cosh(double precision 'infinity');
+SELECT cosh(double precision '-infinity');
+SELECT cosh(double precision 'nan');
+SELECT tanh(double precision 'infinity');
+SELECT tanh(double precision '-infinity');
+SELECT tanh(double precision 'nan');
+SELECT asinh(double precision 'infinity');
+SELECT asinh(double precision '-infinity');
+SELECT asinh(double precision 'nan');
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
--- SELECT acosh(double precision 'infinity');
---@ SELECT acosh(double precision '-infinity');
---@ SELECT acosh(double precision 'nan');
---@ SELECT atanh(double precision 'infinity');
---@ SELECT atanh(double precision '-infinity');
---@ SELECT atanh(double precision 'nan');
+SELECT acosh(double precision 'infinity');
+SELECT acosh(double precision '-infinity');
+SELECT acosh(double precision 'nan');
+SELECT atanh(double precision 'infinity');
+SELECT atanh(double precision '-infinity');
+SELECT atanh(double precision 'nan');
 
 --@ RESET extra_float_digits;
 
