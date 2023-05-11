@@ -53,7 +53,7 @@ impl StreamTemporalJoin {
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(scan.logical().for_system_time_as_of_proctime());
+        assert!(scan.logical().for_system_time_as_of_proctime);
 
         let l2o = logical
             .l2i_col_mapping()
@@ -200,10 +200,10 @@ impl StreamNode for StreamTemporalJoin {
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
-            table_desc: Some(scan.logical().table_desc().to_protobuf()),
+            table_desc: Some(scan.logical().table_desc.to_protobuf()),
             table_output_indices: scan
                 .logical()
-                .output_col_idx()
+                .output_col_idx
                 .iter()
                 .map(|&i| i as _)
                 .collect(),

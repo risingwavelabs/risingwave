@@ -74,6 +74,10 @@ where
         params_types: Vec<DataType>,
     ) -> Result<PS, BoxedError>;
 
+    // TODO: maybe this function should be async and return the notice more timely
+    /// try to take the current notices from the session
+    fn take_notices(self: Arc<Self>) -> Vec<String>;
+
     fn bind(
         self: Arc<Self>,
         prepare_statement: PS,
@@ -303,6 +307,10 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn take_notices(self: Arc<Self>) -> Vec<String> {
+            vec![]
         }
     }
 

@@ -889,6 +889,7 @@ impl Compactor {
             self.task_config.key_range.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.split_by_table,
+            self.task_config.split_weight_by_vnode,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -633,7 +634,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
     system_params_manager.flush_params().await?;
-    env.cluster_id().put_at_meta_store(&meta_store).await?;
+    env.cluster_id()
+        .put_at_meta_store(meta_store.deref())
+        .await?;
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");

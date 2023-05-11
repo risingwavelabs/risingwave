@@ -25,6 +25,21 @@ use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
 const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
+const MV1: &str = "create materialized view m1 as select * from t;";
+
+macro_rules! insert_and_flush {
+    ($cluster:ident) => {{
+        let mut session = $cluster.start_session();
+        let values = repeat_with(|| rand::random::<i32>())
+            .take(100)
+            .map(|i| format!("({})", i))
+            .join(",");
+        session
+            .run(format!("insert into t values {}", values))
+            .await?;
+        session.run("flush").await?;
+    }};
+}
 
 #[madsim::test]
 async fn test_table() -> Result<()> {
@@ -35,31 +50,43 @@ async fn test_table() -> Result<()> {
         .locate_one_fragment([identity_contains("dml"), identity_contains("source")])
         .await?;
 
-    macro_rules! insert_and_flush {
-        () => {{
-            let mut session = cluster.start_session();
-            let values = repeat_with(|| rand::random::<i32>())
-                .take(100)
-                .map(|i| format!("({})", i))
-                .join(",");
-            session
-                .run(format!("insert into t values {}", values))
-                .await?;
-            session.run("flush").await?;
-        }};
-    }
-
-    insert_and_flush!();
+    insert_and_flush!(cluster);
 
     cluster
         .reschedule(fragment.reschedule([0, 2, 4], []))
         .await?;
 
-    insert_and_flush!();
+    insert_and_flush!(cluster);
 
     cluster.reschedule(fragment.reschedule([1], [0, 4])).await?;
 
-    insert_and_flush!();
+    insert_and_flush!(cluster);
+
+    Ok(())
+}
+
+#[madsim::test]
+async fn test_mv_on_scaled_table() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    cluster.run(ROOT_TABLE_CREATE).await?;
+
+    let fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
+        .await?;
+
+    cluster
+        .reschedule(fragment.reschedule([0, 2, 4], []))
+        .await?;
+
+    insert_and_flush!(cluster);
+
+    cluster.reschedule(fragment.reschedule([1], [0, 4])).await?;
+
+    insert_and_flush!(cluster);
+
+    cluster.run(MV1).await?;
+
+    insert_and_flush!(cluster);
 
     Ok(())
 }

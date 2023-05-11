@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
@@ -28,8 +28,8 @@ use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
-    filter_with_delete_range, ENABLE_SANITY_CHECK,
+    cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
+    do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -394,9 +394,12 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+    fn flush(&mut self, delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>) -> Self::FlushFuture<'_> {
         async move {
-            debug_assert!(delete_ranges.iter().map(|(key, _)| key).is_sorted());
+            debug_assert!(delete_ranges
+                .iter()
+                .map(|(key, _)| key)
+                .is_sorted_by(|a, b| Some(cmp_delete_range_left_bounds(a.as_ref(), b.as_ref()))));
             let buffer = self.mem_table.drain().into_parts();
             let mut kv_pairs = Vec::with_capacity(buffer.len());
             for (key, key_op) in filter_with_delete_range(buffer.into_iter(), delete_ranges.iter())
