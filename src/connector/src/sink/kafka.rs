@@ -259,7 +259,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         "after": record_to_json(row, &schema.fields)?,
                         "op": "c",
                         "ts_ms": ts_ms,
-                        "source": source_field.clone(),
+                        "source": source_field,
                     }
                 })),
                 Op::Delete => Some(json!({
@@ -269,7 +269,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
-                        "source": source_field.clone(),
+                        "source": source_field,
                     }
                 })),
                 Op::UpdateDelete => {
@@ -285,7 +285,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                                 "after": record_to_json(row, &schema.fields)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
-                                "source": source_field.clone(),
+                                "source": source_field,
                             }
                         }))
                     } else {
