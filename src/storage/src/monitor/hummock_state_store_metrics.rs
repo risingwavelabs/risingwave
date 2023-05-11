@@ -47,9 +47,6 @@ pub struct HummockStateStoreMetrics {
     pub write_batch_duration: HistogramVec,
     pub write_batch_size: HistogramVec,
 
-    // sample finished task counts
-    // pub merge_imm_task_counts: HistogramVec,
-
     // finished task counts
     pub merge_imm_task_counts: GenericCounterVec<AtomicU64>,
     // merge imm ops
@@ -220,8 +217,8 @@ impl HummockStateStoreMetrics {
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
-            merge_imm_batch_counts,
             merge_imm_task_counts,
+            merge_imm_batch_counts,
         }
     }
 

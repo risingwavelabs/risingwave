@@ -1030,6 +1030,7 @@ mod tests {
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+    use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
@@ -1130,6 +1131,7 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
+            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
@@ -1602,6 +1604,7 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         let uploader = HummockUploader::new(
+            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new({
                 move |_: UploadTaskPayload, task_info: UploadTaskInfo| {
