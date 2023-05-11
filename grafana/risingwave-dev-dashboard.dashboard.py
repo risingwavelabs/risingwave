@@ -1641,13 +1641,9 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Filter/Cache Miss Rate",
+            "Cache Miss Rate",
             "",
             [
-                panels.target(
-                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type))",
-                    "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
                 panels.target(
                     f"(sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
@@ -1660,15 +1656,25 @@ def section_hummock(panels):
                     f"(sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)) / (sum(rate({metric('file_cache_latency_count', file_cache_get_filter)}[$__rate_interval])) by (instance))",
                     "file cache miss rate @ {{instance}}",
                 ),
-
+            ],
+        ),
+        panels.timeseries_percentage(
+            "Bloom-Filter Filtering Rate",
+            "",
+            [
                 panels.target(
                     f"1 - (((sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    "{{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
-
+            ],
+        ),
+        panels.timeseries_percentage(
+            "Bloom-Filter False-Positive Rate",
+            "",
+            [
                 panels.target(
                     f"1 - (((sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
-                    "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    "{{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
