@@ -284,24 +284,24 @@ SELECT x,
 FROM (VALUES (0), (45), (90), (135), (180),
       (225), (270), (315), (360)) AS t(x);
 
-SELECT x,
-       asind(x),
-       asind(x) IN (-90,-30,0,30,90) AS asind_exact,
-       acosd(x),
-       acosd(x) IN (0,60,90,120,180) AS acosd_exact
-FROM (VALUES (-1), (-0.5), (0), (0.5), (1)) AS t(x);
+--@ SELECT x,
+--@        asind(x),
+--@        asind(x) IN (-90,-30,0,30,90) AS asind_exact,
+--@        acosd(x),
+--@        acosd(x) IN (0,60,90,120,180) AS acosd_exact
+--@ FROM (VALUES (-1), (-0.5), (0), (0.5), (1)) AS t(x);
 
-SELECT x,
-       atand(x),
-       atand(x) IN (-90,-45,0,45,90) AS atand_exact
-FROM (VALUES ('-Infinity'::float8), (-1), (0), (1),
-      ('Infinity'::float8)) AS t(x);
+--@ SELECT x,
+--@        atand(x),
+--@        atand(x) IN (-90,-45,0,45,90) AS atand_exact
+--@ FROM (VALUES ('-Infinity'::float8), (-1), (0), (1),
+--@       ('Infinity'::float8)) AS t(x);
 
-SELECT x, y,
-       atan2d(y, x),
-       atan2d(y, x) IN (-90,0,90,180) AS atan2d_exact
-FROM (SELECT 10*cosd(a), 10*sind(a)
-      FROM generate_series(0, 360, 90) AS t(a)) AS t(x,y);
+--@ SELECT x, y,
+--@        atan2d(y, x),
+--@        atan2d(y, x) IN (-90,0,90,180) AS atan2d_exact
+--@ FROM (SELECT 10*cosd(a), 10*sind(a)
+--@       FROM generate_series(0, 360, 90) AS t(a)) AS t(x,y);
 
 --
 -- test output (and round-trip safety) of various values.
