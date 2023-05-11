@@ -209,7 +209,7 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
     }
 }
 
-/// Calculate range (A - B).
+/// Calculate range (A - B), the result might be the union of two ranges when B is totally included in the A.
 fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
     if a.end <= b.start || b.end <= a.start {
         // a: [   )
