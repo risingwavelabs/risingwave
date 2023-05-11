@@ -1659,8 +1659,8 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Bloom-Filter Filtering Rate",
-            "",
+            "Bloom-Filter Filtered Rate",
+            "Negative / Total",
             [
                 panels.target(
                     f"1 - (((sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
@@ -1670,10 +1670,10 @@ def section_hummock(panels):
         ),
         panels.timeseries_percentage(
             "Bloom-Filter False-Positive Rate",
-            "",
+            "False-Positive / Positive",
             [
                 panels.target(
-                    f"1 - (((sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    f"(((sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "{{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
