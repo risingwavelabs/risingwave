@@ -1949,7 +1949,7 @@ async fn test_move_tables_between_compaction_group() {
     let groups = info.keys().sorted().cloned().collect_vec();
     assert_eq!(groups, vec![2, new_group_id]);
     let ret = hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false)
+        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
         .await;
     // we can not move table-101 since sst-12 has been moved to new-group. If we move sst-12 to
     // new-group, some of its data may be expired and it would return error result.
@@ -1978,7 +1978,7 @@ async fn test_move_tables_between_compaction_group() {
     // there is still left one sst for object-12 in branched-sst.
     assert_eq!(branched_ssts.len(), 2);
     hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false)
+        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;

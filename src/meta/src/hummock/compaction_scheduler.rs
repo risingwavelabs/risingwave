@@ -535,6 +535,7 @@ where
                     &[table_id],
                     target_compact_group_id,
                     false,
+                    2,
                 )
                 .await;
             match ret {

@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
@@ -428,7 +429,7 @@ impl<S: MetaStore> HummockManager<S> {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false)
+        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
             .await
     }
 
@@ -441,6 +442,7 @@ impl<S: MetaStore> HummockManager<S> {
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
         allow_split_by_table: bool,
+        split_weight_by_vnode: u32,
     ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
             return Ok(parent_group_id);
@@ -546,6 +548,8 @@ impl<S: MetaStore> HummockManager<S> {
                     .await
                     .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
+                config.split_weight_by_vnode =
+                    std::cmp::min(VirtualNode::COUNT as u32, split_weight_by_vnode);
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,
