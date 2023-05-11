@@ -31,7 +31,6 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
@@ -716,15 +715,6 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
-        let req = SetCompactorRuntimeConfigRequest {
-            context_id: self.worker_id,
-            config: Some(config.into()),
-        };
-        let _resp = self.inner.set_compactor_runtime_config(req).await?;
-        Ok(())
-    }
-
     pub async fn replay_version_delta(
         &self,
         version_delta: HummockVersionDelta,
@@ -983,13 +973,12 @@ impl HummockMetaClient for MetaClient {
 
     async fn subscribe_compact_tasks(
         &self,
-        max_concurrent_task_number: u64,
         cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
-            max_concurrent_task_number,
             cpu_core_num,
+            ..Default::default()
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
@@ -1490,7 +1479,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
-            ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }

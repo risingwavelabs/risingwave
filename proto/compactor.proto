@@ -5,16 +5,11 @@ package compactor;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message CompactorRuntimeConfig {
-  uint64 max_concurrent_task_number = 1;
+message EchoRequest {
 }
 
-message SetRuntimeConfigRequest {
-  CompactorRuntimeConfig config = 1;
-}
-
-message SetRuntimeConfigResponse {}
+message EchoResponse {}
 
 service CompactorService {
-  rpc SetRuntimeConfig(SetRuntimeConfigRequest) returns (SetRuntimeConfigResponse);
+  rpc Echo(EchoRequest) returns (EchoResponse);
 }
