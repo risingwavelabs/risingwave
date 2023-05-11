@@ -26,7 +26,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
 
-use super::monitor::StreamingMetrics;
+use super::monitor::{ActorMetrics, StreamingMetrics};
 use super::subtask::SubtaskHandle;
 use super::StreamConsumer;
 use crate::error::StreamResult;
@@ -42,6 +42,8 @@ pub struct ActorContext {
     total_mem_val: Arc<TrAdder<i64>>,
     streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
+
+    pub actor_metrics: Arc<ActorMetrics>,
 }
 
 pub type ActorContextRef = Arc<ActorContext>;
@@ -56,6 +58,8 @@ impl ActorContext {
             total_mem_val: Arc::new(TrAdder::new()),
             streaming_metrics: Arc::new(StreamingMetrics::unused()),
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(10))),
+
+            actor_metrics: Arc::new(ActorMetrics::unused()),
         })
     }
 
@@ -65,6 +69,7 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         unique_user_errors: usize,
+        actor_metrics: Arc<ActorMetrics>,
     ) -> ActorContextRef {
         Arc::new(Self {
             id,
@@ -74,6 +79,8 @@ impl ActorContext {
             total_mem_val,
             streaming_metrics,
             error_suppressor: Arc::new(Mutex::new(ErrorSuppressor::new(unique_user_errors))),
+
+            actor_metrics,
         })
     }
 

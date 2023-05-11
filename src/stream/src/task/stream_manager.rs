@@ -42,7 +42,7 @@ use tokio::task::JoinHandle;
 use super::{unique_executor_id, unique_operator_id, CollectResult};
 use crate::error::{StreamError, StreamResult};
 use crate::executor::exchange::permit::Receiver;
-use crate::executor::monitor::StreamingMetrics;
+use crate::executor::monitor::{ActorMetrics, StreamingMetrics};
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::*;
 use crate::from_proto::create_executor;
@@ -607,12 +607,14 @@ impl LocalStreamManagerCore {
                 StreamError::from(anyhow!("No such actor with actor id:{}", actor_id))
             })?;
             let mview_definition = &actor.mview_definition;
+            let actor_metrics = Arc::new(ActorMetrics::new(&self.streaming_metrics));
             let actor_context = ActorContext::create_with_metrics(
                 actor_id,
                 actor.fragment_id,
                 self.total_mem_val.clone(),
                 self.streaming_metrics.clone(),
                 self.config.unique_user_stream_errors,
+                actor_metrics,
             );
             let vnode_bitmap = actor
                 .vnode_bitmap

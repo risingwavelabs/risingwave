@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use prometheus::core::{AtomicF64, AtomicI64, AtomicU64, GenericCounterVec, GenericGaugeVec};
+use std::sync::{Arc, OnceLock};
+
+use itertools::Itertools;
+use prometheus::core::{
+    AtomicF64, AtomicI64, AtomicU64, CounterVecBuilder, GaugeVecBuilder, GenericCounterVec,
+    GenericGaugeVec, HistogramVecBuilder, MetricVec,
+};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
@@ -547,6 +553,103 @@ impl StreamingMetrics {
 
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(prometheus::Registry::new())
+        Self::new(Registry::new())
     }
 }
+
+/// Metrics in [`ActorMetrics`] are automatically cleaned after the related actor is dropped.
+pub struct ActorMetrics {
+    // Streaming Aggregation
+    pub agg_lookup_miss_count: ManagedGenericCounterVec<AtomicU64>,
+    pub agg_total_lookup_count: ManagedGenericCounterVec<AtomicU64>,
+    pub agg_cached_keys: ManagedGenericGaugeVec<AtomicI64>,
+    pub agg_chunk_lookup_miss_count: ManagedGenericCounterVec<AtomicU64>,
+    pub agg_chunk_total_lookup_count: ManagedGenericCounterVec<AtomicU64>,
+}
+
+impl ActorMetrics {
+    pub fn new(metrics: &StreamingMetrics) -> Self {
+        let agg_lookup_miss_count = Arc::new(metrics.agg_lookup_miss_count.clone().into());
+        let agg_total_lookup_count = Arc::new(metrics.agg_total_lookup_count.clone().into());
+        let agg_cached_keys = Arc::new(metrics.agg_cached_keys.clone().into());
+        let agg_chunk_lookup_miss_count =
+            Arc::new(metrics.agg_chunk_lookup_miss_count.clone().into());
+        let agg_chunk_total_lookup_count =
+            Arc::new(metrics.agg_chunk_total_lookup_count.clone().into());
+
+        Self {
+            agg_lookup_miss_count,
+            agg_total_lookup_count,
+            agg_cached_keys,
+            agg_chunk_lookup_miss_count,
+            agg_chunk_total_lookup_count,
+        }
+    }
+
+    pub fn unused() -> Self {
+        Self::new(&StreamingMetrics::unused())
+    }
+}
+
+pub struct ManagedMetricVec<T: prometheus::core::MetricVecBuilder> {
+    metric_vec: MetricVec<T>,
+    label_values: OnceLock<Vec<String>>,
+    inner: OnceLock<T::M>,
+}
+
+impl<T: prometheus::core::MetricVecBuilder> ManagedMetricVec<T> {
+    pub fn new(metric_vec: MetricVec<T>) -> Self {
+        Self {
+            metric_vec,
+            label_values: OnceLock::default(),
+            inner: OnceLock::default(),
+        }
+    }
+
+    pub fn with_label_values(&self, label_values: &[&str]) -> &T::M {
+        let res = self.inner.get_or_init(|| {
+            let owned_label_values = label_values.iter().map(ToString::to_string).collect_vec();
+            self.label_values
+                .set(owned_label_values)
+                .expect("Label values are set twice!!");
+            self.metric_vec.with_label_values(label_values)
+        });
+        debug_assert_eq!(
+            label_values,
+            &self
+                .label_values
+                .get()
+                .unwrap()
+                .iter()
+                .map(String::as_str)
+                .collect_vec()
+        );
+        res
+    }
+}
+
+impl<T: prometheus::core::MetricVecBuilder> From<MetricVec<T>> for ManagedMetricVec<T> {
+    fn from(value: MetricVec<T>) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T: prometheus::core::MetricVecBuilder> Drop for ManagedMetricVec<T> {
+    fn drop(&mut self) {
+        match self.label_values.get() {
+            Some(label_values) => {
+                let vals = label_values.iter().map(String::as_str).collect_vec();
+                self.metric_vec
+                    .remove_label_values(&vals)
+                    .expect("Metric labels are removed twice!!")
+            }
+            None => return,
+        }
+    }
+}
+
+pub type ManagedMetricVecRef<B> = Arc<ManagedMetricVec<B>>;
+
+pub type ManagedGenericCounterVec<T> = ManagedMetricVecRef<CounterVecBuilder<T>>;
+pub type ManagedGenericGaugeVec<T> = ManagedMetricVecRef<GaugeVecBuilder<T>>;
+pub type ManagedGenericHistogramVec = ManagedMetricVecRef<HistogramVecBuilder>;

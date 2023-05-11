@@ -115,7 +115,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
 
-    metrics: Arc<StreamingMetrics>,
+    _metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
@@ -220,7 +220,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                metrics: args.extra.metrics,
+                _metrics: args.extra.metrics,
             },
         })
     }
@@ -390,26 +390,31 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
         let table_id_str = this.result_table.table_id().to_string();
-        this.metrics
+        this.actor_ctx
+            .actor_metrics
             .agg_lookup_miss_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .inc_by(vars.stats.lookup_miss_count);
         vars.stats.lookup_miss_count = 0;
-        this.metrics
+        this.actor_ctx
+            .actor_metrics
             .agg_total_lookup_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .inc_by(vars.stats.total_lookup_count);
         vars.stats.total_lookup_count = 0;
-        this.metrics
+        this.actor_ctx
+            .actor_metrics
             .agg_cached_keys
             .with_label_values(&[&table_id_str, &actor_id_str])
             .set(vars.agg_group_cache.len() as i64);
-        this.metrics
+        this.actor_ctx
+            .actor_metrics
             .agg_chunk_lookup_miss_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .inc_by(vars.stats.chunk_lookup_miss_count);
         vars.stats.chunk_lookup_miss_count = 0;
-        this.metrics
+        this.actor_ctx
+            .actor_metrics
             .agg_chunk_total_lookup_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .inc_by(vars.stats.chunk_total_lookup_count);
