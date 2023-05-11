@@ -18,6 +18,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
@@ -215,6 +216,7 @@ impl StreamTableScan {
             let field = &schema[i];
             catalog_builder.add_column(field);
         }
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
         let catalog = catalog_builder
             .build(self.base.distribution().dist_column_indices().into(), 0)
             .with_id(state.gen_table_id_wrapped())

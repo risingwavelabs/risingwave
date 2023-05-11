@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
+use std::thread::current;
 
 use await_tree::InstrumentAwait;
 use either::Either;
@@ -27,6 +28,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
@@ -275,13 +277,16 @@ where
                                     total_snapshot_processed_rows,
                                 );
 
-                                // Flush data out
+                                // Persist state on barrier
                                 if let Some(current_pos) = &current_pos {
+                                    let mut current_pos: Vec<Datum> = current_pos.as_inner().into();
+                                    current_pos.push(Some(false.into()));
+                                    let current_pos = OwnedRow::new(current_pos);
                                     Self::flush_data(
                                         &mut self.state_table,
                                         barrier.epoch,
                                         old_pos.as_ref(),
-                                        current_pos,
+                                        &current_pos,
                                     );
                                 }
                                 old_pos = current_pos.clone();
@@ -303,8 +308,8 @@ where
                         match msg? {
                             None => {
                                 // End of the snapshot read stream.
-                                // We need to set current_pos to the maximum value or do not
-                                // mark the chunk anymore, otherwise, we will ignore some rows
+                                // We need to not mark the chunk anymore,
+                                // otherwise, we will ignore some rows
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
                                 for chunk in upstream_chunk_buffer.drain(..) {
@@ -317,7 +322,6 @@ where
                                     ));
                                 }
 
-                                // Finish backfill.
                                 break 'backfill_loop;
                             }
                             Some(chunk) => {
@@ -359,6 +363,19 @@ where
             if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
                 if let Some(barrier) = msg.as_barrier() {
                     self.progress.finish(barrier.epoch.curr);
+
+                    // Since we are done, we should persist this to
+                    // upstream.
+                    let mut current_pos: Vec<Datum> =
+                        current_pos.clone().unwrap().as_inner().into();
+                    current_pos.push(Some(true.into()));
+                    let current_pos = OwnedRow::new(current_pos);
+                    Self::flush_data(
+                        &mut self.state_table,
+                        barrier.epoch,
+                        old_pos.as_ref(),
+                        &current_pos,
+                    );
                 }
                 yield msg;
             }
