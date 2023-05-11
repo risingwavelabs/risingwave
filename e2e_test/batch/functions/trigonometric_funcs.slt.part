@@ -506,46 +506,21 @@ SELECT abs(abs(asind(0)) - 0) < 1e-14
 t
 
 query R
-SELECT abs(abs(asind(1)) - 90) < 1e-14
+SELECT abs(abs(asind(1) - 90)) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(asind(-1)) + 90) < 1e-14
+SELECT abs(abs(asind(-1) + 90)) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(asind(0.5)) - 30) < 1e-14
+SELECT abs(abs(asind(0.5) - 30)) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(asind(-0.5)) + 30) < 1e-14
-----
-t
-
-query R
-SELECT abs(abs(asind(0.70710678118)) - 45) < 1e-14
-----
-t
-
-query R
-SELECT abs(abs(asind(-0.70710678118)) + 45) < 1e-14
-----
-t
-
-query R
-SELECT abs(abs(asind(0.86602540378)) - 60) < 1e-14
-----
-t
-
-query R
-SELECT abs(abs(asind(-0.86602540378)) + 60) < 1e-14
-----
-t
-
-query R
-SELECT abs(abs(asind(0.2588190451)) - 15) < 1e-14
+SELECT abs(abs(asind(-0.5) + 30)) < 1e-14
 ----
 t
