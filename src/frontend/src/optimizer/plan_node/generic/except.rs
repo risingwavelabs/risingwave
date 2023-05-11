@@ -12,46 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::hash::Hash;
+use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Share<PlanRef> {
-    pub input: RefCell<PlanRef>,
+/// `Except` returns the rows of its first input except any
+///  matching rows from its other inputs.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Except<PlanRef> {
+    pub all: bool,
+    pub inputs: Vec<PlanRef>,
 }
 
-impl<P: Hash> Hash for Share<P> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.input.borrow().hash(state);
-    }
-}
-
-impl<PlanRef: GenericPlanRef> Share<PlanRef> {
-    pub fn replace_input(&self, plan: PlanRef) {
-        *self.input.borrow_mut() = plan;
-    }
-}
-
-impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Except<PlanRef> {
     fn schema(&self) -> Schema {
-        self.input.borrow().schema().clone()
+        self.inputs[0].schema().clone()
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.borrow().logical_pk().to_vec())
+        Some(self.inputs[0].logical_pk().to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.input.borrow().ctx()
+        self.inputs[0].ctx()
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        self.input.borrow().functional_dependency().clone()
+        FunctionalDependencySet::new(self.inputs[0].schema().len())
+    }
+}
+
+impl<PlanRef: GenericPlanRef> Except<PlanRef> {
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder);
+        builder.finish()
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        builder.field("all", &self.all);
     }
 }

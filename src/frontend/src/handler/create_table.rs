@@ -658,7 +658,7 @@ pub async fn handle_create_table(
         }
     }
 
-    let (graph, source, table, notices) = {
+    let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
@@ -688,15 +688,12 @@ pub async fn handle_create_table(
             )?,
         };
 
-        let context = plan.plan_base().ctx.clone();
-        let notices = context.take_warnings();
-
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
             .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table, notices)
+        (graph, source, table)
     };
 
     tracing::trace!(
@@ -708,10 +705,7 @@ pub async fn handle_create_table(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result_with_notices(
-        StatementType::CREATE_TABLE,
-        notices,
-    ))
+    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
 pub fn check_create_table_with_source(

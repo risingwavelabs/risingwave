@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -323,8 +324,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local
         .flush(vec![(
-            Bytes::from(b"ggg".as_slice()),
-            Bytes::from(b"hhh".as_slice()),
+            Bound::Included(Bytes::from(b"ggg".as_slice())),
+            Bound::Excluded(Bytes::from(b"hhh".as_slice())),
         )])
         .await
         .unwrap();
@@ -340,8 +341,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     local
         .flush(vec![(
-            Bytes::from(b"jjj".as_slice()),
-            Bytes::from(b"kkk".as_slice()),
+            Bound::Included(Bytes::from(b"jjj".as_slice())),
+            Bound::Excluded(Bytes::from(b"kkk".as_slice())),
         )])
         .await
         .unwrap();
