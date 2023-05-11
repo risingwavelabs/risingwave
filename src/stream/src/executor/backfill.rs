@@ -26,6 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -33,6 +34,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+use crate::common::table::state_table::StateTable;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
@@ -67,6 +69,9 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
+    /// Internal state table for persisting state of backfill state.
+    state_table: StateTable<S>,
+
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
@@ -88,6 +93,7 @@ where
     pub fn new(
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
+        state: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -102,6 +108,7 @@ where
             },
             upstream_table,
             upstream,
+            state_table,
             output_indices,
             actor_id: progress.actor_id(),
             progress,
@@ -144,10 +151,15 @@ where
         yield Message::Barrier(first_barrier);
 
         if !to_backfill {
-            // Forward messages directly to the downstream.
             #[for_await]
             for message in upstream {
-                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
+                let message = message?;
+                // flush if barrier
+                if let Message::Barrier(barrier) = &message {
+                    Self::flush_data(&mut self.state_table, barrier.epoch.clone()).await;
+                };
+                // Then forward messages directly to the downstream.
+                if let Some(message) = Self::mapping_message(message, &self.output_indices) {
                     yield message;
                 }
             }
@@ -391,6 +403,10 @@ where
         }
 
         yield None;
+    }
+
+    async fn flush_data(table: &mut StateTable<S>, epoch: EpochPair) {
+        todo!()
     }
 
     /// Mark chunk:
