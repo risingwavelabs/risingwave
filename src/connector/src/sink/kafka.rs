@@ -234,6 +234,11 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        let source_field = json!({
+            "db": "RisingWave",
+            "table": "RisingWave",
+        });
+
         let mut update_cache: Option<Map<String, Value>> = None;
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
@@ -254,6 +259,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         "after": record_to_json(row, &schema.fields)?,
                         "op": "c",
                         "ts_ms": ts_ms,
+                        "source": source_field.clone(),
                     }
                 })),
                 Op::Delete => Some(json!({
@@ -263,6 +269,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
+                        "source": source_field.clone(),
                     }
                 })),
                 Op::UpdateDelete => {
@@ -278,6 +285,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                                 "after": record_to_json(row, &schema.fields)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
+                                "source": source_field.clone(),
                             }
                         }))
                     } else {
