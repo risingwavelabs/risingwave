@@ -100,11 +100,7 @@ pub fn gen_sink_plan(
     let connection_id = {
         let conn_id =
             resolve_connection_in_with_option(&mut with_options, &sink_schema_name, session)?;
-        if let Some(id) = conn_id {
-            Some(ConnectionId(id))
-        } else {
-            None
-        }
+        conn_id.map(ConnectionId)
     };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;

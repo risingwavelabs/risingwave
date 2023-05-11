@@ -123,8 +123,8 @@ pub(crate) fn resolve_connection_in_with_option(
     schema_name: &Option<String>,
     session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
-    let connection_name = get_connection_name(&with_options);
-    let is_kafka = is_kafka_connector(&with_options);
+    let connection_name = get_connection_name(with_options);
+    let is_kafka = is_kafka_connector(with_options);
     let connection_id = match connection_name {
         Some(connection_name) => {
             let connection = session

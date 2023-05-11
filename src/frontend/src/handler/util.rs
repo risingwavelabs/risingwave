@@ -34,10 +34,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
 
-
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
-
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
