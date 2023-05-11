@@ -238,10 +238,8 @@ impl Compactor {
             })
             .cloned()
             .collect_vec();
-        let compaction_size = compact_task
-            .input_ssts
+        let compaction_size = sstable_infos
             .iter()
-            .flat_map(|level| level.table_infos.iter())
             .map(|table_info| table_info.file_size)
             .sum::<u64>();
         match generate_splits(&sstable_infos, compaction_size, context.clone()).await {
