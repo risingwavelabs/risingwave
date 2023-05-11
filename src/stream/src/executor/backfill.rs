@@ -22,6 +22,7 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
@@ -90,6 +91,7 @@ impl<S> BackfillExecutor<S>
 where
     S: StateStore,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
@@ -140,6 +142,7 @@ where
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
+        // Whether we still need to backfill
         let to_backfill = to_create_mv && !is_snapshot_empty;
 
         if to_create_mv && is_snapshot_empty {
@@ -153,13 +156,8 @@ where
         if !to_backfill {
             #[for_await]
             for message in upstream {
-                let message = message?;
-                // flush if barrier
-                if let Message::Barrier(barrier) = &message {
-                    Self::flush_data(&mut self.state_table, barrier.epoch).await;
-                };
                 // Then forward messages directly to the downstream.
-                if let Some(message) = Self::mapping_message(message, &self.output_indices) {
+                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
                     yield message;
                 }
             }
@@ -173,6 +171,9 @@ where
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
+
+        // NOTE(kwannoel): Only updated when flushing to state table.
+        let old_pos: Option<OwnedRow> = None;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -273,6 +274,16 @@ where
                                     snapshot_read_epoch,
                                     total_snapshot_processed_rows,
                                 );
+
+                                // Flush data out
+                                if let Some(ref current_pos) = current_pos {
+                                    Self::flush_data(
+                                        &mut self.state_table,
+                                        barrier.epoch,
+                                        old_pos.as_ref(),
+                                        current_pos,
+                                    );
+                                }
 
                                 yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
@@ -405,8 +416,22 @@ where
         yield None;
     }
 
-    async fn flush_data(table: &mut StateTable<S>, epoch: EpochPair) {
-        todo!()
+    fn flush_data(
+        table: &mut StateTable<S>,
+        _epoch: EpochPair,
+        old_pos: Option<&OwnedRow>,
+        current_pos: &OwnedRow,
+    ) {
+        if let Some(old_pos) = old_pos {
+            table.write_record(Record::Update {
+                old_row: old_pos,
+                new_row: current_pos,
+            })
+        } else {
+            table.write_record(Record::Insert {
+                new_row: current_pos,
+            })
+        }
     }
 
     /// Mark chunk:
