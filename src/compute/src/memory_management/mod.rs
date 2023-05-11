@@ -32,8 +32,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 2048;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.1;
+pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
 pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -105,14 +104,11 @@ impl MemoryControl for DummyPolicy {
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
-/// size belongs to [`MIN_SYSTEM_RESERVED_MEMORY_MB`, `MAX_SYSTEM_RESERVED_MEMORY_MB`]
+/// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
-    let reserved = std::cmp::min(
-        std::cmp::max(
-            (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
-            MIN_SYSTEM_RESERVED_MEMORY_MB << 20,
-        ),
-        MAX_SYSTEM_RESERVED_MEMORY_MB << 20,
+    let reserved = std::cmp::max(
+        (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
+        MIN_SYSTEM_RESERVED_MEMORY_MB << 20,
     );
     (reserved, total_memory_bytes - reserved)
 }
@@ -198,13 +194,8 @@ mod tests {
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 1 << 30);
-        assert_eq!(non_reserved, 9 << 30);
-
-        // at most 2 GB
-        let (reserved, non_reserved) = reserve_memory_bytes(100 << 30);
         assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 98 << 30);
+        assert_eq!(non_reserved, 8 << 30);
     }
 
     #[test]

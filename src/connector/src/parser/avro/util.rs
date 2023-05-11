@@ -75,6 +75,7 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::TimestampMillis => DataType::Timestamptz,
         Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
+        Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
         Schema::Record { fields, .. } => {
             let struct_fields = fields
@@ -288,6 +289,7 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
             let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
             ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
         }
+        Value::Bytes(value) => ScalarImpl::Bytea(value.into_boxed_slice()),
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
             let rw_values = descs
