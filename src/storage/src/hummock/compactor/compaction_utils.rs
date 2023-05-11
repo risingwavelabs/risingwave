@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
-use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
+use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec};
 
 pub use super::context::CompactorContext;
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -76,7 +76,8 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         };
         let writer = self
             .sstable_writer_factory
-            .create_sst_writer(table_id, writer_options)?;
+            .create_sst_writer(table_id, writer_options)
+            .await?;
         let builder = SstableBuilder::new(
             table_id,
             writer,
@@ -126,26 +127,7 @@ pub struct TaskConfig {
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
     pub split_by_table: bool,
-}
-
-pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
-    let mut total_memory_size = 0;
-    let mut total_file_count = 0;
-    for level in &task.input_ssts {
-        if level.level_type == LevelType::Nonoverlapping as i32 {
-            if let Some(table) = level.table_infos.first() {
-                total_memory_size += table.file_size * task.splits.len() as u64;
-            }
-        } else {
-            for table in &level.table_infos {
-                total_memory_size += table.file_size;
-            }
-        }
-
-        total_file_count += level.table_infos.len();
-    }
-
-    (total_memory_size, total_file_count)
+    pub split_weight_by_vnode: u32,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

@@ -178,6 +178,7 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -253,7 +254,11 @@ mod tests {
 
         let largest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_zzzz_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
@@ -263,7 +268,11 @@ mod tests {
         // Seek to > last key
         let smallest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_aaaa_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
@@ -279,7 +288,11 @@ mod tests {
                 .seek(
                     FullKey::for_test(
                         TableId::default(),
-                        format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
+                        [
+                            VirtualNode::ZERO.to_be_bytes().as_slice(),
+                            format!("key_test_{:05}", idx * 2 - 1).as_bytes(),
+                        ]
+                        .concat(),
                         0,
                     )
                     .to_ref(),

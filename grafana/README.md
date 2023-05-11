@@ -42,3 +42,14 @@ DASHBOARD_UID=<dashboard_uid> \
 DASHBOARD_VERSION=<version> \
 ./generate.sh
 ```
+
+If you want to use multi-prometheus as the variable:
+
+```bash
+DASHBOARD_NAMESPACE_FILTER_ENABLED=true \
+DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED=true \
+DASHBOARD_DYNAMIC_SOURCE=true \
+DASHBOARD_UID=<dashboard_uid> \
+DASHBOARD_VERSION=<version> \
+./generate.sh
+```

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
@@ -31,7 +32,7 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
     }
 
     async fn get_tracking_id(&self) -> Option<ClusterId> {
-        ClusterId::from_meta_store(&self.meta_store)
+        ClusterId::from_meta_store(self.meta_store.deref())
             .await
             .ok()
             .flatten()

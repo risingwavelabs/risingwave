@@ -18,8 +18,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
 
-use super::stream::StreamPlanRef;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -28,21 +27,16 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
     pub base: PlanBase,
-    logical: LogicalShare,
+    logical: generic::Share<PlanRef>,
 }
 
 impl StreamShare {
-    pub fn new(logical: LogicalShare) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let pk_indices = logical.base.logical_pk.to_vec();
+    pub fn new(logical: generic::Share<PlanRef>) -> Self {
+        let input = logical.input.borrow().0.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
             input.append_only(),
             input.emit_on_window_close(),
@@ -54,17 +48,19 @@ impl StreamShare {
 
 impl fmt::Display for StreamShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamShare")
+        LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
     }
 }
 
 impl PlanTreeNodeUnary for StreamShare {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.borrow().clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let logical = self.logical.clone();
+        logical.replace_input(input);
+        Self::new(logical)
     }
 }
 
