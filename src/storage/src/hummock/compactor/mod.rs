@@ -445,7 +445,6 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
-        // let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
         let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
         let mut system =
             System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
