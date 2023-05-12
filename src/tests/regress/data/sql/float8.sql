@@ -211,7 +211,7 @@ SELECT asinh(double precision 'infinity');
 SELECT asinh(double precision '-infinity');
 SELECT asinh(double precision 'nan');
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
-SELECT acosh(double precision 'infinity');
+-- SELECT acosh(double precision 'infinity');
 SELECT acosh(double precision '-infinity');
 SELECT acosh(double precision 'nan');
 SELECT atanh(double precision 'infinity');
