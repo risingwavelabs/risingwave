@@ -18,6 +18,7 @@
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
 
 mod key_cmp;
 

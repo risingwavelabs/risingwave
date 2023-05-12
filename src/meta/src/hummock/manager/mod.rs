@@ -506,7 +506,10 @@ where
             .compaction_group_manager
             .write()
             .await
-            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .get_or_insert_compaction_group_configs(
+                &all_group_ids.collect_vec(),
+                self.env.meta_store(),
+            )
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
@@ -2162,10 +2165,8 @@ where
                         )
                     };
 
-                    let compaction_group_ids_from_version =
-                        get_compaction_group_ids(&current_version);
-                    for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = &id_to_config[compaction_group_id];
+                    for compaction_group_id in get_compaction_group_ids(&current_version) {
+                        let compaction_group_config = &id_to_config[&compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),
