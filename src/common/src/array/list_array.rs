@@ -165,32 +165,6 @@ impl ListArrayBuilder {
             self.value.append_datum(v);
         }
     }
-
-    /// Append a value to the current list array slot.
-    ///
-    /// You must call `finish_sub` later to finish the current list.
-    ///
-    /// ```
-    /// # use risingwave_common::array::ListArrayBuilder;
-    ///
-    /// let mut builder = ListArrayBuilder::with_type(10, DataType::List(Box::new(DataType::Int32)));
-    /// builder.append_sub(1);
-    /// builder.append_sub(2);
-    /// builder.append_sub(3);
-    /// builder.finish_sub(true);
-    /// let array = builder.finish();
-    /// assert_eq!(array.len(), 1);
-    /// ```
-    pub fn append_sub(&mut self, value: impl ToDatumRef) {
-        self.value.append_datum(value);
-    }
-
-    /// Finish the current variable-length list array slot.
-    pub fn finish_sub(&mut self, is_valid: bool) {
-        self.bitmap.append(is_valid);
-        self.offsets.push(self.value.len() as u32);
-        self.len += 1;
-    }
 }
 
 /// Each item of this `ListArray` is a `List<T>`, or called `T[]` (T array).
