@@ -656,17 +656,17 @@
     └──  StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 8 }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 3
-    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 9 }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 4
-    Chain { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Chain { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 10 }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -685,6 +685,12 @@
     Table 6 { columns: [ t_src, t_dst, t__row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7 { columns: [ t_src, t__row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+
+    Table 8 { columns: [ t__row_id, t_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 2 ], read pk prefix len hint: 0 }
+
+    Table 9 { columns: [ t__row_id, t_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 2 ], read pk prefix len hint: 0 }
+
+    Table 10 { columns: [ t__row_id, t_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ p1, p2, p3, t._row_id, t._row_id#1, t.src, t._row_id#2 ], primary key: [ $3 ASC, $4 ASC, $1 ASC, $6 ASC, $5 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 6 }
 

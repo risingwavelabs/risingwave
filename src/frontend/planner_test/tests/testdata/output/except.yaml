@@ -46,12 +46,12 @@
                 └──  StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+    Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 5 }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 6 }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -84,6 +84,10 @@
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
+    Table 5 { columns: [ t1__row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 3 ], read pk prefix len hint: 0 }
+
+    Table 6 { columns: [ t2__row_id, t2_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 3 ], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
@@ -125,12 +129,12 @@
                 └──  StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+    Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 5 }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+    Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 6 }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -153,6 +157,10 @@
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
+    Table 5 { columns: [ t1_a, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+
+    Table 6 { columns: [ t2_a, t2_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 

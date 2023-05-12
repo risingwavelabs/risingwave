@@ -65,6 +65,7 @@
         │   ├── left table: 2
         │   ├── right table: 3
         │   ├── Chain { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   │   ├── state table: 4
         │   │   ├──  Upstream
         │   │   └──  BatchPlanNode
         │   └──  StreamExchange Broadcast from 1
@@ -72,11 +73,11 @@
 
     Fragment 1
     StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
-    └──  StreamNow { output: [now] } { state table: 4 }
+    └──  StreamNow { output: [now] } { state table: 5 }
 
     Fragment 2
     StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval) as $expr2], output_watermarks: [$expr2] }
-    └──  StreamNow { output: [now] } { state table: 5 }
+    └──  StreamNow { output: [now] } { state table: 6 }
 
     Table 0 { columns: [ t1_ts, t1__row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -86,9 +87,11 @@
 
     Table 3 { columns: [ $expr1 ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 4 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4 { columns: [ t1__row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 0 }
 
     Table 5 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+
+    Table 6 { columns: [ now ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 4294967294 { columns: [ ts, t1._row_id ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
