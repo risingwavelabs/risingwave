@@ -412,7 +412,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .map(|t| self.gen_expr(t, context))
             .collect();
 
-        let distinct = self.flip_coin() && self.is_distinct_allowed;
+        let distinct = self.flip_coin() && self.is_distinct_allowed && !exprs.is_empty();
         let filter = if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
