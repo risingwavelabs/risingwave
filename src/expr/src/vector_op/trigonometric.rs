@@ -65,7 +65,7 @@ static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
 static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
-static ACOS_0_5: f64 = 1.047_197_551_196_597_6;
+static ACOS_0_5: f64 = 1.047_197_551_196_597_6; // TODO: maybe this num is incorrect?
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -324,11 +324,10 @@ fn acosd_q1(x: f64) -> f64 {
     // monotonic function over the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
-        90.0 - (asin_x / ASIN_0_5) * 30.0
-    } else {
-        let acos_x = f64::acos(x);
-        (acos_x / ACOS_0_5) * 60.0
+        return 90.0 - (asin_x / ASIN_0_5) * 30.0;
     }
+    let acos_x = f64::acos(x);
+    (acos_x / ACOS_0_5) * 60.0
 }
 
 #[function("acosd(float64) -> float64")]
@@ -336,7 +335,7 @@ pub fn acosd_f64(input: F64) -> F64 {
     let arg1 = input.0;
 
     // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
-    if input.0.is_nan() || input.0.is_infinite() {
+    if input.0.is_nan() || input.0.is_infinite() || arg1 < -1.0 || arg1 > 1.0 {
         return F64::from(f64::NAN);
     }
 
@@ -385,6 +384,8 @@ mod tests {
 
     #[test]
     fn test_degrees() {
+        let ACOS_0_5_local = f64::acos(0.5);
+
         let d = F64::from(180);
         let pi = F64::from(PI);
 
