@@ -1,0 +1,25 @@
+[package]
+name = "risingwave_hummock_trace"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-trait = "0.1"
+bincode = { version = "=2.0.0-rc.3", features = ["serde"] }
+byteorder = "1"
+bytes = { version = "1", features = ["serde"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = "0.2"
+parking_lot = "0.12"
+prost = "0.11"
+risingwave_common = { path = "../../common" }
+risingwave_hummock_sdk = { path = "../hummock_sdk" }
+risingwave_pb = { path = "../../prost" }
+thiserror = "1.0"
+tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
+
+[dev-dependencies]
+itertools = "0.10.5"
+mockall = "0.11.2"
