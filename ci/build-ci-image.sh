@@ -16,7 +16,7 @@ export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
 ######################################################
 export BUILD_ENV_VERSION=v20230512
 
-export BUILD_TAG="639303875316.dkr.ecr.us-east-2.amazonaws.com/rw-build-env:${BUILD_ENV_VERSION}"
+export BUILD_TAG="rw-build-env:${BUILD_ENV_VERSION}"
 
 echo "+++ Arch"
 arch
