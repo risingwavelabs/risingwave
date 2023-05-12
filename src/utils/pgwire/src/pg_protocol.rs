@@ -49,7 +49,7 @@ use crate::types::Format;
 pub struct PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
@@ -105,7 +105,7 @@ impl TlsConfig {
 impl<S, SM, VS, PS, PO> Drop for PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
@@ -138,7 +138,7 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 impl<S, SM, VS, PS, PO> PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
@@ -436,6 +436,7 @@ where
         let session_id = session.id().0;
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         tracing::trace!(
+            target: "pgwire_query_log",
             "(extended query) session: {}, parse query: {}, statement name: {}",
             session_id,
             sql,
@@ -562,13 +563,20 @@ where
                 self.result_cache.insert(portal_name, result_cache);
             }
         } else {
+            let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
+            let sql = format!("{}", portal);
+            let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
 
-            let pg_response = session
-                .execute(portal)
-                .await
-                .map_err(PsqlError::ExecuteError)?;
+            let result = session.execute(portal).await;
 
+            let mills = start.elapsed().as_millis();
+            tracing::trace!(target: "pgwire_query_log", "(extended query) session: {}, actually execute portal name: {}, status: {}, time: {}ms, sql: {}", session_id, portal_name, if result.is_ok() {"ok"} else {"err"}, mills, truncated_sql);
+
+            let pg_response = match result {
+                Ok(pg_response) => pg_response,
+                Err(err) => return Err(PsqlError::ExecuteError(err)),
+            };
             let mut result_cache = ResultCache::new(pg_response);
             let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
             if !is_consume_completed {
