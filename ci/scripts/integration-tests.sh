@@ -39,3 +39,6 @@ python3 run_demos.py --case ${case} --format ${format}
 
 echo "--- Check if the ingestion is successful"
 python3 check_data.py ${case}
+
+echo "--- Clean Demos"
+python3 clean_demos.py --case ${case}

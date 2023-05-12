@@ -1,18 +1,23 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating
-import logging
 import os
+import logging
 import sys
 p = os.path.dirname(__file__)
 sys.path.append(p)
 from common import *
+from jsonmerge import merge
 
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Ecy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
 datasource = {"type": "prometheus", "uid": f"{source_uid}"}
 
+datasource_const = "datasource"
+if dynamic_source_enabled:
+    datasource = {"type": "prometheus", "uid": "${datasource}"}
+
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
+
 
 def section_actor_info(panels):
     excluded_cols = ['Time', 'Value', '__name__', 'job', 'instance']
@@ -26,6 +31,7 @@ def section_actor_info(panels):
                           [panels.table_target(f"{metric('table_info')}")], excluded_cols),
 
     ]
+
 
 def section_cluster_node(panels):
     return [
@@ -661,7 +667,7 @@ def section_streaming(panels):
             [
                 panels.target(
                     f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
-                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                    "sink={{sink_name}} {{sink_id}} @ {{instance}}",
                 ),
             ],
         ),
@@ -917,19 +923,19 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                         f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
+                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, actor_id))",
                             "join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                            ),
+                        ),
 
                         panels.target(
-                         f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
-                            ),
+                        ),
 
                         panels.target(
-                         f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
-                            ),
+                        ),
 
                     ],
                 ),
@@ -1038,6 +1044,7 @@ def section_streaming_actors(outer_panels):
             ],
         )
     ]
+
 
 def section_streaming_actors_tokio(outer_panels):
     panels = outer_panels.sub_panel()
@@ -1198,6 +1205,7 @@ def section_streaming_actors_tokio(outer_panels):
             ]
         )
     ]
+
 
 def section_streaming_exchange(outer_panels):
     panels = outer_panels.sub_panel()
@@ -1682,6 +1690,28 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Merge Imm - Finished Tasks Count",
+            "",
+            [
+                panels.target(
+                    f"sum(rate({metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    "merge imm tasks - {{table_id}} @ {{instance}} ",
+                ),
+            ],
+        ),
+        panels.timeseries_bytes(
+            "Merge Imm - Finished Task Memory Size",
+            "",
+            [
+                panels.target(
+                    f"sum(rate({metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
+                    "tasks memory size - {{table_id}} @ {{instance}} ",
+                ),
+            ],
+        ),
+
         panels.timeseries_ops(
             "Write Ops",
             "",
@@ -2447,31 +2477,75 @@ def section_connector_node(outer_panels):
     ]
 
 
-templating = Templating()
-if namespace_filter_enabled:
-    templating = Templating(
-        list=[
-            {
-                "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
-                "description": "Kubernetes namespace.",
-                "hide": 0,
-                "includeAll": False,
-                "label": "Namespace",
-                "multi": True,
-                "name": "namespace",
-                "options": [],
-                "query": {
-                    "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
-                    "refId": "StandardVariableQuery"
-                },
-                "refresh": 2,
-                "regex": "",
-                "skipUrlSync": False,
-                "sort": 0,
-                "type": "query"
-            }
-        ]
+templating_list = []
+if dynamic_source_enabled:
+    templating_list.append(
+        {
+            "hide": 0,
+            "includeAll": False,
+            "multi": False,
+            "name": f"{datasource_const}",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 2,
+            "skipUrlSync": False,
+            "type": "datasource"
+        }
     )
+
+if namespace_filter_enabled:
+    namespace_json = {
+        "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+        "description": "Kubernetes namespace.",
+        "hide": 0,
+        "includeAll": False,
+        "label": "Namespace",
+        "multi": False,
+        "name": "namespace",
+        "options": [],
+        "query": {
+            "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 0,
+        "type": "query",
+    }
+
+    name_json = {
+        "current": {
+            "selected": False,
+            "text": "risingwave",
+            "value": "risingwave"
+        },
+        "definition": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+        "hide": 0,
+        "includeAll": False,
+        "label": "RisingWave",
+        "multi": False,
+        "name": "instance",
+        "options": [],
+        "query": {
+            "query": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 6,
+        "type": "query",
+    }
+    if dynamic_source_enabled:
+        namespace_json = merge(namespace_json, {"datasource": datasource})
+        name_json = merge(name_json, {"datasource": datasource})
+
+    templating_list.append(namespace_json)
+    templating_list.append(name_json)
+
+templating = Templating(templating_list)
 
 dashboard = Dashboard(
     title="risingwave_dev_dashboard",

@@ -1,0 +1,18 @@
+[package]
+name = "risedev-config"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+anyhow = { version = "1", features = ["backtrace"] }
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+dialoguer = "0.10"
+enum-iterator = "1"
+fs-err = "2.9.0"
+itertools = "0.10"
+tempfile = "3"
