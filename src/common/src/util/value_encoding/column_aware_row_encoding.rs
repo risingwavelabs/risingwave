@@ -21,7 +21,7 @@
 
 #![expect(clippy::disallowed_methods, reason = "used by bitflags!")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use bitflags::bitflags;
@@ -162,6 +162,7 @@ impl ValueRowSerializer for Serializer {
 pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
     schema: Arc<[DataType]>,
+    default_column_values: Arc<[(usize, Datum)]>,
 }
 
 impl Deserializer {
@@ -174,7 +175,15 @@ impl Deserializer {
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<BTreeMap<_, _>>(),
             schema,
+            default_column_values: Arc::from(vec![]),
         }
+    }
+
+    fn set_default_column_values(
+        &mut self,
+        default_column_values: impl Iterator<Item = (usize, Datum)>,
+    ) {
+        self.default_column_values = default_column_values.collect();
     }
 }
 
@@ -193,9 +202,11 @@ impl ValueRowDeserializer for Deserializer {
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
         let data = &encoded_bytes[data_start_idx..];
         let mut datums = vec![None; self.schema.len()];
+        let mut contained_indices = BTreeSet::new();
         for i in 0..datum_num {
             let this_id = encoded_bytes.get_i32_le();
             if let Some(&decoded_idx) = self.needed_column_ids.get(&this_id) {
+                contained_indices.insert(decoded_idx);
                 let this_offset_start_idx = i * offset_bytes;
                 let mut this_offset_slice =
                     &offsets[this_offset_start_idx..(this_offset_start_idx + offset_bytes)];
@@ -223,6 +234,11 @@ impl ValueRowDeserializer for Deserializer {
                     )?)
                 };
                 datums[decoded_idx] = data;
+            }
+        }
+        for (id, datum) in self.default_column_values.iter() {
+            if !contained_indices.contains(id) && datums[*id].is_none() {
+                datums[*id] = datum.clone()
             }
         }
         Ok(datums)
@@ -261,6 +277,10 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             serializer,
             deserializer,
         }
+    }
+
+    fn set_default_columns(&mut self, default_columns: impl Iterator<Item = (usize, Datum)>) {
+        self.deserializer.set_default_column_values(default_columns)
     }
 }
 

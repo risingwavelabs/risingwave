@@ -35,8 +35,11 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{
     BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
 };
+use risingwave_expr::expr::build_from_prost;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 use tracing::trace;
 
 use super::iter_utils;
@@ -238,7 +241,28 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         let row_serde = {
             let schema = Arc::from(data_types.into_boxed_slice());
             if versioned {
-                ColumnAwareSerde::new(&column_ids, schema).into()
+                let column_with_default = table_columns
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| c.is_default())
+                    .map(|(i, c)| {
+                        if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                            c.generated_or_default_column.clone().unwrap()
+                        {
+                            (
+                                i,
+                                build_from_prost(&expr.unwrap())
+                                    .unwrap()
+                                    .eval_const()
+                                    .unwrap(),
+                            )
+                        } else {
+                            unreachable!()
+                        }
+                    });
+                let mut serde = ColumnAwareSerde::new(&column_ids, schema);
+                serde.set_default_columns(column_with_default);
+                serde.into()
             } else {
                 BasicSerde::new(&column_ids, schema).into()
             }

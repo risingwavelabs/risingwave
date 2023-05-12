@@ -32,10 +32,13 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_expr::expr::build_from_prost;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_storage::error::StorageError;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -238,11 +241,32 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let column_with_default = table_columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_default())
+            .map(|(i, c)| {
+                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                    c.generated_or_default_column.clone().unwrap()
+                {
+                    (
+                        i,
+                        build_from_prost(&expr.unwrap())
+                            .unwrap()
+                            .eval_const()
+                            .unwrap(),
+                    )
+                } else {
+                    unreachable!()
+                }
+            });
+
+        let mut row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
         assert_eq!(
             row_serde.kind().is_column_aware(),
             table_catalog.version.is_some()
         );
+        row_serde.set_default_columns(column_with_default);
 
         Self {
             table_id,

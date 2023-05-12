@@ -59,6 +59,9 @@ pub trait ValueRowDeserializer: Clone {
 /// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
 pub trait ValueRowSerdeNew: Clone {
     fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
+    fn set_default_columns(&mut self, _default_columns: impl Iterator<Item = (usize, Datum)>) {
+        unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
+    }
 }
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
