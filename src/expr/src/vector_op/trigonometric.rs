@@ -246,9 +246,8 @@ pub fn tand_f64(input: F64) -> F64 {
     }
 
     if arg1 % 180.0 == 90.0 {
-        let sign = (arg1 - 90.0) / 180.0;
-        let sign = if sign % 2.0 == 0.0 { 1.0 } else { -1.0 };
-        let sign = if is_neg { sign * -1.0 } else { sign };
+        let sin = sin_f64(input);
+        let sign = if sin.0 > 0.0 { 1.0 } else { -1.0 };
         return F64::from(sign * f64::INFINITY);
     }
 
