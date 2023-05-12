@@ -440,7 +440,7 @@ where
 
     fn flush_data(
         table: &mut StateTable<S>,
-        _epoch: EpochPair,
+        epoch: EpochPair,
         old_pos: Option<&OwnedRow>,
         current_pos: &OwnedRow,
     ) {
@@ -455,6 +455,7 @@ where
                 new_row: current_pos,
             })
         }
+        table.commit(epoch)
     }
 
     /// Mark chunk:

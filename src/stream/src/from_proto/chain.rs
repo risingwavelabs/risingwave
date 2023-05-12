@@ -150,7 +150,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let state_table = StateTable::from_table_catalog(
                     node.get_state_table().unwrap(),
                     state_store,
-                    None, // TODO: should this be none? I guess yes?
+                    None,
                 )
                 .await;
 
