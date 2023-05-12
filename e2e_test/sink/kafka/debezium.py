@@ -21,6 +21,9 @@ with open(expected_output_file) as file:
 with open(test_output_file) as file:
     for line in file:
         kv = line.split()
+        if len(kv) != 2:
+            print(line)
+        assert(len(kv) == 2)
         key = json.loads(kv[0])
         value = json.loads(kv[1])
         # Assert `ts_ms` is an integer here.
