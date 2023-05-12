@@ -50,7 +50,7 @@
 
     Table 2
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -99,7 +99,7 @@
 
     Table 1
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -148,7 +148,7 @@
 
     Table 1
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -207,7 +207,7 @@
 
     Table 2
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -291,9 +291,9 @@
 
     Table 4
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -342,9 +342,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -398,9 +398,9 @@
 
     Table 1
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -449,9 +449,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -505,9 +505,9 @@
 
     Table 1
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -556,9 +556,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -619,9 +619,9 @@
 
     Table 2
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -670,9 +670,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -754,9 +754,9 @@
 
     Table 4
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -805,9 +805,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -868,9 +868,9 @@
 
     Table 2
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -919,9 +919,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -989,9 +989,9 @@
 
     Table 3
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1040,9 +1040,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1102,9 +1102,9 @@
 
     Table 2
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1159,9 +1159,9 @@
 
     Table 2
     ├── columns: [ tk_t__row_id, tk_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 0 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1220,7 +1220,7 @@
 
     Table 2
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -1269,9 +1269,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1324,9 +1324,9 @@
 
     Table 1
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1374,9 +1374,9 @@
 
     Table 1
     ├── columns: [ tk_t__row_id, tk_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 0 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1428,7 +1428,7 @@
 
     Table 1
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -1477,9 +1477,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1532,9 +1532,9 @@
 
     Table 1
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1582,9 +1582,9 @@
 
     Table 1
     ├── columns: [ tk_t__row_id, tk_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 0 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1636,7 +1636,7 @@
 
     Table 1
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -1685,9 +1685,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 2 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1750,9 +1750,9 @@
 
     Table 2
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1810,9 +1810,9 @@
 
     Table 2
     ├── columns: [ tk_t__row_id, tk_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 0 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
@@ -1875,7 +1875,7 @@
 
     Table 2
     ├── columns: [ s_t__row_id, s_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
@@ -1926,9 +1926,9 @@
 
     Table 1
     ├── columns: [ ao__row_id, ao_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 3 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294

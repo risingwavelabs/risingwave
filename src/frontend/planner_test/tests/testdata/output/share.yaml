@@ -314,9 +314,9 @@
 
     Table 6
     ├── columns: [ t__row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
+    ├── primary key: []
     ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
+    ├── distribution key: []
     └── read pk prefix len hint: 0
 
     Table 4294967294
