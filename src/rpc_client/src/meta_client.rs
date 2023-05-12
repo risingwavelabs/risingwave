@@ -978,7 +978,6 @@ impl HummockMetaClient for MetaClient {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             cpu_core_num,
-            ..Default::default()
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
