@@ -41,15 +41,6 @@ impl Xor8FilterBuilder {
 }
 
 impl Xor16FilterBuilder {
-    pub fn with_xor8(capacity: usize) -> Self {
-        let key_hash_entries = if capacity > 0 {
-            Vec::with_capacity(capacity)
-        } else {
-            vec![]
-        };
-        Self { key_hash_entries }
-    }
-
     pub fn new(capacity: usize) -> Self {
         let key_hash_entries = if capacity > 0 {
             Vec::with_capacity(capacity)
@@ -71,6 +62,8 @@ impl FilterBuilder for Xor16FilterBuilder {
     }
 
     fn finish(&mut self) -> Vec<u8> {
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
         let xor_filter = Xor16::from(&self.key_hash_entries);
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() * 2 + 1);
         buf.put_u64_le(xor_filter.seed);
@@ -97,6 +90,8 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 
     fn finish(&mut self) -> Vec<u8> {
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
         let xor_filter = Xor8::from(&self.key_hash_entries);
         let mut buf = Vec::with_capacity(8 + 4 + xor_filter.fingerprints.len() + 1);
         buf.put_u64_le(xor_filter.seed);
