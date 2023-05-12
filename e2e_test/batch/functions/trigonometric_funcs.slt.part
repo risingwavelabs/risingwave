@@ -351,7 +351,7 @@ Infinity
 query R
 SELECT tand(-270)
 ----
-Infinity
+-Infinity
 
 
 query R
