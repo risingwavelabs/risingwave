@@ -340,17 +340,18 @@ where
         let res = self.inner_process_query_msg(sql, session).await;
         // Record query run successfully
         let mills = start.elapsed().as_millis();
+        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
         match res {
             Ok(x) => {
                 tracing::trace!(
                     target: "pgwire_query_log",
-                    "(simple query) session: {}, status: ok, time: {}ms,  sql: {}", session_id, mills, sql);
+                    "(simple query) session: {}, status: ok, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
                 Ok(x)
             }
             Err(err) => {
                 tracing::trace!(
                     target: "pgwire_query_log",
-                    "(simple query) session: {}, status: err, time: {}ms,  sql: {}", session_id, mills, sql);
+                    "(simple query) session: {}, status: err, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
                 Err(err)
             }
         }
@@ -580,11 +581,14 @@ where
 
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         let name = cstr_to_str(&msg.name).unwrap().to_string();
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
             target: "pgwire_query_log",
-            "(extended query)describe name: {}",
+            "(extended query) session: {}, describe name: {}",
+            session_id,
             name,
         );
 
@@ -615,10 +619,7 @@ where
         } else if msg.kind == b'P' {
             let portal = self.get_portal(&name)?;
 
-            let row_descriptions = self
-                .session
-                .clone()
-                .unwrap()
+            let row_descriptions = session
                 .describe_portral(portal)
                 .map_err(PsqlError::Internal)?;
 
