@@ -1707,7 +1707,7 @@ def section_hummock(panels):
             [
                 panels.target(
                     f"sum(rate({metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
-                    "finished tasks memory size - {{table_id}} @ {{instance}} ",
+                    "tasks memory size - {{table_id}} @ {{instance}} ",
                 ),
             ],
         ),
