@@ -5693,7 +5693,6 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
- "bincode 2.0.0-rc.3",
  "bitflags 2.0.2",
  "byteorder",
  "bytes",
@@ -6112,7 +6111,6 @@ dependencies = [
 name = "risingwave_hummock_sdk"
 version = "1.0.0-alpha"
 dependencies = [
- "bincode 2.0.0-rc.3",
  "bytes",
  "hex",
  "itertools",
