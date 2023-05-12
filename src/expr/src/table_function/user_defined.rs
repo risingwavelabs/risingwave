@@ -107,7 +107,7 @@ impl TableFunction for UserDefinedTableFunction {
         panic!("UDF is not supported in simulation yet");
     }
 
-    async fn eval(&self, _input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         panic!("UDF is not supported in simulation yet");
     }
 }
