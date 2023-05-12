@@ -13,7 +13,7 @@ fi
 #   $1: filename (It should be in the current directory)
 function compress-and-upload-artifact() {
   tar --zstd -cvf "$1".tar.zst "$1"
-  buildkite-agent artifact upload "$1".tar.gz
+  buildkite-agent artifact upload "$1".tar.zst
 }
 
 # Arguments:
