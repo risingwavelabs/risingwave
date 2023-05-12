@@ -30,7 +30,7 @@ fi
 set -e
 
 echo "--- Docker login"
-aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h6
+aws ecr get-login-password | docker login --username AWS --password-stdin public.ecr.aws/x5u3w5h6
 
 echo "--- Check image existence"
 set +e
