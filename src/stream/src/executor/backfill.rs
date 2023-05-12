@@ -357,29 +357,40 @@ where
             "Backfill has already finished and forward messages directly to the downstream"
         );
 
-        // Set persist state to finish on next barrier.
-        if let Some(Ok(msg)) = upstream.next().await {
-            if let Some(barrier) = msg.as_barrier() {
-                self.progress.finish(barrier.epoch.curr);
+        // Wait for first barrier after backfill finish to come
+        // so we can update our progress + persist the status.
+        while let Some(Ok(msg)) = upstream.next().await {
+            match &msg {
+                // Set persist state to finish on next barrier.
+                Message::Barrier(barrier) => {
+                    self.progress.finish(barrier.epoch.curr);
+                    let mut current_pos: Vec<Datum> =
+                        current_pos.clone().unwrap().as_inner().into();
+                    current_pos.push(Some(true.into()));
+                    let current_pos = OwnedRow::new(current_pos);
+                    Self::flush_data(
+                        &mut self.state_table,
+                        barrier.epoch,
+                        old_pos.as_ref(),
+                        &current_pos,
+                    )
+                    .await?;
+                    yield msg;
+                    break;
+                }
 
-                // Since we are done, we should persist this to
-                // upstream.
-                let mut current_pos: Vec<Datum> = current_pos.clone().unwrap().as_inner().into();
-                current_pos.push(Some(true.into()));
-                let current_pos = OwnedRow::new(current_pos);
-                Self::flush_data(
-                    &mut self.state_table,
-                    barrier.epoch,
-                    old_pos.as_ref(),
-                    &current_pos,
-                )
-                .await?;
+                // If it's not a barrier, just forward
+                Message::Chunk(_) | Message::Watermark(_) => {
+                    if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                        yield msg;
+                    }
+                }
             }
-            yield msg;
         }
 
-        // Can forward messages directly to the downstream,
-        // Backfill is finished.
+        // After progress finished + state persisted,
+        // we can forward messages directly to the downstream,
+        // as backfill is finished.
         #[for_await]
         for msg in upstream {
             if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
