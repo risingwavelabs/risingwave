@@ -40,6 +40,9 @@ dependencies = [
     "check-mysql"]
 
 [tasks.setup]
+script = """
+psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
+"""
 dependencies = [
     "clean-all",
     "docker",
