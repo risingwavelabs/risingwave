@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -83,7 +82,7 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
 
         fn format_cache(
             f: &mut std::fmt::Formatter<'_>,
-            cache: &BTreeMap<CacheKey, CompactedRow>,
+            cache: &TopNCacheState,
             data_types: &[DataType],
         ) -> std::fmt::Result {
             if cache.is_empty() {
@@ -103,11 +102,11 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
         }
 
         writeln!(f, "  low:")?;
-        format_cache(f, self.low.inner(), &self.data_types)?;
+        format_cache(f, &self.low, &self.data_types)?;
         writeln!(f, "\n  middle:")?;
-        format_cache(f, self.middle.inner(), &self.data_types)?;
+        format_cache(f, &self.middle, &self.data_types)?;
         writeln!(f, "\n  high:")?;
-        format_cache(f, self.high.inner(), &self.data_types)?;
+        format_cache(f, &self.high, &self.data_types)?;
 
         write!(f, "\n}}")?;
         Ok(())

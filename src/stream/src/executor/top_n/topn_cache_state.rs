@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::fmt;
 use std::alloc::Global;
 use std::collections::btree_map::{DrainFilter, OccupiedEntry, Range};
 use std::collections::BTreeMap;
@@ -40,7 +41,10 @@ impl EstimateSize for TopNCacheState {
 
 impl TopNCacheState {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            inner: BTreeMap::new(),
+            kv_heap_size: 0,
+        }
     }
 
     /// Insert into the cache.
@@ -102,8 +106,8 @@ impl TopNCacheState {
             .map(|entry| TopNCacheOccupiedEntry::new(entry, &mut self.kv_heap_size))
     }
 
-    pub fn inner(&self) -> &BTreeMap<CacheKey, CompactedRow> {
-        &self.inner
+    pub fn iter(&self) -> impl Iterator<Item = (&CacheKey, &CompactedRow)> {
+        self.inner.iter()
     }
 
     pub fn range<R>(&self, range: R) -> Range<'_, CacheKey, CompactedRow>
@@ -145,5 +149,11 @@ impl<'a> TopNCacheOccupiedEntry<'a> {
 
     pub fn key(&self) -> &CacheKey {
         self.inner.key()
+    }
+}
+
+impl fmt::Debug for TopNCacheState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }
