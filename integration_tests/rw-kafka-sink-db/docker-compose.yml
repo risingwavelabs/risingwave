@@ -17,13 +17,6 @@ services:
       - POSTGRES_DB=Test
     ports:
       - 5432:5432
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready --username=myuser --dbname=Test" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    command: [ "postgres", "-c", "wal_level=logical" ]
-    restart: always
     container_name: postgres
   mysql:
     image: mysql
