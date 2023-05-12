@@ -289,6 +289,7 @@ where
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
+        let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -299,7 +300,9 @@ where
         );
 
         // Make sure data dir is not used by another cluster.
-        if env.cluster_first_launch() {
+        // Skip this check in e2e compaction test, which needs to start a secondary cluster with
+        // same bucket
+        if env.cluster_first_launch() && !deterministic_mode {
             write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
