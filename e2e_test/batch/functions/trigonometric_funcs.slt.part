@@ -346,12 +346,12 @@ SELECT tand(-90)
 query R
 SELECT tand(270)
 ----
-Infinity
+-Infinity
 
 query R
 SELECT tand(-270)
 ----
--Infinity
+Infinity
 
 
 query R

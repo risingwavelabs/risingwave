@@ -229,7 +229,6 @@ pub fn cotd_f64(input: F64) -> F64 {
 #[function("tand(float64) -> float64")]
 pub fn tand_f64(input: F64) -> F64 {
     // PSQL implementation: https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-
     // Returns NaN if input is NaN or infinite. Different from PSQL implementation.
     if input.0.is_nan() || input.0.is_infinite() {
         return f64::NAN.into();
@@ -237,18 +236,11 @@ pub fn tand_f64(input: F64) -> F64 {
 
     let mut arg1 = input.0 % 360.0;
     let mut sign = 1.0;
-    let is_neg = arg1 < 0.0;
 
-    if is_neg {
+    if arg1 < 0.0 {
         // tand(-x) = -tand(x)
         arg1 = -arg1;
         sign = -sign;
-    }
-
-    if arg1 % 180.0 == 90.0 {
-        let sin = sin_f64(input);
-        let sign = if sin.0 > 0.0 { 1.0 } else { -1.0 };
-        return F64::from(sign * f64::INFINITY);
     }
 
     if arg1 > 180.0 {
@@ -266,9 +258,9 @@ pub fn tand_f64(input: F64) -> F64 {
     let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
     let result = sign * (tan_arg1 / TAND_45);
 
-    // On some machines we get tand(180) = minus zero, but this isn't always
-    // true. For portability, and because the user constituency for this
-    // function probably doesn't want minus zero, force it to plain zero.
+    // On some machines we get tand(180) = minus zero, but this isn't always true. For portability,
+    // and because the user constituency for this function probably doesn't want minus zero, force
+    // it to plain zero.
     let result = if result == 0.0 { 0.0 } else { result };
     result.into()
 }
