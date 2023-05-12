@@ -281,14 +281,15 @@ where
                                     let mut current_pos: Vec<Datum> = current_pos.as_inner().into();
                                     current_pos.push(Some(false.into()));
                                     let current_pos = OwnedRow::new(current_pos);
+                                    println!("flushing on barrier");
                                     Self::flush_data(
                                         &mut self.state_table,
                                         barrier.epoch,
                                         old_pos.as_ref(),
                                         &current_pos,
                                     );
+                                    old_pos = Some(current_pos);
                                 }
-                                old_pos = current_pos.clone();
 
                                 yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
@@ -355,27 +356,31 @@ where
             "Backfill has already finished and forward messages directly to the downstream"
         );
 
-        // Backfill has already finished.
-        // Forward messages directly to the downstream.
+        // Set persist state to finish on next barrier.
+        if let Some(Ok(msg)) = upstream.next().await {
+            if let Some(barrier) = msg.as_barrier() {
+                self.progress.finish(barrier.epoch.curr);
+
+                // Since we are done, we should persist this to
+                // upstream.
+                let mut current_pos: Vec<Datum> = current_pos.clone().unwrap().as_inner().into();
+                current_pos.push(Some(true.into()));
+                let current_pos = OwnedRow::new(current_pos);
+                Self::flush_data(
+                    &mut self.state_table,
+                    barrier.epoch,
+                    old_pos.as_ref(),
+                    &current_pos,
+                );
+            }
+            yield msg;
+        }
+
+        // Can forward messages directly to the downstream,
+        // Backfill is finished.
         #[for_await]
         for msg in upstream {
             if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
-                if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr);
-
-                    // Since we are done, we should persist this to
-                    // upstream.
-                    let mut current_pos: Vec<Datum> =
-                        current_pos.clone().unwrap().as_inner().into();
-                    current_pos.push(Some(true.into()));
-                    let current_pos = OwnedRow::new(current_pos);
-                    Self::flush_data(
-                        &mut self.state_table,
-                        barrier.epoch,
-                        old_pos.as_ref(),
-                        &current_pos,
-                    );
-                }
                 yield msg;
             }
         }
@@ -439,6 +444,7 @@ where
         old_pos: Option<&OwnedRow>,
         current_pos: &OwnedRow,
     ) {
+        debug_assert!(old_pos != Some(current_pos));
         if let Some(old_pos) = old_pos {
             table.write_record(Record::Update {
                 old_row: old_pos,

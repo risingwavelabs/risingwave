@@ -19,8 +19,6 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
@@ -28,7 +26,6 @@ use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -214,16 +211,9 @@ impl StreamTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let schema = self.base.schema();
 
-        // build the internal state table of backfill executor.
-        let mapping =
-            ColIndexMapping::with_included_columns(&self.base.logical_pk, schema.len());
-        let in_dist_key = self.base.distribution().dist_column_indices();
-        let dist_key = mapping.rewrite_dist_key(in_dist_key).unwrap_or_default();
-
-        for (i, pos) in self.base.logical_pk.iter().enumerate() {
+        for pos in &self.base.logical_pk {
             let field = &schema[*pos];
             catalog_builder.add_column(field);
-            catalog_builder.add_order_column(i, OrderType::ascending());
         }
         catalog_builder.add_column(&Field::with_name(
             DataType::Boolean,
@@ -231,7 +221,7 @@ impl StreamTableScan {
         ));
 
         let catalog = catalog_builder
-            .build(dist_key, 0)
+            .build(vec![], 0)
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
