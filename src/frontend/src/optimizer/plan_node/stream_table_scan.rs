@@ -19,13 +19,14 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -211,16 +212,17 @@ impl StreamTableScan {
         let properties = self.ctx().with_options().internal_table_subset(); // TODO: Is this even needed? Why is it needed for simple_agg?
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let schema = self.base.schema();
-        // TODO: What is the difference between `self.logical.primary_key()`
-        // and `self.base.logical_pk`?
-        // Which should I be using?
-        println!("schema {:?}", schema);
-        println!("base pk {:?}", self.base.logical_pk);
-        for i in &self.base.logical_pk {
-            let field = &schema[*i];
+
+        // build the internal state table of backfill executor.
+        for (i, pos) in self.base.logical_pk.iter().enumerate() {
+            let field = &schema[*pos];
             catalog_builder.add_column(field);
+            catalog_builder.add_order_column(i, OrderType::ascending());
         }
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+        catalog_builder.add_column(&Field::with_name(
+            DataType::Boolean,
+            format!("{}_backfill_finished", self.table_name()),
+        ));
         let catalog = catalog_builder
             .build(self.base.distribution().dist_column_indices().into(), 0)
             .with_id(state.gen_table_id_wrapped())
