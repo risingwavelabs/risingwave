@@ -19,6 +19,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::types::DataType;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
@@ -214,6 +215,11 @@ impl StreamTableScan {
         let schema = self.base.schema();
 
         // build the internal state table of backfill executor.
+        let mapping =
+            ColIndexMapping::with_included_columns(&self.base.logical_pk, schema.len());
+        let in_dist_key = self.base.distribution().dist_column_indices();
+        let dist_key = mapping.rewrite_dist_key(in_dist_key).unwrap_or_default();
+
         for (i, pos) in self.base.logical_pk.iter().enumerate() {
             let field = &schema[*pos];
             catalog_builder.add_column(field);
@@ -223,8 +229,9 @@ impl StreamTableScan {
             DataType::Boolean,
             format!("{}_backfill_finished", self.table_name()),
         ));
+
         let catalog = catalog_builder
-            .build(self.base.distribution().dist_column_indices().into(), 0)
+            .build(dist_key, 0)
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
