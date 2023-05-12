@@ -432,21 +432,22 @@ impl LogicalScan {
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
-            let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            if predicate.always_false() {
-                let plan = LogicalValues::create(vec![], scan.schema(), scan.ctx).to_batch()?;
-                assert_eq!(plan.schema(), self.schema());
-                return required_order.enforce_if_not_satisfies(plan);
-            }
+            let plan: PlanRef = if scan.core.predicate.always_false() {
+                LogicalValues::create(vec![], scan.core.schema(), scan.core.ctx).to_batch()?
+            } else {
+                let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-            let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
-            if !predicate.always_true() {
-                plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
-            }
-            if let Some(exprs) = project_expr {
-                plan = BatchProject::new(generic::Project::new(exprs, plan)).into()
-            }
+                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
+                if !predicate.always_true() {
+                    plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
+                }
+                if let Some(exprs) = project_expr {
+                    plan = BatchProject::new(generic::Project::new(exprs, plan)).into()
+                }
+                plan
+            };
+
             assert_eq!(plan.schema(), self.schema());
             required_order.enforce_if_not_satisfies(plan)
         }
