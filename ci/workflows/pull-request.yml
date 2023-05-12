@@ -31,6 +31,8 @@ steps:
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -44,6 +46,8 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -57,6 +61,8 @@ steps:
     key: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -68,6 +74,8 @@ steps:
     key: "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -81,6 +89,8 @@ steps:
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -95,6 +105,8 @@ steps:
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -109,6 +121,8 @@ steps:
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -121,6 +135,8 @@ steps:
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -135,6 +151,8 @@ steps:
       - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: source-test-env
           config: ci/docker-compose.yml
@@ -149,6 +167,8 @@ steps:
       - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: sink-test-env
           config: ci/docker-compose.yml
@@ -163,6 +183,8 @@ steps:
       - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -175,6 +197,8 @@ steps:
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -187,6 +211,8 @@ steps:
     depends_on: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: regress-test-env
           config: ci/docker-compose.yml
@@ -202,6 +228,8 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -217,6 +245,8 @@ steps:
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -228,6 +258,8 @@ steps:
     command: "ci/scripts/check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -237,6 +269,8 @@ steps:
     command: "ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -248,6 +282,8 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -259,6 +295,8 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -273,6 +311,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -290,6 +330,8 @@ steps:
       # - seek-oss/aws-sm#v2.3.1:
       #     env:
       #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -304,6 +346,8 @@ steps:
     command: "ci/scripts/misc-check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -321,6 +365,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -341,6 +387,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
@@ -365,6 +413,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml

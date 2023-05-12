@@ -22,6 +22,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -38,6 +40,8 @@ steps:
           env:
             GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml

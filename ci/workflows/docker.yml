@@ -41,6 +41,8 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
+      - ecr#v2.7.0:
+          login: true
       - docker-compose#v4.9.0:
           run: release-env
           config: ci/docker-compose.yml
