@@ -475,3 +475,12 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(sbtest1.k)] }
         └─BatchScan { table: sbtest1, columns: [sbtest1.k], scan_ranges: [sbtest1.id = Int32(0) , sbtest1.id = Int32(1) , sbtest1.id = Int32(2) , sbtest1.id = Int32(3) , sbtest1.id = Int32(4) , sbtest1.id = Int32(5)], distribution: SomeShard }
+- sql: |
+    create table t (k int primary key, v int);
+    select v from t where k = 2147483648; -- out of range of int32
+  logical_plan: |
+    LogicalProject { exprs: [t.v] }
+    └─LogicalFilter { predicate: (t.k = 2147483648:Int64) }
+      └─LogicalScan { table: t, columns: [t.k, t.v] }
+  batch_plan: |
+    BatchValues { rows: [] }
