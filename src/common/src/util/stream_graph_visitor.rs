@@ -44,8 +44,8 @@ where
     visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
-/// Visit the internal tables of a [`StreamNode`].
-pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, mut f: F)
+/// Visit the tables of a [`StreamNode`].
+fn visit_stream_node_tables_inner<F>(stream_node: &mut StreamNode, internal_tables_only: bool, mut f: F)
 where
     F: FnMut(&mut Table, &str),
 {
@@ -176,10 +176,28 @@ where
             }
 
             // Note: add internal tables for new nodes here.
+
+
+            NodeBody::Materialize(node) if !internal_tables_only => {
+                always!(node.table, "Materialize")
+            }
             _ => {}
         }
     })
 }
+
+pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F) where
+F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, true, f)
+}
+
+pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F) where
+F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, false, f)
+}
+
 
 /// Visit the internal tables of a [`StreamFragment`].
 pub fn visit_internal_tables<F>(fragment: &mut StreamFragment, f: F)
