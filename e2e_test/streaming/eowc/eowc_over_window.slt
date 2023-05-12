@@ -22,34 +22,40 @@ as
 select
     tm, foo, bar,
     lag(foo, 2) over (partition by bar order by tm),
-    max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following)
+    max(foo) over (partition by bar order by tm rows between 1 preceding and 1 following),
+    sum(foo) over (partition by bar order by tm rows 2 preceding exclude current row)
 from t;
 
 statement ok
 insert into t values
-('2023-05-06 16:51:00', 1, 100),
-('2023-05-06 16:56:00', 8, 100),
-('2023-05-06 17:30:00', 3, 200),
-('2023-05-06 17:59:00', 4, 100),
-('2023-05-06 18:01:00', 6, 200);
+  ('2023-05-06 16:51:00', 1, 100)
+, ('2023-05-06 16:56:00', 8, 100)
+, ('2023-05-06 17:30:00', 3, 200)
+, ('2023-05-06 17:35:00', 5, 100)
+, ('2023-05-06 17:59:00', 4, 100)
+, ('2023-05-06 18:01:00', 6, 200)
+;
 
-# Note that the row where foo = 8 is not emitted because it's window is not closed by watermark.
+# Note that the row where foo = 5 is not emitted because it's window is not closed by watermark.
 query TI
 select * from mv order by tm;
 ----
-2023-05-06 16:51:00  1  100  NULL  8
+2023-05-06 16:51:00  1  100  NULL  8  NULL
+2023-05-06 16:56:00  8  100  NULL  8  1
 
 statement ok
 insert into t values
-('2023-05-06 18:10:00', 7, 100),
-('2023-05-06 18:11:00', 9, 200);
+  ('2023-05-06 18:10:00', 7, 100)
+, ('2023-05-06 18:11:00', 9, 200)
+;
 
 query TI
 select * from mv order by tm;
 ----
-2023-05-06 16:51:00  1  100  NULL  8
-2023-05-06 16:56:00  8  100  NULL  8
-2023-05-06 17:30:00  3  200  NULL  6
+2023-05-06 16:51:00  1  100  NULL  8  NULL
+2023-05-06 16:56:00  8  100  NULL  8  1
+2023-05-06 17:30:00  3  200  NULL  6  NULL
+2023-05-06 17:35:00  5  100  1     8  9
 
 statement ok
 drop materialized view mv;

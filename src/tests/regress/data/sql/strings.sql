@@ -633,17 +633,17 @@ select md5('12345678901234567890123456789012345678901234567890123456789012345678
 --
 --@ SET bytea_output TO hex;
 
---@ SELECT sha224('');
---@ SELECT sha224('The quick brown fox jumps over the lazy dog.');
+SELECT sha224('');
+SELECT sha224('The quick brown fox jumps over the lazy dog.');
 --@ 
---@ SELECT sha256('');
---@ SELECT sha256('The quick brown fox jumps over the lazy dog.');
+SELECT sha256('');
+SELECT sha256('The quick brown fox jumps over the lazy dog.');
 --@ 
---@ SELECT sha384('');
---@ SELECT sha384('The quick brown fox jumps over the lazy dog.');
+SELECT sha384('');
+SELECT sha384('The quick brown fox jumps over the lazy dog.');
 --@ 
---@ SELECT sha512('');
---@ SELECT sha512('The quick brown fox jumps over the lazy dog.');
+SELECT sha512('');
+SELECT sha512('The quick brown fox jumps over the lazy dog.');
 
 --
 -- encode/decode

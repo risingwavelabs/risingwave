@@ -33,7 +33,6 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
@@ -234,11 +233,6 @@ pub async fn compute_node_serve(
                 output_memory_limiter,
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
-                compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
-                    CompactorRuntimeConfig {
-                        max_concurrent_task_number: 1,
-                    },
-                )),
             });
 
             let (handle, shutdown_sender) =
