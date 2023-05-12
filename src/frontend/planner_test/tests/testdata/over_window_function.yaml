@@ -88,7 +88,7 @@
     Bind error: failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
 
     Caused by:
-      Invalid input syntax: window frame `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
+      Invalid input syntax: window frame bounds `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
 - sql: |
     create table t(x int, y int);
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
@@ -109,7 +109,7 @@
     Bind error: failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
 
     Caused by:
-      Feature is not yet implemented: window frame in `RANGE` mode is not supported
+      Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - sql: |
     create table t(x int);

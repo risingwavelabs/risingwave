@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -308,6 +308,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
+            let secs = v.div_euclid(1_000_000);
+            let nsecs = v.rem_euclid(1_000_000) * 1000;
+            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
+            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
@@ -411,7 +415,7 @@ mod tests {
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
         let tstz_str = "2018-01-26T18:30:09.453Z";
         let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
-        datum_to_json_object(
+        let tstz_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
@@ -419,6 +423,7 @@ mod tests {
             Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
         )
         .unwrap();
+        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
 
         let ts_value = datum_to_json_object(
             &Field {

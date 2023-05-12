@@ -76,7 +76,7 @@ impl<S: MetaStore> HummockManager<S> {
     /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
-        get_compaction_group_ids(&read_lock!(self, versioning).await.current_version)
+        get_compaction_group_ids(&read_lock!(self, versioning).await.current_version).collect_vec()
     }
 
     /// The implementation acquires `compaction_group_manager` lock.
@@ -362,7 +362,7 @@ impl<S: MetaStore> HummockManager<S> {
             .write()
             .await
             .purge(
-                &get_compaction_group_ids(&versioning.current_version),
+                HashSet::from_iter(get_compaction_group_ids(&versioning.current_version)),
                 self.env.meta_store(),
             )
             .await
@@ -773,7 +773,7 @@ impl CompactionGroupManager {
     /// Removes stale group configs.
     async fn purge<S: MetaStore>(
         &mut self,
-        existing_groups: &[CompactionGroupId],
+        existing_groups: HashSet<CompactionGroupId>,
         meta_store: &S,
     ) -> Result<()> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
