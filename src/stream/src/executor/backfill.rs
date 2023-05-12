@@ -41,7 +41,7 @@ use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{PkIndices, Watermark};
+use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -287,7 +287,8 @@ where
                                         barrier.epoch,
                                         old_pos.as_ref(),
                                         &current_pos,
-                                    );
+                                    )
+                                    .await?;
                                     old_pos = Some(current_pos);
                                 }
 
@@ -371,7 +372,8 @@ where
                     barrier.epoch,
                     old_pos.as_ref(),
                     &current_pos,
-                );
+                )
+                .await?;
             }
             yield msg;
         }
@@ -438,12 +440,12 @@ where
         yield None;
     }
 
-    fn flush_data(
+    async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
         old_pos: Option<&OwnedRow>,
         current_pos: &OwnedRow,
-    ) {
+    ) -> StreamExecutorResult<()> {
         debug_assert!(old_pos != Some(current_pos));
         if let Some(old_pos) = old_pos {
             table.write_record(Record::Update {
@@ -455,7 +457,8 @@ where
                 new_row: current_pos,
             })
         }
-        table.commit(epoch)
+        println!("epoch: {:?}", epoch);
+        table.commit(epoch).await
     }
 
     /// Mark chunk:
