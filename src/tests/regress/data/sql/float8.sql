@@ -196,7 +196,7 @@ SELECT cosh(double precision '1') - 1.54308063481524 < 1e-14;
 SELECT tanh(double precision '1') - 0.761594155955765 < 1e-14;
 SELECT asinh(double precision '1');
 SELECT acosh(double precision '2') - 1.31695789692482 < 1e-14;
-SELECT atanh(double precision '0.5');
+SELECT atanh(double precision '0.5') - 0.549306144334055 < 1e-14;
 -- test Inf/NaN cases for hyperbolic functions
 SELECT sinh(double precision 'infinity');
 SELECT sinh(double precision '-infinity');
