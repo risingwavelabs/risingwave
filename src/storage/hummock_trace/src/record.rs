@@ -56,32 +56,43 @@ impl<T: UniqueId> UniqueIdGenerator<T> {
 }
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
-pub struct Record(pub StorageType, pub RecordId, pub Operation);
+pub struct Record {
+    storage_type: StorageType,
+    record_id: RecordId,
+    operation: Operation,
+}
 
 impl Record {
-    pub(crate) fn new(storage_type: StorageType, record_id: RecordId, op: Operation) -> Self {
-        Self(storage_type, record_id, op)
+    pub fn new(storage_type: StorageType, record_id: RecordId, operation: Operation) -> Self {
+        Self {
+            storage_type,
+            record_id,
+            operation,
+        }
     }
 
     pub fn storage_type(&self) -> &StorageType {
-        &self.0
+        &self.storage_type
     }
 
     pub fn record_id(&self) -> RecordId {
-        self.1
+        self.record_id
     }
 
-    pub fn op(&self) -> &Operation {
-        &self.2
+    pub fn operation(&self) -> &Operation {
+        &self.operation
     }
 
     pub fn is_iter_related(&self) -> bool {
-        matches!(self.op(), Operation::Iter { .. } | Operation::IterNext(_))
+        matches!(
+            self.operation(),
+            Operation::Iter { .. } | Operation::IterNext(_)
+        )
     }
 
     #[cfg(test)]
-    pub(crate) fn new_local_none(record_id: RecordId, op: Operation) -> Self {
-        Self::new(StorageType::Global, record_id, op)
+    pub(crate) fn new_local_none(record_id: RecordId, operation: Operation) -> Self {
+        Self::new(StorageType::Global, record_id, operation)
     }
 }
 
@@ -92,47 +103,64 @@ pub type TracedIterRange = (Bound<TracedBytes>, Bound<TracedBytes>);
 pub enum Operation {
     /// Get operation of Hummock.
     Get {
+        /// Key to retrieve.
         key: TracedBytes,
+        /// Optional epoch value.
         epoch: Option<u64>,
+        /// Read options for the operation.
         read_options: TracedReadOptions,
     },
 
+    /// Insert operation of Hummock.
     Insert {
+        /// Key to insert.
         key: TracedBytes,
+        /// New value to insert.
         new_val: TracedBytes,
+        /// Optional old value to replace.
         old_val: Option<TracedBytes>,
     },
 
+    /// Delete operation of Hummock.
     Delete {
+        /// Key to delete.
         key: TracedBytes,
+        /// Value to match for deletion.
         old_val: TracedBytes,
     },
 
-    /// Iter operation of Hummock
+    /// Iter operation of Hummock.
     Iter {
+        /// Key range for iteration.
         key_range: TracedIterRange,
+        /// Optional epoch value.
         epoch: Option<u64>,
+        /// Read options for the operation.
         read_options: TracedReadOptions,
     },
 
-    /// Iter.next operation
+    /// Iter.next operation of Hummock.
     IterNext(RecordId),
 
-    /// Sync operation
+    /// Sync operation of Hummock.
     Sync(u64),
 
-    /// Seal operation
+    /// Seal operation of Hummock.
     Seal(u64, bool),
 
+    /// MetaMessage operation of Hummock.
     MetaMessage(Box<TraceSubResp>),
 
+    /// Result operation of Hummock.
     Result(OperationResult),
 
+    /// NewLocalStorage operation of Hummock.
     NewLocalStorage(TracedNewLocalOptions),
 
+    /// DropLocalStorage operation of Hummock.
     DropLocalStorage,
 
-    /// The end of an operation
+    /// Finish operation of Hummock.
     Finish,
 }
 
@@ -322,5 +350,25 @@ mod tests {
         for i in 0..count {
             assert!(ids.contains(&i));
         }
+    }
+
+    #[test]
+    fn test_record_is_iter_related() {
+        let iter_operation = Operation::Iter {
+            key_range: (Bound::Unbounded, Bound::Unbounded),
+            epoch: None,
+            read_options: TracedReadOptions::for_test(0),
+        };
+        let get_operation = Operation::Get {
+            key: TracedBytes(Bytes::from("test")),
+            epoch: None,
+            read_options: TracedReadOptions::for_test(0),
+        };
+
+        let iter_record = Record::new(StorageType::Global, 1, iter_operation);
+        let get_record = Record::new(StorageType::Global, 2, get_operation);
+
+        assert!(iter_record.is_iter_related());
+        assert!(!get_record.is_iter_related());
     }
 }

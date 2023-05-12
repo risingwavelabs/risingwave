@@ -34,22 +34,31 @@ use crate::{
     TracedNewLocalOptions, TracedReadOptions, TracedTableId, UniqueIdGenerator,
 };
 
+// Global collector instance used for trace collection
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
+
+// Global record ID generator for generating unique record IDs
 static GLOBAL_RECORD_ID: LazyLock<RecordIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
+
+// Flag indicating whether trace should be used
 static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_should_use_trace);
+
+// Concurrent record ID generator for generating unique record IDs in concurrent environments
 pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
-pub const USE_TRACE: &str = "USE_HM_TRACE";
-const LOG_PATH: &str = "HM_TRACE_PATH";
-const DEFAULT_PATH: &str = ".trace/hummock.ht";
-const WRITER_BUFFER_SIZE: usize = 1024;
+pub const USE_TRACE: &str = "USE_HM_TRACE"; // Environment variable name for enabling trace
+const LOG_PATH: &str = "HM_TRACE_PATH"; // Environment variable name for specifying trace log path
+const DEFAULT_PATH: &str = ".trace/hummock.ht"; // Default trace log path
+const WRITER_BUFFER_SIZE: usize = 1024; // Buffer size for trace writer
 
+/// Returns whether trace should be used based on the environment variable
 pub fn should_use_trace() -> bool {
     *SHOULD_USE_TRACE
 }
 
+/// Sets the value of the `SHOULD_USE_TRACE` flag based on the `USE_TRACE` environment variable
 fn set_should_use_trace() -> bool {
     match std::env::var(USE_TRACE) {
         Ok(v) => v.parse().unwrap_or(false),
