@@ -19,11 +19,9 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::{CachePolicy, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_pb::meta::SubscribeResponse;
 
-use crate::StorageType;
+use crate::{StorageType, TracedNewLocalOptions, TracedReadOptions};
 
 pub type RecordId = u64;
 
@@ -130,7 +128,7 @@ pub enum Operation {
 
     Result(OperationResult),
 
-    NewLocalStorage(NewLocalOptions),
+    NewLocalStorage(TracedNewLocalOptions),
 
     DropLocalStorage,
 
@@ -139,11 +137,11 @@ pub enum Operation {
 }
 
 impl Operation {
-    pub fn get(key: Bytes, epoch: Option<u64>, read_options: ReadOptions) -> Operation {
+    pub fn get(key: Bytes, epoch: Option<u64>, read_options: TracedReadOptions) -> Operation {
         Operation::Get {
             key: key.into(),
             epoch,
-            read_options: read_options.into(),
+            read_options: read_options,
         }
     }
 
@@ -286,32 +284,6 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
             DecodeError::OtherString("failed to decode subscribeResponse".to_string())
         })?;
         Ok(Self(resp))
-    }
-}
-
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
-pub struct TracedReadOptions {
-    pub prefix_hint: Option<TracedBytes>,
-    pub ignore_range_tombstone: bool,
-    pub prefetch_options: PrefetchOptions,
-    pub cache_policy: CachePolicy,
-
-    pub retention_seconds: Option<u32>,
-    pub table_id: TableId,
-    pub read_version_from_backup: bool,
-}
-
-impl From<ReadOptions> for TracedReadOptions {
-    fn from(opts: ReadOptions) -> Self {
-        Self {
-            prefix_hint: opts.prefix_hint.map(TracedBytes::from),
-            ignore_range_tombstone: opts.ignore_range_tombstone,
-            retention_seconds: opts.retention_seconds,
-            table_id: opts.table_id,
-            read_version_from_backup: opts.read_version_from_backup,
-            prefetch_options: opts.prefetch_options,
-            cache_policy: opts.cache_policy,
-        }
     }
 }
 

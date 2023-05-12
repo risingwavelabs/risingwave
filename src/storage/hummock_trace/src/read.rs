@@ -99,14 +99,13 @@ mod test {
     use bincode::encode_to_vec;
     use bytes::Bytes;
     use mockall::mock;
-    use risingwave_hummock_sdk::opts::ReadOptions;
     use risingwave_pb::common::Status;
     use risingwave_pb::meta::SubscribeResponse;
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
         BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
-        MAGIC_BYTES,
+        TracedReadOptions, MAGIC_BYTES,
     };
 
     mock! {
@@ -122,7 +121,7 @@ mod test {
         let op = Operation::get(
             Bytes::from(vec![5, 5, 15, 6]),
             Some(7564),
-            ReadOptions::for_test(0),
+            TracedReadOptions::for_test(0),
         );
         let expected = Record::new_local_none(54433, op);
 

@@ -24,7 +24,6 @@ use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::opts::{NewLocalOptions, ReadOptions};
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -33,7 +32,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    UniqueIdGenerator,
+    TracedReadOptions, UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -175,7 +174,7 @@ impl TraceSpan {
     pub fn new_get_span(
         key: Bytes,
         epoch: Option<u64>,
-        read_options: ReadOptions,
+        read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
         Self::new_global(Operation::get(key, epoch, read_options), storage_type)
@@ -184,7 +183,7 @@ impl TraceSpan {
     pub fn new_iter_span(
         key_range: (Bound<Bytes>, Bound<Bytes>),
         epoch: Option<u64>,
-        read_options: ReadOptions,
+        read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
         Self::new_global(

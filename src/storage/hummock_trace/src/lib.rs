@@ -20,14 +20,15 @@
 
 mod collector;
 mod error;
+mod opts;
 mod read;
 mod record;
 mod write;
-
 use std::future::Future;
 
 pub use collector::*;
 pub use error::*;
+pub use opts::*;
 pub use read::*;
 pub use record::*;
 pub(crate) use write::*;

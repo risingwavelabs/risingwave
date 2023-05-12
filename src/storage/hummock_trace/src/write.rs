@@ -113,10 +113,9 @@ mod test {
     use bincode::{config, decode_from_slice, encode_to_vec};
     use byteorder::{BigEndian, ReadBytesExt};
     use bytes::Bytes;
-    use risingwave_hummock_sdk::opts::ReadOptions;
 
     use super::*;
-    use crate::Operation;
+    use crate::{Operation, TracedReadOptions};
 
     mock! {
         Write{}
@@ -131,7 +130,7 @@ mod test {
         let op = Operation::get(
             Bytes::from(vec![0, 1, 2, 3]),
             Some(123),
-            ReadOptions::for_test(123),
+            TracedReadOptions::for_test(123),
         );
         let expected = Record::new_local_none(0, op);
         let serializer = BincodeSerializer::new();
