@@ -54,7 +54,7 @@ cargo build \
     -p risingwave_backup_cmd \
     -p risingwave_java_binding \
     -p risingwave_e2e_extended_mode_test \
-    "$RISINGWAVE_FEATURE_FLAGS" \
+    $RISINGWAVE_FEATURE_FLAGS \
     --profile "$profile"
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
