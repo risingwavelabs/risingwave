@@ -715,6 +715,18 @@ impl HummockUploader {
                         Some(tracker),
                         &self.context,
                     ));
+
+                let table_label = &table_id.to_string();
+                let shard_label = &shard_id.to_string();
+                self.stats
+                    .merge_imm_pending_task_counts
+                    .with_label_values(&[table_label, shard_label])
+                    .inc();
+
+                self.stats
+                    .merge_imm_pending_memory_sz
+                    .with_label_values(&[table_label, shard_label])
+                    .inc_by(memory_sz);
             } else {
                 tracing::warn!(
                     "fail to acqiure memory {} B, skip merging imms for table {}, shard {}",
@@ -943,11 +955,12 @@ impl HummockUploader {
                 .merge_imm_task_counts
                 .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
                 .inc();
-            // monitor merged imms
+            // monitor merge imm memory size
+            // we should also add up the size of EPOCH stored in each entry
             self.stats
-                .merge_imm_batch_counts
+                .merge_imm_batch_memory_sz
                 .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
-                .inc_by(output.merged_imm.get_imm_ids().len() as _);
+                .inc_by((output.merged_imm.size() + output.merged_imm.kv_count() * EPOCH_LEN) as _);
         }
         poll_ret
     }
