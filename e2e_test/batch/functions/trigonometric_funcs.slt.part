@@ -524,3 +524,48 @@ query R
 SELECT abs(abs(asind(-0.5) + 30)) < 1e-14
 ----
 t
+
+query R
+SELECT abs(acosd(-1) - 180.0) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(-0.75) - 138.59037789072914) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(-0.5) - 120.00000000000001) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(-0.25) - 104.47751218592992) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(0) - 90.0) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(0.25) - 75.52248781407008) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(0.5) - 59.99999999999999) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(0.75) - 41.40962210927086) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosd(1) - 0.0) < 1e-14
+----
+t

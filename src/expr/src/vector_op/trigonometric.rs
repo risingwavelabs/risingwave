@@ -65,6 +65,7 @@ static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
 static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
+static ACOS_0_5: f64 = 1.047_197_551_196_597_6;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -314,6 +315,43 @@ pub fn asind_f64(input: F64) -> F64 {
     result.into()
 }
 
+// returns the inverse cosine of x in degrees, for x in the range [0, 1].  The result is an angle in
+// the first quadrant --- [0, 90] degrees. For the 3 special case inputs (0, 0.5 and 1), this
+// function will return exact values (0, 60 and 90 degrees respectively).
+fn acosd_q1(x: f64) -> f64 {
+    // Stitch together inverse sine and cosine functions for the ranges [0, 0.5] and (0.5, 1].  Each
+    // expression below is guaranteed to return exactly 60 for x=0.5, so the result is a continuous
+    // monotonic function over the full range.
+    if x <= 0.5 {
+        let asin_x = f64::asin(x);
+        90.0 - (asin_x / ASIN_0_5) * 30.0
+    } else {
+        let acos_x = f64::acos(x);
+        (acos_x / ACOS_0_5) * 60.0
+    }
+}
+
+#[function("acosd(float64) -> float64")]
+pub fn acosd_f64(input: F64) -> F64 {
+    let arg1 = input.0;
+
+    // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
+    if input.0.is_nan() || input.0.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+
+    let result = if arg1 >= 0.0 {
+        acosd_q1(arg1)
+    } else {
+        90.0 + asind_q1(-arg1)
+    };
+
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+    result.into()
+}
+
 #[function("degrees(float64) -> float64")]
 pub fn degrees_f64(input: F64) -> F64 {
     input.0.to_degrees().into()
@@ -338,6 +376,9 @@ mod tests {
 
     /// numbers are equal within a rounding error
     fn assert_similar(lhs: F64, rhs: F64) {
+        if lhs == F64::from(f64::NAN) && rhs == F64::from(f64::NAN) {
+            return;
+        }
         let x = (lhs.0 - rhs.0).abs() <= precision();
         assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
     }
@@ -432,6 +473,8 @@ mod tests {
         assert_similar(asind_f64(F64::from(0)), F64::from(0));
         assert_similar(asind_f64(F64::from(0.5)), F64::from(30));
         assert_similar(asind_f64(F64::from(1)), F64::from(90));
+
+        // TODO: write some tests here for cosd here, matching the exact values
 
         // exact matches
         assert!(tand_f64(F64::from(-270)).0.is_infinite());

@@ -119,6 +119,7 @@ message ExprNode {
     SQRT = 258;
     DEGREES = 259;
     RADIANS = 260;
+    ACOSD = 261;
 
     // Boolean comparison
     IS_TRUE = 301;
