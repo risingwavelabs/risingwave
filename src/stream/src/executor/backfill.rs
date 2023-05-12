@@ -282,7 +282,6 @@ where
                                     let mut current_pos: Vec<Datum> = current_pos.as_inner().into();
                                     current_pos.push(Some(false.into()));
                                     let current_pos = OwnedRow::new(current_pos);
-                                    println!("flushing on barrier");
                                     Self::flush_data(
                                         &mut self.state_table,
                                         barrier.epoch,
@@ -458,7 +457,6 @@ where
                 new_row: current_pos,
             })
         }
-        println!("epoch: {:?}", epoch);
         table.commit(epoch).await
     }
 
