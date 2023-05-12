@@ -215,7 +215,7 @@ impl NonOverlapSubLevelPicker {
                 continue;
             }
             let mut pending_compact = false;
-            let mut add_files_size = 0;
+            let mut current_level_size = 0;
             for other in &overlap_files {
                 if level_handler.is_pending_compact(&other.sst_id) {
                     pending_compact = true;
@@ -223,8 +223,7 @@ impl NonOverlapSubLevelPicker {
                 }
                 overlap_info.update(other);
                 select_sst_id_set.insert(other.sst_id);
-                add_files_size += other.file_size;
-
+                current_level_size += other.file_size;
             }
 
             if pending_compact {
@@ -233,6 +232,7 @@ impl NonOverlapSubLevelPicker {
 
             let mut extra_overlap_levels = vec![];
 
+            let mut add_files_size = 0;
             for reverse_index in (0..target_index).rev() {
                 let target_tables = &levels[reverse_index].table_infos;
                 // It has select all files in this sub-level, so it can not overlap with more files.
@@ -286,10 +286,10 @@ impl NonOverlapSubLevelPicker {
                 .iter()
                 .filter(|files| !files.is_empty())
                 .count()
-                > self.min_depth
+                >= self.min_depth
                 && ret.total_file_size > self.min_compaction_bytes
-                && (ret.total_file_size + add_files_size > self.max_compaction_bytes
-                    || ret.total_file_count + add_files_count > self.max_file_count as usize)
+                && (ret.total_file_size + current_level_size + add_files_size > self.max_compaction_bytes
+                || add_files_size > current_level_size)
             {
                 break;
             }
@@ -301,6 +301,7 @@ impl NonOverlapSubLevelPicker {
                 ret.sstable_infos[reverse_index].extend(files);
             }
         }
+
         // sort sst per level due to reverse expand
         ret.sstable_infos.iter_mut().for_each(|level_ssts| {
             level_ssts.sort_by(|sst1, sst2| {
