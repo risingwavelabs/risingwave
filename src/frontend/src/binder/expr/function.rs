@@ -442,6 +442,7 @@ impl Binder {
                 ("asinh", raw_call(ExprType::Asinh)), 
                 ("acosh", raw_call(ExprType::Acosh)), 
                 ("atanh", raw_call(ExprType::Atanh)), 
+                ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),

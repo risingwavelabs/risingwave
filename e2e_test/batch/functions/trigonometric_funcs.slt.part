@@ -506,7 +506,17 @@ SELECT abs(sinh(1) - 1.1752011936438014) < 1e-14
 t
 
 query R
+SELECT abs(abs(asind(0)) - 0) < 1e-14
+----
+t
+
+query R
 SELECT abs(cosh(1) - 1.5430806348152437) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(1) - 90)) < 1e-14
 ----
 t
 
@@ -516,7 +526,17 @@ SELECT abs(tanh(1) -0.7615941559557649) < 1e-14
 t
 
 query R
+SELECT abs(abs(asind(-1) + 90)) < 1e-14
+----
+t
+
+query R
 SELECT abs(coth(1) -  1.3130352854993312) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(0.5) - 30)) < 1e-14
 ----
 t
 
@@ -634,3 +654,8 @@ query R
 SELECT atanh(pi())
 ----
 NaN
+
+query R
+SELECT abs(abs(asind(-0.5) + 30)) < 1e-14
+----
+t
