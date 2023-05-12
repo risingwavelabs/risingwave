@@ -17,7 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt};
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -251,10 +251,12 @@ where
                 {
                     (
                         i,
-                        build_from_prost(&expr.unwrap())
-                            .unwrap()
-                            .eval_const()
-                            .unwrap(),
+                        build_from_prost(&expr.expect("expr should not be none"))
+                            .expect("build_from_prost error")
+                            .eval_row(&OwnedRow::empty())
+                            .now_or_never()
+                            .expect("constant expression should not be async")
+                            .expect("const expression eval failed"),
                     )
                 } else {
                     unreachable!()

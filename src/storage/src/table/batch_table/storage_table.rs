@@ -21,7 +21,7 @@ use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
@@ -251,10 +251,12 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
                         {
                             (
                                 i,
-                                build_from_prost(&expr.unwrap())
-                                    .unwrap()
-                                    .eval_const()
-                                    .unwrap(),
+                                build_from_prost(&expr.expect("expr should not be none"))
+                                    .expect("build_from_prost error")
+                                    .eval_row(&OwnedRow::empty())
+                                    .now_or_never()
+                                    .expect("constant expression should not be async")
+                                    .expect("const expression eval failed"),
                             )
                         } else {
                             unreachable!()
