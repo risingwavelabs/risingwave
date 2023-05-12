@@ -253,10 +253,9 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
                                 i,
                                 build_from_prost(&expr.expect("expr should not be none"))
                                     .expect("build_from_prost error")
-                                    .eval_row(&OwnedRow::empty())
+                                    .eval_row_infallible(&OwnedRow::empty(), |_err| {})
                                     .now_or_never()
-                                    .expect("constant expression should not be async")
-                                    .expect("const expression eval failed"),
+                                    .expect("constant expression should not be async"),
                             )
                         } else {
                             unreachable!()

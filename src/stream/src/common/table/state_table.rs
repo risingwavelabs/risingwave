@@ -253,10 +253,9 @@ where
                         i,
                         build_from_prost(&expr.expect("expr should not be none"))
                             .expect("build_from_prost error")
-                            .eval_row(&OwnedRow::empty())
+                            .eval_row_infallible(&OwnedRow::empty(), |_err| {})
                             .now_or_never()
-                            .expect("constant expression should not be async")
-                            .expect("const expression eval failed"),
+                            .expect("constant expression should not be async"),
                     )
                 } else {
                     unreachable!()
@@ -268,7 +267,9 @@ where
             row_serde.kind().is_column_aware(),
             table_catalog.version.is_some()
         );
-        row_serde.set_default_columns(column_with_default);
+        if row_serde.kind().is_column_aware() {
+            row_serde.set_default_columns(column_with_default);
+        }
 
         Self {
             table_id,
