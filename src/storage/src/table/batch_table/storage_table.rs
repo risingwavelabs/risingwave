@@ -21,7 +21,7 @@ use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::{Stream, StreamExt, FutureExt};
+use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
