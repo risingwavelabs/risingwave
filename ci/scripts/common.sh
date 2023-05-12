@@ -20,8 +20,8 @@ function compress-and-upload-artifact() {
 #   $1: artifact name
 #   $2: output directory
 function download-and-decompress-artifact() {
-  buildkite-agent artifact download "$1".tar.zst
-  tar -xvf "$1".tar.zst --directory="$2"
+  buildkite-agent artifact download "$1".tar.zst "$2"
+  tar -xvf "$1".tar.zst -C "$2"
 }
 
 # export functions so they can be used in parallel
