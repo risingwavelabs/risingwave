@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-download-and-decompress-artifact ./
+download-and-decompress-artifact e2e_test_generated ./
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 

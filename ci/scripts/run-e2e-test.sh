@@ -22,7 +22,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-download-and-decompress-artifact ./
+download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
