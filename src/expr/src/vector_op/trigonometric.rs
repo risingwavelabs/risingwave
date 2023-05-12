@@ -237,15 +237,19 @@ pub fn tand_f64(input: F64) -> F64 {
 
     let mut arg1 = input.0 % 360.0;
     let mut sign = 1.0;
+    let is_neg = arg1 < 0.0;
 
-    if arg1 < 0.0 {
+    if is_neg {
         // tand(-x) = -tand(x)
         arg1 = -arg1;
         sign = -sign;
     }
 
     if arg1 % 180.0 == 90.0 {
-        return F64::from(f64::INFINITY);
+        let sign = (arg1 - 90.0) / 180.0;
+        let sign = if sign % 2.0 == 0.0 { 1.0 } else { -1.0 };
+        let sign = if is_neg { sign * -1.0 } else { sign };
+        return F64::from(sign * f64::INFINITY);
     }
 
     if arg1 > 180.0 {
