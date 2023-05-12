@@ -29,7 +29,7 @@ use super::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
-use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
+use crate::hummock::sstable::{FilterBuilder, Xor16FilterBuilder};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
 use crate::opts::StorageOpts;
@@ -133,12 +133,12 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     epoch_set: BTreeSet<u64>,
 }
 
-impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
+impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
-            XorFilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
