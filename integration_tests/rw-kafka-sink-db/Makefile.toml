@@ -1,0 +1,81 @@
+[tasks.build-image]
+script = "docker compose build"
+dependencies = ["clean-all"]
+
+[tasks.docker]
+script = """
+docker compose -f docker-compose.yml up --build -d;
+sleep 10
+"""
+dependencies = ["clean-all"]
+
+[tasks.setup-risingwave]
+script = """
+psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
+"""
+dependencies = ["docker"]
+
+[tasks.setup-pg-connect]
+script = """
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @pg-sink.json
+"""
+
+[tasks.setup-mysql-connect]
+script = """
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @mysql-sink.json
+"""
+
+[tasks.check-data]
+script = """
+sleep 1
+docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD Test -e "select * from type_test"'
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from type_test"'
+"""
+dependencies = [
+    "setup-pg-connect",
+    "setup-mysql-connect",
+]
+
+[tasks.setup]
+dependencies = [
+    "clean-all",
+    "docker",
+    "setup-pg-connect",
+    "setup-mysql-connect",
+    "setup-check-data",
+]
+
+[tasks.clean-all]
+script = """
+docker compose -f docker-compose.yml down --remove-orphans -v
+"""
+
+[tasks.docker-local]
+script = """
+docker compose -f docker-compose-local.yml up --build -d
+sleep 10
+"""
+dependencies = ["clean-all-local"]
+
+[tasks.clean-all-local]
+script = """
+docker compose -f docker-compose-local.yml down --remove-orphans -v
+"""
+
+[tasks.setup-local]
+dependencies = [
+    "clean-all-local",
+    "docker-local",
+    "setup-pg-connect",
+    "setup-mysql-connect",
+]
+
+[tasks.show-json-logs]
+script = """
+docker exec kafka /kafka/bin/kafka-console-consumer.sh \
+    --bootstrap-server kafka:9092 \
+    --from-beginning \
+    --property print.key=true \
+    --topic type_test
+"""
+description = "Show produces kafka json logs"

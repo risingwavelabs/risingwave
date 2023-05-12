@@ -1,0 +1,81 @@
+---
+version: "3"
+services:
+  risingwave:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    ports:
+      - 4566:4566
+      - 5691:5691
+    command:
+      - playground
+    container_name: risingwave
+  postgres:
+    image: postgres
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=123456
+      - POSTGRES_DB=Test
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready --username=myuser --dbname=Test" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
+    restart: always
+    container_name: postgres
+  mysql:
+    image: mysql
+    ports:
+     - 3306:3306
+    environment:
+     - MYSQL_ROOT_PASSWORD=mysql
+     - MYSQL_USER=myuser
+     - MYSQL_PASSWORD=123456
+     - MYSQL_DATABASE=Test
+    container_name: mysql
+  #======================= Kafka ======================
+  zookeeper:
+    image: quay.io/debezium/zookeeper:2.2
+    ports:
+     - 2181:2181
+     - 2888:2888
+     - 3888:3888
+    container_name: zookeeper
+  kafka:
+    image: quay.io/debezium/kafka:2.2
+    ports:
+     - 9092:9092
+     - 9093:9093
+    links:
+     - zookeeper
+     - risingwave
+    environment:
+     - ZOOKEEPER_CONNECT=zookeeper:2181
+     - KAFKA_LISTENERS= INT://kafka:9092,EXT://0.0.0.0:9093
+     - KAFKA_ADVERTISED_LISTENERS= INT://kafka:9092,EXT://localhost:9093
+     - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INT:PLAINTEXT,EXT:PLAINTEXT
+     - KAFKA_INTER_BROKER_LISTENER_NAME=INT
+    container_name: kafka
+  connect:
+    image: debezium/connect:2.2
+    build:
+      context: debezium-jdbc
+      args:
+        DEBEZIUM_VERSION: 2.2
+    ports:
+     - 8083:8083
+     - 5005:5005
+    links:
+     - kafka
+     - postgres
+     - risingwave
+    environment:
+     - BOOTSTRAP_SERVERS=kafka:9092
+     - GROUP_ID=1
+     - CONFIG_STORAGE_TOPIC=my_connect_configs
+     - OFFSET_STORAGE_TOPIC=my_connect_offsets
+     - STATUS_STORAGE_TOPIC=my_source_connect_statuses
+    container_name: connect
+name: risingwave-compose

@@ -1,0 +1,17 @@
+{
+    "name": "pg-jdbc-sink",
+    "config": {
+        "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+        "tasks.max": "1",
+        "topics": "type_test",
+        "connection.url": "jdbc:postgresql://postgres:5432/Test?user=myuser&password=123456",
+        "transforms": "unwrap",
+        "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+        "transforms.unwrap.drop.tombstones": "false",
+        "auto.create": "true",
+        "insert.mode": "upsert",
+        "delete.enabled": "true",
+        "pk.fields": "int_type",
+        "pk.mode": "record_key"
+    }
+}
