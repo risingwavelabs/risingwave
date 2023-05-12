@@ -20,6 +20,7 @@ members = [
   "src/prost",
   "src/prost/helpers",
   "src/risedevtool",
+  "src/risedevtool/config",
   "src/rpc_client",
   "src/source",
   "src/sqlparser",
@@ -67,7 +68,7 @@ aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha" }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 
 [profile.dev]
 lto = 'off'

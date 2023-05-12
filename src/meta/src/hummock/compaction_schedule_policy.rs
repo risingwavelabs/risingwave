@@ -501,6 +501,7 @@ mod tests {
             target_sub_level_id: 0,
             task_type: compact_task::TaskType::Dynamic as i32,
             split_by_state_table: false,
+            split_weight_by_vnode: 0,
         }
     }
 

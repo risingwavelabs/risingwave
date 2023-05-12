@@ -90,7 +90,7 @@ impl<T> NdByteStreamWrapper<T> {
 
                 msgs.push(SourceMessage {
                     payload: Some(line.into()),
-                    offset: offset.to_string(),
+                    offset: (offset + len).to_string(),
                     split_id: split_id.clone(),
                     meta: meta.clone(),
                 });

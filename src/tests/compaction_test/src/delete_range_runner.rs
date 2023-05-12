@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +29,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
 };
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -46,6 +45,7 @@ use risingwave_storage::filter_key_extractor::{
 };
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
     CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
@@ -349,7 +349,7 @@ struct NormalState {
 
 struct DeleteRangeState {
     inner: NormalState,
-    delete_ranges: Vec<(Bytes, Bytes)>,
+    delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
 }
 
 impl DeleteRangeState {
@@ -380,7 +380,7 @@ impl NormalState {
 
     async fn commit_impl(
         &mut self,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         next_epoch: u64,
     ) -> Result<(), String> {
         self.storage
@@ -501,13 +501,15 @@ impl CheckState for NormalState {
 #[async_trait::async_trait]
 impl CheckState for DeleteRangeState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        self.delete_ranges
-            .push((Bytes::copy_from_slice(left), Bytes::copy_from_slice(right)));
+        self.delete_ranges.push((
+            Bound::Included(Bytes::copy_from_slice(left)),
+            Bound::Excluded(Bytes::copy_from_slice(right)),
+        ));
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
-        for (left, right) in &self.delete_ranges {
-            if left.as_ref().le(key) && right.as_ref().gt(key) {
+        for delete_range in &self.delete_ranges {
+            if delete_range.contains(key) {
                 return None;
             }
         }
@@ -517,8 +519,8 @@ impl CheckState for DeleteRangeState {
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
         let mut ret = self.inner.scan_impl(left, right, false).await;
         ret.retain(|(key, _)| {
-            for (left, right) in &self.delete_ranges {
-                if left.as_ref().le(key) && right.as_ref().gt(key) {
+            for delete_range in &self.delete_ranges {
+                if delete_range.contains(key) {
                     return false;
                 }
             }
@@ -533,7 +535,7 @@ impl CheckState for DeleteRangeState {
 
     async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
         let mut delete_ranges = std::mem::take(&mut self.delete_ranges);
-        delete_ranges.sort();
+        delete_ranges.sort_by(|a, b| cmp_delete_range_left_bounds(a.0.as_ref(), b.0.as_ref()));
         self.inner.commit_impl(delete_ranges, next_epoch).await
     }
 }
@@ -560,9 +562,6 @@ fn run_compactor_thread(
         output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
-        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number: 4,
-        })),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

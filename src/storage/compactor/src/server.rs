@@ -26,7 +26,6 @@ use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
@@ -102,7 +101,7 @@ pub async fn compactor_serve(
         &storage_memory_config,
     )));
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64 * 0.9) as usize;
+        (resource_util::memory::total_memory_available_bytes() as f64 * 0.8) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
@@ -165,7 +164,6 @@ pub async fn compactor_serve(
     // In a compact operation, the size of the output files will not be larger than the input files.
     // So we can limit the input memory with the output memory limit
     let output_memory_limiter = Arc::new(MemoryLimiter::new(input_limit_bytes));
-    let max_concurrent_task_number = storage_opts.max_concurrent_compaction_task_number;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
         output_memory_limiter.clone(),
@@ -188,9 +186,6 @@ pub async fn compactor_serve(
         output_memory_limiter,
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
-        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number,
-        })),
     });
     let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
@@ -224,10 +219,7 @@ pub async fn compactor_serve(
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
-            .add_service(CompactorServiceServer::new(CompactorServiceImpl::new(
-                compactor_context,
-                meta_client.clone(),
-            )))
+            .add_service(CompactorServiceServer::new(CompactorServiceImpl::default()))
             .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

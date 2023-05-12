@@ -16,7 +16,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_common_proc_macro::EstimateSize;
-use risingwave_expr::function::window::{Frame, FrameBound};
+use risingwave_expr::function::window::{Frame, FrameBound, FrameBounds};
 use smallvec::SmallVec;
 
 use super::{EstimatedVecDeque, StateKey, StateOutput, StatePos, WindowState};
@@ -39,7 +39,7 @@ pub(super) struct LeadState {
 
 impl LeadState {
     pub fn new(frame: &Frame) -> Self {
-        let offset = must_match!(frame, Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset)) => *offset);
+        let offset = must_match!(&frame.bounds, FrameBounds::Rows(FrameBound::CurrentRow, FrameBound::Following(offset)) => *offset);
         Self {
             offset,
             buffer: Default::default(),

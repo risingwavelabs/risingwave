@@ -166,7 +166,7 @@ impl S3StreamingUploader {
                 .content_length(len as i64)
                 .send()
                 .await
-                .map_err(ObjectError::s3);
+                .map_err(Into::into);
             try_update_failure_metric(&metrics, &upload_output_res, operation_type);
             Ok((part_id, upload_output_res?))
         }));
@@ -327,7 +327,7 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
             "s3 streaming upload error"
         )));

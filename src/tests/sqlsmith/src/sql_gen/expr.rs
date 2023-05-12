@@ -412,7 +412,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .map(|t| self.gen_expr(t, context))
             .collect();
 
-        let distinct = self.flip_coin() && self.is_distinct_allowed;
+        let distinct = self.flip_coin() && self.is_distinct_allowed && !exprs.is_empty();
         let filter = if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
@@ -526,6 +526,11 @@ fn make_general_expr(func: ExprType, exprs: Vec<Expr>) -> Option<Expr> {
         E::SplitPart => Some(Expr::Function(make_simple_func("split_part", &exprs))),
         E::Encode => Some(Expr::Function(make_simple_func("encode", &exprs))),
         E::Decode => Some(Expr::Function(make_simple_func("decode", &exprs))),
+        E::Sha1 => Some(Expr::Function(make_simple_func("sha1", &exprs))),
+        E::Sha224 => Some(Expr::Function(make_simple_func("sha224", &exprs))),
+        E::Sha256 => Some(Expr::Function(make_simple_func("sha256", &exprs))),
+        E::Sha384 => Some(Expr::Function(make_simple_func("sha384", &exprs))),
+        E::Sha512 => Some(Expr::Function(make_simple_func("sha512", &exprs))),
         // TODO: Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
         // E::Translate => Some(Expr::Function(make_simple_func("translate", &exprs))),
         E::Overlay => Some(make_overlay(exprs)),

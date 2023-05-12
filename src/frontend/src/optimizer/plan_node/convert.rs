@@ -75,7 +75,7 @@ pub fn stream_enforce_eowc_requirement(
             .into())
         } else {
             if n_watermark_cols > 1 {
-                ctx.warn("There are multiple watermark columns in the query, currently only the first one will be used.");
+                ctx.warn_to_user("There are multiple watermark columns in the query, currently only the first one will be used.");
             }
             let watermark_col_idx = watermark_cols.ones().next().unwrap();
             Ok(StreamSort::new(plan, watermark_col_idx).into())

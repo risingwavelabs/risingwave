@@ -37,7 +37,7 @@ pub(super) struct AggregateState {
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
-        if !call.frame.is_valid() || call.frame.end_is_unbounded() {
+        if !call.frame.bounds.is_valid() || call.frame.bounds.end_is_unbounded() {
             bail!("the window frame must be valid and end-bounded");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
@@ -134,22 +134,23 @@ struct BatchAggregatorWrapper<'a> {
 impl BatchAggregatorWrapper<'_> {
     fn aggregate<'a>(
         &'a self,
-        values: impl ExactSizeIterator<Item = &'a [Datum]>,
+        values: impl Iterator<Item = &'a [Datum]>,
     ) -> StreamExecutorResult<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
-
-        let n_values = values.len();
 
         let mut args_builders = self
             .arg_data_types
             .iter()
-            .map(|data_type| data_type.create_array_builder(n_values))
+            .map(|data_type| data_type.create_array_builder(0 /* bad! */))
             .collect::<Vec<_>>();
+        let mut n_values = 0;
         for value in values {
+            n_values += 1;
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
                 builder.append_datum(datum);
             }
         }
+
         let columns = args_builders
             .into_iter()
             .map(|builder| builder.finish().into())

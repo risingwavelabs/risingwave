@@ -40,6 +40,7 @@ use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -549,6 +550,7 @@ impl UploaderContext {
 /// Data are mostly stored in `VecDeque`, and the order stored in the `VecDeque` indicates the data
 /// order. Data at the front represents ***newer*** data.
 pub struct HummockUploader {
+    stats: Arc<HummockStateStoreMetrics>,
     /// The maximum epoch that is sealed
     max_sealed_epoch: HummockEpoch,
     /// The maximum epoch that has started syncing
@@ -577,6 +579,7 @@ pub struct HummockUploader {
 
 impl HummockUploader {
     pub(crate) fn new(
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
@@ -585,6 +588,7 @@ impl HummockUploader {
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
+            stats: state_store_metrics,
             max_sealed_epoch: initial_epoch,
             max_syncing_epoch: initial_epoch,
             max_synced_epoch: initial_epoch,
@@ -929,7 +933,24 @@ impl HummockUploader {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<MergeImmTaskOutput>> {
-        self.sealed_data.poll_success_merge_imm(cx)
+        let poll_ret = self.sealed_data.poll_success_merge_imm(cx);
+        if let Poll::Ready(Some(output)) = &poll_ret {
+            let table_id_label = output.table_id.to_string();
+            let shard_id_label = output.instance_id.to_string();
+
+            // monitor finished task
+            self.stats
+                .merge_imm_task_counts
+                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .inc();
+            // monitor merge imm memory size
+            // we should also add up the size of EPOCH stored in each entry
+            self.stats
+                .merge_imm_batch_memory_sz
+                .with_label_values(&[table_id_label.as_str(), shard_id_label.as_str()])
+                .inc_by((output.merged_imm.size() + output.merged_imm.kv_count() * EPOCH_LEN) as _);
+        }
+        poll_ret
     }
 }
 
@@ -1010,6 +1031,7 @@ mod tests {
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::value::HummockValue;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+    use crate::monitor::HummockStateStoreMetrics;
     use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
@@ -1110,6 +1132,7 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         HummockUploader::new(
+            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
@@ -1582,6 +1605,7 @@ mod tests {
         let config = StorageOpts::default();
         let compaction_executor = Arc::new(CompactionExecutor::new(None));
         let uploader = HummockUploader::new(
+            Arc::new(HummockStateStoreMetrics::unused()),
             initial_pinned_version(),
             Arc::new({
                 move |_: UploadTaskPayload, task_info: UploadTaskInfo| {
