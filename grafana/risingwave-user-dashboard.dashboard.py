@@ -71,8 +71,8 @@ def section_overview(panels):
             "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])) by (source_name)",
-                    "{{source_name}}",
+                    f"sum(rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])) by (sink_name)",
+                    "{{sink_name}}",
                 ),
             ],
         ),

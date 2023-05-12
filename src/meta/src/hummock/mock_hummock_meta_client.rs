@@ -171,7 +171,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn subscribe_compact_tasks(
         &self,
-        _max_concurrent_task_number: u64,
         _cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel();

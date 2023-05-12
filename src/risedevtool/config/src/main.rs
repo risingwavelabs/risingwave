@@ -23,7 +23,6 @@ use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
 use fs_err::OpenOptions;
 use itertools::Itertools;
-use risedev::RISEDEV_CONFIG_FILE;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -72,6 +71,7 @@ pub enum Components {
     Release,
     AllInOne,
     Sanitizer,
+    DynamicLinking,
 }
 
 impl Components {
@@ -91,6 +91,7 @@ impl Components {
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
+            Self::DynamicLinking => "[Build] Enable dynamic linking",
         }
         .into()
     }
@@ -168,6 +169,13 @@ Required if you want to sink data to redis.
 Required if you want to build Connector Node from source locally.
                 "
             }
+            Self::DynamicLinking => {
+                "
+With this option enabled, RiseDev will use dynamic linking when
+building Rust components. This can speed up the build process,
+but you might need the expertise to install dependencies correctly.
+                "
+            }
         }
         .into()
     }
@@ -184,6 +192,7 @@ Required if you want to build Connector Node from source locally.
             "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
+            "ENABLE_DYNAMIC_LINKING" => Some(Self::DynamicLinking),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
@@ -208,6 +217,7 @@ Required if you want to build Connector Node from source locally.
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
+            Self::DynamicLinking => "ENABLE_DYNAMIC_LINKING",
         }
         .into()
     }
@@ -380,7 +390,7 @@ fn main() -> Result<()> {
     println!(
         "If you want to use these components, please {} in {} to start that component.",
         style("modify the cluster config").yellow().bold(),
-        style(RISEDEV_CONFIG_FILE).bold(),
+        style("risedev.yml").bold(),
     );
     println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 
