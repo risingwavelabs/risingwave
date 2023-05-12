@@ -23,7 +23,9 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
-use risingwave_hummock_trace::{TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions};
+use risingwave_hummock_trace::{
+    TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions, TracedWriteOptions,
+};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -357,7 +359,7 @@ pub struct ReadOptions {
 impl From<TracedReadOptions> for ReadOptions {
     fn from(value: TracedReadOptions) -> Self {
         Self {
-            prefix_hint: value.prefix_hint,
+            prefix_hint: value.prefix_hint.map(|b| b.into()),
             ignore_range_tombstone: value.ignore_range_tombstone,
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),

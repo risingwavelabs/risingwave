@@ -23,7 +23,6 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
-use risingwave_common::catalog::TableId;
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -32,7 +31,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TracedReadOptions, UniqueIdGenerator,
+    TracedNewLocalOptions, TracedReadOptions, TracedTableId, UniqueIdGenerator,
 };
 
 static GLOBAL_COLLECTOR: LazyLock<GlobalCollector> = LazyLock::new(GlobalCollector::new);
@@ -193,7 +192,7 @@ impl TraceSpan {
                     key_range.1.as_ref().map(|v| v.clone().into()),
                 ),
                 epoch,
-                read_options: read_options.into(),
+                read_options,
             },
             storage_type,
         )
@@ -238,7 +237,7 @@ impl TraceSpan {
     }
 
     pub fn new_local_storage_span(
-        option: NewLocalOptions,
+        option: TracedNewLocalOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
         Self::new_global(Operation::NewLocalStorage(option), storage_type)
@@ -246,7 +245,11 @@ impl TraceSpan {
 
     pub fn send(&self, op: Operation) {
         self.tx
-            .send(Some(Record::new(self.storage_type(), self.id(), op)))
+            .send(Some(Record::new(
+                self.storage_type().clone(),
+                self.id(),
+                op,
+            )))
             .expect("failed to log record");
     }
 
@@ -262,8 +265,8 @@ impl TraceSpan {
         self.id
     }
 
-    fn storage_type(&self) -> StorageType {
-        self.storage_type
+    fn storage_type(&self) -> &StorageType {
+        &self.storage_type
     }
 
     /// Create a span and send operation to the `GLOBAL_COLLECTOR`
@@ -295,10 +298,10 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Option<Record>;
 pub type ConcurrentId = u64;
 
-#[derive(Clone, Copy, Debug, Encode, Decode, PartialEq)]
+#[derive(Clone, Debug, Encode, Decode, PartialEq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId, TableId),
+    Local(ConcurrentId, TracedTableId),
 }
 
 task_local! {
@@ -311,8 +314,6 @@ task_local! {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
-    use risingwave_common::catalog::TableId;
 
     use super::*;
     use crate::MockTraceWriter;
@@ -332,7 +333,7 @@ mod tests {
                 let op = Operation::get(
                     Bytes::from(vec![i as u8]),
                     Some(123),
-                    ReadOptions::for_test(0),
+                    TracedReadOptions::for_test(0),
                 );
                 let _span = TraceSpan::new_with_op(
                     collector.tx(),
@@ -365,7 +366,7 @@ mod tests {
         let op = Operation::get(
             Bytes::from(vec![74, 56, 43, 67]),
             Some(256),
-            ReadOptions::for_test(0),
+            TracedReadOptions::for_test(0),
         );
         let mut mock_writer = MockTraceWriter::new();
 
@@ -388,7 +389,7 @@ mod tests {
                     tx,
                     generator.next(),
                     op,
-                    StorageType::Local(0, TableId { table_id: 0 }),
+                    StorageType::Local(0, TracedTableId { table_id: 0 }),
                 );
             });
             handles.push(handle);

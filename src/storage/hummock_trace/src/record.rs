@@ -141,7 +141,7 @@ impl Operation {
         Operation::Get {
             key: key.into(),
             epoch,
-            read_options: read_options,
+            read_options,
         }
     }
 
@@ -156,12 +156,6 @@ impl Operation {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct TracedBytes(Bytes);
-
-impl TracedBytes {
-    pub fn into_bytes(self) -> Bytes {
-        self.0
-    }
-}
 
 impl Deref for TracedBytes {
     type Target = Bytes;
@@ -206,6 +200,12 @@ impl From<Vec<u8>> for TracedBytes {
 impl From<Bytes> for TracedBytes {
     fn from(value: Bytes) -> Self {
         Self(value)
+    }
+}
+
+impl From<TracedBytes> for Bytes {
+    fn from(value: TracedBytes) -> Self {
+        value.0
     }
 }
 

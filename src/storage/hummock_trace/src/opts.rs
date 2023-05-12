@@ -45,6 +45,15 @@ impl From<CachePriority> for TracedCachePriority {
     }
 }
 
+impl From<TracedCachePriority> for CachePriority {
+    fn from(value: TracedCachePriority) -> Self {
+        match value {
+            TracedCachePriority::High => Self::High,
+            TracedCachePriority::Low => Self::Low,
+        }
+    }
+}
+
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedTableId {
     pub table_id: u32,
@@ -52,6 +61,14 @@ pub struct TracedTableId {
 
 impl From<TableId> for TracedTableId {
     fn from(value: TableId) -> Self {
+        Self {
+            table_id: value.table_id,
+        }
+    }
+}
+
+impl From<TracedTableId> for TableId {
+    fn from(value: TracedTableId) -> Self {
         Self {
             table_id: value.table_id,
         }
@@ -97,6 +114,14 @@ pub struct TracedTableOption {
 
 impl From<TableOption> for TracedTableOption {
     fn from(value: TableOption) -> Self {
+        Self {
+            retention_seconds: value.retention_seconds,
+        }
+    }
+}
+
+impl From<TracedTableOption> for TableOption {
+    fn from(value: TracedTableOption) -> Self {
         Self {
             retention_seconds: value.retention_seconds,
         }
