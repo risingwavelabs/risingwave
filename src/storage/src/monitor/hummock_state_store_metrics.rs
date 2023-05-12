@@ -47,9 +47,6 @@ pub struct HummockStateStoreMetrics {
     pub write_batch_duration: HistogramVec,
     pub write_batch_size: HistogramVec,
 
-    pub merge_imm_pending_task_counts: GenericCounterVec<AtomicU64>,
-    pub merge_imm_pending_memory_sz: GenericCounterVec<AtomicU64>,
-
     // finished task counts
     pub merge_imm_task_counts: GenericCounterVec<AtomicU64>,
     // merge imm ops
@@ -179,22 +176,6 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
-        let merge_imm_pending_task_counts = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_pending_task_counts",
-            "Total number of merge imm task that are pending for schedule",
-            &["table_id", "shard_id"],
-            registry
-        )
-        .unwrap();
-
-        let merge_imm_pending_memory_sz = register_int_counter_vec_with_registry!(
-            "state_store_merge_imm_pending_memory_sz",
-            "Total size of imm batches that are pending for merge",
-            &["table_id", "shard_id"],
-            registry
-        )
-        .unwrap();
-
         let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -236,8 +217,6 @@ impl HummockStateStoreMetrics {
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
-            merge_imm_pending_task_counts,
-            merge_imm_pending_memory_sz,
             merge_imm_task_counts,
             merge_imm_batch_memory_sz,
         }

@@ -715,18 +715,6 @@ impl HummockUploader {
                         Some(tracker),
                         &self.context,
                     ));
-
-                let table_label = &table_id.to_string();
-                let shard_label = &shard_id.to_string();
-                self.stats
-                    .merge_imm_pending_task_counts
-                    .with_label_values(&[table_label, shard_label])
-                    .inc();
-
-                self.stats
-                    .merge_imm_pending_memory_sz
-                    .with_label_values(&[table_label, shard_label])
-                    .inc_by(memory_sz);
             } else {
                 tracing::warn!(
                     "fail to acqiure memory {} B, skip merging imms for table {}, shard {}",

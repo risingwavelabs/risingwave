@@ -1691,28 +1691,6 @@ def section_hummock(panels):
             ],
         ),
 
-
-        panels.timeseries_ops(
-            "Merge Imm - Pending Tasks Count",
-            "",
-            [
-                panels.target(
-                    f"sum(rate({metric('state_store_merge_imm_pending_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
-                    "pending tasks - {{table_id}} @ {{instance}} ",
-                ),
-            ],
-        ),
-        panels.timeseries_ops(
-            "Merge Imm - Pending Task Memory Size",
-            "",
-            [
-                panels.target(
-                    f"sum(rate({metric('state_store_merge_imm_pending_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
-                    "pending tasks memory size - {{table_id}} @ {{instance}} ",
-                ),
-            ],
-        ),
-
         panels.timeseries_ops(
             "Merge Imm - Finished Tasks Count",
             "",
