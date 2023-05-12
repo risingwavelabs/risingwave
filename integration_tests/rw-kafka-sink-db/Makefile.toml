@@ -15,34 +15,34 @@ psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
 """
 dependencies = ["docker"]
 
-[tasks.setup-pg-connect]
-script = """
+[tasks.connect]
+script = '''
 curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @pg-sink.json
-"""
-
-[tasks.setup-mysql-connect]
-script = """
 curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @mysql-sink.json
-"""
-
-[tasks.check-data]
-script = """
 sleep 1
-docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD Test -e "select * from type_test"'
+'''
+
+[tasks.check-pg]
+script = '''
 docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from type_test"'
-"""
+'''
+dependencies = ["connect"]
+
+[tasks.check-mysql]
+script = '''
+docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD Test -e "select * from type_test"'
+'''
+dependencies = ["connect"]
+
+[tasks.check-db]
 dependencies = [
-    "setup-pg-connect",
-    "setup-mysql-connect",
-]
+    "check-pg",
+    "check-mysql"]
 
 [tasks.setup]
 dependencies = [
     "clean-all",
     "docker",
-    "setup-pg-connect",
-    "setup-mysql-connect",
-    "setup-check-data",
 ]
 
 [tasks.clean-all]
@@ -63,11 +63,12 @@ docker compose -f docker-compose-local.yml down --remove-orphans -v
 """
 
 [tasks.setup-local]
+script = """
+psql -h localhost -p 4566 -d dev -U root -f risingwave-local.sql
+"""
 dependencies = [
     "clean-all-local",
     "docker-local",
-    "setup-pg-connect",
-    "setup-mysql-connect",
 ]
 
 [tasks.show-json-logs]
