@@ -4,6 +4,9 @@ export CARGO_HOME=/risingwave/.cargo
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
+export MINIO_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/minio
+export MCLI_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/mcli
+export GCLOUD_DOWNLOAD_TGZ=https://ci-deps-dist.s3.amazonaws.com/google-cloud-cli-406.0.0-linux-x86_64.tar.gz
 
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT

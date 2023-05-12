@@ -2,8 +2,8 @@ extend = "common.toml"
 
 [env]
 MINIO_SYSTEM = "${SYSTEM}"
-MCLI_DOWNLOAD_BIN = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc"
-MINIO_DOWNLOAD_BIN = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio"
+MCLI_DOWNLOAD_BIN = { value = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc", condition = { env_not_set = [ "MCLI_DOWNLOAD_BIN" ] } }
+MINIO_DOWNLOAD_BIN = { value = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio", condition = { env_not_set = [ "MINIO_DOWNLOAD_BIN" ] } }
 
 [tasks.download-minio]
 category = "RiseDev - Components"

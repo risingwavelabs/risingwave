@@ -2,9 +2,7 @@ extend = "common.toml"
 
 [env]
 GCLOUD_DOWNLOAD_PATH = "${PREFIX_TMP}/gcloud.tgz"
-GCLOUD_VERSION = "406.0.0"
-GCLOUD_RELEASE = "google-cloud-cli-${GCLOUD_VERSION}-linux-x86_64.tar.gz"
-GCLOUD_DOWNLOAD_TGZ = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${GCLOUD_RELEASE}"
+GCLOUD_DOWNLOAD_TGZ = { value = "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-406.0.0-linux-x86_64.tar.gz", condition = { env_not_set = [ "GCLOUD_DOWNLOAD_TGZ" ] } }
 GCLOUD_SDK_DIR = "google-cloud-sdk"
 
 [tasks.download-pubsub]
@@ -18,7 +16,7 @@ set -e
 if [ -d "${PREFIX_BIN}/gcloud" ]; then
     exit 0
 fi
-echo "gcloud not found, download ${GCLOUD_RELEASE}"
+echo "gcloud not found, downloading"
 curl -fL -o "${GCLOUD_DOWNLOAD_PATH}" "${GCLOUD_DOWNLOAD_TGZ}"
 tar -xf "${GCLOUD_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
 echo "install the pubsub-emulator"
