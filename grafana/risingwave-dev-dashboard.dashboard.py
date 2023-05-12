@@ -1691,7 +1691,7 @@ def section_hummock(panels):
             ],
         ),
 
-        panels.timeseries_ops(
+        panels.timeseries_count(
             "Merge Imm - Finished Tasks Count",
             "",
             [
@@ -1701,7 +1701,7 @@ def section_hummock(panels):
                 ),
             ],
         ),
-        panels.timeseries_ops(
+        panels.timeseries_bytes(
             "Merge Imm - Finished Task Memory Size",
             "",
             [
