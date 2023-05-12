@@ -119,7 +119,6 @@ message ExprNode {
     DEGREES = 258;
     RADIANS = 259;
     SIGN = 260;
-    
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
