@@ -581,15 +581,16 @@ where
         let mut min_trigger_interval =
             tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        min_trigger_interval.reset();
         let dynamic_tick_trigger =
             IntervalStream::new(min_trigger_interval).map(|_| SchedulerEvent::DynamicTrigger);
 
         let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
             periodic_space_reclaim_compaction_interval_sec,
         ));
-
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        min_space_reclaim_trigger_interval.reset();
         let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
             .map(|_| SchedulerEvent::SpaceReclaimTrigger);
 
@@ -598,18 +599,24 @@ where
         ));
         min_ttl_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        min_ttl_reclaim_trigger_interval.reset();
         let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
             .map(|_| SchedulerEvent::TtlReclaimTrigger);
+
         let mut check_compact_trigger_interval =
             tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
         check_compact_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        check_compact_trigger_interval.reset();
         let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
             .map(|_| SchedulerEvent::CheckDeadTaskTrigger);
+
         let mut split_group_trigger_interval =
             tokio::time::interval(Duration::from_secs(periodic_check_split_group_interval_sec));
         split_group_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        split_group_trigger_interval.reset();
+
         let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
             .map(|_| SchedulerEvent::GroupSplitTrigger);
         let triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
