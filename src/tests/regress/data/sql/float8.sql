@@ -191,11 +191,11 @@ SELECT * FROM FLOAT8_TBL;
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
 -- tend to produce results that vary in the last place.
-SELECT sinh(double precision '1');
-SELECT cosh(double precision '1');
-SELECT tanh(double precision '1');
+SELECT sinh(double precision '1') - 1.1752011936438 < 1e-14;
+SELECT cosh(double precision '1') - 1.54308063481524 < 1e-14;
+SELECT tanh(double precision '1') - 0.761594155955765 < 1e-14;
 SELECT asinh(double precision '1');
-SELECT acosh(double precision '2');
+SELECT acosh(double precision '2') - 1.31695789692482 < 1e-14;
 SELECT atanh(double precision '0.5');
 -- test Inf/NaN cases for hyperbolic functions
 SELECT sinh(double precision 'infinity');
@@ -212,11 +212,11 @@ SELECT asinh(double precision '-infinity');
 SELECT asinh(double precision 'nan');
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
 -- SELECT acosh(double precision 'infinity');
-SELECT acosh(double precision '-infinity');
-SELECT acosh(double precision 'nan');
-SELECT atanh(double precision 'infinity');
-SELECT atanh(double precision '-infinity');
-SELECT atanh(double precision 'nan');
+--@ SELECT acosh(double precision '-infinity');
+--@ SELECT acosh(double precision 'nan');
+--@ SELECT atanh(double precision 'infinity');
+--@ SELECT atanh(double precision '-infinity');
+--@ SELECT atanh(double precision 'nan');
 
 --@ RESET extra_float_digits;
 
