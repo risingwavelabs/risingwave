@@ -47,10 +47,10 @@ impl<PlanRef> Delete<PlanRef> {
         returning: bool,
     ) -> Self {
         Self {
-            input,
             table_name,
             table_id,
             table_version_id,
+            input,
             returning,
         }
     }
