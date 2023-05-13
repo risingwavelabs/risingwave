@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{
-    gen_filter_and_pushdown, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, generic,
+    gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{
@@ -40,62 +40,18 @@ pub struct LogicalDelete {
 
 impl From<generic::Delete<PlanRef>> for LogicalDelete {
     fn from(core: generic::Delete<PlanRef>) -> Self {
-        let ctx = core.input.ctx();
         let schema = if core.returning {
-            core.input.schema().clone()
+            core.schema().clone()
         } else {
             Schema::new(vec![Field::unnamed(DataType::Int64)])
         };
         let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        let base = PlanBase::new_logical(core.ctx(), schema, vec![], fd_set);
         Self { base, core }
     }
 }
 
 impl LogicalDelete {
-    /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        returning: bool,
-    ) -> Self {
-        let ctx = input.ctx();
-        let schema = if returning {
-            input.schema().clone()
-        } else {
-            Schema::new(vec![Field::unnamed(DataType::Int64)])
-        };
-        let fd_set = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
-        Self {
-            base,
-            table_name,
-            table_id,
-            table_version_id,
-            input,
-            returning,
-        }
-    }
-
-    /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        returning: bool,
-    ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_name,
-            table_id,
-            table_version_id,
-            returning,
-        ))
-    }
-
     #[must_use]
     pub fn table_id(&self) -> TableId {
         self.core.table_id
@@ -154,8 +110,9 @@ impl PredicatePushdown for LogicalDelete {
 impl ToBatch for LogicalDelete {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchDelete::new(new_logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchDelete::new(core).into())
     }
 }
 
