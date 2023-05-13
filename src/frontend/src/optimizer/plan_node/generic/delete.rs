@@ -1,6 +1,6 @@
 use std::fmt;
 
-use risingwave_common::catalog::{TableVersionId, Schema};
+use risingwave_common::catalog::{Schema, TableVersionId};
 
 use super::GenericPlanRef;
 use crate::catalog::TableId;
