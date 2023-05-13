@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 
 use super::{
     gen_filter_and_pushdown, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, generic,
 };
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::{
@@ -35,11 +35,21 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDelete {
     pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
-    table_version_id: TableVersionId,
-    input: PlanRef,
-    returning: bool,
+    core: generic::Delete<PlanRef>,
+}
+
+impl From<generic::Delete<PlanRef>> for LogicalDelete {
+    fn from(core: generic::Delete<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
+        let schema = if core.returning {
+            core.input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
+        let fd_set = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
+        Self { base, core }
+    }
 }
 
 impl LogicalDelete {
@@ -86,47 +96,29 @@ impl LogicalDelete {
         ))
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}{} }}",
-            name,
-            self.table_name,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
-
     #[must_use]
     pub fn table_id(&self) -> TableId {
-        self.table_id
+        self.core.table_id
     }
 
     pub fn has_returning(&self) -> bool {
-        self.returning
+        self.core.returning
     }
 
     pub fn table_version_id(&self) -> TableVersionId {
-        self.table_version_id
+        self.core.table_version_id
     }
 }
 
 impl PlanTreeNodeUnary for LogicalDelete {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_name.clone(),
-            self.table_id,
-            self.table_version_id,
-            self.returning,
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        core.into()
     }
 }
 
@@ -134,14 +126,15 @@ impl_plan_tree_node_for_unary! { LogicalDelete }
 
 impl fmt::Display for LogicalDelete {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalDelete")
+        self.core.fmt_with_name(f, "LogicalDelete")
     }
 }
 
 impl ColPrunable for LogicalDelete {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+        let input = &self.core.input;
+        let required_cols: Vec<_> = (0..input.schema().len()).collect();
+        self.clone_with_input(input.prune_col(&required_cols, ctx))
             .into()
     }
 }
