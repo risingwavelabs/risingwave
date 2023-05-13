@@ -155,6 +155,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
+            | expr_node::Type::Asind
             | expr_node::Type::Decode
             | expr_node::Type::Encode
             | expr_node::Type::Sha1

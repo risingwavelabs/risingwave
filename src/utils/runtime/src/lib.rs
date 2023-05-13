@@ -206,6 +206,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_level(false)
             .with_file(false)
             .with_target(false)
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+            .with_thread_names(true)
+            .with_thread_ids(true)
             .with_writer(std::sync::Mutex::new(file))
             .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
         layers.push(layer.boxed());
@@ -238,6 +241,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         .with_level(false)
         .with_file(false)
         .with_target(false)
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+        .with_thread_names(true)
+        .with_thread_ids(true)
         .with_writer(std::sync::Mutex::new(file))
         .with_filter(
             filter::Targets::new().with_target("risingwave_frontend_slow_query_log", Level::TRACE),

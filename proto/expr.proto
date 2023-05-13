@@ -115,10 +115,12 @@ message ExprNode {
     COSD = 254;
     COTD = 255;
     TAND = 256;
-    SQRT = 257;
-    DEGREES = 258;
-    RADIANS = 259;
-    SIGN = 260;
+    ASIND = 257;
+    SQRT = 258;
+    DEGREES = 259;
+    RADIANS = 260;
+    SIGN = 261;
+
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
@@ -290,16 +292,16 @@ message WindowFrame {
   enum Type {
     TYPE_UNSPECIFIED = 0;
     // RANGE = 1;
-    ROWS = 2;
+    TYPE_ROWS = 2;
     // GROUPS = 3;
   }
   enum BoundType {
     BOUND_TYPE_UNSPECIFIED = 0;
-    UNBOUNDED_PRECEDING = 1;
-    PRECEDING = 2;
-    CURRENT_ROW = 3;
-    FOLLOWING = 4;
-    UNBOUNDED_FOLLOWING = 5;
+    BOUND_TYPE_UNBOUNDED_PRECEDING = 1;
+    BOUND_TYPE_PRECEDING = 2;
+    BOUND_TYPE_CURRENT_ROW = 3;
+    BOUND_TYPE_FOLLOWING = 4;
+    BOUND_TYPE_UNBOUNDED_FOLLOWING = 5;
   }
   message Bound {
     BoundType type = 1;
@@ -308,11 +310,18 @@ message WindowFrame {
       data.Datum datum = 3;
     }
   }
+  enum Exclusion {
+    EXCLUSION_UNSPECIFIED = 0;
+    EXCLUSION_CURRENT_ROW = 1;
+    // EXCLUSION_GROUP = 2;
+    // EXCLUSION_TIES = 3;
+    EXCLUSION_NO_OTHERS = 4;
+  }
 
   Type type = 1;
   Bound start = 2;
   Bound end = 3;
-  // Xxx exclusion = 4;
+  Exclusion exclusion = 4;
 }
 
 message WindowFunction {

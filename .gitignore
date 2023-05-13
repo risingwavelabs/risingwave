@@ -25,6 +25,7 @@ build/
 
 # Python
 *.pyc
+venv/
 
 # Golang
 go/bin/
