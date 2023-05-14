@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-use std::pin::pin;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -652,7 +651,7 @@ impl SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = pin!(handle(self, stmt, sql, formats));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -837,7 +836,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let sql_str = stmt.to_string();
         let rsp = {
-            let mut handle_fut = pin!(handle(self, stmt, &sql_str, vec![format]));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -894,7 +893,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
         portal: Portal,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let rsp = {
-            let mut handle_fut = pin!(handle_execute(self, portal));
+            let mut handle_fut = Box::pin(handle_execute(self, portal));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
