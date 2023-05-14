@@ -3124,6 +3124,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "insta"
+version = "1.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a28d25139df397cbca21408bb742cf6837e04cdbebf1b07b760caf971d6a972"
+dependencies = [
+ "console",
+ "lazy_static",
+ "linked-hash-map",
+ "similar",
+ "yaml-rust",
+]
+
+[[package]]
 name = "instant"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6647,6 +6660,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hytra",
+ "insta",
  "iter-chunks",
  "itertools",
  "local_stats_alloc",
@@ -6674,7 +6688,9 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "serde",
  "serde_json",
+ "serde_yaml",
  "smallvec",
  "static_assertions",
  "task_stats_alloc",

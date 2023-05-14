@@ -545,3 +545,88 @@ pub mod top_n_executor {
         .await
     }
 }
+
+#[cfg(test)]
+pub mod snapshot {
+    use futures::{Future, FutureExt, TryStreamExt};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::DataType;
+
+    use super::MessageSender;
+    use crate::executor::{BoxedMessageStream, Message};
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "lowercase")]
+    enum SnapshotEvent {
+        Barrier,
+        Noop,
+        Recovery,
+        Chunk(String),
+        Watermark { col_idx: usize, val: i64 },
+    }
+
+    impl SnapshotEvent {
+        #[track_caller]
+        fn parse(s: &str) -> Vec<Self> {
+            serde_yaml::from_str(s).unwrap()
+        }
+    }
+
+    #[derive(Debug, serde::Serialize, serde::Deserialize)]
+    struct Snapshot {
+        input: SnapshotEvent,
+        output: Vec<SnapshotEvent>,
+    }
+
+    pub async fn executor_snapshot<F, Fut>(create_executor: F, inputs: &str) -> String
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = (MessageSender, BoxedMessageStream)>,
+    {
+        let inputs = SnapshotEvent::parse(inputs);
+
+        let (mut tx, mut executor) = create_executor().await;
+        let mut epoch = 1;
+
+        let mut snapshot = Vec::with_capacity(inputs.len());
+        for mut event in inputs {
+            match &mut event {
+                SnapshotEvent::Barrier => {
+                    tx.push_barrier(epoch, false);
+                    epoch += 1;
+                }
+                SnapshotEvent::Noop => unreachable!(),
+                SnapshotEvent::Recovery => {
+                    (tx, executor) = create_executor().await;
+                }
+                SnapshotEvent::Chunk(chunk_str) => {
+                    let chunk = StreamChunk::from_pretty(chunk_str);
+                    *chunk_str = chunk.to_pretty_string();
+                    tx.push_chunk(chunk);
+                }
+                SnapshotEvent::Watermark { col_idx, val } => {
+                    tx.push_watermark(*col_idx, DataType::Int64, (*val).into())
+                }
+            }
+            let mut output = vec![];
+            while let Some(msg) = executor.try_next().now_or_never() {
+                output.push(match msg.unwrap().unwrap() {
+                    Message::Chunk(chunk) => SnapshotEvent::Chunk(chunk.to_pretty_string()),
+                    Message::Barrier(_) => SnapshotEvent::Barrier,
+                    Message::Watermark(watermark) => SnapshotEvent::Watermark {
+                        col_idx: watermark.col_idx,
+                        val: watermark.val.into_int64(),
+                    },
+                });
+            }
+            snapshot.push(Snapshot {
+                input: event,
+                output,
+            });
+        }
+        // Note: we serialize ourselves, instead of relying on insta::assert_yaml_snapshot,
+        // because serde_yaml is prettier. https://github.com/mitsuhiko/insta/issues/372
+        serde_yaml::to_string(&snapshot).unwrap()
+    }
+}

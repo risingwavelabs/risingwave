@@ -1,0 +1,23 @@
+---
+source: src/stream/src/executor/over_window/eowc.rs
+expression: "executor_snapshot(Box::new(async ||\n                create_executor(calls.clone(), store.clone()).await),\n        r###\"\n- barrier\n- !chunk |-\n    I T  I   i\n    + 1 p1 100 10\n    + 1 p1 101 16\n    + 4 p1 102 20\n\"###).await"
+---
+- input: barrier
+  output:
+  - barrier
+- input: !chunk |-
+    +---+---+----+-----+----+
+    | + | 1 | p1 | 100 | 10 |
+    | + | 1 | p1 | 101 | 16 |
+    | + | 4 | p1 | 102 | 20 |
+    +---+---+----+-----+----+
+  output:
+  - !watermark
+    col_idx: 0
+    val: 1
+  - !chunk |-
+    +---+---+----+-----+----+----+
+    | + | 1 | p1 | 100 | 10 | 26 |
+    | + | 1 | p1 | 101 | 16 | 46 |
+    +---+---+----+-----+----+----+
+

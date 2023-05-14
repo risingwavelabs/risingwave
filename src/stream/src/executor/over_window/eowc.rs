@@ -494,9 +494,7 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
-    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::agg::{AggArgs, AggKind};
@@ -506,7 +504,8 @@ mod tests {
 
     use super::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
-    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    use crate::executor::test_utils::snapshot::executor_snapshot;
+    use crate::executor::test_utils::{MessageSender, MockSource};
     use crate::executor::{ActorContext, BoxedMessageStream, Executor};
 
     async fn create_executor<S: StateStore>(
@@ -580,75 +579,37 @@ mod tests {
             },
         ];
 
-        {
-            // test basic
-            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-            tx.push_barrier(1, false);
-            over_window.expect_barrier().await;
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I T  I   i
-                + 1 p1 100 10
-                + 1 p1 101 16
-                + 4 p2 200 20",
-            ));
-            assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 1 p1 100 10 .  16"
-                )
-            );
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I T  I   i
-                + 5 p1 102 18
-                + 7 p2 201 22
-                + 8 p3 300 33",
-            ));
-            // NOTE: no watermark message here, since watermark(1) was already received
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 1 p1 101 16 10 18
-                    + 4 p2 200 20 .  22"
-                )
-            );
-
-            tx.push_barrier(2, false);
-            over_window.expect_barrier().await;
-        }
-
-        {
-            // test recovery
-            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-            tx.push_barrier(3, false);
-            over_window.expect_barrier().await;
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I  T  I   i
-                + 10 p1 103 13
-                + 12 p2 202 28
-                + 13 p3 301 39",
-            ));
-            assert_eq!(5, over_window.expect_watermark().await.val.into_int64());
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 5 p1 102 18 16 13
-                    + 7 p2 201 22 20 28
-                    + 8 p3 300 33 .  39"
-                )
-            );
-
-            tx.push_barrier(4, false);
-            over_window.expect_barrier().await;
-        }
+        insta::assert_snapshot!(
+            executor_snapshot(
+                Box::new(async || create_executor(calls.clone(), store.clone()).await),
+                r###"
+- barrier
+# FIXME: the header cannot be aligned. What's the correct YAML format?
+- !chunk |-
+    I T  I   i
+    + 1 p1 100 10
+    + 1 p1 101 16
+    + 4 p2 200 20
+- !chunk |-
+    I T  I   i
+    + 5 p1 102 18
+    + 7 p2 201 22
+    + 8 p3 300 33
+# TODO: preserve comment in snapshot?
+# NOTE: no watermark message here, since watermark(1) was already received
+- barrier
+- recovery
+- barrier
+- !chunk |-
+    I  T  I   i
+    + 10 p1 103 13
+    + 12 p2 202 28
+    + 13 p3 301 39
+- barrier
+"###,
+            )
+            .await
+        );
     }
 
     #[tokio::test]
@@ -661,26 +622,19 @@ mod tests {
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
         }];
 
-        let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-        tx.push_barrier(1, false);
-        over_window.expect_barrier().await;
-
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I T  I   i
-            + 1 p1 100 10
-            + 1 p1 101 16
-            + 4 p1 102 20",
-        ));
-        assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
-        let chunk = over_window.expect_chunk().await;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " I T  I   i  I
-                + 1 p1 100 10 26
-                + 1 p1 101 16 46"
+        insta::assert_snapshot!(
+            executor_snapshot(
+                Box::new(async || create_executor(calls.clone(), store.clone()).await),
+                r###"
+- barrier
+- !chunk |-
+    I T  I   i
+    + 1 p1 100 10
+    + 1 p1 101 16
+    + 4 p1 102 20
+"###
             )
+            .await
         );
     }
 }
