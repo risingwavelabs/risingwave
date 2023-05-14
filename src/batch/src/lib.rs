@@ -31,6 +31,7 @@
 #![feature(bound_map)]
 #![feature(int_roundings)]
 #![feature(async_fn_in_trait)]
+#![feature(allocator_api)]
 
 mod error;
 pub mod exchange_source;

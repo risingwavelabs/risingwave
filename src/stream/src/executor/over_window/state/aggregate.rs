@@ -19,7 +19,7 @@ use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
-use risingwave_expr::agg::{build as builg_agg, AggArgs, AggCall, BoxedAggState};
+use risingwave_expr::agg::{build as builg_agg, AggArgs, AggCall};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
@@ -28,14 +28,14 @@ use super::{StateEvictHint, StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
-    factory: BoxedAggState,
+    agg_call: AggCall,
     arg_data_types: Vec<DataType>,
     buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
 }
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
-        if !call.frame.is_valid() || call.frame.end_is_unbounded() {
+        if !call.frame.bounds.is_valid() || call.frame.bounds.end_is_unbounded() {
             bail!("the window frame must be valid and end-bounded");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
@@ -56,7 +56,7 @@ impl AggregateState {
             distinct: false,
         };
         Ok(Self {
-            factory: builg_agg(agg_call)?,
+            agg_call,
             arg_data_types,
             buffer: StreamWindowBuffer::new(call.frame.clone()),
         })
@@ -79,7 +79,7 @@ impl WindowState for AggregateState {
     fn output(&mut self) -> StreamExecutorResult<StateOutput> {
         assert!(self.curr_window().is_ready);
         let wrapper = BatchAggregatorWrapper {
-            factory: &self.factory,
+            agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
         };
         let return_value =
@@ -102,36 +102,37 @@ impl WindowState for AggregateState {
 }
 
 struct BatchAggregatorWrapper<'a> {
-    factory: &'a BoxedAggState,
+    agg_call: &'a AggCall,
     arg_data_types: &'a [DataType],
 }
 
 impl BatchAggregatorWrapper<'_> {
     fn aggregate<'a>(
         &'a self,
-        values: impl ExactSizeIterator<Item = &'a [Datum]>,
+        values: impl Iterator<Item = &'a [Datum]>,
     ) -> StreamExecutorResult<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
-
-        let n_values = values.len();
 
         let mut args_builders = self
             .arg_data_types
             .iter()
-            .map(|data_type| data_type.create_array_builder(n_values))
+            .map(|data_type| data_type.create_array_builder(0 /* bad! */))
             .collect::<Vec<_>>();
+        let mut n_values = 0;
         for value in values {
+            n_values += 1;
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
                 builder.append_datum(datum);
             }
         }
+
         let columns = args_builders
             .into_iter()
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
         let chunk = DataChunk::new(columns, Vis::Compact(n_values));
 
-        let mut aggregator = self.factory.clone();
+        let mut aggregator = builg_agg(self.agg_call.clone())?;
         aggregator
             .update_multi(&chunk, 0, n_values)
             .now_or_never()

@@ -14,3 +14,5 @@
 
 mod mem_context;
 pub use mem_context::*;
+mod alloc;
+pub use alloc::*;

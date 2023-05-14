@@ -19,7 +19,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::memory::MemoryContextRef;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -64,7 +64,7 @@ pub struct NestedLoopJoinExecutor {
     chunk_size: usize,
 
     /// Memory context used for recording memory usage of executor.
-    mem_context: Option<MemoryContextRef>,
+    mem_context: MemoryContext,
 }
 
 impl Executor for NestedLoopJoinExecutor {
@@ -95,10 +95,8 @@ impl NestedLoopJoinExecutor {
             #[for_await]
             for chunk in self.left_child.execute() {
                 let c = chunk?;
-                if let Some(m) = &self.mem_context {
-                    trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
-                    m.add(c.estimated_heap_size() as i64);
-                }
+                trace!("Estimated chunk size is {:?}", c.estimated_heap_size());
+                self.mem_context.add(c.estimated_heap_size() as i64);
                 ret.push(c);
             }
             ret
@@ -198,7 +196,7 @@ impl NestedLoopJoinExecutor {
         right_child: BoxedExecutor,
         identity: String,
         chunk_size: usize,
-        mem_context: Option<MemoryContextRef>,
+        mem_context: MemoryContext,
     ) -> Self {
         // TODO(Bowen): Merge this with derive schema in Logical Join (#790).
         let original_schema = match join_type {
@@ -492,6 +490,7 @@ impl NestedLoopJoinExecutor {
 mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
@@ -616,7 +615,7 @@ mod tests {
                 right_child,
                 "NestedLoopJoinExecutor".into(),
                 CHUNK_SIZE,
-                None,
+                MemoryContext::none(),
             ))
         }
 

@@ -18,11 +18,16 @@ use prometheus::IntGauge;
 
 use crate::metrics::TrAdderGauge;
 
-pub type MemoryContextRef = Arc<MemoryContext>;
-
-pub struct MemoryContext {
+struct MemoryContextInner {
     counter: MemCounter,
-    parent: Option<MemoryContextRef>,
+    parent: Option<MemoryContext>,
+}
+
+#[derive(Clone)]
+pub struct MemoryContext {
+    /// Add None op mem context, so that we don't need to return [`Option`] in
+    /// [`BatchTaskContext`]. This helps with later `Allocator` implementation.
+    inner: Option<Arc<MemoryContextInner>>,
 }
 
 pub enum MemCounter {
@@ -45,44 +50,56 @@ impl From<TrAdderGauge> for MemCounter {
 }
 
 impl MemoryContext {
-    pub fn new<C: Into<MemCounter>>(parent: Option<MemoryContextRef>, counter: C) -> Self {
+    pub fn new<C: Into<MemCounter>>(parent: Option<MemoryContext>, counter: C) -> Self {
         Self {
-            counter: counter.into(),
-            parent,
+            inner: Some(Arc::new(MemoryContextInner {
+                counter: counter.into(),
+                parent,
+            })),
         }
+    }
+
+    /// Creates a noop memory context.
+    pub fn none() -> Self {
+        Self { inner: None }
+    }
+
+    pub fn root<C: Into<MemCounter>>(counter: C) -> Self {
+        Self::new(None, counter)
     }
 
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
     pub fn add(&self, bytes: i64) {
-        match &self.counter {
-            MemCounter::TrAdder(c) => c.add(bytes),
-            MemCounter::Atomic(c) => c.add(bytes),
-        }
+        if let Some(inner) = &self.inner {
+            match &inner.counter {
+                MemCounter::TrAdder(c) => c.add(bytes),
+                MemCounter::Atomic(c) => c.add(bytes),
+            }
 
-        if let Some(parent) = &self.parent {
-            parent.add(bytes);
+            if let Some(parent) = &inner.parent {
+                parent.add(bytes);
+            }
         }
     }
 
     pub fn get_bytes_used(&self) -> i64 {
-        match &self.counter {
-            MemCounter::TrAdder(c) => c.get(),
-            MemCounter::Atomic(c) => c.get(),
-        }
-    }
-
-    pub fn for_test() -> Self {
-        Self {
-            counter: MemCounter::Atomic(IntGauge::new("test", "test").unwrap()),
-            parent: None,
+        if let Some(inner) = &self.inner {
+            match &inner.counter {
+                MemCounter::TrAdder(c) => c.get(),
+                MemCounter::Atomic(c) => c.get(),
+            }
+        } else {
+            0
         }
     }
 }
 
 impl Drop for MemoryContext {
     fn drop(&mut self) {
-        if let Some(p) = &self.parent {
-            p.add(-self.get_bytes_used())
+        if let Some(inner) = &self.inner {
+            if let Some(p) = &inner.parent {
+                p.add(-self.get_bytes_used())
+            }
         }
     }
 }

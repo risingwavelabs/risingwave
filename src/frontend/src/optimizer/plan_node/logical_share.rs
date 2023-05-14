@@ -67,8 +67,12 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ id = {} }}", name, &self.id().0)
+    pub(super) fn fmt_with_name(
+        base: &PlanBase,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+    ) -> fmt::Result {
+        write!(f, "{} {{ id = {} }}", name, &base.id.0)
     }
 }
 
@@ -101,7 +105,7 @@ impl LogicalShare {
 
 impl fmt::Display for LogicalShare {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalShare")
+        Self::fmt_with_name(&self.base, f, "LogicalShare")
     }
 }
 
@@ -140,7 +144,8 @@ impl ToStream for LogicalShare {
         match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
-                let new_logical = self.clone_with_input(new_input);
+                let new_logical = self.core.clone();
+                new_logical.replace_input(new_input);
                 let stream_share_ref: PlanRef = StreamShare::new(new_logical).into();
                 ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
                 Ok(stream_share_ref)

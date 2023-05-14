@@ -18,7 +18,6 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
 use crate::expr::{CorrelatedId, SessionTimezone};
@@ -51,8 +50,15 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
-    /// warning messages
-    warning_messages: RefCell<Vec<String>>,
+}
+
+// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
+impl Drop for OptimizerContext {
+    fn drop(&mut self) {
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            self.warn_to_user(warning);
+        };
+    }
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -81,7 +87,6 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
-            warning_messages: RefCell::new(vec![]),
         }
     }
 
@@ -101,7 +106,6 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
-            warning_messages: RefCell::new(vec![]),
         }
         .into()
     }
@@ -165,11 +169,8 @@ impl OptimizerContext {
         optimizer_trace.push("\n".to_string());
     }
 
-    pub fn warn(&self, str: impl Into<String>) {
-        let mut warnings = self.warning_messages.borrow_mut();
-        let string = str.into();
-        tracing::trace!("warn to user:{}", string);
-        warnings.push(string);
+    pub fn warn_to_user(&self, str: impl Into<String>) {
+        self.session_ctx().notice_to_user(str);
     }
 
     pub fn store_logical(&self, str: impl Into<String>) {
@@ -182,14 +183,6 @@ impl OptimizerContext {
 
     pub fn take_trace(&self) -> Vec<String> {
         self.optimizer_trace.borrow_mut().drain(..).collect()
-    }
-
-    pub fn take_warnings(&self) -> Vec<String> {
-        let mut warnings = self.warning_messages.borrow_mut().drain(..).collect_vec();
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            warnings.push(warning);
-        };
-        warnings
     }
 
     pub fn with_options(&self) -> &WithOptions {

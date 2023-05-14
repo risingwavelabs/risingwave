@@ -108,7 +108,7 @@ impl StreamingJob {
         }
     }
 
-    pub fn mview_definition(&self) -> String {
+    pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),

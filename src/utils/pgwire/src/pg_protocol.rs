@@ -19,6 +19,7 @@ use std::pin::Pin;
 use std::str;
 use std::str::Utf8Error;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
@@ -333,12 +334,34 @@ where
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
-        tracing::trace!(
-            target: "pgwire_query_log",
-            "(simple query)receive query: {}", sql);
-
+        let start = Instant::now();
         let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
+        let res = self.inner_process_query_msg(sql, session).await;
+        // Record query run successfully
+        let mills = start.elapsed().as_millis();
+        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+        match res {
+            Ok(x) => {
+                tracing::trace!(
+                    target: "pgwire_query_log",
+                    "(simple query) session: {}, status: ok, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
+                Ok(x)
+            }
+            Err(err) => {
+                tracing::trace!(
+                    target: "pgwire_query_log",
+                    "(simple query) session: {}, status: err, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
+                Err(err)
+            }
+        }
+    }
 
+    async fn inner_process_query_msg(
+        &mut self,
+        sql: &str,
+        session: Arc<SM::Session>,
+    ) -> PsqlResult<()> {
         // Parse sql.
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
@@ -347,12 +370,13 @@ where
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
             let session = session.clone();
-
             // execute query
-            let mut res = session
-                .run_one_query(stmt, Format::Text)
-                .await
-                .map_err(|err| PsqlError::QueryError(err))?;
+            let res = session.clone().run_one_query(stmt, Format::Text).await;
+            for notice in session.take_notices() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+            }
+            let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
 
             for notice in res.get_notices() {
                 self.stream
@@ -408,9 +432,12 @@ where
 
     fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         tracing::trace!(
-            "(extended query)parse query: {}, statement name: {}",
+            "(extended query) session: {}, parse query: {}, statement name: {}",
+            session_id,
             sql,
             statement_name
         );
@@ -447,7 +474,6 @@ where
             .try_collect()
             .map_err(|err| PsqlError::ParseError(err.into()))?;
 
-        let session = self.session.clone().unwrap();
         let prepare_statement = session
             .parse(stmt, param_types)
             .map_err(PsqlError::ParseError)?;
@@ -471,11 +497,12 @@ where
     fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
-
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
         trace!(
             target: "pgwire_query_log",
-            "(extended query)bind: statement name: {}, portal name: {}",
-            &statement_name,&portal_name
+            "(extended query) session: {}, bind: statement name: {}, portal name: {}",
+            session_id, &statement_name, &portal_name
         );
 
         if self.portal_store.contains_key(&portal_name) {
@@ -495,10 +522,7 @@ where
             .map(|&format_code| Format::from_i16(format_code))
             .try_collect()?;
 
-        let portal = self
-            .session
-            .clone()
-            .unwrap()
+        let portal = session
             .bind(prepare_statement, msg.params, param_formats, result_formats)
             .map_err(PsqlError::Internal)?;
 
@@ -525,7 +549,9 @@ where
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let row_max = msg.max_rows as usize;
-        tracing::trace!(target: "pgwire_query_log", "(extended query)execute portal name: {}",portal_name);
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
+        tracing::trace!(target: "pgwire_query_log", "(extended query) session: {}, execute portal name: {}", session_id, portal_name);
 
         if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
             assert!(self.portal_store.contains_key(&portal_name));
@@ -538,10 +564,7 @@ where
         } else {
             let portal = self.get_portal(&portal_name)?;
 
-            let pg_response = self
-                .session
-                .clone()
-                .unwrap()
+            let pg_response = session
                 .execute(portal)
                 .await
                 .map_err(PsqlError::ExecuteError)?;
@@ -558,11 +581,14 @@ where
 
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         let name = cstr_to_str(&msg.name).unwrap().to_string();
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
             target: "pgwire_query_log",
-            "(extended query)describe name: {}",
+            "(extended query) session: {}, describe name: {}",
+            session_id,
             name,
         );
 
@@ -593,10 +619,7 @@ where
         } else if msg.kind == b'P' {
             let portal = self.get_portal(&name)?;
 
-            let row_descriptions = self
-                .session
-                .clone()
-                .unwrap()
+            let row_descriptions = session
                 .describe_portral(portal)
                 .map_err(PsqlError::Internal)?;
 

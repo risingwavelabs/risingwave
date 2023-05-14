@@ -233,51 +233,82 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count = Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
-- name: Cannot push down for Mutiple upper bound 1.
+- name: merge mutiple upper bound
   before:
   - create_table_and_mv_ordered
   sql: |
-    SELECT * FROM orders_count_by_user_ordered WHERE user_id < 10 and user_id < 30
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count < 10 and orders_count < 30
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id < 10:Int32) AND (orders_count_by_user_ordered.user_id < 30:Int32) }
-      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
-- name: Cannot push down for Mutiple upper bound 2.
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: merge include and exclude upper bound of same value
   before:
   - create_table_and_mv_ordered
   sql: |
-    SELECT * FROM orders_count_by_user_ordered WHERE user_id < 10 and user_id <= 10
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count < 10 and orders_count <= 10
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id < 10:Int32) AND (orders_count_by_user_ordered.user_id <= 10:Int32) }
-      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
-- name: Cannot push down for Mutiple lower bound 1.
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count < Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: merge mutiple lower bound
   before:
   - create_table_and_mv_ordered
   sql: |
-    SELECT * FROM orders_count_by_user_ordered WHERE user_id > 10 and user_id > 30
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count > 10 and orders_count > 30
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id > 10:Int32) AND (orders_count_by_user_ordered.user_id > 30:Int32) }
-      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
-- name: Cannot push down for Mutiple lower bound 2.
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count > Int64(30)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: merge include and exclude lower bound of same value
   before:
   - create_table_and_mv_ordered
   sql: |
-    SELECT * FROM orders_count_by_user_ordered WHERE user_id > 10 and user_id >= 10
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count > 10 and orders_count >= 10
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id > 10:Int32) AND (orders_count_by_user_ordered.user_id >= 10:Int32) }
-      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
-- name: Cannot push down for Mix cmp and eq.
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count > Int64(10)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: invalid range
   before:
   - create_table_and_mv_ordered
   sql: |
-    SELECT * FROM orders_count_by_user_ordered WHERE user_id = 10 and user_id <30
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count > 10 and orders_count < 5
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: merge cmp and eq condition
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count > 20 and orders_count < 30 and orders_count = 25
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchFilter { predicate: (orders_count_by_user_ordered.user_id = 10:Int32) AND (orders_count_by_user_ordered.user_id < 30:Int32) }
-      └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count = Int64(25)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: invalid range of merging cmp and eq condition
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count > 20 and orders_count < 30 and orders_count = 35
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: merge cmp and const-in condition
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count in (10,20,30,40) and orders_count <30
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: orders_count_by_user_ordered, columns: [orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date, orders_count_by_user_ordered.orders_count], scan_ranges: [orders_count_by_user_ordered.orders_count = Int64(10) , orders_count_by_user_ordered.orders_count = Int64(20)], distribution: UpstreamHashShard(orders_count_by_user_ordered.user_id, orders_count_by_user_ordered.date) }
+- name: invalid range of merging cmp and const-in condition
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count in (10,20,30,40) and orders_count > 50
+  batch_plan: |
+    BatchValues { rows: [] }
+- name: merge null and cmp condition
+  before:
+  - create_table_and_mv_ordered
+  sql: |
+    SELECT * FROM orders_count_by_user_ordered WHERE orders_count is null and orders_count < 30
+  batch_plan: |
+    BatchValues { rows: [] }
 - id: create_small
   sql: |
     CREATE TABLE t(x smallint);
@@ -444,3 +475,12 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count(sbtest1.k)] }
         └─BatchScan { table: sbtest1, columns: [sbtest1.k], scan_ranges: [sbtest1.id = Int32(0) , sbtest1.id = Int32(1) , sbtest1.id = Int32(2) , sbtest1.id = Int32(3) , sbtest1.id = Int32(4) , sbtest1.id = Int32(5)], distribution: SomeShard }
+- sql: |
+    create table t (k int primary key, v int);
+    select v from t where k = 2147483648; -- out of range of int32
+  logical_plan: |
+    LogicalProject { exprs: [t.v] }
+    └─LogicalFilter { predicate: (t.k = 2147483648:Int64) }
+      └─LogicalScan { table: t, columns: [t.k, t.v] }
+  batch_plan: |
+    BatchValues { rows: [] }
