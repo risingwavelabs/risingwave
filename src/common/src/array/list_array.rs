@@ -29,7 +29,7 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, OrdDatumRef, Scalar, ScalarRefImpl, ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -478,20 +478,11 @@ impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                Some(lhs.cmp_by(rhs, |lv, rv| cmp_list_value(&lv, &rv)))
+                lhs.partial_cmp_by(rhs, |lv, rv| {
+                    OrdDatumRef::new(lv).partial_cmp(&OrdDatumRef::new(rv))
+                })
             })
         })
-    }
-}
-
-fn cmp_list_value(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
-    match (l, r) {
-        // Comparability check was performed by frontend beforehand.
-        (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
-        // Nulls are larger than everything, ARRAY[1, null] > ARRAY[1, 2] for example.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
     }
 }
 
@@ -795,9 +786,9 @@ mod tests {
             ListValue::new(vec![Some(1.into()), Some(2.into()), Some(1.into())]),
         );
         // null > 1
-        assert_eq!(
-            cmp_list_value(&None, &Some(ScalarRefImpl::Int32(1))),
-            Ordering::Greater
+        assert_gt!(
+            ListValue::new(vec![None]),
+            ListValue::new(vec![Some(1.into())]),
         );
         // ARRAY[1, 2, null] > ARRAY[1, 2, 1]
         assert_gt!(

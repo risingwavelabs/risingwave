@@ -24,7 +24,7 @@ use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
-use crate::row::{OwnedRow, Row};
+use crate::row::{OrdRow, OwnedRow, Row};
 use crate::types::{DataType, ToText};
 use crate::util::iter_util::ZipEqFast;
 
@@ -436,7 +436,10 @@ impl StreamChunkTestExt for StreamChunk {
         }
         let rows = self.rows().collect_vec();
         let mut idx = (0..self.capacity()).collect_vec();
-        idx.sort_by_key(|&i| &rows[i]);
+        idx.sort_by_key(|&i| {
+            let (op, row_ref) = rows[i];
+            (op, OrdRow::new(row_ref))
+        });
         StreamChunk {
             ops: idx.iter().map(|&i| self.ops[i]).collect(),
             data: self.data.reorder_rows(&idx),
