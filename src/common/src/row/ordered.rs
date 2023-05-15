@@ -81,6 +81,8 @@ impl<R: Row> PartialOrd for OrdRow<R> {
 
 impl<R: Row> Ord for OrdRow<R> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // NOTE(rc): This is slightly different from `partial_cmp_rows`, for this function won't
+        // check the length of rows.
         cmp_datum_iter(
             self.iter(),
             other.iter(),
