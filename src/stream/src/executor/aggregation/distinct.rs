@@ -69,6 +69,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
 
+        let table_id_str = dedup_table.table_id().to_string();
         for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
             // skip if this item is hidden to all agg calls (this is likely to happen)
             if !visibilities.iter().any(|vis| vis.is_set(datum_idx)) {
@@ -78,9 +79,9 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             // get counts of the distinct key of all agg calls that distinct on this column
             let key = group_key.chain(row::once(datum));
             let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
-            let table_id_str = dedup_table.table_id().to_string();
+
             self.metrics
-                .agg_distinct_total_count
+                .agg_distinct_total_cache_count
                 .with_label_values(&[&table_id_str, &actor_id_str.to_string()])
                 .inc();
             // TODO(yuhao): avoid this `contains`.
@@ -183,6 +184,10 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         // TODO(rc): now we flush the table in `dedup` method.
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
+        self.metrics
+            .agg_distinct_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.cache.len());
         self.cache.evict();
     }
 }
