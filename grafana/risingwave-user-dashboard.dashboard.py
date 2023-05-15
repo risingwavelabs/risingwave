@@ -288,6 +288,10 @@ def section_memory(outer_panels):
                             "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
+                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
@@ -312,6 +316,10 @@ def section_memory(outer_panels):
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",

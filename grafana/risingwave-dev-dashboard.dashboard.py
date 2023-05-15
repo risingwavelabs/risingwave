@@ -933,6 +933,11 @@ def section_streaming_actors(outer_panels):
                         ),
 
                         panels.target(
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} actor {{actor_id}}  {{instance}}",
                         ),
@@ -1014,6 +1019,11 @@ def section_streaming_actors(outer_panels):
                             "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
+                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+           
+                        panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
@@ -1038,6 +1048,8 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
+                                      "table {{table_id}} actor {{actor_id}}"),
+                        panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
                                       "table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
