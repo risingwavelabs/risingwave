@@ -371,7 +371,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
-                    this.actor_ctx.id,
+                    this.actor_ctx.clone(),
                 )
                 .await?;
             agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
@@ -519,7 +519,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Flush distinct dedup state.
         vars.distinct_dedup
-            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.id)?;
+            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();

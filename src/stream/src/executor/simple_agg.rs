@@ -213,7 +213,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
-                this.actor_ctx.id,
+                this.actor_ctx.clone(),
             )
             .await?;
 
@@ -240,7 +240,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
             // Flush distinct dedup state.
             vars.distinct_dedup
-                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.id)?;
+                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
             // Commit all state tables except for result table.
             futures::future::try_join_all(
