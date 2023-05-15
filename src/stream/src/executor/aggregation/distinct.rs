@@ -57,7 +57,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&OwnedRow>,
-        actor_id_str: u32,
+        actor_id: u32,
     ) -> StreamExecutorResult<()> {
         let column = column.array_ref();
         let n_calls = visibilities.len();
@@ -82,7 +82,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
 
             self.metrics
                 .agg_distinct_total_cache_count
-                .with_label_values(&[&table_id_str, &actor_id_str.to_string()])
+                .with_label_values(&[&table_id_str, &actor_id.to_string()])
                 .inc();
             // TODO(yuhao): avoid this `contains`.
             // https://github.com/risingwavelabs/risingwave/issues/9233
@@ -91,7 +91,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             } else {
                 self.metrics
                     .agg_distinct_cache_miss_count
-                    .with_label_values(&[&table_id_str, &actor_id_str.to_string()])
+                    .with_label_values(&[&table_id_str, &actor_id.to_string()])
                     .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
