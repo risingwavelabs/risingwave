@@ -484,8 +484,8 @@
     | └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
     └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   stream_plan: |
-    StreamMaterialize { columns: [t1x, t2x, t1z, t2y, t2z, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t1x, t._row_id#1], pk_columns: [t1x, t._row_id#1], pk_conflict: "NoCheck" }
-    └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z, t._row_id, t._row_id] }
+    StreamMaterialize { columns: [t1x, t2x, t1z, t2y, t2z, t._row_id(hidden)], stream_key: [t1x, t._row_id], pk_columns: [t1x, t._row_id], pk_conflict: "NoCheck" }
+    └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z, t._row_id] }
       ├─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
       | └─StreamExchange { dist: HashShard(t.x) }
       |   └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

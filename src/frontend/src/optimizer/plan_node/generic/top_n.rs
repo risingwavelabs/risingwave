@@ -147,7 +147,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+        // We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+        if self.limit_attr.max_one_row() {
+            Some(self.group_key.clone())
+        } else {
+            Some(self.input.logical_pk().to_vec())
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
