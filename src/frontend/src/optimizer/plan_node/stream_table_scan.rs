@@ -18,6 +18,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
@@ -26,6 +27,7 @@ use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -113,7 +115,15 @@ impl StreamTableScan {
         self.chain_type
     }
 
-    // Build catalog for backfill state
+    /// Build catalog for backfill state
+    /// Schema for `Distribution::UpstreamHashShard`
+    /// | vnode | pk key | backfill_finished |
+    /// Schema for `Distribution::Single`
+    /// | pk key | backfill_finished |
+    ///
+    /// FIXME(kwannoel): Schema for `Distribution::SomeShard` just uses `Distribution::Single.
+    /// It has to be supported because `SOURCEs` have `Distribution::SomeShard`.
+    /// This means we can't recover for `Distribution::SomeShard`.
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -122,11 +132,24 @@ impl StreamTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let schema = self.base.schema();
 
+        // `vnode` for `UpstreamHashShard`
+        match self.base.distribution() {
+            Distribution::UpstreamHashShard(dist_key,_) => {
+                catalog_builder.add_column(&Field::with_name(
+                    VirtualNode::RW_TYPE,
+                    "vnode",
+                ));
+            }
+            Distribution::SomeShard | Distribution::Single => {}
+            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!()
+        }
+
         for pos in &self.base.logical_pk {
             let field = &schema[*pos];
             catalog_builder.add_column(field);
         }
 
+        // `backfill_finished` column
         catalog_builder.add_column(&Field::with_name(
             DataType::Boolean,
             format!("{}_backfill_finished", self.table_name()),
