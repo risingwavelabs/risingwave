@@ -6,6 +6,7 @@ import sys
 import subprocess
 from time import sleep
 import argparse
+import requests
 
 
 def run_sql_file(f: str, dir: str):
@@ -42,6 +43,42 @@ def run_demo(demo: str, format: str):
         run_sql_file(sql_file, demo_dir)
         sleep(10)
 
+def connect_connector(json: str):
+    headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+    }
+
+    with open(json) as f:
+        data = f.read().replace('\n', '').replace('\r', '').encode()
+
+    response = requests.post('http://localhost:8083/connectors/', headers=headers, data=data)
+    print(response.text)
+
+def run_debezium_sink_demo():
+    demo = "rw-kafka-sink-db"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: ", demo, demo_dir)
+    test_file = "risingwave.sql"
+    subprocess.run(["docker", "compose", "-f", "docker-compose.yml", "up", "--build", "-d"], cwd=demo_dir, check=True)
+    sleep(40)
+
+    print("Connect PostgreSQL")
+    connect_connector(demo_dir + "/" + "pg-sink.json")
+
+    print("Connect MySQL")
+    connect_connector(demo_dir + "/" + "mysql-sink.json")
+
+    # produce data
+    run_sql_file(test_file, demo_dir)
+
+    # query data
+    print("PostgreSQL result")
+    subprocess.call("docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c \"select * from type_test\"'", shell=True)
+    print("MySQL result")
+    subprocess.call("docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD Test -e \"select * from type_test\"'", shell=True)
 
 def run_iceberg_demo():
     demo = "iceberg-sink"
@@ -101,11 +138,16 @@ args = arg_parser.parse_args()
 
 # disable telemetry in env
 os.environ['ENABLE_TELEMETRY'] = "false"
-
+print(args.case)
 if args.case == "iceberg-sink":
     if args.format == "protobuf":
         print("skip protobuf test for iceberg-sink")
     else:
         run_iceberg_demo()
+elif args.case == "rw-kafka-sink-db":
+    if args.format == "protobuf":
+        print("skip protobuf test for rw-kafka-sink-db")
+    else:
+        run_debezium_sink_demo()
 else:
     run_demo(args.case, args.format)

@@ -5,10 +5,9 @@
 
 # Commands
 
-1. Setup pipeline: `cargo make setup`
-2. Check result: `cargo make check-db` 
+To test, in `../scripts` folder, run `python3 run_demos.py --case rw-kafka-sink-db --format json`
 
-If you want to test on local RisingWave:
+To test on local newly built RisingWave:
 1. Start RisingWave
 2. `cargo make setup-local`
 3. `cargo make check-db`
