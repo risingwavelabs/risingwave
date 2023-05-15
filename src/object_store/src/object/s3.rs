@@ -359,9 +359,23 @@ impl ObjectStore for S3ObjectStore {
         let resp = tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                self.obj_store_request(path, start_pos, end_pos)
+                match self
+                    .obj_store_request(path, start_pos, end_pos)
                     .send()
                     .await
+                {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        if let SdkError::DispatchFailure(e) = &err && e.is_timeout() {
+                            self.metrics
+                                .request_retry_count
+                                .with_label_values(&["read"])
+                                .inc();
+                        }
+
+                        Err(err)
+                    }
+                }
             },
             Self::should_retry,
         )
@@ -425,7 +439,21 @@ impl ObjectStore for S3ObjectStore {
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
-            || async { self.obj_store_request(path, start_pos, None).send().await },
+            || async {
+                match self.obj_store_request(path, start_pos, None).send().await {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        if let SdkError::DispatchFailure(e) = &err&& e.is_timeout() {
+                                self.metrics
+                                    .request_retry_count
+                                    .with_label_values(&["streaming_read"])
+                                    .inc();
+                        }
+
+                        Err(err)
+                    }
+                }
+            },
             Self::should_retry,
         )
         .await?;
