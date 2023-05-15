@@ -16,7 +16,7 @@ use std::ops::Deref;
 
 use super::{OwnedRow, Row};
 use crate::estimate_size::EstimateSize;
-use crate::types::OrdDatumRef;
+use crate::util::sort_util::{cmp_datum_iter, partial_cmp_datum_iter, OrderType};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct OrdRow<R: Row> {
@@ -71,18 +71,20 @@ impl<R: Row> PartialOrd for OrdRow<R> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // NOTE(rc): This is slightly different from `partial_cmp_rows`, for this function won't
         // check the length of rows.
-        self.iter().partial_cmp_by(other.iter(), |x, y| {
-            OrdDatumRef::new(x).partial_cmp(&OrdDatumRef::new(y))
-        })
+        partial_cmp_datum_iter(
+            self.iter(),
+            other.iter(),
+            std::iter::repeat(OrderType::default()),
+        )
     }
 }
 
 impl<R: Row> Ord for OrdRow<R> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // NOTE(rc): This is slightly different from `cmp_rows`, for this function won't
-        // check the length of rows.
-        self.iter().cmp_by(other.iter(), |x, y| {
-            OrdDatumRef::new(x).cmp(&OrdDatumRef::new(y))
-        })
+        cmp_datum_iter(
+            self.iter(),
+            other.iter(),
+            std::iter::repeat(OrderType::default()),
+        )
     }
 }

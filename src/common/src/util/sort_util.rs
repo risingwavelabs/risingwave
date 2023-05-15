@@ -428,6 +428,34 @@ pub fn cmp_datum(lhs: impl ToDatumRef, rhs: impl ToDatumRef, order_type: OrderTy
         .unwrap_or_else(|| panic!("cannot compare {lhs:?} with {rhs:?}"))
 }
 
+pub fn partial_cmp_datum_iter(
+    lhs: impl IntoIterator<Item = impl ToDatumRef>,
+    rhs: impl IntoIterator<Item = impl ToDatumRef>,
+    order_types: impl IntoIterator<Item = OrderType>,
+) -> Option<Ordering> {
+    let mut order_types_iter = order_types.into_iter();
+    lhs.into_iter().partial_cmp_by(rhs.into_iter(), |x, y| {
+        let Some(order_type) = order_types_iter.next() else {
+            return None;
+        };
+        partial_cmp_datum(x, y, order_type)
+    })
+}
+
+pub fn cmp_datum_iter(
+    lhs: impl IntoIterator<Item = impl ToDatumRef>,
+    rhs: impl IntoIterator<Item = impl ToDatumRef>,
+    order_types: impl IntoIterator<Item = OrderType>,
+) -> Ordering {
+    let mut order_types_iter = order_types.into_iter();
+    lhs.into_iter().cmp_by(rhs.into_iter(), |x, y| {
+        let order_type = order_types_iter
+            .next()
+            .expect("number of `OrderType`s is not enough");
+        cmp_datum(x, y, order_type)
+    })
+}
+
 /// Partial compare two `Row`s with specified order types.
 ///
 /// NOTE: This function returns `None` if two rows have different schema.
