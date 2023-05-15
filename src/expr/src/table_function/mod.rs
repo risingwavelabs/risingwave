@@ -115,7 +115,7 @@ impl ProjectSetSelectItem {
     ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>> {
         match self {
             Self::TableFunction(tf) => Ok(Either::Left(
-                TableFunctionOutputIter::new(tf.return_type(), tf.eval(input).await).await?,
+                TableFunctionOutputIter::new(tf.eval(input).await).await?,
             )),
             Self::Expr(expr) => expr.eval(input).await.map(Either::Right),
         }
@@ -123,8 +123,46 @@ impl ProjectSetSelectItem {
 }
 
 /// A wrapper over the output of table function that allows iteration by rows.
+///
+/// If the table function returns multiple columns, the output will be struct values.
+///
+/// Note that to get datum reference for efficiency, this iterator doesn't follow the standard
+/// `Stream` API. Instead, it provides a `peek` method to get the next row without consuming it,
+/// and a `next` method to consume the next row.
+///
+/// ```
+/// # use futures_util::StreamExt;
+/// # use risingwave_common::array::{DataChunk, DataChunkTestExt};
+/// # use risingwave_expr::table_function::TableFunctionOutputIter;
+/// # tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+/// let mut iter = TableFunctionOutputIter::new(
+///     futures_util::stream::iter([
+///         DataChunk::from_pretty(
+///             "I I
+///              0 0
+///              1 1",
+///         ),
+///         DataChunk::from_pretty(
+///             "I I
+///              2 2
+///              3 3",
+///         ),
+///     ])
+///     .map(Ok)
+///     .boxed(),
+/// )
+/// .await.unwrap();
+///
+/// for i in 0..4 {
+///     let (index, value) = iter.peek().unwrap();
+///     assert_eq!(index, i);
+///     assert_eq!(value, Some((i as i64).into()));
+///     iter.next().await.unwrap();
+/// }
+/// assert!(iter.peek().is_none());
+/// # });
+/// ```
 pub struct TableFunctionOutputIter<'a> {
-    data_type: DataType,
     stream: BoxStream<'a, Result<DataChunk>>,
     chunk: Option<(ArrayRef, ArrayRef)>,
     index: usize,
@@ -132,11 +170,9 @@ pub struct TableFunctionOutputIter<'a> {
 
 impl<'a> TableFunctionOutputIter<'a> {
     pub async fn new(
-        data_type: DataType,
         stream: BoxStream<'a, Result<DataChunk>>,
     ) -> Result<TableFunctionOutputIter<'a>> {
         let mut iter = Self {
-            data_type,
             stream,
             chunk: None,
             index: 0,
@@ -172,7 +208,7 @@ impl<'a> TableFunctionOutputIter<'a> {
         self.chunk = chunk.map(|c| {
             let (c1, c2) = c.split_column_at(1);
             let indexes = c1.column_at(0).array();
-            let values = if let DataType::Struct(_) = &self.data_type {
+            let values = if c2.columns().len() > 1 {
                 Arc::new(StructArray::from(c2).into())
             } else {
                 c2.column_at(0).array()
