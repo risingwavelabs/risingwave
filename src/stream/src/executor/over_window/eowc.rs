@@ -255,7 +255,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -330,7 +330,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -386,7 +386,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
                         let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key)))
+                            .chain(row::once(Some(key.order_key.into_inner())))
                             .chain(pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
