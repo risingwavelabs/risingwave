@@ -6339,6 +6339,7 @@ dependencies = [
  "thiserror",
  "tokio-retry",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
