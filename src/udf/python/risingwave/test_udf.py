@@ -66,6 +66,7 @@ def test_io_concurrency():
     assert '__original_wait_concurrent' in globals()
 
     with flight_client() as client, flight_server() as server:
+        # Single-threaded function takes a long time
         flight_info = flight.FlightDescriptor.for_path(b"wait")
         writer, reader = client.do_exchange(descriptor=flight_info)
         with writer:
@@ -84,6 +85,7 @@ def test_io_concurrency():
             elapsed_time = time.time() - start_time # ~0.64s
             assert elapsed_time > 0.5
 
+        # Multi-threaded I/O bound function will take a much shorter time
         flight_info = flight.FlightDescriptor.for_path(b"wait_concurrent")
         writer, reader = client.do_exchange(descriptor=flight_info)
         with writer:
