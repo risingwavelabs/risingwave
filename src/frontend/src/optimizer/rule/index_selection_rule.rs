@@ -67,8 +67,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
-    PredicatePushdown, PredicatePushdownContext,
+    generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
+    PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -554,7 +554,7 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = LogicalScan::new(
+        let primary_access = generic::Scan::new(
             logical_scan.table_name().to_string(),
             false,
             primary_table_desc
@@ -596,7 +596,7 @@ impl IndexSelectionRule {
         }
 
         Some(
-            LogicalScan::new(
+            generic::Scan::new(
                 index.index_table.name.to_string(),
                 false,
                 index

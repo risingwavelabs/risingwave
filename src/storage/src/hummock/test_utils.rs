@@ -19,6 +19,7 @@ use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
@@ -335,7 +336,8 @@ pub fn test_user_key(table_key: impl AsRef<[u8]>) -> UserKey<Vec<u8>> {
 
 /// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
 pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
-    let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
+    let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+    table_key.extend_from_slice(format!("key_test_{:05}", idx * 2).as_bytes());
     UserKey::for_test(TableId::default(), table_key)
 }
 
