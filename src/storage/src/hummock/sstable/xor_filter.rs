@@ -97,8 +97,7 @@ impl FilterBuilder for Xor8FilterBuilder {
         buf.put_u64_le(xor_filter.seed);
         buf.put_u32_le(xor_filter.block_length as u32);
         buf.put_slice(xor_filter.fingerprints.as_ref());
-        // We add an extra byte so we can distinguish bloom filter and xor filter by the last
-        // byte(254 indicates a xor8 filter and others indicate a bloom filter).
+        // Add footer to tell which kind of filter.
         buf.put_u8(FOOTER_XOR8);
         buf
     }
