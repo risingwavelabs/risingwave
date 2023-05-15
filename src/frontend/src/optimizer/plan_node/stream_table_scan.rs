@@ -33,6 +33,7 @@ use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -119,11 +120,11 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     /// Schema for `Distribution::UpstreamHashShard`
-    /// | vnode | pk | backfill_finished |
+    /// | vnode | pk | `backfill_finished` |
     /// Schema for `Distribution::Single`
-    /// | pk | backfill_finished |
+    /// | pk | `backfill_finished` |
     ///
-    /// FIXME(kwannoel): Schema for `Distribution::SomeShard` just uses `Distribution::Single.
+    /// FIXME(kwannoel): Schema for `Distribution::SomeShard` just uses `Distribution::Single`.
     /// It has to be supported because `SOURCEs` have `Distribution::SomeShard`.
     /// This means we can't recover for `Distribution::SomeShard`.
     pub fn build_backfill_state_catalog(
@@ -136,23 +137,22 @@ impl StreamTableScan {
 
         // Construct distribution key + Add `vnode` for `UpstreamHashShard`
         let distribution_key = match self.base.distribution() {
-            Distribution::UpstreamHashShard(dist_key,_) => {
-                catalog_builder.add_column(&Field::with_name(
-                    VirtualNode::RW_TYPE,
-                    "vnode",
-                ));
+            Distribution::UpstreamHashShard(dist_key, _) => {
+                catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
                 let mut mapping = vec![None];
                 for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
-                    mapping[old_pos] = Some(new_pos);
+                    mapping[*old_pos] = Some(new_pos);
                 }
                 let mapping = ColIndexMapping::new(mapping);
-                mapping.rewrite_dist_key(dist_key).unwrap();
+                mapping.rewrite_dist_key(dist_key).unwrap()
             }
-            Distribution::SomeShard | Distribution::Single => { vec![] }
-            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!()
+            Distribution::SomeShard | Distribution::Single => {
+                vec![]
+            }
+            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!(),
         };
 
-        for (i, pos) in &self.base.logical_pk.iter().enumerate() {
+        for (i, pos) in self.base.logical_pk.iter().enumerate() {
             // Add pks, required since distribution key ⊆ pk.
             catalog_builder.add_order_column(i, OrderType::ascending());
 

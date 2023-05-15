@@ -62,11 +62,11 @@ impl VirtualNode {
 pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -> VirtualNode>;
 
 impl VirtualNode {
-    /// We may use VirtualNode as a datum in a stream, or store it as a column.
-    /// Hence this reifies it as a RW datatype.
-    pub const RW_TYPE: DataType = DataType::Int16;
     /// The maximum value of the virtual node.
     pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    /// We may use `VirtualNode` as a datum in a stream, or store it as a column.
+    /// Hence this reifies it as a RW datatype.
+    pub const RW_TYPE: DataType = DataType::Int16;
     /// The minimum (zero) value of the virtual node.
     pub const ZERO: VirtualNode = VirtualNode::from_index(0);
 

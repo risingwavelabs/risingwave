@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -111,10 +113,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
-                let distribution = match params.vnode_bitmap {
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let distribution = match &vnodes {
                     Some(vnodes) => Distribution {
                         dist_key_in_pk_indices,
-                        vnodes: vnodes.into(),
+                        vnodes: vnodes.clone(),
                     },
                     None => Distribution::fallback(),
                 };
@@ -150,7 +153,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let state_table = StateTable::from_table_catalog(
                     node.get_state_table().unwrap(),
                     state_store,
-                    None,
+                    vnodes,
                 )
                 .await;
 
