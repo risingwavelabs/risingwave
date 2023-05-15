@@ -38,7 +38,6 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
@@ -446,8 +445,7 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
-        let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
-
+        let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
         let mut system =
             System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         let pid = sysinfo::get_current_pid().unwrap();
@@ -470,9 +468,8 @@ impl Compactor {
                     }
                 }
 
-                let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(config.max_concurrent_task_number, cpu_core_num)
+                    .subscribe_compact_tasks(cpu_core_num)
                     .await
                 {
                     Ok(stream) => {
@@ -487,7 +484,6 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
-                drop(config);
 
                 let executor = compactor_context.compaction_executor.clone();
                 let mut last_workload = CompactorWorkload::default();

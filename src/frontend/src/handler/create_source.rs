@@ -47,7 +47,6 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -57,6 +56,7 @@ use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::utils::resolve_connection_in_with_option;
 use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -176,13 +176,6 @@ async fn extract_protobuf_table_schema(
             is_hidden: false,
         })
         .collect_vec())
-}
-
-#[inline(always)]
-fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
 }
 
 pub(crate) async fn resolve_source_schema(
@@ -791,25 +784,10 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    let connection_name = get_connection_name(&with_properties);
-    let is_kafka_connector = is_kafka_connector(&with_properties);
+    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
-    let connection_id = match connection_name {
-        Some(connection_name) => {
-            let connection = session
-                .get_connection_by_name(schema_name, &connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka_connector {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Create source with connection is only supported for kafka connectors."
-                        .to_string(),
-                )));
-            }
-            resolve_private_link_connection(&connection, with_options.inner_mut())?;
-            Some(connection.id)
-        }
-        None => None,
-    };
+    let connection_id =
+        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {
