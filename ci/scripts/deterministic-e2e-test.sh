@@ -7,7 +7,7 @@ source ci/scripts/common.sh
 source ci/scripts/pr.env.sh
 
 echo "--- Download artifacts"
-buildkite-agent artifact download risingwave_simulation .
+download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 echo "--- Extract data for Kafka"

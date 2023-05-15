@@ -75,7 +75,7 @@ use crate::Result;
 /// ```
 #[function("trim_array(list, int32) -> list")]
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
-    let values = array.iter_elems_ref();
+    let values = array.iter();
     let len_to_trim: usize = n.try_into().map_err(|_| ExprError::InvalidParam {
         name: "n",
         reason: "less than zero".to_string(),

@@ -10,6 +10,25 @@ if [ -n "${BUILDKITE_COMMIT:-}" ]; then
 fi
 
 # Arguments:
+#   $1: filename (It should be in the current directory)
+function compress-and-upload-artifact() {
+  tar --zstd -cvf "$1".tar.zst "$1"
+  buildkite-agent artifact upload "$1".tar.zst
+}
+
+# Arguments:
+#   $1: artifact name
+#   $2: output directory
+function download-and-decompress-artifact() {
+  buildkite-agent artifact download "$1".tar.zst "$2"
+  tar -xvf "$2"/"$1".tar.zst -C "$2" --no-same-owner
+}
+
+# export functions so they can be used in parallel
+export -f compress-and-upload-artifact
+export -f download-and-decompress-artifact
+
+# Arguments:
 #   $1: cargo build `profile` of the binaries
 #   $2: risedev-components `env` to use
 # 
@@ -36,8 +55,8 @@ function download_and_prepare_rw() {
   echo -e "\033[33mDownload artifacts\033[0m"
 
   mkdir -p target/debug
-  buildkite-agent artifact download risingwave-"$profile" target/debug/
-  buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+  download-and-decompress-artifact risingwave-"$profile" target/debug/
+  download-and-decompress-artifact risedev-dev-"$profile" target/debug/
 
   mv target/debug/risingwave-"$profile" target/debug/risingwave
   mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
@@ -73,7 +92,7 @@ function download_java_binding() {
   echo -e "\033[33mDownload artifacts\033[0m"
 
   mkdir -p target/debug
-  buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
+  download-and-decompress-artifact librisingwave_java_binding.so-"$profile" target/debug
   mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
   
   export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug

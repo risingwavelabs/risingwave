@@ -52,12 +52,7 @@ use risingwave_expr_macro::function;
 
 #[function("array_distinct(list) -> list")]
 pub fn array_distinct(list: ListRef<'_>) -> ListValue {
-    ListValue::new(
-        list.iter_elems_ref()
-            .unique()
-            .map(|x| x.to_owned_datum())
-            .collect(),
-    )
+    ListValue::new(list.iter().unique().map(|x| x.to_owned_datum()).collect())
 }
 
 #[cfg(test)]
