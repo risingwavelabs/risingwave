@@ -158,7 +158,7 @@ class UserDefinedScalarFunctionWrapperConcurrent(UserDefinedScalarFunctionWrappe
     def __init__(self, *args, **kwargs):
         self.io_threads = kwargs.pop("io_threads") if "io_threads" in kwargs else 1
         super().__init__(*args, **kwargs)
-        self.executor = ProcessPoolExecutor(max_workers=self.io_threads)  # Or any number that fits your machine
+        self.executor = ProcessPoolExecutor(max_workers=self.io_threads)
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
         # parse value from json string for jsonb columns
@@ -178,7 +178,7 @@ class UserDefinedScalarFunctionWrapperConcurrent(UserDefinedScalarFunctionWrappe
             column = [(json.dumps(v) if v is not None else None)
                       for v in column]
         array = pa.array(column, type=self._result_schema.types[0])
-        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
+        yield pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 class UserDefinedTableFunctionWrapper(TableFunction):
@@ -217,11 +217,12 @@ def _to_list(x):
         return [x]
 
 
-def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
-        result_type: Union[str, pa.DataType],
-        name: Optional[str] = None,
-        io_threads: Optional[int] = None,
-    ) -> Callable:
+def udf(
+    input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+    result_type: Union[str, pa.DataType],
+    name: Optional[str] = None,
+    io_threads: Optional[int] = None,
+) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
 
@@ -229,7 +230,7 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
     - input_types: A list of strings or Arrow data types that specifies the input data types.
     - result_type: A string or an Arrow data type that specifies the return value type.
     - name: An optional string specifying the function name. If not provided, the original name will be used.
-    - io_threads: Number of I/O threads used per data chunk for I/O bound UDFs.
+    - io_threads: Number of I/O threads used per data chunk for I/O bound functions.
 
     Example:
     ```
@@ -239,16 +240,23 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
             (x, y) = (y, x % y)
         return x
     ```
+
+    I/O bound Example:
+    ```
+    @udf(input_types=['INT'], result_type='INT', io_threads=64)
+    def external_api(x):
+        response = requests.get(my_endpoint + '?param=' + x)
+        return response["data"]
+    ```
     """
 
     if io_threads is not None and io_threads > 1:
         def wrapper(f):
-            # Hack to allow function to be pickleable by instantiating the original
-            # function under a different name in the module it is defined in
-            f.__qualname__ = '__original_' + f.__name__
+            # Allow function to be pickleable by instantiating the original
+            # function under a different name in the module it is defined
+            f.__qualname__ = '__original_' + f.__name__ if hasattr(f, "__name__") else f.__class__.__name__
             module_globals = inspect.currentframe().f_back.f_globals
             module_globals[f.__qualname__] = f
-
             return UserDefinedScalarFunctionWrapperConcurrent(f, input_types, result_type, name, io_threads=io_threads)
         return wrapper
     else:

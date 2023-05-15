@@ -50,7 +50,6 @@ def test_simple():
                 writer.write_batch(batch)
             writer.done_writing()
 
-            total_len = 0
             chunk = reader.read_chunk()
             assert len(chunk.data) == LEN
             assert chunk.data.column('output').equals(pa.array(range(0, LEN * 2, 2), type=pa.int32()))
@@ -90,7 +89,7 @@ def test_io_concurrency():
         with writer:
             writer.begin(schema=data.schema)
             for batch in batches:
-                    writer.write_batch(batch)
+                writer.write_batch(batch)
             writer.done_writing()
             start_time = time.time()
 
