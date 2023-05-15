@@ -45,7 +45,7 @@ workspace-hack = { path = "../workspace-hack" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 
 [[bin]]
 name = "frontend"
