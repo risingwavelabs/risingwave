@@ -86,8 +86,6 @@ mod simple_agg;
 mod sink;
 mod sort;
 mod sort_buffer;
-mod sort_buffer_v0;
-mod sort_v0;
 pub mod source;
 mod stateless_simple_agg;
 mod stream_reader;
@@ -680,6 +678,12 @@ pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
     Watermark(Watermark),
+}
+
+impl From<StreamChunk> for Message {
+    fn from(chunk: StreamChunk) -> Self {
+        Message::Chunk(chunk)
+    }
 }
 
 impl<'a> TryFrom<&'a Message> for &'a Barrier {

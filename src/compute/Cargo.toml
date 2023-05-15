@@ -20,7 +20,7 @@ await-tree = "0.1.1"
 clap = { version = "4", features = ["derive"] }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
@@ -62,6 +62,6 @@ tikv-jemalloc-ctl = "0.5"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 rand = "0.8"
 tempfile = "3"

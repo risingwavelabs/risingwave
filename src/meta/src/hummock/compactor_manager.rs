@@ -21,7 +21,6 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -110,11 +109,6 @@ impl Compactor {
 
     pub fn max_concurrent_task_number(&self) -> u64 {
         self.max_concurrent_task_number.load(Ordering::Relaxed)
-    }
-
-    pub fn set_config(&self, config: CompactorRuntimeConfig) {
-        self.max_concurrent_task_number
-            .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
 
     pub fn is_busy(&self, limit: u32) -> bool {
@@ -247,16 +241,6 @@ impl CompactorManager {
         // To remove the heartbeats, they need to be forcefully purged,
         // which is only safe when the context has been completely removed from meta.
         tracing::info!("Removed compactor session {}", context_id);
-    }
-
-    pub fn set_compactor_config(
-        &self,
-        context_id: HummockContextId,
-        config: CompactorRuntimeConfig,
-    ) {
-        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
-            compactor.set_config(config);
-        }
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {

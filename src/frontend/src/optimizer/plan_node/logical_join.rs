@@ -776,17 +776,18 @@ impl PredicatePushdown for LogicalJoin {
     /// | Where predicate (filter) | Pushed              | Not Pushed           |
     fn predicate_pushdown(
         &self,
-        mut predicate: Condition,
+        predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        // rewrite output col referencing indices as internal cols
+        let mut predicate = {
+            let mut mapping = self.core.o2i_col_mapping();
+            predicate.rewrite_expr(&mut mapping)
+        };
+
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
-
-        // rewrite output col referencing indices as internal cols
-        let mut mapping = self.core.o2i_col_mapping();
-
-        predicate = predicate.rewrite_expr(&mut mapping);
 
         let (left_from_filter, right_from_filter, on) =
             push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);

@@ -64,6 +64,9 @@ pub struct StreamingMetrics {
     pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
     pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_total_cache_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
     // Backfill
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
@@ -356,6 +359,29 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let agg_distinct_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_distinct_cache_miss_count",
+            "Aggregation executor dinsinct miss duration",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_distinct_total_cache_count = register_int_counter_vec_with_registry!(
+            "stream_agg_distinct_total_cache_count",
+            "Aggregation executor distinct total operation",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_distinct_cached_entry_count",
+            "Total entry counts in distinct aggregation executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
@@ -527,6 +553,9 @@ impl StreamingMetrics {
             agg_cached_keys,
             agg_chunk_lookup_miss_count,
             agg_chunk_total_lookup_count,
+            agg_distinct_cache_miss_count,
+            agg_distinct_total_cache_count,
+            agg_distinct_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
             barrier_inflight_latency,

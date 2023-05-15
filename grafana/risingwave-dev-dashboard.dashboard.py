@@ -427,7 +427,7 @@ def section_compaction(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                                f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_remote_read_time_per_task_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                                 f"remote-io p{legend}" +
                                 " - {{table_id}} @ {{job}} @ {{instance}}",
                             ),
@@ -676,7 +676,7 @@ def section_streaming(panels):
             "Total number of rows that have been read from the backfill snapshot",
             [
                 panels.target(
-                    f"rate({metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
+                    f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
                     "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
                 ),
             ],
@@ -686,7 +686,7 @@ def section_streaming(panels):
             "Total number of rows that have been output from the backfill upstream",
             [
                 panels.target(
-                    f"rate({metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
+                    f"rate({table_metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
                     "table_id={{table_id}} actor={{actor_id}} @ {{instance}}"
                 ),
             ],
@@ -909,11 +909,11 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
+                            f"rate({table_metric('stream_materialize_cache_hit_count')}[$__rate_interval])",
                             "cache hit count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
                         ),
                         panels.target(
-                            f"rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])",
+                            f"rate({table_metric('stream_materialize_cache_total_count')}[$__rate_interval])",
                             "total cached count - table {{table_id}} - actor {{actor_id}}   {{instance}}",
                         ),
                     ],
@@ -930,6 +930,11 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
 
                         panels.target(
@@ -1014,6 +1019,11 @@ def section_streaming_actors(outer_panels):
                             "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
+                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+           
+                        panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "total lookups - table {{table_id}} actor {{actor_id}}",
                         ),
@@ -1038,6 +1048,8 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
+                                      "table {{table_id}} actor {{actor_id}}"),
+                        panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
                                       "table {{table_id}} actor {{actor_id}}"),
                     ],
                 ),
@@ -1434,7 +1446,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_sst_store_block_request_counts')}[$__rate_interval])) by (job, instance, table_id, type)",
+                    f"sum(rate({table_metric('state_store_sst_store_block_request_counts')}[$__rate_interval])) by (job, instance, table_id, type)",
                     "{{table_id}} @ {{type}} - {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1466,19 +1478,19 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_get_duration_count')}[$__rate_interval])) by (job,instanc,table_id)",
+                    f"sum(rate({table_metric('state_store_get_duration_count')}[$__rate_interval])) by (job,instanc,table_id)",
                     "get - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_range_reverse_scan_duration_count')}[$__rate_interval])) by (job,instance)",
+                    f"sum(rate({table_metric('state_store_range_reverse_scan_duration_count')}[$__rate_interval])) by (job,instance)",
                     "backward scan - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_get_shared_buffer_hit_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_get_shared_buffer_hit_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "shared_buffer hit - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
                     "iter - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -1489,13 +1501,13 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_get_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_get_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"p{legend}" + " - {{table_id}} @ {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_get_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_get_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance, table_id)(rate({table_metric('state_store_get_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({table_metric('state_store_get_duration_count')}[$__rate_interval]))",
                     "avg - {{table_id}} {{job}} @ {{instance}}",
                 ),
             ],
@@ -1507,7 +1519,7 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_init_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_init_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"create_iter_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
@@ -1518,13 +1530,13 @@ def section_hummock(panels):
                 ),
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_scan_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_scan_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"pure_scan_time p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance)(rate({metric('state_store_scan_iter_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_scan_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance)(rate({metric('state_store_iter_scan_duration_sum')}[$__rate_interval])) / sum by(le, job,instance) (rate({metric('state_store_iter_scan_duration_count')}[$__rate_interval]))",
                     "pure_scan_time avg - {{job}} @ {{instance}}",
                 ),
             ],
@@ -1535,7 +1547,7 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_get_key_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({metric('state_store_get_value_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_get_key_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id)) + histogram_quantile({quantile}, sum(rate({table_metric('state_store_get_value_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"p{legend} - {{{{table_id}}}} {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
@@ -1548,7 +1560,7 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
@@ -1561,7 +1573,7 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_item_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_item_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
                     ),
                     [90, 99, 999, "max"],
@@ -1597,13 +1609,13 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_may_exist_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_may_exist_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"p{legend}" + " - {{table_id}} @ {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_may_exist_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_may_exist_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance, table_id)(rate({table_metric('state_store_may_exist_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({table_metric('state_store_may_exist_duration_count')}[$__rate_interval]))",
                     "avg - {{table_id}} {{job}} @ {{instance}}",
                 ),
             ],
@@ -1613,19 +1625,19 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(rate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -1635,7 +1647,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_iter_scan_key_counts')}[$__rate_interval])) by (instance, type, table_id)",
+                    f"sum(rate({table_metric('state_store_iter_scan_key_counts')}[$__rate_interval])) by (instance, type, table_id)",
                     "iter keys flow - {{table_id}} @ {{type}} @ {{instance}} ",
                 ),
             ],
@@ -1645,15 +1657,15 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type))",
+                    f"1 - (sum(rate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)) / (sum(rate({table_metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type))",
                     "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
+                    f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"(sum(rate({metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
+                    f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "block cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1662,12 +1674,12 @@ def section_hummock(panels):
                 ),
 
                 panels.target(
-                    f"1 - (((sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    f"1 - (((sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
 
                 panels.target(
-                    f"1 - (((sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    f"1 - (((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -1678,24 +1690,46 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, table_id, type))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, table_id, type))",
                         f"# merged ssts p{legend}" +
                         " - {{table_id}} @ {{job}} @ {{type}}",
                     ),
                     [90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_iter_merge_sstable_counts_sum')}[$__rate_interval]))  / sum by(le, job, instance, table_id)(rate({metric('state_store_iter_merge_sstable_counts_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance, table_id)(rate({table_metric('state_store_iter_merge_sstable_counts_sum')}[$__rate_interval]))  / sum by(le, job, instance, table_id)(rate({table_metric('state_store_iter_merge_sstable_counts_count')}[$__rate_interval]))",
                     "# merged ssts avg  - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Merge Imm - Finished Tasks Count",
+            "",
+            [
+                panels.target(
+                    f"sum(rate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    "merge imm tasks - {{table_id}} @ {{instance}} ",
+                ),
+            ],
+        ),
+        panels.timeseries_bytes(
+            "Merge Imm - Finished Task Memory Size",
+            "",
+            [
+                panels.target(
+                    f"sum(rate({table_metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
+                    "tasks memory size - {{table_id}} @ {{instance}} ",
+                ),
+            ],
+        ),
+
         panels.timeseries_ops(
             "Write Ops",
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_write_batch_duration_count')}[$__rate_interval])) by (job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_write_batch_duration_count')}[$__rate_interval])) by (job,instance,table_id)",
                     "write batch - {{table_id}} @ {{job}} @ {{instance}} ",
                 ),
                 panels.target(
@@ -1710,14 +1744,14 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_write_batch_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_write_batch_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"write to shared_buffer p{legend}" +
                         " - {{table_id}} @ {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance, table_id)(rate({metric('state_store_write_batch_duration_sum')}[$__rate_interval]))  / sum by(le, job, instance, table_id)(rate({metric('state_store_write_batch_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance, table_id)(rate({table_metric('state_store_write_batch_duration_sum')}[$__rate_interval]))  / sum by(le, job, instance, table_id)(rate({table_metric('state_store_write_batch_duration_count')}[$__rate_interval]))",
                     "write to shared_buffer avg - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 *quantile(
@@ -1739,7 +1773,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_write_batch_tuple_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_write_batch_tuple_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "write_batch_kv_pair_count - {{table_id}} @ {{instance}} ",
                 ),
             ],
@@ -1749,7 +1783,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({table_metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
                     "shared_buffer - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
@@ -1819,14 +1853,14 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_fetch_meta_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
+                        f"histogram_quantile({quantile}, sum(rate({table_metric('state_store_iter_fetch_meta_duration_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
                         f"fetch_meta_duration p{legend}" +
                         " - {{table_id}} @ {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({metric('state_store_iter_fetch_meta_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance, table_id) (rate({table_metric('state_store_iter_fetch_meta_duration_sum')}[$__rate_interval])) / sum by(le, job, instance, table_id) (rate({table_metric('state_store_iter_fetch_meta_duration_count')}[$__rate_interval]))",
                     "fetch_meta_duration avg - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -2014,9 +2048,9 @@ def section_hummock_manager(outer_panels):
                     "Table KV Size",
                     "",
                     [
-                        panels.target(f"{metric('storage_version_stats', total_key_size_filter)}/1024",
+                        panels.target(f"{table_metric('storage_version_stats', total_key_size_filter)}/1024",
                                       "table{{table_id}} {{metric}}"),
-                        panels.target(f"{metric('storage_version_stats', total_value_size_filter)}/1024",
+                        panels.target(f"{table_metric('storage_version_stats', total_value_size_filter)}/1024",
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
@@ -2024,7 +2058,7 @@ def section_hummock_manager(outer_panels):
                     "Table KV Count",
                     "",
                     [
-                        panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
+                        panels.target(f"{table_metric('storage_version_stats', total_key_count_filter)}",
                                       "table{{table_id}} {{metric}}"),
                     ],
                 ),
@@ -2522,6 +2556,90 @@ if namespace_filter_enabled:
 
     templating_list.append(namespace_json)
     templating_list.append(name_json)
+
+node_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+    "description": "Reporting instance of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Node",
+    "multi": True,
+    "name": "node",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+job_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+    "description": "Reporting job of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Job",
+    "multi": True,
+    "name": "job",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+table_id_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('table_info', node_filter_enabled=False)}, table_id)",
+    "description": "Reporting table id of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Table",
+    "multi": True,
+    "name": "table",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('table_info', node_filter_enabled=False)}, table_id)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+if dynamic_source_enabled:
+    node_json = merge(node_json, {"datasource": datasource})
+    job_json = merge(job_json, {"datasource": datasource})
+    table_id_json = merge(table_id_json, {"datasource": datasource})
+
+templating_list.append(node_json)
+templating_list.append(job_json)
+templating_list.append(table_id_json)
 
 templating = Templating(templating_list)
 

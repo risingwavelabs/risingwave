@@ -140,6 +140,18 @@ create source s with (
   connection.name = 'nonexist',
 ) row format json;
 
+statement ok
+CREATE TABLE mytable with (
+  connector = 'kafka',
+  topic = 'kafka_1_partition_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  connection.name = 'mock'
+) ROW FORMAT JSON;
+
+statement ok
+DROP TABLE mytable;
+
+
 # `DEBEZIUM_MONGO_JSON` requires the source table have `_id` and `payload` columns.
 statement error
 create source s (

@@ -675,7 +675,7 @@ pub struct WindowFrame {
     /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
     /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
     pub end_bound: Option<WindowFrameBound>,
-    // TBD: EXCLUDE
+    pub exclusion: Option<WindowFrameExclusion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -730,6 +730,27 @@ impl fmt::Display for WindowFrameBound {
             WindowFrameBound::Following(None) => f.write_str("UNBOUNDED FOLLOWING"),
             WindowFrameBound::Preceding(Some(n)) => write!(f, "{} PRECEDING", n),
             WindowFrameBound::Following(Some(n)) => write!(f, "{} FOLLOWING", n),
+        }
+    }
+}
+
+/// Frame exclusion option of [WindowFrame].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameExclusion {
+    CurrentRow,
+    Group,
+    Ties,
+    NoOthers,
+}
+
+impl fmt::Display for WindowFrameExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW"),
+            WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP"),
+            WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES"),
+            WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS"),
         }
     }
 }
