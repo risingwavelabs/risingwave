@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -455,7 +455,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .expect("order key must not be NULL");
 
                         if vars.last_watermark.is_none()
-                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                            || vars
+                                .last_watermark
+                                .as_ref()
+                                .unwrap()
+                                .default_cmp(&first_order_key)
+                                .is_lt()
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(

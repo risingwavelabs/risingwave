@@ -28,7 +28,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, OrdDatumRef, Scalar, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, StructType, ToDatumRef,
+    ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -439,9 +440,7 @@ impl PartialOrd for StructRef<'_> {
                 if lhs.len() != rhs.len() {
                     return None;
                 }
-                lhs.partial_cmp_by(rhs, |lv, rv| {
-                    OrdDatumRef::new(lv).partial_cmp(&OrdDatumRef::new(rv))
-                })
+                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
             })
         })
     }

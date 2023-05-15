@@ -29,7 +29,8 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, OrdDatumRef, Scalar, ScalarRefImpl, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, ScalarRefImpl, ToDatumRef,
+    ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -505,9 +506,7 @@ impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                lhs.partial_cmp_by(rhs, |lv, rv| {
-                    OrdDatumRef::new(lv).partial_cmp(&OrdDatumRef::new(rv))
-                })
+                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
             })
         })
     }
