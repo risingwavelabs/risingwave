@@ -29,6 +29,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -110,6 +111,30 @@ impl StreamTableScan {
 
     pub fn chain_type(&self) -> ChainType {
         self.chain_type
+    }
+
+    // Build catalog for backfill state
+    pub fn build_backfill_state_catalog(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> TableCatalog {
+        let properties = self.ctx().with_options().internal_table_subset();
+        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let schema = self.base.schema();
+
+        for pos in &self.base.logical_pk {
+            let field = &schema[*pos];
+            catalog_builder.add_column(field);
+        }
+
+        catalog_builder.add_column(&Field::with_name(
+            DataType::Boolean,
+            format!("{}_backfill_finished", self.table_name()),
+        ));
+
+        catalog_builder
+            .build(vec![], 0)
+            .with_id(state.gen_table_id_wrapped())
     }
 }
 
@@ -207,23 +232,8 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
-        let properties = self.ctx().with_options().internal_table_subset(); // TODO: Is this even needed? Why is it needed for simple_agg?
-        let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let schema = self.base.schema();
-
-        for pos in &self.base.logical_pk {
-            let field = &schema[*pos];
-            catalog_builder.add_column(field);
-        }
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Boolean,
-            format!("{}_backfill_finished", self.table_name()),
-        ));
-
-        let catalog = catalog_builder
-            .build(vec![], 0)
-            .with_id(state.gen_table_id_wrapped())
-            .to_internal_table_prost();
+        let catalog = self.build_backfill_state_catalog(state);
+        let catalog = catalog.to_internal_table_prost();
 
         PbStreamNode {
             fields: self.schema().to_prost(),
