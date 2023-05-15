@@ -655,11 +655,12 @@ impl SessionImpl {
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
                 loop {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            target: "risingwave_frontend_slow_query_log",
+                            target: SLOW_QUERY_LOG,
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),

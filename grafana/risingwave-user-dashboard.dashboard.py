@@ -14,11 +14,15 @@ import sys
 p = os.path.dirname(__file__)
 sys.path.append(p)
 from common import *
+from jsonmerge import merge
 
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Fcy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
 datasource = {"type": "prometheus", "uid": f"{source_uid}"}
+datasource_const = "datasource"
+if dynamic_source_enabled:
+    datasource = {"type": "prometheus", "uid": "${datasource}"}
 
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
@@ -659,6 +663,132 @@ def section_batch(outer_panels):
         )
     ]
 
+templating_list = []
+if dynamic_source_enabled:
+    templating_list.append(
+        {
+            "hide": 0,
+            "includeAll": False,
+            "multi": False,
+            "name": f"{datasource_const}",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 2,
+            "skipUrlSync": False,
+            "type": "datasource"
+        }
+    )
+
+if namespace_filter_enabled:
+    namespace_json = {
+        "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+        "description": "Kubernetes namespace.",
+        "hide": 0,
+        "includeAll": False,
+        "label": "Namespace",
+        "multi": False,
+        "name": "namespace",
+        "options": [],
+        "query": {
+            "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 0,
+        "type": "query",
+    }
+
+    name_json = {
+        "current": {
+            "selected": False,
+            "text": "risingwave",
+            "value": "risingwave"
+        },
+        "definition": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+        "hide": 0,
+        "includeAll": False,
+        "label": "RisingWave",
+        "multi": False,
+        "name": "instance",
+        "options": [],
+        "query": {
+            "query": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 6,
+        "type": "query",
+    }
+    if dynamic_source_enabled:
+        namespace_json = merge(namespace_json, {"datasource": datasource})
+        name_json = merge(name_json, {"datasource": datasource})
+
+    templating_list.append(namespace_json)
+    templating_list.append(name_json)
+
+
+node_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+    "description": "Reporting instance of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Node",
+    "multi": True,
+    "name": "node",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+job_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+    "description": "Reporting job of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Job",
+    "multi": True,
+    "name": "job",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+if dynamic_source_enabled:
+    node_json = merge(node_json, {"datasource": datasource})
+    job_json = merge(job_json, {"datasource": datasource})
+
+templating_list.append(node_json)
+templating_list.append(job_json)
+templating = Templating(templating_list)
 
 dashboard = Dashboard(
     title="risingwave_dashboard",

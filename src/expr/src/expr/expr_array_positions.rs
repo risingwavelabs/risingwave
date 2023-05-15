@@ -76,7 +76,7 @@ fn array_positions<'a, T: ScalarRef<'a>>(
 ) -> Result<Option<ListValue>> {
     match array {
         Some(left) => {
-            let values = left.iter_elems_ref();
+            let values = left.iter();
             match TryInto::<i32>::try_into(values.len()) {
                 Ok(_) => Ok(Some(ListValue::new(
                     values
