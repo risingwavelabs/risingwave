@@ -141,6 +141,7 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -157,6 +158,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -175,6 +177,7 @@ class Panels:
             gridPos=gridPos,
             unit="percentunit",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -192,6 +195,7 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -209,6 +213,7 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -226,6 +231,7 @@ class Panels:
             gridPos=gridPos,
             unit="s",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -243,6 +249,7 @@ class Panels:
             gridPos=gridPos,
             unit="Qps",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -260,6 +267,7 @@ class Panels:
             gridPos=gridPos,
             unit="Bps",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -277,6 +285,7 @@ class Panels:
             gridPos=gridPos,
             unit="bytes",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -290,6 +299,7 @@ class Panels:
             gridPos=gridPos,
             unit="row",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -302,6 +312,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -319,6 +330,7 @@ class Panels:
             gridPos=gridPos,
             unit="kbytes",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -336,6 +348,7 @@ class Panels:
             gridPos=gridPos,
             unit="$",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -349,6 +362,7 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -366,6 +380,7 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -383,6 +398,7 @@ class Panels:
             gridPos=gridPos,
             unit="ops",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -400,6 +416,7 @@ class Panels:
             gridPos=gridPos,
             unit="rows/s",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -417,6 +434,7 @@ class Panels:
             gridPos=gridPos,
             unit="MB/s",
             legendCalcs=legendCols,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -429,6 +447,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="rows/s",
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -441,6 +460,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="bytes",
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -453,6 +473,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="percentunit",
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -465,6 +486,7 @@ class Panels:
             targets=targets,
             gridPos=gridPos,
             unit="s",
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -476,6 +498,7 @@ class Panels:
             description=description,
             targets=targets,
             gridPos=gridPos,
+            legendDisplayMode="table",
             **self.common_options,
         )
 
@@ -499,16 +522,24 @@ class Panels:
         return Panels(self.datasource)
 
 
-def metric(name, filter=None):
+def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=False):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
         filters.append("namespace=~\"$namespace\"")
     if risingwave_name_filter_enabled:
         filters.append("risingwave_name=~\"$instance\"")
+    if table_id_filter_enabled:
+        filters.append("table_id=~\"$table\"")
+    if node_filter_enabled:
+        filters.append("job=~\"$job\"")
+        filters.append("instance=~\"$node\"")
     if filters:
         return f"{name}{{{','.join(filters)}}}"
     else:
         return name
+
+def table_metric(name, filter=None):
+    return metric(name, filter, True, True)
 
 
 def quantile(f, percentiles):

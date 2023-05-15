@@ -39,7 +39,7 @@ csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 globset = "0.4.8"
 google-cloud-pubsub = "0.14"
 hex = "0.4"

@@ -267,10 +267,9 @@ mod tests {
             ColumnOrder::new(0, OrderType::ascending()),
             ColumnOrder::new(1, OrderType::ascending()),
         ];
-        let pk = vec![0, 1];
         let order_by = vec![ColumnOrder::new(0, OrderType::ascending())];
 
-        create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
+        create_cache_key_serde(&storage_key, &schema, &order_by, &[])
     }
 
     #[tokio::test]
