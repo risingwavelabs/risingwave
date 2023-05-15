@@ -10,7 +10,6 @@ steps:
           - "cdn-metrics"
           - "clickstream"
           - "livestream"
-          - "twitter"
           - "prometheus"
           - "schema-registry"
           - "mysql-cdc"
@@ -69,5 +68,24 @@ steps:
           skip: true
         - with:
             testcase: "debezium-mysql"
+            format: "protobuf"
+          skip: true
+
+# NOTE: buildkite matrix-limits
+# Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
+  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
+    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
+    timeout_in_minutes: 30
+    matrix:
+      setup:
+        testcase:
+          - "twitter"
+          - "twitter-pulsar"
+        format:
+          - "json"
+          - "protobuf"
+      adjustments:
+        - with:
+            testcase: "twitter-pulsar"
             format: "protobuf"
           skip: true

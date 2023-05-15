@@ -60,6 +60,7 @@ impl StreamUnion {
             logical.functional_dependency().clone(),
             dist,
             logical.inputs().iter().all(|x| x.append_only()),
+            logical.inputs().iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
         );
         StreamUnion { base, logical }

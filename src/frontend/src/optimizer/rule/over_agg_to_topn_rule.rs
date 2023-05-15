@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::function::window::WindowFuncKind;
 
 use super::Rule;
-use crate::expr::{ExprImpl, ExprType};
+use crate::expr::{collect_input_refs, ExprImpl, ExprType};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
@@ -30,45 +30,43 @@ use crate::PlanRef;
 ///   (SELECT .., ROW_NUMBER() OVER(PARTITION BY .. ORDER BY ..) rank from ..)
 /// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
-pub struct OverAggToTopNRule;
+pub struct OverWindowToTopNRule;
 
-impl OverAggToTopNRule {
+impl OverWindowToTopNRule {
     pub fn create() -> Box<dyn Rule> {
-        Box::new(OverAggToTopNRule)
+        Box::new(OverWindowToTopNRule)
     }
 }
 
-impl Rule for OverAggToTopNRule {
+impl Rule for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        let project = plan.as_logical_project()?;
-        let plan = project.input();
+        let ctx = plan.ctx();
+        let (project, plan) = {
+            if let Some(project) = plan.as_logical_project() {
+                (Some(project), project.input())
+            } else {
+                (None, plan)
+            }
+        };
         let filter = plan.as_logical_filter()?;
         let plan = filter.input();
-        // The filter is directly on top of the over agg after predicate pushdown.
-        let over_agg = plan.as_logical_over_agg()?;
+        // The filter is directly on top of the over window after predicate pushdown.
+        let over_window = plan.as_logical_over_window()?;
 
-        if over_agg.window_functions().len() != 1 {
+        // TODO(st1page): split the OverAgg if there is some part of window function can be
+        // rewritten to group topn
+        if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
             return None;
         }
-
-        let f = &over_agg.window_functions()[0];
+        let f = &over_window.window_functions()[0];
         if !f.kind.is_rank() {
             // Only rank functions can be converted to TopN.
             return None;
         }
 
-        let over_agg_len = over_agg.schema().len();
-        let window_func_pos = over_agg_len - 1;
-
-        if project.exprs().iter().any(|expr| {
-            expr.collect_input_refs(over_agg_len)
-                .contains(window_func_pos)
-        }) {
-            // TopN with ranking output is not supported yet.
-            tracing::error!("TopN with ranking output is not supported yet.");
-            return None;
-        }
+        let output_len = over_window.schema().len();
+        let window_func_pos = output_len - 1;
 
         let with_ties = match f.kind {
             // Only `ROW_NUMBER` and `RANK` can be optimized to TopN now.
@@ -80,7 +78,7 @@ impl Rule for OverAggToTopNRule {
 
         let (rank_pred, other_pred) = {
             let predicate = filter.predicate();
-            let mut rank_col = FixedBitSet::with_capacity(over_agg_len);
+            let mut rank_col = FixedBitSet::with_capacity(output_len);
             rank_col.set(window_func_pos, true);
             predicate.clone().split_disjoint(&rank_col)
         };
@@ -88,23 +86,32 @@ impl Rule for OverAggToTopNRule {
         let (limit, offset) = handle_rank_preds(&rank_pred.conjunctions, window_func_pos)?;
 
         if offset > 0 && with_ties {
-            tracing::error!("Failed to optimize with ties and offset");
+            tracing::warn!("Failed to optimize with ties and offset");
+            ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
             return None;
         }
 
-        let topn = LogicalTopN::with_group(
-            over_agg.input(),
-            limit,
-            offset,
-            with_ties,
-            Order {
-                column_orders: f.order_by.to_vec(),
-            },
-            f.partition_by.iter().map(|i| i.index).collect(),
-        )
-        .into();
-        let filter = LogicalFilter::create(topn, other_pred);
-        Some(project.clone_with_input(filter).into())
+        // TODO(st1page): refine this with if_chain
+        if let Some(project) = project {
+            let referred_cols = collect_input_refs(output_len, project.exprs());
+            if !referred_cols.contains(window_func_pos) {
+                let topn: PlanRef = LogicalTopN::with_group(
+                    over_window.input(),
+                    limit,
+                    offset,
+                    with_ties,
+                    Order {
+                        column_orders: f.order_by.to_vec(),
+                    },
+                    f.partition_by.iter().map(|i| i.index).collect(),
+                )
+                .into();
+                let filter = LogicalFilter::create(topn, other_pred);
+                return Some(project.clone_with_input(filter).into());
+            }
+        }
+        ctx.warn_to_user("fail to transform overAgg to groupTopN: the rank cannot be included in the outer select_list, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
+        None
     }
 }
 
@@ -134,7 +141,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
-                tracing::error!(
+                tracing::warn!(
                     "Failed to optimize rank predicate with conflicting equal conditions."
                 );
                 return None;
@@ -142,7 +149,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             eq = Some(v)
         } else {
             // TODO: support between and in
-            tracing::error!("Failed to optimize complex rank predicate {:?}", cond);
+            tracing::warn!("Failed to optimize complex rank predicate {:?}", cond);
             return None;
         }
     }
@@ -150,7 +157,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     // Note: rank functions start from 1
     if let Some(eq) = eq {
         if eq < 1 {
-            tracing::error!(
+            tracing::warn!(
                 "Failed to optimize rank predicate with invalid predicate rank={}.",
                 eq
             );
@@ -159,7 +166,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
         let lb = lb.unwrap_or(i64::MIN);
         let ub = ub.unwrap_or(i64::MAX);
         if !(lb <= eq && eq <= ub) {
-            tracing::error!("Failed to optimize rank predicate with conflicting bounds.");
+            tracing::warn!("Failed to optimize rank predicate with conflicting bounds.");
             return None;
         }
         Some((1, (eq - 1) as u64))

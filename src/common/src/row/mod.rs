@@ -22,7 +22,7 @@ use itertools::Itertools;
 use self::empty::EMPTY;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
-use crate::util::ordered::OrderedRowSerde;
+use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -215,13 +215,13 @@ macro_rules! deref_forward_row {
 
         fn memcmp_serialize_into(
             &self,
-            serde: &$crate::util::ordered::OrderedRowSerde,
+            serde: &$crate::util::row_serde::OrderedRowSerde,
             buf: impl bytes::BufMut,
         ) {
             (**self).memcmp_serialize_into(serde, buf)
         }
 
-        fn memcmp_serialize(&self, serde: &$crate::util::ordered::OrderedRowSerde) -> Vec<u8> {
+        fn memcmp_serialize(&self, serde: &$crate::util::row_serde::OrderedRowSerde) -> Vec<u8> {
             (**self).memcmp_serialize(serde)
         }
 
@@ -374,7 +374,6 @@ impl<R: Row> Row for Option<R> {
     }
 }
 
-mod ascent_owned_row;
 mod chain;
 mod compacted_row;
 mod empty;
@@ -382,8 +381,6 @@ mod once;
 mod owned_row;
 mod project;
 mod repeat_n;
-#[allow(deprecated)]
-pub use ascent_owned_row::AscentOwnedRow;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};

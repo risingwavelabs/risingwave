@@ -34,7 +34,7 @@ services:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
   message_queue:
-    image: "apachepulsar/pulsar:2.9.1"
+    image: "apachepulsar/pulsar:2.11.1"
     command: bin/pulsar standalone
     ports:
       - 8080:8080

@@ -4,7 +4,6 @@ package hummock;
 
 import "catalog.proto";
 import "common.proto";
-import "compactor.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -267,6 +266,8 @@ message CompactTask {
   // compaction output will be added to [`target_level`] of LSM after compaction
   uint32 target_level = 6;
   bool gc_delete_keys = 7;
+  // Lbase in LSM
+  uint32 base_level = 8;
   TaskStatus task_status = 9;
   // compaction group the task belongs to
   uint64 compaction_group_id = 12;
@@ -291,6 +292,8 @@ message CompactTask {
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
   bool split_by_state_table = 21;
+  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
+  uint32 split_weight_by_vnode = 22;
 }
 
 message LevelHandler {
@@ -394,7 +397,8 @@ message CompactorHeartbeatResponse {
 
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
-  uint64 max_concurrent_task_number = 2;
+  reserved 2;
+  reserved "max_concurrent_task_number";
   uint32 cpu_core_num = 3;
 }
 
@@ -558,13 +562,6 @@ message RiseCtlUpdateCompactionConfigResponse {
   common.Status status = 1;
 }
 
-message SetCompactorRuntimeConfigRequest {
-  uint32 context_id = 1;
-  compactor.CompactorRuntimeConfig config = 2;
-}
-
-message SetCompactorRuntimeConfigResponse {}
-
 message PinVersionRequest {
   uint32 context_id = 1;
 }
@@ -608,7 +605,6 @@ service HummockManagerService {
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
-  rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
@@ -632,6 +628,8 @@ message CompactionConfig {
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
   bool split_by_state_table = 14;
+  // Compaction needs to cut the state table every time 1/weight of vnodes in the table have been processed.
+  uint32 split_weight_by_vnode = 6;
   // soft limit for max number of sub level number
   uint64 level0_stop_write_threshold_sub_level_number = 15;
   uint64 level0_max_compact_file_number = 16;

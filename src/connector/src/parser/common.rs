@@ -17,13 +17,13 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time, Timestamp,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::{i64_to_timestamp, i64_to_timestamptz};
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
@@ -110,14 +110,18 @@ fn do_parse_simd_json_value(
             BorrowedValue::String(s) => Timestamp::from_str(s)
                 .map_err(|err| ErrorCode::ExprError(err.into()))?
                 .into(),
-            BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))
+                .map_err(|e| anyhow!(e))?
+                .into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestamptz => match v {
             BorrowedValue::String(s) => str_with_time_zone_to_timestamptz(s)
                 .map_err(|err| ErrorCode::ExprError(err.into()))?
                 .into(),
-            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_i64!(v, i64))?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_i64!(v, i64))
+                .map_err(|e| anyhow!(e))?
+                .into(),
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Jsonb => {

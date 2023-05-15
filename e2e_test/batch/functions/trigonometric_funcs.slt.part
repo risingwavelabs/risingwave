@@ -341,12 +341,12 @@ Infinity
 query R
 SELECT tand(-90)
 ----
-Infinity
+-Infinity
 
 query R
 SELECT tand(270)
 ----
-Infinity
+-Infinity
 
 query R
 SELECT tand(-270)
@@ -499,3 +499,28 @@ query R
 SELECT cotd('-NaN')
 ----
 NaN
+
+query R
+SELECT abs(abs(asind(0)) - 0) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(1) - 90)) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(-1) + 90)) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(0.5) - 30)) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(-0.5) + 30)) < 1e-14
+----
+t

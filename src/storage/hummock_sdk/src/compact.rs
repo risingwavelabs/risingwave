@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::hummock::{CompactTask, SstableInfo};
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
 pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     use std::fmt::Write;
@@ -101,36 +101,22 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     }
 }
 
-/// Config that is updatable when compactor is running.
-#[derive(Clone, Default)]
-pub struct CompactorRuntimeConfig {
-    pub max_concurrent_task_number: u64,
-}
-
-impl From<risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
-    fn from(value: risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<&risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
-    fn from(value: &risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
-        Self {
-            max_concurrent_task_number: value.max_concurrent_task_number,
+pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
+    let mut total_memory_size = 0;
+    let mut total_file_count = 0;
+    for level in &task.input_ssts {
+        if level.level_type == LevelType::Nonoverlapping as i32 {
+            if let Some(table) = level.table_infos.first() {
+                total_memory_size += table.file_size * task.splits.len() as u64;
+            }
+        } else {
+            for table in &level.table_infos {
+                total_memory_size += table.file_size;
+            }
         }
-    }
-}
 
-impl From<CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
-    fn from(value: CompactorRuntimeConfig) -> Self {
-        (&value).into()
+        total_file_count += level.table_infos.len();
     }
-}
 
-impl From<&CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
-    fn from(value: &CompactorRuntimeConfig) -> Self {
-        risingwave_pb::compactor::CompactorRuntimeConfig {
-            max_concurrent_task_number: value.max_concurrent_task_number,
-        }
-    }
+    (total_memory_size, total_file_count)
 }

@@ -52,7 +52,7 @@ impl Rule for IntersectToSemiJoinRule {
 }
 
 impl IntersectToSemiJoinRule {
-    fn gen_null_safe_equal(left: PlanRef, right: PlanRef) -> ExprImpl {
+    pub(crate) fn gen_null_safe_equal(left: PlanRef, right: PlanRef) -> ExprImpl {
         (left
             .schema()
             .fields()
