@@ -26,7 +26,7 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 ctor = "0.1"
 dyn-clone = "1"
 either = "1"
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4.3"
 itertools = "0.10"
