@@ -31,6 +31,7 @@ use super::{
     StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -1165,8 +1166,8 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let plan = StreamDynamicFilter::new(left_ref.index, comparator, left, right).into();
-
+        let core = DynamicFilter::new(comparator, left_ref.index, left, right);
+        let plan = StreamDynamicFilter::new(core).into();
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
             .output_indices()
