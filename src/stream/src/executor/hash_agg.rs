@@ -371,6 +371,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
+                    this.actor_ctx.id,
                 )
                 .await?;
             agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
@@ -534,7 +535,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             stats: ExecutionStats::new(),
             agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
             group_change_set: HashSet::new(),
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
+            distinct_dedup: DistinctDeduplicater::new(
+                &this.agg_calls,
+                &this.watermark_epoch,
+                this.metrics.clone(),
+            ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),

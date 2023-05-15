@@ -24,6 +24,7 @@ use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
+use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
@@ -83,6 +84,8 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
@@ -148,6 +151,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
+                metrics: args.extra.metrics,
             },
         })
     }
@@ -209,6 +213,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
+                this.actor_ctx.id,
             )
             .await?;
 
@@ -296,7 +301,11 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
+            distinct_dedup: DistinctDeduplicater::new(
+                &this.agg_calls,
+                &this.watermark_epoch,
+                this.metrics.clone(),
+            ),
             state_changed: false,
         };
 

@@ -68,7 +68,9 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             distinct_dedup_tables,
             watermark_epoch: stream.get_watermark_epoch(),
 
-            extra: SimpleAggExecutorExtraArgs {},
+            extra: SimpleAggExecutorExtraArgs {
+                metrics: params.executor_stats,
+            },
         })?
         .boxed())
     }

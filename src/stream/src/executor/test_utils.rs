@@ -494,7 +494,9 @@ pub mod agg_executor {
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
 
-            extra: SimpleAggExecutorExtraArgs {},
+            extra: SimpleAggExecutorExtraArgs {
+                metrics: Arc::new(StreamingMetrics::unused()),
+            },
         })
         .unwrap()
         .boxed()
