@@ -197,7 +197,10 @@ for_all_fields_variants! { gen_sequence_field_alias }
 
 #[cfg(test)]
 mod tests {
+    use more_asserts::assert_le;
+
     use super::*;
+    use crate::types::OrdScalarRefImpl;
     #[test]
     fn test_sequence_field_generator() {
         let mut i16_field =
@@ -248,7 +251,14 @@ mod tests {
             let res = i32_field.generate_datum(i as u64);
             assert!(res.is_some());
             let res = res.unwrap();
-            assert!(lower <= res && res <= upper);
+            assert_le!(
+                OrdScalarRefImpl::new(lower.as_scalar_ref_impl()),
+                OrdScalarRefImpl::new(res.as_scalar_ref_impl())
+            );
+            assert_le!(
+                OrdScalarRefImpl::new(res.as_scalar_ref_impl()),
+                OrdScalarRefImpl::new(upper.as_scalar_ref_impl())
+            );
         }
     }
 
