@@ -20,6 +20,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
@@ -117,9 +119,9 @@ impl StreamTableScan {
 
     /// Build catalog for backfill state
     /// Schema for `Distribution::UpstreamHashShard`
-    /// | vnode | pk key | backfill_finished |
+    /// | vnode | pk | backfill_finished |
     /// Schema for `Distribution::Single`
-    /// | pk key | backfill_finished |
+    /// | pk | backfill_finished |
     ///
     /// FIXME(kwannoel): Schema for `Distribution::SomeShard` just uses `Distribution::Single.
     /// It has to be supported because `SOURCEs` have `Distribution::SomeShard`.
@@ -130,22 +132,31 @@ impl StreamTableScan {
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let schema = self.base.schema();
+        let upstream_schema = self.base.schema();
 
-        // `vnode` for `UpstreamHashShard`
-        match self.base.distribution() {
+        // Construct distribution key + Add `vnode` for `UpstreamHashShard`
+        let distribution_key = match self.base.distribution() {
             Distribution::UpstreamHashShard(dist_key,_) => {
                 catalog_builder.add_column(&Field::with_name(
                     VirtualNode::RW_TYPE,
                     "vnode",
                 ));
+                let mut mapping = vec![None];
+                for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
+                    mapping[old_pos] = Some(new_pos);
+                }
+                let mapping = ColIndexMapping::new(mapping);
+                mapping.rewrite_dist_key(dist_key).unwrap();
             }
-            Distribution::SomeShard | Distribution::Single => {}
+            Distribution::SomeShard | Distribution::Single => { vec![] }
             Distribution::HashShard(_) | Distribution::Broadcast => unreachable!()
-        }
+        };
 
-        for pos in &self.base.logical_pk {
-            let field = &schema[*pos];
+        for (i, pos) in &self.base.logical_pk.iter().enumerate() {
+            // Add pks, required since distribution key ⊆ pk.
+            catalog_builder.add_order_column(i, OrderType::ascending());
+
+            let field = &upstream_schema[*pos];
             catalog_builder.add_column(field);
         }
 
@@ -156,7 +167,7 @@ impl StreamTableScan {
         ));
 
         catalog_builder
-            .build(vec![], 0)
+            .build(distribution_key, 0)
             .with_id(state.gen_table_id_wrapped())
     }
 }
