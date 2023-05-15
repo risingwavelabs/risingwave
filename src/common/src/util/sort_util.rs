@@ -436,6 +436,7 @@ pub fn cmp_datum(lhs: impl ToDatumRef, rhs: impl ToDatumRef, order_type: OrderTy
         .unwrap_or_else(|| panic!("cannot compare {lhs:?} with {rhs:?}"))
 }
 
+/// Compare two `Datum` iterators with specified order types.
 pub fn partial_cmp_datum_iter(
     lhs: impl IntoIterator<Item = impl ToDatumRef>,
     rhs: impl IntoIterator<Item = impl ToDatumRef>,
@@ -450,6 +451,12 @@ pub fn partial_cmp_datum_iter(
     })
 }
 
+/// Compare two `Datum` iterators with specified order types.
+///
+/// # Panics
+///
+/// Panics if the number of `OrderType`s is smaller than the number of `Datum`s,
+/// or if the data types of `lhs` and `rhs` are not matched.
 pub fn cmp_datum_iter(
     lhs: impl IntoIterator<Item = impl ToDatumRef>,
     rhs: impl IntoIterator<Item = impl ToDatumRef>,
