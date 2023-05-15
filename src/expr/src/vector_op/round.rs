@@ -81,7 +81,7 @@ mod tests {
         do_test("21.666666666666666666666666667", 4, "21.6667");
         do_test("84818.33333333333333333333333", 4, "84818.3333");
         do_test("84818.15", 1, "84818.2");
-        do_test("21.372736", -1, "0");
+        do_test("21.372736", -1, "20");
         // When digit extends past original scale, it should just return original scale.
         // Intuitively, it does not make sense after rounding `0` it becomes `0.000`. Precision
         // should always be less or equal, not more.
