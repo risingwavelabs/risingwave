@@ -190,14 +190,18 @@ impl<'a> TableFunctionOutputIter<'a> {
     }
 
     /// Moves to the next row.
+    ///
+    /// This method is cancellation safe.
     pub async fn next(&mut self) -> Result<()> {
         let Some((indexes, _)) = &self.chunk else {
             return Ok(());
         };
-        self.index += 1;
-        if self.index == indexes.len() {
+        if self.index + 1 == indexes.len() {
+            // note: for cancellation safety, do not mutate self before await.
             self.pop_from_stream().await?;
             self.index = 0;
+        } else {
+            self.index += 1;
         }
         Ok(())
     }
