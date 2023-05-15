@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::Global;
+use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -124,8 +125,8 @@ pub async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: 
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
 async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
-    let mut left = Box::pin(left.execute());
-    let mut right = Box::pin(right.execute());
+    let mut left = pin!(left.execute());
+    let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
     loop {
         let mut right_chunks = vec![];

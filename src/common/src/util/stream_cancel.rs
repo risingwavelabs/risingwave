@@ -19,6 +19,8 @@
 //!
 //! Following is an example of how it works:
 //! ```rust
+//! use std::pin::pin;
+//!
 //! use futures::stream::iter;
 //! use futures::StreamExt;
 //! use risingwave_common::util::stream_cancel::{cancellable_stream, stream_tripwire};
@@ -26,7 +28,7 @@
 //! #[tokio::main]
 //! async fn main() {
 //!     let (trigger, tripwire) = stream_tripwire(|| 5);
-//!     let mut s = Box::pin(cancellable_stream(iter(vec![1i32, 2, 3, 4]), tripwire));
+//!     let mut s = pin!(cancellable_stream(iter(vec![1i32, 2, 3, 4]), tripwire));
 //!     assert_eq!(Some(1), s.next().await);
 //!     assert_eq!(Some(2), s.next().await);
 //!     trigger.abort();
@@ -113,6 +115,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::pin::pin;
+
     use futures::stream::iter;
     use futures::StreamExt;
 
@@ -121,7 +125,7 @@ mod tests {
     #[tokio::test]
     async fn test_cancellable_stream_aborted() {
         let (trigger, tripwire) = stream_tripwire(|| 5);
-        let mut s = Box::pin(cancellable_stream(iter(vec![1i32, 2, 3, 4]), tripwire));
+        let mut s = pin!(cancellable_stream(iter(vec![1i32, 2, 3, 4]), tripwire));
         assert_eq!(Some(1), s.next().await);
         assert_eq!(Some(2), s.next().await);
         trigger.abort();
@@ -133,7 +137,7 @@ mod tests {
     #[tokio::test]
     async fn test_cancellable_stream_not_aborted() {
         let (trigger, tripwire) = stream_tripwire(|| 5);
-        let mut s = Box::pin(cancellable_stream(iter(vec![1, 2, 3, 4]), tripwire));
+        let mut s = pin!(cancellable_stream(iter(vec![1, 2, 3, 4]), tripwire));
         assert_eq!(Some(1), s.next().await);
         assert_eq!(Some(2), s.next().await);
         assert_eq!(Some(3), s.next().await);

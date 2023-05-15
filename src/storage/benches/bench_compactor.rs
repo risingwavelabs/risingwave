@@ -39,7 +39,7 @@ use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
-    SstableStore, SstableWriterOptions, TieredCache,
+    SstableStore, SstableWriterOptions, TieredCache, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -100,7 +100,8 @@ async fn build_table(
             policy: CachePolicy::Fill(CachePriority::High),
         },
     );
-    let mut builder = SstableBuilder::for_test(sstable_object_id, writer, opt);
+    let mut builder =
+        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
     let table_key_len = full_key.user_key.table_key.len();
