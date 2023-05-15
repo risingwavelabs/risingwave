@@ -473,7 +473,7 @@ impl DataType {
             DataType::Struct(struct_type) => {
                 Self::text_to_struct(text, struct_type).map(Scalar::to_scalar_value)
             }
-            DataType::Int256 => todo!(),
+            DataType::Int256 => Self::text_to_int256(text).map(Scalar::to_scalar_value),
         }
     }
 
@@ -506,6 +506,10 @@ impl DataType {
     }
 
     fn text_to_decimal(text: &str) -> Result<Decimal, String> {
+        text.parse().map_err(|err| (format!("{}", err)))
+    }
+
+    fn text_to_int256(text: &str) -> Result<Int256, String> {
         text.parse().map_err(|err| (format!("{}", err)))
     }
 
