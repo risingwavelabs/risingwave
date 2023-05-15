@@ -21,9 +21,6 @@ use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::get_event_stream_request::{
-    Request as SourceRequest, StartSource, ValidateProperties,
-};
 use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
 use risingwave_pb::connector_service::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -67,12 +64,10 @@ impl ConnectorClient {
             .0
             .to_owned()
             .get_event_stream(GetEventStreamRequest {
-                request: Some(SourceRequest::Start(StartSource {
-                    source_id,
-                    source_type: source_type as _,
-                    start_offset: start_offset.unwrap_or_default(),
-                    properties,
-                })),
+                source_id,
+                source_type: source_type as _,
+                start_offset: start_offset.unwrap_or_default(),
+                properties,
             })
             .await
             .inspect_err(|err| {
@@ -92,32 +87,34 @@ impl ConnectorClient {
         source_type: SourceType,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
-    ) -> Result<Streaming<GetEventStreamResponse>> {
-        Ok(self
+    ) -> Result<()> {
+        let response = self
             .0
             .to_owned()
-            .get_event_stream(GetEventStreamRequest {
-                request: Some(SourceRequest::Validate(ValidateProperties {
-                    source_id,
-                    source_type: source_type as _,
-                    properties,
-                    table_schema,
-                })),
+            .validate_source(ValidateSourceRequest {
+                source_id,
+                source_type: source_type as _,
+                properties,
+                table_schema,
             })
             .await
             .inspect_err(|err| {
-                tracing::error!(
-                    "failed to validate source {} properties: {}",
-                    source_id,
-                    err.message()
-                )
+                tracing::error!("failed to validate source#{}: {}", source_id, err.message())
             })?
-            .into_inner())
+            .into_inner();
+
+        response.error.map_or(Ok(()), |err| {
+            Err(RpcError::Internal(anyhow!(format!(
+                "source cannot pass validation: {}",
+                err.error_message
+            ))))
+        })
     }
 
     pub async fn start_sink_stream(
         &self,
         connector_type: String,
+        sink_id: u64,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
         sink_payload_format: SinkPayloadFormat,
@@ -134,6 +131,7 @@ impl ConnectorClient {
                         properties,
                         table_schema,
                     }),
+                    sink_id,
                 })),
             })
             .map_err(|err| RpcError::Internal(anyhow!(err.to_string())))?;

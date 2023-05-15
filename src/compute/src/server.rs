@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
+use risingwave_batch::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::{
@@ -38,6 +38,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -62,8 +63,7 @@ use tokio::task::JoinHandle;
 
 use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::memory_management::{
-    memory_control_policy_from_config, reserve_memory_bytes, storage_memory_config,
-    MIN_COMPUTE_MEMORY_MB,
+    build_memory_control_policy, reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
 };
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
@@ -103,7 +103,11 @@ pub async fn compute_node_serve(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &advertise_addr,
-        opts.parallelism,
+        Property {
+            worker_node_parallelism: opts.parallelism as u64,
+            is_streaming: opts.role.for_streaming(),
+            is_serving: opts.role.for_serving(),
+        },
         &config.meta,
     )
     .await
@@ -116,10 +120,13 @@ pub async fn compute_node_serve(
 
     let (reserved_memory_bytes, non_reserved_memory_bytes) =
         reserve_memory_bytes(opts.total_memory_bytes);
-    let storage_memory_config = storage_memory_config(non_reserved_memory_bytes, &config.storage);
+    let storage_memory_config = storage_memory_config(
+        non_reserved_memory_bytes,
+        embedded_compactor_enabled,
+        &config.storage,
+    );
 
-    let storage_memory_bytes =
-        total_storage_memory_limit_bytes(&storage_memory_config, embedded_compactor_enabled);
+    let storage_memory_bytes = total_storage_memory_limit_bytes(&storage_memory_config);
     let compute_memory_bytes = validate_compute_node_memory_config(
         opts.total_memory_bytes,
         reserved_memory_bytes,
@@ -134,7 +141,15 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
     );
 
-    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
+    let memory_control_policy = build_memory_control_policy(total_memory_bytes).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
@@ -153,6 +168,7 @@ pub async fn compute_node_serve(
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     let batch_task_metrics = Arc::new(BatchTaskMetrics::new(registry.clone()));
+    let batch_executor_metrics = Arc::new(BatchExecutorMetrics::new(registry.clone()));
     let batch_manager_metrics = BatchManagerMetrics::new(registry.clone());
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
@@ -276,15 +292,7 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
     let memory_mgr = GlobalMemoryManager::new(
-        compute_memory_bytes + storage_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         memory_control_policy,
@@ -312,6 +320,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store.clone(),
         batch_task_metrics.clone(),
+        batch_executor_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
         source_metrics.clone(),
@@ -463,19 +472,13 @@ fn validate_compute_node_memory_config(
 
 /// The maximal memory that storage components may use based on the configurations in bytes. Note
 /// that this is the total storage memory for one compute node instead of the whole cluster.
-fn total_storage_memory_limit_bytes(
-    storage_memory_config: &StorageMemoryConfig,
-    embedded_compactor_enabled: bool,
-) -> usize {
+fn total_storage_memory_limit_bytes(storage_memory_config: &StorageMemoryConfig) -> usize {
     let total_storage_memory_mb = storage_memory_config.block_cache_capacity_mb
         + storage_memory_config.meta_cache_capacity_mb
         + storage_memory_config.shared_buffer_capacity_mb
-        + storage_memory_config.file_cache_total_buffer_capacity_mb;
-    if embedded_compactor_enabled {
-        (storage_memory_config.compactor_memory_limit_mb + total_storage_memory_mb) << 20
-    } else {
-        total_storage_memory_mb << 20
-    }
+        + storage_memory_config.file_cache_total_buffer_capacity_mb
+        + storage_memory_config.compactor_memory_limit_mb;
+    total_storage_memory_mb << 20
 }
 
 /// Checks whether an embedded compactor starts with a compute node.

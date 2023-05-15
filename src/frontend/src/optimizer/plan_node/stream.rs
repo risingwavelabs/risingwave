@@ -610,7 +610,7 @@ pub fn to_stream_prost_body(
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
             PbNodeBody::HashAgg(HashAggNode {
-                group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
+                group_key: me.core.group_key.ones().map(|idx| idx as u32).collect(),
                 agg_calls: me
                     .core
                     .agg_calls

@@ -757,7 +757,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.release(handle)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key,value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data && let Some(listener) = &self.listener {
             listener.on_release(key, value);
         }
     }
@@ -819,7 +819,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shard.erase(hash, key)
         };
         // do not deallocate data with holding mutex.
-        if let Some((key,value)) = data && let Some(listener) = &self.listener {
+        if let Some((key, value)) = data && let Some(listener) = &self.listener {
             listener.on_release(key, value);
         }
     }

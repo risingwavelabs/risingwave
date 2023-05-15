@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
 use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -43,7 +44,8 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, CompactionDeleteRanges, HummockError, HummockResult, SstableBuilderOptions,
+    create_monotonic_events_from_compaction_delete_events, CachePolicy, CompactionDeleteRanges,
+    HummockError, HummockResult, SstableBuilderOptions,
 };
 
 const GC_DELETE_KEYS_FOR_FLUSH: bool = false;
@@ -138,7 +140,7 @@ async fn compact_shared_buffer(
     for imm in &payload {
         let data_size = {
             let tombstones = imm.get_delete_range_tombstones();
-            builder.add_tombstone(tombstones);
+            builder.add_delete_events(tombstones);
             // calculate encoded bytes of key var length
             (imm.kv_count() * 8 + imm.size()) as u64
         };
@@ -267,17 +269,17 @@ pub async fn merge_imms_in_memory(
     imms: Vec<ImmutableMemtable>,
     memory_tracker: Option<MemoryTracker>,
 ) -> HummockResult<ImmutableMemtable> {
-    let mut range_tombstone_list = Vec::new();
     let mut kv_count = 0;
     let mut epochs = vec![];
     let mut merged_size = 0;
     let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
-    let mut smallest_table_key = vec![];
+    let mut smallest_table_key = BytesMut::new();
     let mut smallest_empty = true;
-    let mut largest_table_key = vec![];
+    let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
+    let mut builder = CompactionDeleteRangesBuilder::default();
     for imm in imms {
         assert!(
             imm.kv_count() > 0 || imm.has_range_tombstone(),
@@ -293,22 +295,29 @@ pub async fn merge_imms_in_memory(
         epochs.push(imm.min_epoch());
         kv_count += imm.kv_count();
         merged_size += imm.size();
-        range_tombstone_list.extend(imm.get_delete_range_tombstones());
+        builder.add_delete_events(imm.get_delete_range_tombstones());
 
-        if smallest_empty || smallest_table_key.gt(imm.raw_smallest_key()) {
+        if smallest_empty || smallest_table_key.as_ref().gt(imm.raw_smallest_key()) {
             smallest_table_key.clear();
             smallest_table_key.extend_from_slice(imm.raw_smallest_key());
             smallest_empty = false;
         }
-        if largest_table_key.lt(imm.raw_largest_key()) {
-            largest_table_key.clear();
-            largest_table_key.extend_from_slice(imm.raw_largest_key());
+        let imm_raw_largest_key = imm.raw_largest_key();
+        if match (&largest_table_key, imm_raw_largest_key) {
+            (_, Bound::Unbounded) => true,
+            (Bound::Included(x), Bound::Included(y)) | (Bound::Included(x), Bound::Excluded(y)) => {
+                x < y
+            }
+            (Bound::Excluded(x), Bound::Included(y)) | (Bound::Excluded(x), Bound::Excluded(y)) => {
+                x <= y
+            }
+            (Bound::Unbounded, _) => false,
+        } {
+            largest_table_key = imm_raw_largest_key.as_ref().cloned();
         }
 
         imm_iters.push(imm.into_forward_iter());
     }
-    let mut builder = CompactionDeleteRangesBuilder::default();
-    builder.add_tombstone(range_tombstone_list.clone());
     let compaction_delete_ranges = builder.build_for_compaction(GC_DELETE_KEYS_FOR_FLUSH);
     let mut del_iter = compaction_delete_ranges.iter();
     del_iter.rewind();
@@ -325,9 +334,12 @@ pub async fn merge_imms_in_memory(
     }
 
     let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
-    let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
+    let mut pivot = items
+        .first()
+        .map(|((k, _), _)| k.clone())
+        .unwrap_or_default();
     del_iter.earliest_delete_which_can_see_key(
-        &UserKey::new(table_id, TableKey(pivot.as_ref())),
+        UserKey::new(table_id, TableKey(pivot.as_ref())),
         HummockEpoch::MAX,
     );
     let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
@@ -344,7 +356,7 @@ pub async fn merge_imms_in_memory(
             pivot_last_delete_epoch = HummockEpoch::MAX;
             versions = vec![];
             del_iter.earliest_delete_which_can_see_key(
-                &UserKey::new(table_id, TableKey(pivot.as_ref())),
+                UserKey::new(table_id, TableKey(pivot.as_ref())),
                 epoch,
             )
         };
@@ -374,16 +386,19 @@ pub async fn merge_imms_in_memory(
     }
 
     drop(del_iter);
+    let compaction_delete_events = Arc::unwrap_or_clone(compaction_delete_ranges).into_events();
+    let monotonic_tombstone_events =
+        create_monotonic_events_from_compaction_delete_events(compaction_delete_events);
 
     Ok(SharedBufferBatch {
         inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
             epochs,
             merged_payload,
-            smallest_table_key,
+            smallest_table_key.freeze(),
             largest_table_key,
             kv_count,
             merged_imm_ids,
-            range_tombstone_list,
+            monotonic_tombstone_events,
             merged_size,
             memory_tracker,
         )),

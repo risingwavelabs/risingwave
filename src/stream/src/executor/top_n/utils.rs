@@ -67,6 +67,8 @@ pub trait TopNExecutorBase: Send + 'static {
     }
 
     fn evict(&mut self) {}
+    fn update_epoch(&mut self, _epoch: u64) {}
+
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
     /// Handle incoming watermarks
@@ -123,6 +125,7 @@ where
 
         #[for_await]
         for msg in input {
+            self.inner.evict();
             let msg = msg?;
             match msg {
                 Message::Watermark(watermark) => {
@@ -138,7 +141,8 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-                    self.inner.evict();
+
+                    self.inner.update_epoch(barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             };

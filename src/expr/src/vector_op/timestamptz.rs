@@ -17,9 +17,8 @@ use std::str::FromStr;
 
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use num_traits::ToPrimitive;
 use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
-use risingwave_common::types::{Timestamp, F64};
+use risingwave_common::types::{IntoOrdered, Timestamp, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -37,9 +36,9 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
     (elem.0 * 1e6)
-        .round() // TODO(#5576): should round to even
-        .to_i64()
-        .ok_or(ExprError::NumericOutOfRange)
+        .into_ordered()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
 #[function("at_time_zone(timestamp, varchar) -> timestamptz")]

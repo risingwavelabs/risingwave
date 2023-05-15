@@ -47,11 +47,11 @@ impl Task for PubsubReadyTaskCheck {
             .enable_io()
             .build()?;
 
-        let client = async_runtime.block_on(Client::default())?;
+        let client = async_runtime.block_on(Client::new(Default::default()))?;
 
         ctx.wait(|| {
             async_runtime
-                .block_on(client.get_subscriptions(None, None))
+                .block_on(client.get_subscriptions(None))
                 .map_err(|e| anyhow!(e))?;
             Ok(())
         })?;

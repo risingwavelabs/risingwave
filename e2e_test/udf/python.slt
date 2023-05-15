@@ -49,6 +49,20 @@ create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_
 statement ok
 create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
 
+query TTTTT rowsort
+show functions
+----
+array_access varchar[], integer varchar python http://localhost:8815
+extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> python http://localhost:8815
+gcd integer, integer integer python http://localhost:8815
+gcd integer, integer, integer integer python http://localhost:8815
+hex_to_dec varchar numeric python http://localhost:8815
+int_42 (empty) integer python http://localhost:8815
+jsonb_access jsonb, integer jsonb python http://localhost:8815
+jsonb_concat jsonb[] jsonb python http://localhost:8815
+series integer integer python http://localhost:8815
+series2 integer struct<x integer,y varchar> python http://localhost:8815
+
 query I
 select int_42();
 ----
@@ -151,20 +165,22 @@ drop materialized view mv;
 statement ok
 drop table t;
 
-# TODO: drop function without arguments
-
-# # Drop a function but ambiguous.
-# statement error is not unique
-# drop function gcd;
-
 # Drop a function
 statement ok
 drop function int_42();
 
-# Drop a function
+# Drop a function without arguments, but the function name is not unique.
+statement error is not unique
+drop function gcd;
+
+# Drop a function with arguments.
 statement ok
 drop function gcd(int, int);
 
-# Drop a function
+# foo() is different from foo.
+statement error function not found
+drop function gcd();
+
+# Drop a function without arguments. Now the function name is unique.
 statement ok
-drop function gcd(int, int, int);
+drop function gcd;

@@ -16,7 +16,6 @@ use std::fmt::Debug;
 
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::types::num256::Int256Ref;
 use risingwave_expr_macro::function;
 
 #[function("equal(*int, *int) -> boolean")]
@@ -227,47 +226,47 @@ where
     l.map(Into::into) == r.map(Into::into)
 }
 
-#[function("equal(boolean, boolean) -> boolean", batch = "boolarray_eq")]
+#[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
 pub fn boolean_eq(l: bool, r: bool) -> bool {
     l == r
 }
 
-#[function("not_equal(boolean, boolean) -> boolean", batch = "boolarray_ne")]
+#[function("not_equal(boolean, boolean) -> boolean", batch_fn = "boolarray_ne")]
 pub fn boolean_ne(l: bool, r: bool) -> bool {
     l != r
 }
 
 #[function(
     "greater_than_or_equal(boolean, boolean) -> boolean",
-    batch = "boolarray_ge"
+    batch_fn = "boolarray_ge"
 )]
 pub fn boolean_ge(l: bool, r: bool) -> bool {
     l >= r
 }
 
 #[allow(clippy::bool_comparison)]
-#[function("greater_than(boolean, boolean) -> boolean", batch = "boolarray_gt")]
+#[function("greater_than(boolean, boolean) -> boolean", batch_fn = "boolarray_gt")]
 pub fn boolean_gt(l: bool, r: bool) -> bool {
     l > r
 }
 
 #[function(
     "less_than_or_equal(boolean, boolean) -> boolean",
-    batch = "boolarray_le"
+    batch_fn = "boolarray_le"
 )]
 pub fn boolean_le(l: bool, r: bool) -> bool {
     l <= r
 }
 
 #[allow(clippy::bool_comparison)]
-#[function("less_than(boolean, boolean) -> boolean", batch = "boolarray_lt")]
+#[function("less_than(boolean, boolean) -> boolean", batch_fn = "boolarray_lt")]
 pub fn boolean_lt(l: bool, r: bool) -> bool {
     l < r
 }
 
 #[function(
     "is_distinct_from(boolean, boolean) -> boolean",
-    batch = "boolarray_is_distinct_from"
+    batch_fn = "boolarray_is_distinct_from"
 )]
 pub fn boolean_is_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
     l != r
@@ -275,28 +274,31 @@ pub fn boolean_is_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
 
 #[function(
     "is_not_distinct_from(boolean, boolean) -> boolean",
-    batch = "boolarray_is_not_distinct_from"
+    batch_fn = "boolarray_is_not_distinct_from"
 )]
 pub fn boolean_is_not_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
     l == r
 }
 
-#[function("is_true(boolean) -> boolean", batch = "boolarray_is_true")]
+#[function("is_true(boolean) -> boolean", batch_fn = "boolarray_is_true")]
 pub fn is_true(v: Option<bool>) -> bool {
     v == Some(true)
 }
 
-#[function("is_not_true(boolean) -> boolean", batch = "boolarray_is_not_true")]
+#[function("is_not_true(boolean) -> boolean", batch_fn = "boolarray_is_not_true")]
 pub fn is_not_true(v: Option<bool>) -> bool {
     v != Some(true)
 }
 
-#[function("is_false(boolean) -> boolean", batch = "boolarray_is_false")]
+#[function("is_false(boolean) -> boolean", batch_fn = "boolarray_is_false")]
 pub fn is_false(v: Option<bool>) -> bool {
     v == Some(false)
 }
 
-#[function("is_not_false(boolean) -> boolean", batch = "boolarray_is_not_false")]
+#[function(
+    "is_not_false(boolean) -> boolean",
+    batch_fn = "boolarray_is_not_false"
+)]
 pub fn is_not_false(v: Option<bool>) -> bool {
     v != Some(false)
 }
@@ -376,38 +378,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_deci_f() {
-        assert!(general_eq::<_, _, Decimal>(
-            Decimal::from_str("1.1").unwrap(),
-            1.1f32
-        ))
-    }
-
-    #[test]
     fn test_comparison() {
         assert!(general_eq::<Decimal, i32, Decimal>(dec("1.0"), 1));
-        assert!(general_eq::<Decimal, f32, Decimal>(dec("1.0"), 1.0));
         assert!(!general_ne::<Decimal, i32, Decimal>(dec("1.0"), 1));
-        assert!(!general_ne::<Decimal, f32, Decimal>(dec("1.0"), 1.0));
         assert!(!general_gt::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(!general_gt::<Decimal, f32, Decimal>(dec("1.0"), 2.0));
         assert!(general_le::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(general_le::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
         assert!(!general_ge::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(!general_ge::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
         assert!(general_lt::<Decimal, i32, Decimal>(dec("1.0"), 2));
-        assert!(general_lt::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
         assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
             Some(dec("1.0")),
             Some(2)
-        ));
-        assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
-            Some(dec("1.0")),
-            Some(2.0)
-        ));
-        assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
-            Some(dec("1.0")),
-            None
         ));
         assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
             None,
@@ -416,13 +396,6 @@ mod tests {
         assert!(!general_is_distinct_from::<Decimal, i32, Decimal>(
             Some(dec("1.0")),
             Some(1)
-        ));
-        assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
-            Some(dec("1.0")),
-            Some(1.0)
-        ));
-        assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
-            None, None
         ));
         assert!(general_eq::<F32, i32, F64>(1.0.into(), 1));
         assert!(!general_ne::<F32, i32, F64>(1.0.into(), 1));

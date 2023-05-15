@@ -15,9 +15,11 @@
 pub mod collections;
 
 use std::collections::HashSet;
+use std::marker::PhantomData;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
+use rust_decimal::Decimal as RustDecimal;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
@@ -53,11 +55,6 @@ impl EstimateSize for () {
         0
     }
 }
-impl<T: EstimateSize> EstimateSize for Box<T> {
-    fn estimated_heap_size(&self) -> usize {
-        self.as_ref().estimated_size()
-    }
-}
 
 impl<T: EstimateSize> EstimateSize for Option<T> {
     fn estimated_heap_size(&self) -> usize {
@@ -77,6 +74,12 @@ impl EstimateSize for Bytes {
     }
 }
 
+impl EstimateSize for Box<str> {
+    fn estimated_heap_size(&self) -> usize {
+        self.len()
+    }
+}
+
 // FIXME: implement a wrapper structure for `HashSet` that impl `EstimateSize`
 impl<T: EstimateSize> EstimateSize for HashSet<T> {
     fn estimated_heap_size(&self) -> usize {
@@ -86,20 +89,46 @@ impl<T: EstimateSize> EstimateSize for HashSet<T> {
     }
 }
 
+impl<T1: EstimateSize, T2: EstimateSize> EstimateSize for (T1, T2) {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size() + self.1.estimated_heap_size()
+    }
+}
+
 macro_rules! primitive_estimate_size_impl {
     ($($t:ty)*) => ($(
-        impl EstimateSize for $t {
-            fn estimated_heap_size(&self) -> usize { 0 }
-        }
-
-        impl EstimateSize for Vec<$t> {
-            fn estimated_heap_size(&self) -> usize { std::mem::size_of::<$t>() * self.len() }
-        }
-
-        impl EstimateSize for Box<[$t]> {
-            fn estimated_heap_size(&self) -> usize { std::mem::size_of::<$t>() * self.len() }
-        }
+        impl ZeroHeapSize for $t {}
     )*)
 }
 
-primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
+primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 bool }
+
+pub trait ZeroHeapSize {}
+
+impl<T: ZeroHeapSize> EstimateSize for T {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl<T: ZeroHeapSize> EstimateSize for Vec<T> {
+    fn estimated_heap_size(&self) -> usize {
+        std::mem::size_of::<T>() * self.capacity()
+    }
+}
+
+impl<T: ZeroHeapSize> EstimateSize for Box<[T]> {
+    fn estimated_heap_size(&self) -> usize {
+        std::mem::size_of::<T>() * self.len()
+    }
+}
+
+impl<T: ZeroHeapSize, const LEN: usize> EstimateSize for [T; LEN] {
+    fn estimated_heap_size(&self) -> usize {
+        0
+    }
+}
+
+impl ZeroHeapSize for RustDecimal {}
+
+impl<T> ZeroHeapSize for PhantomData<T> {}

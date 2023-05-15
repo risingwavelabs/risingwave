@@ -16,12 +16,12 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
-use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode;
-use risingwave_common::types::num256::Int256;
 use risingwave_common::types::timestamptz::str_with_time_zone_to_timestamptz;
-use risingwave_common::types::{DataType, Date, Datum, Decimal, ScalarImpl, Time, Timestamp};
+use risingwave_common::types::{
+    DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time, Timestamp,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{i64_to_timestamp, i64_to_timestamptz};
 use simd_json::value::StaticNode;
@@ -78,8 +78,8 @@ fn do_parse_simd_json_value(
         }
         DataType::Float64 => simd_json_ensure_float!(v, f64).into(),
         // FIXME: decimal should have more precision than f64
-        DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
-            .ok_or_else(|| anyhow!("expect decimal"))?
+        DataType::Decimal => Decimal::try_from(simd_json_ensure_float!(v, Decimal))
+            .map_err(|_| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
@@ -123,13 +123,11 @@ fn do_parse_simd_json_value(
         DataType::Jsonb => {
             // jsonb will be output as a string in debezium format
             if *format == SourceFormat::DebeziumJson {
-                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_str(ensure_str!(
-                    v, "jsonb"
-                ))?)
+                ScalarImpl::Jsonb(JsonbVal::from_str(ensure_str!(v, "jsonb"))?)
             } else {
                 let v: serde_json::Value = v.clone().try_into()?;
                 #[expect(clippy::disallowed_methods)]
-                ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_serde(v))
+                ScalarImpl::Jsonb(JsonbVal::from_serde(v))
             }
         }
         DataType::Struct(struct_type_info) => {
@@ -147,9 +145,7 @@ fn do_parse_simd_json_value(
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }
-        DataType::List {
-            datatype: item_type,
-        } => {
+        DataType::List(item_type) => {
             if let BorrowedValue::Array(values) = v {
                 let values = values
                     .iter()

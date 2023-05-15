@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -50,19 +52,33 @@ impl TableFunctionExecutor {
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 
-        let mut builder = self
-            .table_function
-            .return_type()
-            .create_array_builder(self.chunk_size);
-        let mut len = 0;
-        for array in self.table_function.eval(&dummy_chunk).await? {
-            len += array.len();
-            builder.append_array(&array);
-        }
-        yield match builder.finish() {
-            ArrayImpl::Struct(s) => DataChunk::from(s),
-            array => DataChunk::new(vec![array.into()], len),
+        let data_chunk_type = {
+            match self.table_function.return_type() {
+                DataType::Struct(s) => s.fields.clone(),
+                other => vec![other],
+            }
         };
+
+        let mut data_chunk_builder = DataChunkBuilder::new(data_chunk_type, self.chunk_size);
+
+        for array in self.table_function.eval(&dummy_chunk).await? {
+            let len = array.len();
+            if len == 0 {
+                continue;
+            }
+            let data_chunk = match array.as_ref() {
+                ArrayImpl::Struct(s) => DataChunk::from(s),
+                _ => DataChunk::new(vec![Column::new(array.clone())], len),
+            };
+
+            for chunk in data_chunk_builder.append_chunk(data_chunk) {
+                yield chunk;
+            }
+        }
+
+        if let Some(chunk) = data_chunk_builder.consume_all() {
+            yield chunk;
+        }
     }
 }
 

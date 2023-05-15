@@ -189,10 +189,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .iter()
             .filter(|monotonic_delete| monotonic_delete.new_epoch != HummockEpoch::MAX)
         {
-            if last_table_id != monotonic_delete.event_key.table_id {
-                last_table_id = monotonic_delete.event_key.table_id;
+            if last_table_id != monotonic_delete.event_key.left_user_key.table_id {
+                last_table_id = monotonic_delete.event_key.left_user_key.table_id;
                 self.table_ids
-                    .insert(monotonic_delete.event_key.table_id.table_id());
+                    .insert(monotonic_delete.event_key.left_user_key.table_id.table_id());
             }
         }
         self.monotonic_deletes.extend(monotonic_deletes);
@@ -319,30 +319,46 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let meta_offset = self.writer.data_len() as u64;
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
             debug_assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
-            if largest_key.is_empty()
+            if monotonic_delete.event_key.is_exclude_left_key {
+                if largest_key.is_empty()
+                    || !KeyComparator::encoded_greater_than_unencoded(
+                        user_key(&largest_key),
+                        &monotonic_delete.event_key.left_user_key,
+                    )
+                {
+                    largest_key = FullKey::from_user_key(
+                        monotonic_delete.event_key.left_user_key.clone(),
+                        HummockEpoch::MIN,
+                    )
+                    .encode();
+                }
+            } else if largest_key.is_empty()
                 || KeyComparator::encoded_less_than_unencoded(
                     user_key(&largest_key),
-                    &monotonic_delete.event_key,
+                    &monotonic_delete.event_key.left_user_key,
                 )
             {
-                // use MAX as epoch because the last monotonic delete must be `HummockEpoch::MAX`,
-                // so we can not include any version of this key.
-                largest_key =
-                    FullKey::from_user_key(monotonic_delete.event_key.clone(), HummockEpoch::MAX)
-                        .encode();
+                // use MAX as epoch because the last monotonic delete must be
+                // `HummockEpoch::MAX`, so we can not include any version of
+                // this key.
+                largest_key = FullKey::from_user_key(
+                    monotonic_delete.event_key.left_user_key.clone(),
+                    HummockEpoch::MAX,
+                )
+                .encode();
                 right_exclusive = true;
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
             if smallest_key.is_empty()
-                || KeyComparator::encoded_greater_than_unencoded(
+                || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),
-                    &monotonic_delete.event_key,
+                    &monotonic_delete.event_key.left_user_key,
                 )
             {
                 smallest_key = FullKey::from_user_key(
-                    monotonic_delete.event_key.clone(),
-                    monotonic_delete.new_epoch,
+                    monotonic_delete.event_key.left_user_key.clone(),
+                    HummockEpoch::MAX,
                 )
                 .encode();
             }
@@ -447,6 +463,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
+            range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",

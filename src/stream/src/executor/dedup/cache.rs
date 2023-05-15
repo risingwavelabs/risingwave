@@ -52,6 +52,11 @@ impl<K: Hash + Eq + EstimateSize> DedupCache<K> {
         self.inner.evict()
     }
 
+    pub fn update_epoch(&mut self, epoch: u64) {
+        // Update the current epoch in `ManagedLruCache`
+        self.inner.update_epoch(epoch)
+    }
+
     /// Clear everything in the cache.
     pub fn clear(&mut self) {
         self.inner.clear()

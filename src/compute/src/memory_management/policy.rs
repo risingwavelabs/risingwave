@@ -15,140 +15,52 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
 use super::{MemoryControl, MemoryControlStats};
 
-/// `FixedProportionPolicy` performs memory control by limiting the memory usage of both batch and
-/// streaming to a fixed proportion.
-pub struct FixedProportionPolicy {
-    /// The proportion of streaming memory to all available memory for computing. This should
-    /// always fall in (0, 1). The proportion of batch memory will be 1
-    /// -`streaming_memory_proportion`.
-    streaming_memory_proportion: f64,
+/// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
+/// assumes that most memory is used by streaming engine and does memory control over LRU watermark
+/// based on jemalloc statistics.
+#[derive(Debug)]
+pub struct JemallocMemoryControl {
+    threshold_stable: usize,
+    threshold_graceful: usize,
+    threshold_aggressive: usize,
 }
 
-impl FixedProportionPolicy {
-    const BATCH_KILL_QUERY_THRESHOLD: f64 = 0.8;
-    pub const CONFIG_STR: &str = "streaming-batch";
-    const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
+impl JemallocMemoryControl {
+    const THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    const THRESHOLD_GRACEFUL: f64 = 0.8;
+    const THRESHOLD_STABLE: f64 = 0.7;
 
-    pub fn new(streaming_memory_proportion: f64) -> Result<Self> {
-        if streaming_memory_proportion <= 0.0 || streaming_memory_proportion >= 1.0 {
-            return Err(anyhow!("streaming memory proportion should fall in (0, 1)").into());
+    pub fn new(total_memory: usize) -> Self {
+        let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
+        let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
+        let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
+        Self {
+            threshold_stable,
+            threshold_graceful,
+            threshold_aggressive,
         }
-        Ok(Self {
-            streaming_memory_proportion,
-        })
     }
 }
 
-impl MemoryControl for FixedProportionPolicy {
+impl MemoryControl for JemallocMemoryControl {
     fn apply(
         &self,
-        total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
+        interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
+        _batch_manager: Arc<BatchManager>,
+        _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
-        let batch_memory_proportion = 1.0 - self.streaming_memory_proportion;
-        let total_batch_memory_bytes = total_compute_memory_bytes as f64 * batch_memory_proportion;
-        let batch_memory_threshold =
-            (total_batch_memory_bytes * Self::BATCH_KILL_QUERY_THRESHOLD) as usize;
-        let total_stream_memory_bytes =
-            total_compute_memory_bytes as f64 * self.streaming_memory_proportion;
-        let stream_memory_threshold_graceful =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
-        let stream_memory_threshold_aggressive =
-            (total_stream_memory_bytes * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE) as usize;
-
-        let jemalloc_allocated_mib =
-            advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
-
-        // Batch memory control
-        //
-        // When the batch memory usage exceeds the threshold, we choose the query that uses the
-        // most memory and kill it.
-
-        let batch_used_memory_bytes = batch_manager.total_mem_usage();
-        if batch_used_memory_bytes > batch_memory_threshold {
-            batch_manager.kill_queries("excessive batch memory usage".to_string());
-        }
-
-        // Streaming memory control
-        //
-        // We calculate the watermark of the LRU cache, which provides hints for streaming executors
-        // on cache eviction.
-
-        let stream_used_memory_bytes = stream_manager.total_mem_usage();
-        let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
-            stream_used_memory_bytes,
-            stream_memory_threshold_graceful,
-            stream_memory_threshold_aggressive,
-            barrier_interval_ms,
-            prev_memory_stats,
+        let (jemalloc_allocated_mib, jemalloc_active_mib) = advance_jemalloc_epoch(
+            prev_memory_stats.jemalloc_allocated_mib,
+            prev_memory_stats.jemalloc_active_mib,
         );
-        set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
-
-        MemoryControlStats {
-            batch_memory_usage: batch_used_memory_bytes,
-            streaming_memory_usage: stream_used_memory_bytes,
-            jemalloc_allocated_mib,
-            lru_watermark_step,
-            lru_watermark_time_ms,
-            lru_physical_now_ms: lru_physical_now,
-        }
-    }
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String {
-        let total_stream_memory_bytes =
-            total_compute_memory_bytes as f64 * self.streaming_memory_proportion;
-        let total_batch_memory_bytes =
-            total_compute_memory_bytes as f64 * (1.0 - self.streaming_memory_proportion);
-        format!(
-            "FixedProportionPolicy: total available streaming memory is {}, total available batch memory is {}",
-            convert(total_stream_memory_bytes),
-            convert(total_batch_memory_bytes)
-        )
-    }
-}
-/// `StreamingOnlyPolicy` only performs memory control on streaming tasks. It differs from
-/// `FixedProportionPolicy` in that it calculates the memory usage based on jemalloc statistics,
-/// which actually contains system usage other than computing tasks. This is the default memory
-/// control policy.
-pub struct StreamingOnlyPolicy;
-
-impl StreamingOnlyPolicy {
-    pub const CONFIG_STR: &str = "streaming-only";
-    const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
-    const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
-}
-
-impl MemoryControl for StreamingOnlyPolicy {
-    fn apply(
-        &self,
-        total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
-        prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
-        watermark_epoch: Arc<AtomicU64>,
-    ) -> MemoryControlStats {
-        let jemalloc_allocated_mib =
-            advance_jemalloc_epoch(prev_memory_stats.jemalloc_allocated_mib);
-        let stream_memory_threshold_graceful =
-            (total_compute_memory_bytes as f64 * Self::STREAM_EVICTION_THRESHOLD_GRACEFUL) as usize;
-        let stream_memory_threshold_aggressive = (total_compute_memory_bytes as f64
-            * Self::STREAM_EVICTION_THRESHOLD_AGGRESSIVE)
-            as usize;
 
         // Streaming memory control
         //
@@ -157,56 +69,61 @@ impl MemoryControl for StreamingOnlyPolicy {
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
             jemalloc_allocated_mib,
-            stream_memory_threshold_graceful,
-            stream_memory_threshold_aggressive,
-            barrier_interval_ms,
+            self.threshold_stable,
+            self.threshold_graceful,
+            self.threshold_aggressive,
+            interval_ms,
             prev_memory_stats,
         );
+
         set_lru_watermark_time_ms(watermark_epoch, lru_watermark_time_ms);
 
         MemoryControlStats {
-            batch_memory_usage: batch_manager.total_mem_usage(),
-            streaming_memory_usage: stream_manager.total_mem_usage(),
             jemalloc_allocated_mib,
+            jemalloc_active_mib,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
         }
     }
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String {
-        format!(
-            "StreamingOnlyPolicy: total available streaming memory is {}",
-            convert(total_compute_memory_bytes as f64)
-        )
-    }
 }
 
-fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
+fn advance_jemalloc_epoch(
+    prev_jemalloc_allocated_mib: usize,
+    prev_jemalloc_active_mib: usize,
+) -> (usize, usize) {
     use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
     let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
-    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-
     if let Err(e) = jemalloc_epoch_mib.advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
-    jemalloc_allocated_mib.read().unwrap_or_else(|e| {
-        tracing::warn!("Jemalloc read allocated failed! {:?}", e);
-        prev_jemalloc_allocated_mib
-    })
+
+    let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
+    let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
+    (
+        jemalloc_allocated_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read allocated failed! {:?}", e);
+            prev_jemalloc_allocated_mib
+        }),
+        jemalloc_active_mib.read().unwrap_or_else(|e| {
+            tracing::warn!("Jemalloc read active failed! {:?}", e);
+            prev_jemalloc_active_mib
+        }),
+    )
 }
 
 fn calculate_lru_watermark(
-    cur_stream_used_memory_bytes: usize,
-    stream_memory_threshold_graceful: usize,
-    stream_memory_threshold_aggressive: usize,
-    barrier_interval_ms: u32,
+    cur_used_memory_bytes: usize,
+    threshold_stable: usize,
+    threshold_graceful: usize,
+    threshold_aggressive: usize,
+    interval_ms: u32,
     prev_memory_stats: MemoryControlStats,
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
     let last_step = prev_memory_stats.lru_watermark_step;
-    let last_stream_used_memory_bytes = prev_memory_stats.streaming_memory_usage;
+    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_mib;
 
     // The watermark calculation works in the following way:
     //
@@ -223,17 +140,20 @@ fn calculate_lru_watermark(
     //     last_step.
     //   - Otherwise, we set the step to last_step * 2.
 
-    let mut step = if cur_stream_used_memory_bytes < stream_memory_threshold_graceful {
-        // Do not evict if the memory usage is lower than `stream_memory_threshold_graceful`
+    let mut step = if cur_used_memory_bytes < threshold_stable {
+        // Do not evict if the memory usage is lower than `threshold_stable`
         0
-    } else if cur_stream_used_memory_bytes < stream_memory_threshold_aggressive {
+    } else if cur_used_memory_bytes < threshold_graceful {
+        // Evict in equal speed of time before `threshold_graceful`
+        1
+    } else if cur_used_memory_bytes < threshold_aggressive {
         // Gracefully evict
-        if last_stream_used_memory_bytes > cur_stream_used_memory_bytes {
+        if last_used_memory_bytes > cur_used_memory_bytes {
             1
         } else {
             last_step + 1
         }
-    } else if last_stream_used_memory_bytes < cur_stream_used_memory_bytes {
+    } else if last_used_memory_bytes < cur_used_memory_bytes {
         // Aggressively evict
         if last_step == 0 {
             2
@@ -245,15 +165,13 @@ fn calculate_lru_watermark(
     };
 
     let physical_now = Epoch::physical_now();
-    if (physical_now - prev_memory_stats.lru_watermark_time_ms) / (barrier_interval_ms as u64)
-        < step
-    {
+    if (physical_now - prev_memory_stats.lru_watermark_time_ms) / (interval_ms as u64) < step {
         // We do not increase the step and watermark here to prevent a too-advanced watermark. The
-        // original condition is `prev_watermark_time_ms + barrier_interval_ms * step > now`.
+        // original condition is `prev_watermark_time_ms + interval_ms * step > now`.
         step = last_step;
         watermark_time_ms = physical_now;
     } else {
-        watermark_time_ms += barrier_interval_ms as u64 * step;
+        watermark_time_ms += interval_ms as u64 * step;
     }
 
     (step, watermark_time_ms, physical_now)

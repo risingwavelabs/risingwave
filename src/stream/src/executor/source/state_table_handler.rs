@@ -16,12 +16,11 @@ use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::JsonbVal;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};

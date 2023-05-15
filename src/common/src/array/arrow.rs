@@ -22,8 +22,7 @@ use itertools::Itertools;
 
 use super::column::Column;
 use super::*;
-use crate::types::num256::Int256;
-use crate::types::struct_type::StructType;
+use crate::types::{Int256, StructType};
 use crate::util::iter_util::ZipEqFast;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
@@ -124,13 +123,11 @@ impl From<&arrow_schema::DataType> for DataType {
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
+            Struct(field) => Self::Struct(Arc::new(StructType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
             })),
-            List(field) => Self::List {
-                datatype: Box::new(field.data_type().into()),
-            },
+            List(field) => Self::List(Box::new(field.data_type().into())),
             Decimal128(_, _) => Self::Decimal,
             Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
@@ -165,7 +162,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
@@ -653,7 +650,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::interval::test_utils::IntervalTestExt;
+    use crate::types::test_utils::IntervalTestExt;
     use crate::{array, empty_array};
 
     #[test]

@@ -29,7 +29,7 @@ pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>, Cow<'static, str>> {
 }
 
 // Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
-fn parse_bytes_hex(s: &str) -> Result<Vec<u8>, Cow<'static, str>> {
+pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>, Cow<'static, str>> {
     // Can't use `hex::decode` here, as it doesn't tolerate whitespace
     // between encoded bytes.
 
@@ -57,7 +57,7 @@ fn parse_bytes_hex(s: &str) -> Result<Vec<u8>, Cow<'static, str>> {
 }
 
 // Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
-fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>, Cow<'static, str>> {
+pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>, Cow<'static, str>> {
     // Bytes are interpreted literally, save for the special escape sequences
     // "\\", which represents a single backslash, and "\NNN", where each N
     // is an octal digit, which represents the byte whose octal value is NNN.

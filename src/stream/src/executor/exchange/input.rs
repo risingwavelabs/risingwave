@@ -22,13 +22,12 @@ use futures_async_stream::try_stream;
 use pin_project::pin_project;
 use risingwave_common::bail;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
-use risingwave_pb::task_service::GetStreamResponse;
+use risingwave_pb::task_service::{permits, GetStreamResponse};
 use risingwave_rpc_client::ComputeClientPool;
 
 use super::permit::Receiver;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::exchange::permit::Permits;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::*;
 use crate::task::{FragmentId, SharedContext, UpDownActorIds, UpDownFragmentIds};
@@ -186,11 +185,24 @@ impl RemoteInput {
                     };
                     rr += 1;
 
-                    // Batch the permits we received to reduce the backward `AddPermits` messages.
-                    batched_permits_accumulated += permits;
-                    if batched_permits_accumulated >= batched_permits_limit as Permits {
+                    if let Some(add_back_permits) = match permits.unwrap().value {
+                        // For records, batch the permits we received to reduce the backward
+                        // `AddPermits` messages.
+                        Some(permits::Value::Record(p)) => {
+                            batched_permits_accumulated += p;
+                            if batched_permits_accumulated >= batched_permits_limit as u32 {
+                                let permits = std::mem::take(&mut batched_permits_accumulated);
+                                Some(permits::Value::Record(permits))
+                            } else {
+                                None
+                            }
+                        }
+                        // For barriers, always send it back immediately.
+                        Some(permits::Value::Barrier(p)) => Some(permits::Value::Barrier(p)),
+                        None => None,
+                    } {
                         permits_tx
-                            .send(std::mem::take(&mut batched_permits_accumulated))
+                            .send(add_back_permits)
                             .context("RemoteInput backward permits channel closed.")?;
                     }
 

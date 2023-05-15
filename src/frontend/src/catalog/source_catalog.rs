@@ -18,7 +18,7 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
-use super::{ColumnId, OwnedByUserCatalog, SourceId};
+use super::{ColumnId, ConnectionId, OwnedByUserCatalog, SourceId};
 use crate::catalog::TableId;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -39,6 +39,7 @@ pub struct SourceCatalog {
     pub watermark_descs: Vec<WatermarkDesc>,
     pub associated_table_id: Option<TableId>,
     pub definition: String,
+    pub connection_id: Option<ConnectionId>,
 }
 
 impl SourceCatalog {
@@ -74,6 +75,8 @@ impl From<&PbSource> for SourceCatalog {
                 OptionalAssociatedTableId::AssociatedTableId(id) => id,
             });
 
+        let connection_id = prost.connection_id;
+
         Self {
             id,
             name,
@@ -87,6 +90,7 @@ impl From<&PbSource> for SourceCatalog {
             watermark_descs,
             associated_table_id: associated_table_id.map(|x| x.into()),
             definition: prost.definition.clone(),
+            connection_id,
         }
     }
 }

@@ -20,6 +20,7 @@ use std::time::Duration;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
@@ -284,11 +285,9 @@ where
 {
     let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = vec![
+        cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
-            .await,
-        cluster_manager
-            .list_worker_node(WorkerType::Compactor, None)
+            .list_worker_node(WorkerType::Compactor, Some(Running))
             .await,
     ]
     .concat();

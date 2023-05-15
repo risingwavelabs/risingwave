@@ -17,7 +17,8 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::system_param::is_mutable;
+use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 
 use super::RwPgResponse;
@@ -145,7 +146,11 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
     let rows = params
         .to_kv()
         .into_iter()
-        .map(|(k, v)| Row::new(vec![Some(k.into()), Some(v.into())]))
+        .map(|(k, v)| {
+            let is_mutable_bytes =
+                ScalarRefImpl::Bool(is_mutable(&k).unwrap()).encode_to_text(&DataType::Boolean);
+            Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
+        })
         .collect_vec();
 
     Ok(RwPgResponse::new_for_stream(
@@ -162,6 +167,11 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
                 "Value".to_string(),
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Mutable".to_string(),
+                DataType::Boolean.to_oid(),
+                DataType::Boolean.type_len(),
             ),
         ],
     ))

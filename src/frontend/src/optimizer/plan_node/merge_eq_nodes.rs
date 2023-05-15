@@ -30,7 +30,7 @@ impl Semantics<PlanRef> for PlanRef {
 }
 
 impl PlanRef {
-    pub fn merge_eq_nodes<V: Hash + Eq>(self) -> PlanRef
+    pub fn common_subplan_sharing<V: Hash + Eq>(self) -> PlanRef
     where
         PlanRef: Semantics<V>,
     {

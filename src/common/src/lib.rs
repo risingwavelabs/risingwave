@@ -34,6 +34,8 @@
 #![allow(incomplete_features)]
 #![feature(const_option_ext)]
 #![feature(iterator_try_collect)]
+#![feature(round_ties_even)]
+#![feature(iter_order_by)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -51,12 +53,14 @@ pub mod constants;
 pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
+pub mod memory;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
 
+pub mod metrics;
 pub mod test_utils;
 pub mod types;
 

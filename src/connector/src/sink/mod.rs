@@ -27,8 +27,7 @@ use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
@@ -83,6 +82,28 @@ pub enum SinkState {
 
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
+#[derive(Debug)]
+pub struct BlockHoleSink;
+
+#[async_trait]
+impl Sink for BlockHoleSink {
+    async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
+        Ok(())
+    }
+
+    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
+        Ok(())
+    }
+
+    async fn commit(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn abort(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
 impl SinkConfig {
     pub fn from_hashmap(mut properties: HashMap<String, String>) -> Result<Self> {
         const CONNECTOR_TYPE_KEY: &str = "connector";
@@ -117,12 +138,28 @@ impl SinkConfig {
 
 #[derive(Debug)]
 pub enum SinkImpl {
-    Redis(Box<RedisSink>),
-    Kafka(Box<KafkaSink<true>>),
-    UpsertKafka(Box<KafkaSink<false>>),
-    Remote(Box<RemoteSink<true>>),
-    UpsertRemote(Box<RemoteSink<false>>),
-    Blackhole,
+    Redis(RedisSink),
+    Kafka(KafkaSink<true>),
+    UpsertKafka(KafkaSink<false>),
+    Remote(RemoteSink<true>),
+    UpsertRemote(RemoteSink<false>),
+    BlackHole(BlockHoleSink),
+}
+
+#[macro_export]
+macro_rules! dispatch_sink {
+    ($impl:expr, $sink:ident, $body:tt) => {{
+        use $crate::sink::SinkImpl;
+
+        match $impl {
+            SinkImpl::Redis($sink) => $body,
+            SinkImpl::Kafka($sink) => $body,
+            SinkImpl::UpsertKafka($sink) => $body,
+            SinkImpl::Remote($sink) => $body,
+            SinkImpl::UpsertRemote($sink) => $body,
+            SinkImpl::BlackHole($sink) => $body,
+        }
+    }};
 }
 
 impl SinkImpl {
@@ -132,36 +169,41 @@ impl SinkImpl {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
         sink_type: SinkType,
+        sink_id: u64,
     ) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
             SinkConfig::Kafka(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only Kafka sink
-                    SinkImpl::Kafka(Box::new(
-                        KafkaSink::<true>::new(*cfg, schema, pk_indices).await?,
-                    ))
+                    SinkImpl::Kafka(KafkaSink::<true>::new(*cfg, schema, pk_indices).await?)
                 } else {
                     // Upsert Kafka sink
-                    SinkImpl::UpsertKafka(Box::new(
-                        KafkaSink::<false>::new(*cfg, schema, pk_indices).await?,
-                    ))
+                    SinkImpl::UpsertKafka(KafkaSink::<false>::new(*cfg, schema, pk_indices).await?)
                 }
             }
             SinkConfig::Remote(cfg) => {
                 if sink_type.is_append_only() {
                     // Append-only remote sink
-                    SinkImpl::Remote(Box::new(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
-                    ))
+                    SinkImpl::Remote(
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
+                            .await?,
+                    )
                 } else {
                     // Upsert remote sink
-                    SinkImpl::UpsertRemote(Box::new(
-                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
-                    ))
+                    SinkImpl::UpsertRemote(
+                        RemoteSink::<false>::new(
+                            cfg,
+                            schema,
+                            pk_indices,
+                            connector_params,
+                            sink_id,
+                        )
+                        .await?,
+                    )
                 }
             }
-            SinkConfig::BlackHole => SinkImpl::Blackhole,
+            SinkConfig::BlackHole => SinkImpl::BlackHole(BlockHoleSink),
         })
     }
 
@@ -189,49 +231,6 @@ impl SinkImpl {
             SinkConfig::BlackHole => Ok(()),
         }
     }
-}
-
-macro_rules! impl_sink {
-    ($($variant_name:ident),*) => {
-        #[async_trait]
-        impl Sink for SinkImpl {
-            async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.write_batch(chunk).await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.begin_epoch(epoch).await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn commit(&mut self) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.commit().await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-
-            async fn abort(&mut self) -> Result<()> {
-                match self {
-                    $( SinkImpl::$variant_name(inner) => inner.abort().await, )*
-                    SinkImpl::Blackhole => Ok(()),
-                }
-            }
-        }
-    }
-}
-
-impl_sink! {
-    Redis,
-    Kafka,
-    UpsertKafka,
-    Remote,
-    UpsertRemote
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -328,10 +327,11 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
+            let elems = list_ref.iter_elems_ref();
+            let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in list_ref.values_ref() {
+            for sub_datum_ref in elems {
                 let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
@@ -339,7 +339,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
                 st.fields
                     .iter()
                     .zip_eq_fast(st.field_names.iter())

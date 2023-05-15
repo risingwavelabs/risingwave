@@ -16,11 +16,10 @@
 
 use std::sync::Arc;
 
+use risingwave_pb::task_service::permits;
 use tokio::sync::{mpsc, Semaphore};
 
 use crate::executor::Message;
-
-pub type Permits = u32;
 
 /// Message with its required permits.
 ///
@@ -29,15 +28,24 @@ pub type Permits = u32;
 /// `permits` back verbatim, in case the version of the upstream and the downstream are different.
 pub struct MessageWithPermits {
     pub message: Message,
-    pub permits: Permits,
+    pub permits: Option<permits::Value>,
 }
 
-/// Create a channel for the exchange service
-pub fn channel(initial_permits: usize, batched_permits: usize) -> (Sender, Receiver) {
+/// Create a channel for the exchange service.
+pub fn channel(
+    initial_permits: usize,
+    batched_permits: usize,
+    concurrent_barriers: usize,
+) -> (Sender, Receiver) {
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
-    let permits = Arc::new(Semaphore::new(initial_permits));
+
+    let records = Semaphore::new(initial_permits);
+    let barriers = Semaphore::new(concurrent_barriers);
+    let permits = Arc::new(Permits { records, barriers });
+
     let max_chunk_permits: usize = initial_permits - batched_permits;
+
     (
         Sender {
             tx,
@@ -49,26 +57,38 @@ pub fn channel(initial_permits: usize, batched_permits: usize) -> (Sender, Recei
 }
 
 pub fn channel_for_test() -> (Sender, Receiver) {
-    // Use an unbounded channel since we manage the permits manually.
-    let (tx, rx) = mpsc::unbounded_channel();
-    const INITIAL_PERMITS: usize = 8192;
-    const BATCHED_PERMITS: usize = 1024;
-    let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
-    let max_chunk_permits: usize = INITIAL_PERMITS - BATCHED_PERMITS;
-    (
-        Sender {
-            tx,
-            permits: permits.clone(),
-            max_chunk_permits,
-        },
-        Receiver { rx, permits },
-    )
+    const INITIAL_PERMITS: usize = (u32::MAX / 2) as _;
+    const BATCHED_PERMITS: usize = 1;
+    const CONCURRENT_BARRIERS: usize = (u32::MAX / 2) as _;
+
+    channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
+}
+
+/// Semaphore-based permits to control the back-pressure.
+///
+/// The number of messages in the exchange channel is limited by these semaphores.
+pub struct Permits {
+    /// The permits for records in chunks.
+    records: Semaphore,
+    /// The permits for barriers.
+    barriers: Semaphore,
+}
+
+impl Permits {
+    /// Add permits back to the semaphores.
+    pub fn add_permits(&self, permits: permits::Value) {
+        match permits {
+            permits::Value::Record(p) => self.records.add_permits(p as usize),
+            permits::Value::Barrier(p) => self.barriers.add_permits(p as usize),
+        }
+    }
 }
 
 /// The sender of the exchange service with permit-based back-pressure.
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,
-    permits: Arc<Semaphore>,
+    permits: Arc<Permits>,
+
     /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only
     /// acquire these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with
     /// batching.
@@ -80,19 +100,27 @@ impl Sender {
     ///
     /// Returns error if the receive half of the channel is closed, including the message passed.
     pub async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
+        // The semaphores should never be closed.
         let permits = match &message {
             Message::Chunk(c) => {
-                let p = c.cardinality().clamp(1, self.max_chunk_permits);
-                if p == self.max_chunk_permits {
+                let card = c.cardinality().clamp(1, self.max_chunk_permits);
+                if card == self.max_chunk_permits {
                     tracing::warn!(cardinality = c.cardinality(), "large chunk in exchange")
                 }
-                p
+                self.permits
+                    .records
+                    .acquire_many(card as _)
+                    .await
+                    .unwrap()
+                    .forget();
+                Some(permits::Value::Record(card as _))
             }
-            Message::Barrier(_) | Message::Watermark(_) => 0,
-        } as Permits;
-
-        // The semaphore should never be closed.
-        self.permits.acquire_many(permits).await.unwrap().forget();
+            Message::Barrier(_) => {
+                self.permits.barriers.acquire().await.unwrap().forget();
+                Some(permits::Value::Barrier(1))
+            }
+            Message::Watermark(_) => None,
+        };
 
         self.tx
             .send(MessageWithPermits { message, permits })
@@ -103,7 +131,7 @@ impl Sender {
 /// The receiver of the exchange service with permit-based back-pressure.
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
-    permits: Arc<Semaphore>,
+    permits: Arc<Permits>,
 }
 
 impl Receiver {
@@ -113,7 +141,11 @@ impl Receiver {
     /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
         let MessageWithPermits { message, permits } = self.recv_raw().await?;
-        self.permits.add_permits(permits as usize);
+
+        if let Some(permits) = permits {
+            self.permits.add_permits(permits);
+        }
+
         Some(message)
     }
 
@@ -123,7 +155,11 @@ impl Receiver {
     /// Returns error if the channel is currently empty.
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
         let MessageWithPermits { message, permits } = self.rx.try_recv()?;
-        self.permits.add_permits(permits as usize);
+
+        if let Some(permits) = permits {
+            self.permits.add_permits(permits);
+        }
+
         Ok(message)
     }
 
@@ -136,8 +172,8 @@ impl Receiver {
         self.rx.recv().await
     }
 
-    /// Get a reference to the `permits` semaphore.
-    pub fn permits(&self) -> Arc<Semaphore> {
+    /// Get a reference to the inner [`Permits`] to manually add permits.
+    pub fn permits(&self) -> Arc<Permits> {
         self.permits.clone()
     }
 }

@@ -107,8 +107,8 @@ impl JsonParser {
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        if let BorrowedValue::Array(ref objects) = value  && matches!(op, Op::Insert) {
-             at_least_one_ok(
+        if let BorrowedValue::Array(ref objects) = value && matches!(op, Op::Insert) {
+            at_least_one_ok(
                 objects
                     .iter()
                     .map(|obj| Self::parse_single_value(obj, &mut writer))
@@ -119,13 +119,10 @@ impl JsonParser {
                 simd_json_parse_value(
                     &SourceFormat::Json,
                     &desc.data_type,
-                    json_object_smart_get_value(&value,desc.name.as_str().into())
+                    json_object_smart_get_value(&value, desc.name.as_str().into()),
                 )
                 .map_err(|e| {
-                    tracing::error!(
-                        "failed to process value: {}",
-                        e
-                    );
+                    tracing::error!("failed to process value: {}", e);
                     e.into()
                 })
             };

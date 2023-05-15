@@ -19,7 +19,7 @@ use multimap::MultiMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{BoxedExpression, ExprContext, CONTEXT};
+use risingwave_expr::expr::BoxedExpression;
 
 use super::*;
 
@@ -115,7 +115,6 @@ impl Inner {
     async fn map_filter_chunk(
         &self,
         chunk: StreamChunk,
-        context: ExprContext,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
             chunk.compact()
@@ -126,15 +125,11 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = CONTEXT
-                .scope(
-                    context.clone(),
-                    expr.eval_infallible(&data_chunk, |err| {
-                        self.ctx.on_compute_error(err, &self.info.identity)
-                    }),
-                )
+            let evaluated_expr = expr
+                .eval_infallible(&data_chunk, |err| {
+                    self.ctx.on_compute_error(err, &self.info.identity)
+                })
                 .await;
-
             let new_column = Column::new(evaluated_expr);
             projected_columns.push(new_column);
         }
@@ -175,13 +170,8 @@ impl Inner {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(self, input: BoxedExecutor) {
-        let mut input = input.execute();
-        let first_barrier = expect_first_barrier(&mut input).await?;
-        let mut context = ExprContext::new(first_barrier.get_curr_epoch());
-        yield Message::Barrier(first_barrier);
-
         #[for_await]
-        for msg in input {
+        for msg in input.execute() {
             let msg = msg?;
             match msg {
                 Message::Watermark(w) => {
@@ -190,16 +180,11 @@ impl Inner {
                         yield Message::Watermark(watermark)
                     }
                 }
-                Message::Chunk(chunk) => {
-                    match self.map_filter_chunk(chunk, context.clone()).await? {
-                        Some(new_chunk) => yield Message::Chunk(new_chunk),
-                        None => continue,
-                    }
-                }
-                Message::Barrier(barrier) => {
-                    context = ExprContext::new(barrier.get_curr_epoch());
-                    yield Message::Barrier(barrier);
-                }
+                Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
+                    Some(new_chunk) => yield Message::Chunk(new_chunk),
+                    None => continue,
+                },
+                m => yield m,
             }
         }
     }

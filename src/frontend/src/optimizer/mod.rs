@@ -274,12 +274,6 @@ impl PlanRoot {
         let mut plan = self.gen_stream_plan()?;
 
         plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Merge StreamProject",
             vec![StreamProjectMergeRule::create()],
             ApplyOrder::BottomUp,
@@ -390,6 +384,7 @@ impl PlanRoot {
     #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         &mut self,
+        context: OptimizerContextRef,
         table_name: String,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -455,6 +450,8 @@ impl PlanRoot {
             }
             RequiredDist::ShardByKey(bitset)
         };
+
+        let stream_plan = inline_session_timezone_in_exprs(context, stream_plan)?;
 
         StreamMaterialize::create_for_table(
             stream_plan,

@@ -354,9 +354,9 @@ where
                 .await
                 .map_err(|err| PsqlError::QueryError(err))?;
 
-            if let Some(notice) = res.get_notice() {
+            for notice in res.get_notices() {
                 self.stream
-                    .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+                    .write_no_flush(&BeMessage::NoticeResponse(notice))?;
             }
 
             if res.is_query() {
