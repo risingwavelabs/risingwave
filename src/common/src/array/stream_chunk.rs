@@ -222,6 +222,10 @@ impl StreamChunk {
         self.data.visibility()
     }
 
+    pub fn vis(&self) -> &Vis {
+        self.data.vis()
+    }
+
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
         use comfy_table::{Cell, CellAlignment, Table};

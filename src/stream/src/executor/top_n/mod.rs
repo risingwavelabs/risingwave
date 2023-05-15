@@ -24,6 +24,7 @@ use top_n_state::ManagedTopNState;
 // `TopN` variants
 mod group_top_n;
 mod group_top_n_appendonly;
+mod group_top_n_eowc;
 mod top_n_appendonly;
 mod top_n_plain;
 
