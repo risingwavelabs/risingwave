@@ -180,14 +180,15 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
+    fn flush(&mut self, dedup_table: &mut StateTable<S>, actor_id: u32) {
         // TODO(rc): now we flush the table in `dedup` method.
         // WARN: if you want to change to batching the write to table. please remember to change
         // `self.cache.evict()` too.
+        let table_id_str = dedup_table.table_id().to_string();
         self.metrics
             .agg_distinct_cached_entry_count
-            .with_label_values(&[&table_id_str, &actor_id_str])
-            .set(self.cache.len());
+            .with_label_values(&[&table_id_str, &actor_id.to_string()])
+            .set(self.cache.len() as i64);
         self.cache.evict();
     }
 }
@@ -277,10 +278,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub fn flush(
         &mut self,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
+        actor_id: u32,
     ) -> StreamExecutorResult<()> {
         for (distinct_col, (_, deduplicater)) in &mut self.deduplicaters {
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
-            deduplicater.flush(dedup_table);
+            deduplicater.flush(dedup_table, actor_id);
         }
         Ok(())
     }
@@ -422,14 +424,7 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(
-                &ops,
-                &columns,
-                visibilities,
-                &mut dedup_tables,
-                None,
-                "".to_string(),
-            )
+            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None, 0)
             .await
             .unwrap();
         assert_eq!(
@@ -449,7 +444,7 @@ mod tests {
             vec![true, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater.flush(&mut dedup_tables, 0).unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -470,14 +465,7 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(
-                &ops,
-                &columns,
-                visibilities,
-                &mut dedup_tables,
-                None,
-                "".to_string(),
-            )
+            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None, 0)
             .await
             .unwrap();
         assert_eq!(
@@ -497,7 +485,7 @@ mod tests {
             vec![false, false, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater.flush(&mut dedup_tables, 0).unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -525,14 +513,7 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(
-                &ops,
-                &columns,
-                visibilities,
-                &mut dedup_tables,
-                None,
-                "".to_string(),
-            )
+            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None, 0)
             .await
             .unwrap();
         assert_eq!(
@@ -567,7 +548,7 @@ mod tests {
             ]
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater.flush(&mut dedup_tables, 0).unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -629,7 +610,7 @@ mod tests {
                 visibilities,
                 &mut dedup_tables,
                 Some(&group_key),
-                "".to_string(),
+                0,
             )
             .await
             .unwrap();
@@ -646,7 +627,7 @@ mod tests {
             vec![true, true, false, false, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater.flush(&mut dedup_tables, 0).unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -671,7 +652,7 @@ mod tests {
                 visibilities,
                 &mut dedup_tables,
                 Some(&group_key),
-                "".to_string(),
+                0,
             )
             .await
             .unwrap();
@@ -698,7 +679,7 @@ mod tests {
             ]
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater.flush(&mut dedup_tables, 0).unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
