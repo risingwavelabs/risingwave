@@ -624,7 +624,7 @@ mod tests {
 
         insta::assert_snapshot!(
             executor_snapshot(
-                Box::new(async || create_executor(calls.clone(), store.clone()).await),
+                async || create_executor(calls.clone(), store.clone()).await,
                 r###"
 - barrier
 - !chunk |-
