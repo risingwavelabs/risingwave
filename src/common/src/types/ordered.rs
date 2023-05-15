@@ -126,7 +126,7 @@ impl Deref for OrdDatum {
     }
 }
 
-macro_rules! gen_new_and_convert {
+macro_rules! gen_impl_and_convert {
     ($( $inner:ident ),*) => {
         paste! {
             $(
@@ -155,27 +155,20 @@ macro_rules! gen_new_and_convert {
                         wrapper.inner
                     }
                 }
+
+                impl PartialOrd for [<Ord $inner>] {
+                    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                        self.inner.default_partial_cmp(&other.inner)
+                    }
+                }
+
+                impl Ord for [<Ord $inner>] {
+                    fn cmp(&self, other: &Self) -> Ordering {
+                        self.inner.default_cmp(&other.inner)
+                    }
+                }
             )*
         }
     };
 }
-gen_new_and_convert!(ScalarImpl, Datum);
-
-macro_rules! gen_ord {
-    ($($wrapper:ty),*) => {
-        $(
-            impl PartialOrd for $wrapper {
-                fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                    self.inner.default_partial_cmp(&other.inner)
-                }
-            }
-
-            impl Ord for $wrapper {
-                fn cmp(&self, other: &Self) -> Ordering {
-                    self.inner.default_cmp(&other.inner)
-                }
-            }
-        )*
-    };
-}
-gen_ord!(OrdScalarImpl, OrdDatum);
+gen_impl_and_convert!(ScalarImpl, Datum);
