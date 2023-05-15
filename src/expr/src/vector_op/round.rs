@@ -19,7 +19,10 @@ use risingwave_expr_macro::function;
 pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     let digits = digits.into();
     if digits < 0 {
-        Decimal::zero()
+        let multiply = 10_i32.pow(digits.unsigned_abs()) as f64;
+        let float_repr: f64 = input.try_into().unwrap();
+        let res = (float_repr / multiply).round() * multiply;
+        Decimal::try_from(res).unwrap()
     } else {
         // rust_decimal can only handle up to 28 digits of scale
         input.round_dp_ties_away(std::cmp::min(digits as u32, 28))
