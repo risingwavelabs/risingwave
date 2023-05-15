@@ -68,7 +68,7 @@ pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
-pub use self::ordered::{OrdDatum, OrdDatumRef, OrdScalarImpl, OrdScalarRefImpl};
+pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;

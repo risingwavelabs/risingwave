@@ -22,16 +22,32 @@ use risingwave_common_proc_macro::EstimateSize;
 use crate::estimate_size::EstimateSize;
 use crate::for_all_scalar_variants;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
-use crate::util::sort_util::{partial_cmp_datum, OrderType};
+use crate::util::sort_util::{cmp_datum, partial_cmp_datum, OrderType};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EstimateSize)]
 pub struct OrdScalarImpl {
     inner: ScalarImpl,
 }
 
+impl OrdScalarImpl {
+    pub fn as_scalar_ref_impl(&self) -> OrdScalarRefImpl<'_> {
+        OrdScalarRefImpl {
+            inner: self.inner.as_scalar_ref_impl(),
+        }
+    }
+}
+
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct OrdScalarRefImpl<'a> {
     inner: ScalarRefImpl<'a>,
+}
+
+impl<'a> OrdScalarRefImpl<'a> {
+    pub fn into_scalar_impl(self) -> OrdScalarImpl {
+        OrdScalarImpl {
+            inner: self.inner.into_scalar_impl(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, EstimateSize)]
@@ -164,3 +180,61 @@ gen_ord!(
     OrdDatum,
     OrdDatumRef<'_>
 );
+
+pub trait DefaultPartialOrd {
+    fn default_partial_cmp(&self, other: &Self) -> Option<Ordering>;
+}
+
+pub trait DefaultOrd: DefaultPartialOrd {
+    fn default_cmp(&self, other: &Self) -> Ordering;
+}
+
+impl DefaultPartialOrd for ScalarImpl {
+    fn default_partial_cmp(&self, other: &ScalarImpl) -> Option<Ordering> {
+        self.as_scalar_ref_impl()
+            .default_partial_cmp(&other.as_scalar_ref_impl())
+    }
+}
+
+impl DefaultOrd for ScalarImpl {
+    fn default_cmp(&self, other: &ScalarImpl) -> Ordering {
+        self.as_scalar_ref_impl()
+            .default_cmp(&other.as_scalar_ref_impl())
+    }
+}
+
+impl DefaultPartialOrd for ScalarRefImpl<'_> {
+    fn default_partial_cmp(&self, other: &ScalarRefImpl<'_>) -> Option<Ordering> {
+        OrdScalarRefImpl::new(*self).partial_cmp(&OrdScalarRefImpl::new(*other))
+    }
+}
+
+impl DefaultOrd for ScalarRefImpl<'_> {
+    fn default_cmp(&self, other: &ScalarRefImpl<'_>) -> Ordering {
+        OrdScalarRefImpl::new(*self).cmp(&OrdScalarRefImpl::new(*other))
+    }
+}
+
+impl DefaultPartialOrd for Datum {
+    fn default_partial_cmp(&self, other: &Datum) -> Option<Ordering> {
+        partial_cmp_datum(self, other, OrderType::default())
+    }
+}
+
+impl DefaultOrd for Datum {
+    fn default_cmp(&self, other: &Datum) -> Ordering {
+        cmp_datum(self, other, OrderType::default())
+    }
+}
+
+impl DefaultPartialOrd for DatumRef<'_> {
+    fn default_partial_cmp(&self, other: &DatumRef<'_>) -> Option<Ordering> {
+        partial_cmp_datum(*self, *other, OrderType::default())
+    }
+}
+
+impl DefaultOrd for DatumRef<'_> {
+    fn default_cmp(&self, other: &DatumRef<'_>) -> Ordering {
+        cmp_datum(*self, *other, OrderType::default())
+    }
+}
