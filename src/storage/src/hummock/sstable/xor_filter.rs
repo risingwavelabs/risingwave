@@ -73,7 +73,8 @@ impl FilterBuilder for Xor16FilterBuilder {
             .iter()
             .for_each(|x| buf.put_u16_le(*x));
         // We add an extra byte so we can distinguish bloom filter and xor filter by the last
-        // byte(255 indicates a xor16 filter and others indicate a bloom filter).
+        // byte(255 indicates a xor16 filter, 254 indicates a xor8 filter and others indicate a
+        // bloom filter).
         buf.put_u8(FOOTER_XOR16);
         buf
     }
@@ -97,7 +98,7 @@ impl FilterBuilder for Xor8FilterBuilder {
         buf.put_u64_le(xor_filter.seed);
         buf.put_u32_le(xor_filter.block_length as u32);
         buf.put_slice(xor_filter.fingerprints.as_ref());
-        // Add footer to tell which kind of filter.
+        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
         buf.put_u8(FOOTER_XOR8);
         buf
     }
