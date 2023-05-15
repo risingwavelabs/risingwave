@@ -304,7 +304,6 @@ mod test {
     use risingwave_common::error;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
-    use serde::__private::from_utf8_lossy;
     use url::Url;
 
     use super::{
@@ -657,6 +656,9 @@ mod test {
             .open(e2e_file_path("avro_bin.1"))
             .unwrap();
         file.write_all(encoded.as_slice()).unwrap();
-        println!("encoded = {:?}", from_utf8_lossy(encoded.as_slice()));
+        println!(
+            "encoded = {:?}",
+            String::from_utf8_lossy(encoded.as_slice())
+        );
     }
 }

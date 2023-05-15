@@ -6084,6 +6084,7 @@ dependencies = [
  "ctor",
  "dyn-clone",
  "either",
+ "futures-async-stream",
  "futures-util",
  "hex",
  "itertools",

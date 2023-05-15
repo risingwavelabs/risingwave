@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 echo "--- Download artifacts"
-buildkite-agent artifact download risingwave_simulation .
+download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 export RUST_LOG=info

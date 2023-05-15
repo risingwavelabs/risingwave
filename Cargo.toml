@@ -67,6 +67,7 @@ aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 
@@ -76,16 +77,6 @@ lto = 'off'
 [profile.release]
 debug = 1 # line tables only
 lto = 'thin'
-
-[profile.bench]
-opt-level = 3
-debug = false
-codegen-units = 1
-lto = 'thin'
-incremental = false
-debug-assertions = false
-overflow-checks = false
-rpath = false
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
