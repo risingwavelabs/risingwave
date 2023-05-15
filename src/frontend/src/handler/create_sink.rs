@@ -26,8 +26,6 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
-use crate::handler::create_source::CONNECTION_NAME_KEY;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
@@ -35,6 +33,7 @@ use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationC
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::resolve_connection_in_with_option;
 use crate::Planner;
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
@@ -95,19 +94,10 @@ pub fn gen_sink_plan(
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
     let mut with_options = context.with_options().clone();
-    let properties = with_options.inner_mut();
     let connection_id = {
-        if let Some(connection_name) = properties
-            .get(CONNECTION_NAME_KEY)
-            .map(|s| s.to_lowercase())
-        {
-            let conn = session.get_connection_by_name(sink_schema_name, &connection_name)?;
-            resolve_private_link_connection(&conn, properties)?;
-            tracing::debug!("Create sink with connection {:?}", conn.id);
-            Some(ConnectionId(conn.id))
-        } else {
-            None
-        }
+        let conn_id =
+            resolve_connection_in_with_option(&mut with_options, &sink_schema_name, session)?;
+        conn_id.map(ConnectionId)
     };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;

@@ -112,7 +112,7 @@ impl Rule for ApplyJoinTransposeRule {
 
         // Shortcut
         // Check whether correlated_input_ref with same correlated_id exists below apply.
-        // If no, bail out and leave for ApplyScan rule to deal with.
+        // If no, bail out and leave for `ApplyEliminateRule` to deal with.
         if !join_cond_has_correlated_id
             && !join_left_has_correlated_id
             && !join_right_has_correlated_id

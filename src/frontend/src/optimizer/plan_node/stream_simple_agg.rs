@@ -25,7 +25,7 @@ use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamGlobalSimpleAgg {
+pub struct StreamSimpleAgg {
     pub base: PlanBase,
     logical: generic::Agg<PlanRef>,
 
@@ -33,7 +33,7 @@ pub struct StreamGlobalSimpleAgg {
     row_count_idx: usize,
 }
 
-impl StreamGlobalSimpleAgg {
+impl StreamSimpleAgg {
     pub fn new(logical: generic::Agg<PlanRef>, row_count_idx: usize) -> Self {
         assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
 
@@ -44,14 +44,13 @@ impl StreamGlobalSimpleAgg {
             _ => panic!(),
         };
 
-        // Empty because watermark column(s) must be in group key and global simple agg have no
-        // group key.
+        // Empty because watermark column(s) must be in group key and simple agg have no group key.
         let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
         let base =
             PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
-        StreamGlobalSimpleAgg {
+        StreamSimpleAgg {
             base,
             logical,
             row_count_idx,
@@ -63,20 +62,20 @@ impl StreamGlobalSimpleAgg {
     }
 }
 
-impl fmt::Display for StreamGlobalSimpleAgg {
+impl fmt::Display for StreamSimpleAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(
             f,
             if self.input().append_only() {
-                "StreamAppendOnlyGlobalSimpleAgg"
+                "StreamAppendOnlySimpleAgg"
             } else {
-                "StreamGlobalSimpleAgg"
+                "StreamSimpleAgg"
             },
         )
     }
 }
 
-impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
+impl PlanTreeNodeUnary for StreamSimpleAgg {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
     }
@@ -89,15 +88,15 @@ impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
         Self::new(logical, self.row_count_idx)
     }
 }
-impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
+impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 
-impl StreamNode for StreamGlobalSimpleAgg {
+impl StreamNode for StreamSimpleAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let (result_table, agg_states, distinct_dedup_tables) =
             self.logical.infer_tables(&self.base, None);
 
-        PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
+        PbNodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -137,7 +136,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
     }
 }
 
-impl ExprRewritable for StreamGlobalSimpleAgg {
+impl ExprRewritable for StreamSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

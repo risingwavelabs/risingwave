@@ -64,11 +64,8 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
 
         let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
         column_orders.iter().for_each(|order| {
-            if !order_cols.contains(&order.column_index) {
-                internal_table_catalog_builder
-                    .add_order_column(order.column_index, order.order_type);
-                order_cols.insert(order.column_index);
-            }
+            internal_table_catalog_builder.add_order_column(order.column_index, order.order_type);
+            order_cols.insert(order.column_index);
         });
 
         stream_key.iter().for_each(|idx| {

@@ -39,7 +39,7 @@ async fn test_singleton_migration() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment(vec![
             identity_contains("materialize"),
-            identity_contains("globalSimpleAgg"),
+            identity_contains("simpleAgg"),
         ])
         .await?;
 

@@ -119,9 +119,13 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
-    static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(
-        "Union Merge",
-        vec![UnionMergeRule::create()],
+    static ref SET_OPERATION_MERGE: OptimizationStage = OptimizationStage::new(
+        "Set Operation Merge",
+        vec![
+            UnionMergeRule::create(),
+            IntersectMergeRule::create(),
+            ExceptMergeRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 
@@ -146,7 +150,7 @@ lazy_static! {
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyScanRule::create(),
+            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -216,14 +220,17 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
+    // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+    // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+    // 2. should be after merge the multiple projects
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
-        "Convert Window Aggregation",
+        "Convert Window Function",
         vec![
-            OverAggToTopNRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -261,7 +268,10 @@ lazy_static! {
 
     static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
         "Set Operation To Join",
-        vec![IntersectToSemiJoinRule::create()],
+        vec![
+            IntersectToSemiJoinRule::create(),
+            ExceptToAntiJoinRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 }
@@ -378,9 +388,8 @@ impl LogicalOptimizer {
             }
         }
 
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-
-        plan = plan.optimize_by_rules(&UNION_MERGE);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
@@ -418,14 +427,15 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -450,8 +460,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
-        plan = plan.optimize_by_rules(&UNION_MERGE);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
@@ -479,6 +489,9 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
@@ -487,8 +500,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 

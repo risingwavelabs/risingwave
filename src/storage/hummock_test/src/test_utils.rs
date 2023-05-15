@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -92,7 +93,7 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
@@ -102,7 +103,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         assert_eq!(self.epoch(), write_options.epoch);

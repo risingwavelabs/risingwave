@@ -29,4 +29,4 @@ workspace-members = [
     "risingwave_object_store",
     "risingwave_bench",
 ]
-third-party = [{ name = "opendal" }]
+third-party = [{ name = "opendal" }, { name = "criterion" }]

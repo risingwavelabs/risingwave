@@ -47,8 +47,8 @@ mod apply_filter_transpose_rule;
 pub use apply_filter_transpose_rule::*;
 mod apply_project_transpose_rule;
 pub use apply_project_transpose_rule::*;
-mod apply_scan_rule;
-pub use apply_scan_rule::*;
+mod apply_eliminate_rule;
+pub use apply_eliminate_rule::*;
 mod translate_apply_rule;
 pub use translate_apply_rule::*;
 mod merge_multijoin_rule;
@@ -105,6 +105,12 @@ mod apply_offset_rewriter;
 use apply_offset_rewriter::ApplyOffsetRewriter;
 mod intersect_to_semi_join_rule;
 pub use intersect_to_semi_join_rule::*;
+mod except_to_anti_join_rule;
+pub use except_to_anti_join_rule::*;
+mod intersect_merge_rule;
+pub use intersect_merge_rule::*;
+mod except_merge_rule;
+pub use except_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -113,7 +119,7 @@ macro_rules! for_all_rules {
               { ApplyAggTransposeRule }
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
-            , { ApplyScanRule }
+            , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
             , { ApplyShareEliminateRule }
             , { ApplyToJoinRule }
@@ -129,7 +135,7 @@ macro_rules! for_all_rules {
             , { TranslateApplyRule }
             , { PushCalculationOfJoinRule }
             , { IndexSelectionRule }
-            , { OverAggToTopNRule }
+            , { OverWindowToTopNRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -148,6 +154,9 @@ macro_rules! for_all_rules {
             , { LimitPushDownRule }
             , { PullUpHopRule }
             , { IntersectToSemiJoinRule }
+            , { ExceptToAntiJoinRule }
+            , { IntersectMergeRule }
+            , { ExceptMergeRule }
         }
     };
 }

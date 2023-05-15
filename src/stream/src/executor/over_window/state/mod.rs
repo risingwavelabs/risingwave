@@ -116,7 +116,7 @@ pub(super) trait WindowState {
 pub(super) fn create_window_state(
     call: &WindowFuncCall,
 ) -> StreamExecutorResult<Box<dyn WindowState + Send>> {
-    assert!(call.frame.is_valid());
+    assert!(call.frame.bounds.is_valid());
 
     use WindowFuncKind::*;
     Ok(match call.kind {

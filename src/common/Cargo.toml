@@ -39,7 +39,7 @@ enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hex = "0.4.3"
 humantime = "2.1"
 hytra = { workspace = true }
@@ -77,6 +77,7 @@ strum = "0.24"
 strum_macros = "0.24"
 sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
+tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -107,6 +108,7 @@ mach2 = "0.4"
 [dev-dependencies]
 criterion = "0.4"
 more-asserts = "0.3"
+pretty_assertions = "1"
 rand = "0.8"
 tempfile = "3"
 

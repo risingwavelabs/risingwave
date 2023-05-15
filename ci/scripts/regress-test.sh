@@ -24,7 +24,7 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-buildkite-agent artifact download risingwave_regress_test-"$profile" target/debug/
+download-and-decompress-artifact risingwave_regress_test-"$profile" target/debug/
 mv target/debug/risingwave_regress_test-"$profile" target/debug/risingwave_regress_test
 
 chmod +x ./target/debug/risingwave_regress_test

@@ -44,9 +44,12 @@ where
     visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
-/// Visit the internal tables of a [`StreamNode`].
-pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, mut f: F)
-where
+/// Visit the tables of a [`StreamNode`].
+fn visit_stream_node_tables_inner<F>(
+    stream_node: &mut StreamNode,
+    internal_tables_only: bool,
+    mut f: F,
+) where
     F: FnMut(&mut Table, &str),
 {
     macro_rules! always {
@@ -105,20 +108,20 @@ where
                     f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
                 }
             }
-            NodeBody::GlobalSimpleAgg(node) => {
+            NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "GlobalSimpleAggResult");
+                always!(node.result_table, "SimpleAggResult");
                 for state in &mut node.agg_call_states {
                     if let agg_call_state::Inner::MaterializedInputState(s) =
                         state.inner.as_mut().unwrap()
                     {
-                        always!(s.table, "GlobalSimpleAgg");
+                        always!(s.table, "SimpleAgg");
                     }
                 }
                 for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
                     f(
                         dedup_table,
-                        &format!("GlobalSimpleAggDedupForCol{}", distinct_col),
+                        &format!("SimpleAggDedupForCol{}", distinct_col),
                     );
                 }
             }
@@ -176,9 +179,26 @@ where
             }
 
             // Note: add internal tables for new nodes here.
+            NodeBody::Materialize(node) if !internal_tables_only => {
+                always!(node.table, "Materialize")
+            }
             _ => {}
         }
     })
+}
+
+pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, true, f)
+}
+
+pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, false, f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].

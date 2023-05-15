@@ -291,7 +291,10 @@ impl AvroParser {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::fs::OpenOptions;
+    use std::io::Write;
     use std::ops::Sub;
+    use std::path::PathBuf;
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
@@ -314,6 +317,17 @@ mod test {
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
         curr_dir.into_string().unwrap() + "/src/test_data/" + file_name
+    }
+
+    fn e2e_file_path(file_name: &str) -> String {
+        let curr_dir = env::current_dir().unwrap().into_os_string();
+        let binding = PathBuf::from(curr_dir);
+        let dir = binding.parent().unwrap().parent().unwrap();
+        dir.join("scripts/source/test_data/")
+            .join(file_name)
+            .to_str()
+            .unwrap()
+            .to_string()
     }
 
     #[tokio::test]
@@ -377,7 +391,7 @@ mod test {
             .unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
-        assert_eq!(record.fields.len(), 10);
+        assert_eq!(record.fields.len(), 11);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
         writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
@@ -428,6 +442,9 @@ mod test {
                     let micros = Some(ScalarImpl::Int64(micros));
                     assert_eq!(row[i], micros);
                 }
+                Value::Bytes(bytes) => {
+                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                }
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
@@ -456,6 +473,7 @@ mod test {
             SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
             SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
             SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
+            SourceColumnDesc::simple("bytes", DataType::Bytea, ColumnId::from(10)),
         ]
     }
 
@@ -467,6 +485,7 @@ mod test {
             Schema::Float => Some(Value::Float(32_f32)),
             Schema::Double => Some(Value::Double(64_f64)),
             Schema::Boolean => Some(Value::Boolean(true)),
+            Schema::Bytes => Some(Value::Bytes(vec![1, 2, 3, 4, 5])),
 
             Schema::Date => {
                 let original_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
@@ -535,7 +554,7 @@ mod test {
             .await
             .unwrap();
         let columns = conf.map_to_columns().unwrap();
-        assert_eq!(columns.len(), 10);
+        assert_eq!(columns.len(), 11);
         println!("{:?}", columns);
     }
 
@@ -614,5 +633,32 @@ mod test {
             }
             _ => unreachable!(),
         }
+    }
+
+    // run this script when updating `simple-schema.avsc`, the script will generate new value in
+    // `avro_bin.1`
+    #[ignore]
+    #[tokio::test]
+    async fn update_avro_payload() {
+        let conf = new_avro_conf_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
+        let mut writer = Writer::new(&conf.schema, Vec::new());
+        let record = build_avro_data(&conf.schema);
+        writer.append(record).unwrap();
+        let encoded = writer.into_inner().unwrap();
+        println!("path = {:?}", e2e_file_path("avro_bin.1"));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(e2e_file_path("avro_bin.1"))
+            .unwrap();
+        file.write_all(encoded.as_slice()).unwrap();
+        println!(
+            "encoded = {:?}",
+            String::from_utf8_lossy(encoded.as_slice())
+        );
     }
 }
