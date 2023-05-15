@@ -96,6 +96,10 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
@@ -106,6 +110,10 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     }
 
     pub fn without_group(input: PlanRef, limit_attr: Limit, offset: u64, order: Order) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
