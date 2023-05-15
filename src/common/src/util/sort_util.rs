@@ -25,7 +25,7 @@ use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::row::Row;
-use crate::types::{OrdScalarRefImpl, ToDatumRef};
+use crate::types::{ScalarRefImpl, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
@@ -369,7 +369,7 @@ fn compare_values_in_array<'a, T>(
 ) -> Ordering
 where
     T: Array,
-    <T as Array>::RefItem<'a>: Ord,
+    <T as Array>::RefItem<'a>: PartialOrd,
 {
     generic_partial_cmp(
         lhs_array.value_at(lhs_idx).as_ref(),
@@ -411,8 +411,16 @@ pub fn partial_cmp_datum(
     rhs: impl ToDatumRef,
     order_type: OrderType,
 ) -> Option<Ordering> {
-    let lhs = lhs.to_datum_ref().map(OrdScalarRefImpl::new);
-    let rhs = rhs.to_datum_ref().map(OrdScalarRefImpl::new);
+    #[derive(PartialEq, Eq)]
+    struct OrdScalarRefImpl<'a>(ScalarRefImpl<'a>);
+    impl PartialOrd for OrdScalarRefImpl<'_> {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            crate::types::default_partial_cmp_scalar_ref_impl(self.0, other.0)
+        }
+    }
+
+    let lhs = lhs.to_datum_ref().map(OrdScalarRefImpl);
+    let rhs = rhs.to_datum_ref().map(OrdScalarRefImpl);
     generic_partial_cmp(lhs.as_ref(), rhs.as_ref(), order_type)
 }
 
