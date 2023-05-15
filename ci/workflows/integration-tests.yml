@@ -71,8 +71,8 @@ steps:
             format: "protobuf"
           skip: true
 
-# NOTE: buildkite matrix-limits
-# Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
+  # NOTE: buildkite matrix-limits
+  # Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
@@ -81,11 +81,21 @@ steps:
         testcase:
           - "twitter"
           - "twitter-pulsar"
+          - "debezium-mongo"
+          - "debezium-postgres"
         format:
           - "json"
           - "protobuf"
       adjustments:
         - with:
             testcase: "twitter-pulsar"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-mongo"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-postgres"
             format: "protobuf"
           skip: true

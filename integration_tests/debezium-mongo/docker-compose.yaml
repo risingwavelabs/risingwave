@@ -62,13 +62,14 @@ services:
       dockerfile: Dockerfile.generator
     container_name: random_data_generator
     depends_on:
-      - mongodb
+      mongodb: { condition: service_healthy }
     environment:
       MONGO_HOST: mongodb
       MONGO_PORT: 27017
       MONGO_DB_NAME: random_data
       MONGO_USERNAME: admin
       MONGO_PASSWORD: admin123
+    restart: on-failure
 
   message_queue:
     extends:
@@ -80,29 +81,12 @@ services:
     container_name: register-mongodb-connector
     depends_on:
       debezium: { condition: service_healthy }
+      mongodb: { condition: service_healthy }
     command: >
-      /bin/sh -c "
-      echo 'Waiting for Kafka Connect to start...' &&
-      while ! curl -s http://debezium:8083/ | grep -q 'version'; do
-        sleep 5;
-      done &&
-      echo 'Kafka Connect started.' &&
-      echo 'Registering MongoDB connector...' &&
-      curl -X POST -H 'Content-Type: application/json' --data '{
-        \"name\": \"mongodb-connector\",
-        \"config\": {
-          \"connector.class\": \"io.debezium.connector.mongodb.MongoDbConnector\",
-          \"tasks.max\": \"1\",
-          \"mongodb.hosts\": \"mongodb:27017\",
-          \"mongodb.name\": \"dbserver1\",
-          \"mongodb.user\": \"admin\",
-          \"mongodb.password\": \"admin123\",
-          \"database.history.kafka.bootstrap.servers\": \"message_queue:29092\",
-          \"database.include.list\" : \"random_data\"
-        }
-      }' http://debezium:8083/connectors &&
-      echo 'MongoDB connector registered.'"
-    restart: always
+      /bin/sh /register-mongodb-connector.sh
+    restart: on-failure
+    volumes:
+      - ./register-mongodb-connector.sh:/register-mongodb-connector.sh
 
   kafka-connect-ui:
     image: landoop/kafka-connect-ui:0.9.7
@@ -114,9 +98,20 @@ services:
     environment:
       CONNECT_URL: http://debezium:8083
 
+  risingwave:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    ports:
+      - 4566:4566
+      - 5691:5691
+    command:
+      - playground
+    container_name: risingwave
+
 volumes:
   mongodb_data:
   message_queue:
     external: false
   debezium:
+    external: false
+  register-mongodb-connector:
     external: false
