@@ -131,7 +131,7 @@ where
 
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
-        let init_epoch = first_barrier.epoch.curr;
+        let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
 
         // If the barrier is a conf change of creating this mview, we follow the procedure of
@@ -150,17 +150,6 @@ where
         if to_create_mv && is_snapshot_empty {
             // Directly finish the progress as the snapshot is empty.
             self.progress.finish(first_barrier.epoch.curr);
-            // Persist state on barrier
-            let mut current_pos = vec![None; pk_in_output_indices.len()];
-            current_pos.push(Some(false.into()));
-            let current_pos = OwnedRow::new(current_pos);
-            Self::flush_data(
-                &mut self.state_table,
-                first_barrier.epoch,
-                None,
-                &current_pos,
-            )
-            .await?;
         }
 
         // The first barrier message should be propagated.
