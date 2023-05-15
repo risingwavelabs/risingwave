@@ -1,3 +1,4 @@
+import pickle
 from typing import *
 import pyarrow as pa
 import pyarrow.flight
@@ -5,6 +6,8 @@ import pyarrow.parquet
 import inspect
 import traceback
 import json
+from concurrent.futures import ProcessPoolExecutor
+import concurrent
 
 
 class UserDefinedFunction:
@@ -115,6 +118,32 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
 
     def eval(self, *args):
         return self._func(*args)
+    
+class UserDefinedScalarFunctionWrapperConcurrent(UserDefinedScalarFunctionWrapper):
+    def __init__(self, *args, **kwargs):
+        self.io_threads = kwargs.pop("io_threads") if "io_threads" in kwargs else 1
+        super().__init__(*args, **kwargs)
+        self.executor = ProcessPoolExecutor(max_workers=self.io_threads)  # Or any number that fits your machine
+
+    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        # parse value from json string for jsonb columns
+        inputs = [[v.as_py() for v in array] for array in batch]
+        inputs = [
+            _process_input_array(array, type)
+            for array, type in zip(inputs, self._input_schema.types)
+        ]
+
+        # evaluate the function for each row
+        tasks = [self.executor.submit(self._func, *[col[i] for col in inputs])
+                 for i in range(batch.num_rows)]
+        column = [future.result() for future in concurrent.futures.as_completed(tasks)]
+
+        # convert value to json for jsonb columns
+        if self._result_schema.types[0] == pa.large_string():
+            column = [(json.dumps(v) if v is not None else None)
+                      for v in column]
+        array = pa.array(column, type=self._result_schema.types[0])
+        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 class UserDefinedTableFunctionWrapper(TableFunction):
@@ -140,7 +169,6 @@ class UserDefinedTableFunctionWrapper(TableFunction):
     def eval(self, *args):
         return self._func(*args)
 
-
 def _to_list(x):
     if isinstance(x, list):
         return x
@@ -150,7 +178,9 @@ def _to_list(x):
 
 def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
         result_type: Union[str, pa.DataType],
-        name: Optional[str] = None,) -> Callable:
+        name: Optional[str] = None,
+        io_threads: Optional[int] = None,
+    ) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
 
@@ -158,6 +188,7 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
     - input_types: A list of strings or Arrow data types that specifies the input data types.
     - result_type: A string or an Arrow data type that specifies the return value type.
     - name: An optional string specifying the function name. If not provided, the original name will be used.
+    - io_threads: Number of I/O threads used per data chunk for I/O bound UDFs.
 
     Example:
     ```
@@ -169,7 +200,18 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
     ```
     """
 
-    return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
+    if io_threads is not None and io_threads > 1:
+        def wrapper(f):
+            # Hack to allow function to be pickleable by instantiating the original
+            # function under a different name in the module it is defined in
+            f.__qualname__ = '__original_' + f.__name__
+            module_globals = inspect.currentframe().f_back.f_globals
+            module_globals[f.__qualname__] = f
+
+            return UserDefinedScalarFunctionWrapperConcurrent(f, input_types, result_type, name, io_threads=io_threads)
+        return wrapper
+    else:
+        return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
 
 
 def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],

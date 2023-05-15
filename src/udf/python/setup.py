@@ -18,4 +18,7 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=['pyarrow'],
+    extras_require={
+        'test': ['pytest', 'requests', 'multiprocess']
+    },
 )
