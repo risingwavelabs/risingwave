@@ -189,7 +189,7 @@ def section_compaction(outer_panels):
                     "Avg l0 select_level_count of the compact task, and categorize it according to different cg, levels and task types",
                     [
                         panels.target(
-                            f"sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
+                            f"sum by(le, group, type)(irate({metric('storage_l0_compact_level_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(irate({metric('storage_l0_compact_level_count_count')}[$__rate_interval]))",
                             "avg cg{{group}}@{{type}}",
                         ),
                     ],
@@ -200,7 +200,7 @@ def section_compaction(outer_panels):
                     "Avg file count of the compact task, and categorize it according to different cg, levels and task types",
                     [
                         panels.target(
-                            f"sum by(le, group, type)(rate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(rate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
+                            f"sum by(le, group, type)(irate({metric('storage_compact_task_file_count_sum')}[$__rate_interval]))  / sum by(le, group, type)(irate({metric('storage_compact_task_file_count_count')}[$__rate_interval]))",
                             "avg cg{{group}}@{{type}}",
                         ),
                     ],
@@ -367,16 +367,16 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
+                            f"sum(irate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} write to next level",
                         ),
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
+                            f"sum(irate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read from next level",
                         ),
 
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
+                            f"sum(irate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read from current level",
                         ),
                     ],
@@ -1625,19 +1625,19 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(irate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "bloom filter false positive count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    f"sum(irate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
                     "read_req check bloom filter - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
@@ -1708,7 +1708,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    f"sum(irate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "merge imm tasks - {{table_id}} @ {{instance}} ",
                 ),
             ],
@@ -1773,7 +1773,7 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({table_metric('state_store_write_batch_tuple_counts')}[$__rate_interval])) by (job,instance,table_id)",
+                    f"sum(irate({table_metric('state_store_write_batch_tuple_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "write_batch_kv_pair_count - {{table_id}} @ {{instance}} ",
                 ),
             ],
