@@ -933,7 +933,7 @@ def section_streaming_actors(outer_panels):
                         ),
 
                         panels.target(
-                            f"(sum(rate({metric('stream_agg_distinct_cahce_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
 
@@ -1019,7 +1019,7 @@ def section_streaming_actors(outer_panels):
                             "cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                         panels.target(
-                            f"rate({metric('stream_agg_distinct_cahce_miss_count')}[$__rate_interval])",
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
                             "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
            

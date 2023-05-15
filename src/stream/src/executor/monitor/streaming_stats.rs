@@ -360,7 +360,7 @@ impl StreamingMetrics {
         .unwrap();
 
         let agg_distinct_cache_miss_count = register_int_counter_vec_with_registry!(
-            "stream_agg_distinct_cahce_miss_count",
+            "stream_agg_distinct_cache_miss_count",
             "Aggregation executor dinsinct miss duration",
             &["table_id", "actor_id"],
             registry
