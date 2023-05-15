@@ -680,6 +680,12 @@ pub enum Message {
     Watermark(Watermark),
 }
 
+impl From<StreamChunk> for Message {
+    fn from(chunk: StreamChunk) -> Self {
+        Message::Chunk(chunk)
+    }
+}
+
 impl<'a> TryFrom<&'a Message> for &'a Barrier {
     type Error = ();
 

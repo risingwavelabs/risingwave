@@ -282,7 +282,7 @@ fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
     s.estimate_serialize_size_inner()
 }
 fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
-    let elems = value.iter_elems_ref();
+    let elems = value.iter();
     buf.put_u32_le(elems.len() as u32);
 
     elems.for_each(|field_value| {
