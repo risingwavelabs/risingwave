@@ -509,16 +509,16 @@
     └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] }
       └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   stream_plan: |
-    StreamMaterialize { columns: [z, t._row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
-    └─StreamProject { exprs: [t.z, t._row_id] }
+    StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [t.z, t.x, t.y] }
       └─StreamGroupTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] }
         └─StreamExchange { dist: HashShard(t.x, t.y) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [z, t._row_id(hidden)], stream_key: [], pk_columns: [], pk_conflict: "NoCheck" }
+    StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [t.z, t._row_id] }
+    └── StreamProject { exprs: [t.z, t.x, t.y] }
         └── StreamGroupTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] } { state table: 0 }
             └──  StreamExchange Hash([0, 1]) from 1
 
@@ -535,9 +535,9 @@
     └── read pk prefix len hint: 2
 
     Table 4294967294
-    ├── columns: [ z, t._row_id ]
-    ├── primary key: []
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    ├── columns: [ z, t.x, t.y ]
+    ├── primary key: [ $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 1, 2 ]
+    └── read pk prefix len hint: 2
 
