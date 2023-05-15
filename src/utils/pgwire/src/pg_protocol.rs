@@ -76,6 +76,8 @@ where
     tls_context: Option<SslContext>,
 }
 
+const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
+
 /// Configures TLS encryption for connections.
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
@@ -340,8 +342,14 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::trace!(target: "pgwire_query_log",
-            "(simple query) session: {}, status: {}, time: {}ms, sql: {}", session_id, if result.is_ok() {"ok"} else {"err"}, mills, truncated_sql);
+        tracing::trace!(
+            target: PGWIRE_QUERY_LOG,
+            "(simple query) session: {}, status: {}, time: {}ms, sql: {}",
+            session_id,
+            if result.is_ok() { "ok" } else { "err" },
+            mills,
+            truncated_sql
+        );
 
         result
     }
@@ -430,8 +438,14 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::trace!(target: "pgwire_query_log",
-            "(extended query parse) session: {}, status: {}, time: {}ms, sql: {}", session_id, if result.is_ok() {"ok"} else {"err"}, mills, truncated_sql);
+        tracing::trace!(
+            target: PGWIRE_QUERY_LOG,
+            "(extended query parse) session: {}, status: {}, time: {}ms, sql: {}",
+            session_id,
+            if result.is_ok() { "ok" } else { "err" },
+            mills,
+            truncated_sql
+        );
 
         result
     }
@@ -563,7 +577,14 @@ where
             let result = session.execute(portal).await;
 
             let mills = start.elapsed().as_millis();
-            tracing::trace!(target: "pgwire_query_log", "(extended query execute) session: {}, status: {}, time: {}ms, sql: {}", session_id, if result.is_ok() {"ok"} else {"err"}, mills, truncated_sql);
+            tracing::trace!(
+                target: PGWIRE_QUERY_LOG,
+                "(extended query execute) session: {}, status: {}, time: {}ms, sql: {}",
+                session_id,
+                if result.is_ok() { "ok" } else { "err" },
+                mills,
+                truncated_sql
+            );
 
             let pg_response = match result {
                 Ok(pg_response) => pg_response,
