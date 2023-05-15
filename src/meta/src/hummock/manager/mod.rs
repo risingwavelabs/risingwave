@@ -26,7 +26,7 @@ use function_name::named;
 use itertools::Itertools;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
@@ -289,6 +289,7 @@ where
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
+        let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -299,7 +300,9 @@ where
         );
 
         // Make sure data dir is not used by another cluster.
-        if env.cluster_first_launch() {
+        // Skip this check in e2e compaction test, which needs to start a secondary cluster with
+        // same bucket
+        if env.cluster_first_launch() && !deterministic_mode {
             write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
@@ -506,7 +509,10 @@ where
             .compaction_group_manager
             .write()
             .await
-            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .get_or_insert_compaction_group_configs(
+                &all_group_ids.collect_vec(),
+                self.env.meta_store(),
+            )
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
@@ -912,11 +918,58 @@ where
                 (count, size)
             };
 
+            let (compact_task_size, compact_task_file_count) =
+                estimate_state_for_compaction(&compact_task);
+
             if compact_task.input_ssts[0].level_idx == 0 {
+                let level_type_label = if compact_task.input_ssts.len() == 2
+                    && compact_task.input_ssts[1].table_infos.is_empty()
+                {
+                    "l0_trivial_move".to_string()
+                } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
+                    "l0_overlapping".to_string()
+                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                    "l0_intra".to_string()
+                } else {
+                    let is_trivial_move = if compact_task
+                        .input_ssts
+                        .last()
+                        .unwrap()
+                        .table_infos
+                        .is_empty()
+                    {
+                        "trivial-move"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "L0->L{} {}",
+                        compact_task.input_ssts.last().unwrap().level_idx,
+                        is_trivial_move
+                    )
+                };
+
+                let level_count = compact_task.input_ssts.len();
+
+                self.metrics
+                    .l0_compact_level_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(level_count as _);
+
+                self.metrics
+                    .compact_task_size
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_size as _);
+
+                self.metrics
+                    .compact_task_file_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_file_count as _);
+
                 tracing::trace!(
                     "For compaction group {}: pick up {} {} sub_level in level {} file_count {} file_size {} to compact to target {}. cost time: {:?}",
                     compaction_group_id,
-                    compact_task.input_ssts.len(),
+                    level_count,
                     compact_task.input_ssts[0].level_type().as_str_name(),
                     compact_task.input_ssts[0].level_idx,
                     file_count,
@@ -925,6 +978,27 @@ where
                     start_time.elapsed()
                 );
             } else {
+                let level_type_label = format!(
+                    "L{}->L{} {}",
+                    compact_task.input_ssts[0].level_idx,
+                    compact_task.input_ssts[1].level_idx,
+                    if CompactStatus::is_trivial_move_task(&compact_task) {
+                        "trivial-move"
+                    } else {
+                        ""
+                    }
+                );
+
+                self.metrics
+                    .compact_task_size
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_size as _);
+
+                self.metrics
+                    .compact_task_file_count
+                    .with_label_values(&[&compaction_group_id.to_string(), &level_type_label])
+                    .observe(compact_task_file_count as _);
+
                 tracing::trace!(
                     "For compaction group {}: pick up {} tables in level {} file_count {} file_size {} to compact to target {}.  cost time: {:?}",
                     compaction_group_id,
@@ -2094,10 +2168,8 @@ where
                         )
                     };
 
-                    let compaction_group_ids_from_version =
-                        get_compaction_group_ids(&current_version);
-                    for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = &id_to_config[compaction_group_id];
+                    for compaction_group_id in get_compaction_group_ids(&current_version) {
+                        let compaction_group_config = &id_to_config[&compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),

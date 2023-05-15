@@ -105,6 +105,10 @@ pub struct TableGroupInfo {
 }
 
 pub trait HummockVersionExt {
+    type CombinedLevelsIter<'a>: Iterator<Item = &'a Level> + 'a
+    where
+        Self: 'a;
+
     /// Gets `compaction_group_id`'s levels
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels;
     /// Gets `compaction_group_id`'s levels
@@ -115,7 +119,7 @@ pub trait HummockVersionExt {
     /// Gets all levels.
     ///
     /// Levels belonging to the same compaction group retain their relative order.
-    fn get_combined_levels(&self) -> Vec<&Level>;
+    fn get_combined_levels(&self) -> Self::CombinedLevelsIter<'_>;
     fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
@@ -145,6 +149,8 @@ pub trait HummockVersionUpdateExt {
 }
 
 impl HummockVersionExt for HummockVersion {
+    type CombinedLevelsIter<'a> = impl Iterator<Item = &'a Level> + 'a;
+
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
@@ -160,19 +166,22 @@ impl HummockVersionExt for HummockVersion {
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
     }
 
-    fn get_combined_levels(&self) -> Vec<&Level> {
-        let mut combined_levels = vec![];
-        for level in self.levels.values() {
-            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter().rev());
-            combined_levels.extend(level.levels.iter());
-        }
-        combined_levels
+    fn get_combined_levels(&self) -> Self::CombinedLevelsIter<'_> {
+        self.levels.values().flat_map(|level| {
+            level
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .rev()
+                .chain(level.levels.iter())
+        })
     }
 
     /// This function does NOT dedup.
     fn get_object_ids(&self) -> Vec<u64> {
         self.get_combined_levels()
-            .iter()
             .flat_map(|level| {
                 level
                     .table_infos
@@ -732,8 +741,10 @@ pub fn try_get_compaction_group_id_by_table_id(
 }
 
 /// Gets all compaction group ids.
-pub fn get_compaction_group_ids(version: &HummockVersion) -> Vec<CompactionGroupId> {
-    version.levels.keys().cloned().collect()
+pub fn get_compaction_group_ids(
+    version: &HummockVersion,
+) -> impl Iterator<Item = CompactionGroupId> + '_ {
+    version.levels.keys().cloned()
 }
 
 /// Gets all member table ids.
@@ -749,7 +760,7 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
 pub fn get_compaction_group_ssts(
     version: &HummockVersion,
     group_id: CompactionGroupId,
-) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
+) -> impl Iterator<Item = (HummockSstableObjectId, HummockSstableId)> + '_ {
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
@@ -765,7 +776,6 @@ pub fn get_compaction_group_ssts(
                 .iter()
                 .map(|table_info| (table_info.get_object_id(), table_info.get_sst_id()))
         })
-        .collect_vec()
 }
 
 pub fn new_sub_level(

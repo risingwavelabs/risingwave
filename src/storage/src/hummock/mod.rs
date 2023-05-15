@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -193,7 +192,6 @@ impl HummockStorage {
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
-            CompactorRuntimeConfig::default(),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -203,6 +201,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            state_store_metrics.clone(),
         );
 
         let instance = Self {

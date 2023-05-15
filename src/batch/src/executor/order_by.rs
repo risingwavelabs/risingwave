@@ -16,6 +16,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::memory::{MonitoredAlloc, MonitoredGlobalAlloc};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -37,6 +38,7 @@ pub struct SortExecutor {
     identity: String,
     schema: Schema,
     chunk_size: usize,
+    alloc: MonitoredGlobalAlloc,
 }
 
 impl Executor for SortExecutor {
@@ -69,11 +71,16 @@ impl BoxedExecutorBuilder for SortExecutor {
             .iter()
             .map(ColumnOrder::from_protobuf)
             .collect();
+
+        let identity = source.plan_node().get_identity();
         Ok(Box::new(SortExecutor::new(
             child,
             column_orders,
-            source.plan_node().get_identity().clone(),
+            identity.clone(),
             source.context.get_config().developer.chunk_size,
+            MonitoredAlloc::with_memory_context(
+                source.context.create_executor_mem_context(identity),
+            ),
         )))
     }
 }
@@ -82,13 +89,14 @@ impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        let mut chunks = Vec::new();
-        let mut encoded_rows = Vec::new();
+        let mut chunks = Vec::new_in(self.alloc.clone());
 
         #[for_await]
         for chunk in self.child.execute() {
             chunks.push(chunk?.compact());
         }
+
+        let mut encoded_rows = Vec::with_capacity_in(chunks.len(), self.alloc.clone());
 
         for chunk in &chunks {
             let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
@@ -120,6 +128,7 @@ impl SortExecutor {
         column_orders: Vec<ColumnOrder>,
         identity: String,
         chunk_size: usize,
+        alloc: MonitoredGlobalAlloc,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -128,6 +137,7 @@ impl SortExecutor {
             identity,
             schema,
             chunk_size,
+            alloc,
         }
     }
 }
@@ -181,6 +191,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -230,6 +241,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Float32);
@@ -279,6 +291,7 @@ mod tests {
             column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
         let fields = &order_by_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Varchar);
@@ -353,6 +366,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -426,6 +440,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -519,6 +534,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();
@@ -678,6 +694,7 @@ mod tests {
             column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredGlobalAlloc::for_test(),
         ));
 
         let mut stream = order_by_executor.execute();

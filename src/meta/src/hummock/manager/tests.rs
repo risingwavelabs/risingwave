@@ -94,7 +94,6 @@ fn get_compaction_group_object_ids(
     group_id: CompactionGroupId,
 ) -> Vec<HummockSstableObjectId> {
     get_compaction_group_ssts(version, group_id)
-        .into_iter()
         .map(|(object_id, _)| object_id)
         .collect_vec()
 }
@@ -905,7 +904,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = get_compaction_group_ids(&cur_version);
+    let compaction_groups = get_compaction_group_ids(&cur_version).collect_vec();
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)

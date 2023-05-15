@@ -90,7 +90,7 @@ impl TopNOnIndexRule {
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
             column_orders: primary_key
-                .into_iter()
+                .iter()
                 .map(|o| {
                     ColumnOrder::new(
                         *output_col_map
