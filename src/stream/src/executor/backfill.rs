@@ -26,7 +26,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{compare_datum, OrderType};
+use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -407,9 +407,8 @@ where
                 .project(pk_in_output_indices)
                 .iter()
                 .zip_eq_fast(pk_order.iter().copied())
-                .cmp_by(current_pos.iter(), |(x, order), y| {
-                    compare_datum(x, y, order)
-                }) {
+                .cmp_by(current_pos.iter(), |(x, order), y| cmp_datum(x, y, order))
+            {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
             }

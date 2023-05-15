@@ -50,6 +50,7 @@ mod jsonb;
 mod native_type;
 mod num256;
 mod ops;
+mod ordered;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
@@ -67,6 +68,7 @@ pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered::{OrdDatum, OrdDatumRef, OrdScalarImpl, OrdScalarRefImpl};
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
@@ -548,44 +550,6 @@ macro_rules! scalar_impl_enum {
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
-
-/// Implement [`PartialOrd`] and [`Ord`] for [`ScalarImpl`] and [`ScalarRefImpl`].
-///
-/// Scalars of different types are not comparable. For this case, `partial_cmp` returns `None` and
-/// `cmp` will panic.
-macro_rules! scalar_impl_partial_ord {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl PartialOrd for ScalarImpl {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarImpl {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-
-        impl PartialOrd for ScalarRefImpl<'_> {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarRefImpl<'_> {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-    };
-}
-
-for_all_scalar_variants! { scalar_impl_partial_ord }
 
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
