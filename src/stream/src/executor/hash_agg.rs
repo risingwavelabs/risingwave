@@ -220,7 +220,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                metrics: args.extra.metrics,
+                metrics: args.metrics,
             },
         })
     }

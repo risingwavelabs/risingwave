@@ -43,16 +43,14 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub result_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
-
+    pub metrics: Arc<StreamingMetrics>,
     // extra
     pub extra: E,
 }
 
 pub trait AggExecutorExtraArgs {}
 
-pub struct SimpleAggExecutorExtraArgs {
-    pub metrics: Arc<StreamingMetrics>,
-}
+pub struct SimpleAggExecutorExtraArgs {}
 impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 
 /// Extra arguments needed to construct an `HashAggExecutor`.
@@ -60,6 +58,5 @@ pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
     pub emit_on_window_close: bool,
-    pub metrics: Arc<StreamingMetrics>,
 }
 impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

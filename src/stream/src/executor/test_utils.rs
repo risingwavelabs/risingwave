@@ -431,12 +431,12 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            metrics: Arc::new(StreamingMetrics::unused()),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
                 emit_on_window_close,
-                metrics: Arc::new(StreamingMetrics::unused()),
             },
         })
         .unwrap()
@@ -493,10 +493,8 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-
-            extra: SimpleAggExecutorExtraArgs {
-                metrics: Arc::new(StreamingMetrics::unused()),
-            },
+            metrics: Arc::new(StreamingMetrics::unused()),
+            extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()
         .boxed()
