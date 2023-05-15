@@ -22,7 +22,6 @@ use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::TableGroupInfo;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -488,7 +487,6 @@ where
         history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
     ) {
         const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 5;
-        const SLOW_INCREASE_RATIO_PERCENT: usize = 10;
         let mut group_infos = self
             .hummock_manager
             .calculate_compaction_group_statistic()
@@ -497,7 +495,8 @@ where
         group_infos.reverse();
         let group_size_limit = self.env.opts.split_group_size_limit;
         let table_split_limit = self.env.opts.move_table_size_limit;
-        let mut table_infos = HashMap::default();
+        let mut table_infos = vec![];
+        // TODO: support move small state-table back to default-group to reduce IOPS.
         for group in &group_infos {
             if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
                 continue;
@@ -505,7 +504,7 @@ where
             for (table_id, table_size) in &group.table_statistic {
                 let last_table_infos = history_table_infos
                     .entry(*table_id)
-                    .or_insert_with(|| VecDeque::new());
+                    .or_insert_with(VecDeque::new);
                 last_table_infos.push_back(*table_size);
                 if last_table_infos.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
                     last_table_infos.pop_front();
@@ -518,43 +517,45 @@ where
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         for (table_id, parent_group_id, parent_group_size) in table_infos {
             let table_info = history_table_infos.get(&table_id).unwrap();
-            let mut target_compact_group_id = None;
-            let mut table_size = *table_info.back().unwrap();
+            let table_size = *table_info.back().unwrap();
             if table_size < table_split_limit
                 || (table_size < group_size_limit
                     && table_info.len() < HISTORY_TABLE_INFO_WINDOW_SIZE)
             {
                 continue;
             }
-            let mut increase = true;
-            for idx in 1..table_info.len() {
-                if table_info[idx] < table_info[idx - 1] {
-                    increase = false;
-                    break;
+
+            let mut target_compact_group_id = None;
+            let mut allow_split_by_table = false;
+            if table_size < group_size_limit {
+                let mut increase = true;
+                for idx in 1..table_info.len() {
+                    if table_info[idx] < table_info[idx - 1] {
+                        increase = false;
+                        break;
+                    }
                 }
-            }
 
-            if !increase {
-                continue;
-            }
-
-            // do not split a large table and a small table because it would increase IOPS of small
-            // table.
-            if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                let rest_group_size = parent_group_size - table_size;
-                if rest_group_size < table_size && rest_group_size < table_split_limit {
+                if !increase {
                     continue;
                 }
-            }
 
-            let increase_data_size = table_size.saturating_sub(*table_info.front().unwrap());
-            let mut allow_split_by_table = false;
-            let increase_slow =
-                increase_data_size < table_split_limit * SLOW_INCREASE_RATIO_PERCENT / 100;
+                // do not split a large table and a small table because it would increase IOPS of
+                // small table.
+                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                    let rest_group_size = parent_group_size - table_size;
+                    if rest_group_size < table_size && rest_group_size < table_split_limit {
+                        continue;
+                    }
+                }
 
-            // if the size of this table increases too fast, we shall create one group for it.
-            if increase_slow && table_size < group_size_limit {
-                if parent_group_id == mv_group_id || parent_group_id == default_group_id {
+                let increase_data_size = table_size.saturating_sub(*table_info.front().unwrap());
+                let increase_slow = increase_data_size < table_split_limit;
+
+                // if the size of this table increases too fast, we shall create one group for it.
+                if increase_slow
+                    && (parent_group_id == mv_group_id || parent_group_id == default_group_id)
+                {
                     for group in &group_infos {
                         // do not move to mv group or state group
                         if !group.split_by_table || group.group_id == mv_group_id
@@ -569,9 +570,10 @@ where
                         }
                         target_compact_group_id = Some(group.group_id);
                     }
+                    allow_split_by_table = true;
                 }
-                allow_split_by_table = true;
             }
+
             let ret = self
                 .hummock_manager
                 .move_state_table_to_compaction_group(
