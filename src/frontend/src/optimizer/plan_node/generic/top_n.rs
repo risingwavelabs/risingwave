@@ -93,6 +93,10 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
@@ -103,6 +107,10 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
     }
 
     pub fn without_group(input: PlanRef, limit_attr: Limit, offset: u64, order: Order) -> Self {
+        if limit_attr.with_ties() {
+            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
+        }
+
         Self {
             input,
             limit_attr,
@@ -144,7 +152,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+        // We can use the group key as the stream key when there is at most one record for each
+        // value of the group key.
+        if self.limit_attr.max_one_row() {
+            Some(self.group_key.clone())
+        } else {
+            Some(self.input.logical_pk().to_vec())
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
