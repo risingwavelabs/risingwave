@@ -233,7 +233,7 @@ mod tests {
                 || std::future::ready(create_executor()),
                 r###"
 - !chunk |2
-    I I
+      I I
     + 1 4
     + 2 5
     + 3 6
