@@ -787,6 +787,7 @@ pub enum ShowObject {
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
+    Indexes { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -819,6 +820,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
+            ShowObject::Indexes { table } => write!(f, "INDEXES{}", table),
         }
     }
 }
