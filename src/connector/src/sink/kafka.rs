@@ -304,6 +304,13 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         .payload(obj.to_string().as_bytes()),
                 )
                 .await?;
+                if op == Op::Delete {
+                    self.send(
+                        BaseRecord::to(self.config.common.topic.as_str())
+                            .key(key_obj.to_string().as_bytes())
+                    )
+                    .await?;
+                }
             }
         }
         Ok(())
