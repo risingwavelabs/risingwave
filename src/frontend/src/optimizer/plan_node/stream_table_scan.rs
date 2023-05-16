@@ -135,10 +135,12 @@ impl StreamTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let upstream_schema = self.base.schema();
 
-        // Construct distribution key + Add `vnode` for `UpstreamHashShard`
+        // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
+        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+
+        // Construct distribution key
         let distribution_key = match self.base.distribution() {
             Distribution::UpstreamHashShard(dist_key, _) => {
-                catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
                 let mut mapping = vec![None];
                 for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
                     mapping[*old_pos] = Some(new_pos);
