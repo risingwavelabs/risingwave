@@ -148,17 +148,24 @@ impl StreamTableScan {
             Distribution::UpstreamHashShard(dist_key, _) => {
                 // 1. Map distribution key to the position in primary key.
                 // println!("primary key {:?}", self.logical.primary_key());
-                // let distribution_key = dist_key.iter().map(|i| {
-                //     self.logical
-                //         .primary_key()
-                //         .iter()
-                //         .position(|j| *i == j.column_index)
-                //         .map(|k| k as u32)
-                //         .unwrap()
-                // }).collect_vec();
-                // println!("distribution key: {:?}", distribution_key);
-                // distribution_key
-                dist_key.iter().map(|k| *k as u32).collect()
+                println!("--------------");
+                println!("upstream_hash_shard dist_key: {:?}", dist_key);
+                println!("logical_pk: {:?}", self.logical.logical_pk());
+                println!("logical_primary_key: {:?}", self.logical.primary_key());
+                println!("table_desc_primary_key: {:?}", self.logical().table_desc.pk);
+                println!("table_desc_distribution_key: {:?}", self.logical().table_desc.distribution_key);
+                println!("base pk: {:?}", self.base.logical_pk());
+                let distribution_key = dist_key.iter().map(|i| {
+                    self.logical.logical_pk().unwrap()
+                        .iter()
+                        .position(|j| i == j)
+                        .map(|k| k as u32)
+                        .unwrap()
+                }).collect_vec();
+                println!("distribution key: {:?}", distribution_key);
+                println!("--------------");
+                distribution_key
+                // dist_key.iter().map(|k| *k as u32).collect()
                 // // 2. Add 1 to offset, since there's a vnode column prepended.
                 // debug_assert_eq!(*dist_key, self.logical.table_desc.distribution_key);
                 // // println!("logical pk: {:?}", self.logical.primary_key());
@@ -269,7 +276,7 @@ impl StreamTableScan {
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
-        let upstream_dist_key = self.compute_upstream_distribution_key();
+        let dist_key_in_pk = self.compute_upstream_distribution_key();
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
@@ -349,7 +356,7 @@ impl StreamTableScan {
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc.to_protobuf()),
                 state_table: Some(catalog),
-                upstream_dist_key,
+                dist_key_in_pk,
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,

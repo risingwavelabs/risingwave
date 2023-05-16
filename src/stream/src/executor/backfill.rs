@@ -78,7 +78,7 @@ pub struct BackfillExecutor<S: StateStore> {
     state_table: StateTable<S>,
 
     /// Upstream dist key to compute vnode
-    upstream_dist_key: Vec<usize>,
+    dist_key_in_pk: Vec<usize>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -103,7 +103,7 @@ where
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         state_table: StateTable<S>,
-        upstream_dist_key: Vec<usize>,
+        dist_key_in_pk: Vec<usize>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -119,7 +119,7 @@ where
             upstream_table,
             upstream,
             state_table,
-            upstream_dist_key,
+            dist_key_in_pk,
             output_indices,
             actor_id: progress.actor_id(),
             progress,
@@ -136,7 +136,7 @@ where
 
         let _state_table_len = pk_in_output_indices.len() + 2;
 
-        let upstream_dist_key = self.upstream_dist_key;
+        let dist_key_in_pk = self.dist_key_in_pk;
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
@@ -301,8 +301,7 @@ where
                                     let new_state = Self::build_new_state(
                                         false,
                                         current_pos_inner,
-                                        &pk_in_output_indices,
-                                        &upstream_dist_key,
+                                        &dist_key_in_pk,
                                     );
                                     Self::persist_state(
                                         barrier.epoch,
@@ -382,8 +381,7 @@ where
                     let new_state = Self::build_new_state(
                         true,
                         &current_pos.unwrap(),
-                        &pk_in_output_indices,
-                        &upstream_dist_key,
+                        &dist_key_in_pk,
                     );
                     Self::persist_state(
                         barrier.epoch,
@@ -567,23 +565,23 @@ where
     fn build_new_state(
         is_finished: bool,
         current_pos: &OwnedRow,
-        pk_in_output_indices: &[usize],
-        upstream_dist_key: &[usize],
+        dist_key_in_pk: &[usize],
     ) -> OwnedRow {
-        let mut state = vec![None; pk_in_output_indices.len() + 2];
+        let mut state = vec![None; current_pos.len() + 2];
+        println!("dist_key_in_pk {:?}", dist_key_in_pk);
 
         // vnode
-        let current_vnode = VirtualNode::compute_row(current_pos, upstream_dist_key).to_scalar();
+        let current_vnode = VirtualNode::compute_row(current_pos, dist_key_in_pk).to_scalar();
         let current_vnode = Some(current_vnode.into());
         state[0] = current_vnode;
 
         // pk
-        for (i, pos) in pk_in_output_indices.iter().enumerate() {
-            state[i + 1] = current_pos.datum_at(*pos).to_owned_datum();
+        for (i, d) in current_pos.iter().enumerate() {
+            state[i + 1] = d.to_owned_datum();
         }
 
         // is_finished
-        state[pk_in_output_indices.len() + 1] = Some(is_finished.into());
+        state[current_pos.len() + 1] = Some(is_finished.into());
 
         OwnedRow::new(state)
     }
