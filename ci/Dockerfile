@@ -12,14 +12,16 @@ RUN apt-get update -yy && \
 
 SHELL ["/bin/bash", "-c"]
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
-
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
-    tar -xvzf - -C /usr/local --strip-components 1
-
 RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
+
+RUN echo ${RUST_TOOLCHAIN} > rust-toolchain && \
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y && \
+    rustup show
+
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
+    tar -xvzf - -C /usr/local --strip-components 1
 
 ENV PATH /root/.cargo/bin/:$PATH
 
