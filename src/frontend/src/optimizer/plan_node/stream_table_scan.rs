@@ -144,11 +144,14 @@ impl StreamTableScan {
             // So the new distribution key indices will be: [1]
             // ---
             // Q: Why distribution key is needed?
-            // A: We NEED distribution key so we can compute vnode.
-            // Since there can be parallel table scans.
-            // In the state of the backfill executor,
-            // we only partition by vnode, i.e. it is the prefix key.
-            // The upstream pk serves as the value.
+            // A: We need distribution key so we can compute vnode.
+            // Q: Why do we need vnode?
+            // A: We need to partition state by it,
+            // since there can be parallel table scans. Without it when we recover,
+            // we don't know what is the backfill progress of each backfill executor,
+            // since they all override to the same spot.
+            // If we use vnode as prefix key, that will partition their states.
+            // The upstream pk will still serve as the value.
             Distribution::UpstreamHashShard(dist_key, _) => {
                 debug_assert_eq!(*dist_key, self.logical.table_desc.distribution_key);
                 // println!("logical pk: {:?}", self.logical.primary_key());
