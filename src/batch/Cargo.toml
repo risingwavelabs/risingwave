@@ -23,6 +23,7 @@ either = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+hashbrown = { workspace = true }
 hytra = "0.1.2"
 itertools = "0.10"
 minitrace = "0.4"

@@ -84,6 +84,37 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
 
+/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
+/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
+///
+/// This is useful for checking whether a physical type is compatible with a logical type.
+#[macro_export]
+macro_rules! for_all_type_pairs {
+    ($macro:ident) => {
+        $macro! {
+            { Boolean,     Bool },
+            { Int16,       Int16 },
+            { Int32,       Int32 },
+            { Int64,       Int64 },
+            { Int256,      Int256 },
+            { Float32,     Float32 },
+            { Float64,     Float64 },
+            { Varchar,     Utf8 },
+            { Bytea,       Bytea },
+            { Date,        Date },
+            { Time,        Time },
+            { Timestamp,   Timestamp },
+            { Timestamptz, Int64 },
+            { Interval,    Interval },
+            { Decimal,     Decimal },
+            { Jsonb,       Jsonb },
+            { Serial,      Serial },
+            { List,        List },
+            { Struct,      Struct }
+        }
+    };
+}
+
 /// The set of datatypes that are supported in RisingWave.
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 // but without data fields.
@@ -287,27 +318,20 @@ impl From<DataTypeName> for PbTypeName {
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
-        match self {
-            DataType::Boolean => BoolArrayBuilder::new(capacity).into(),
-            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
-            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
-            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
-            DataType::Serial => PrimitiveArrayBuilder::<Serial>::new(capacity).into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<F32>::new(capacity).into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<F64>::new(capacity).into(),
-            DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
-            DataType::Date => DateArrayBuilder::new(capacity).into(),
-            DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
-            DataType::Time => TimeArrayBuilder::new(capacity).into(),
-            DataType::Timestamp => TimestampArrayBuilder::new(capacity).into(),
-            DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
-            DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
-            DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
-            DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
-            DataType::Struct(_) => StructArrayBuilder::with_type(capacity, self.clone()).into(),
-            DataType::List { .. } => ListArrayBuilder::with_type(capacity, self.clone()).into(),
-            DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
+
+        macro_rules! new_builder {
+            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                match self {
+                    $(
+                        DataType::$DataType { .. } => {
+                            let builder = ArrayBuilder::with_type(capacity, self.clone());
+                            ArrayBuilderImpl::$PhysicalType(builder)
+                        }
+                    )*
+                }
+            }
         }
+        for_all_type_pairs! { new_builder }
     }
 
     pub fn prost_type_name(&self) -> PbTypeName {
@@ -1101,37 +1125,6 @@ impl ScalarImpl {
             ),
         }
     }
-}
-
-/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
-/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
-///
-/// This is useful for checking whether a physical type is compatible with a logical type.
-#[macro_export]
-macro_rules! for_all_type_pairs {
-    ($macro:ident) => {
-        $macro! {
-            { Boolean,     Bool },
-            { Int16,       Int16 },
-            { Int32,       Int32 },
-            { Int64,       Int64 },
-            { Int256,      Int256 },
-            { Float32,     Float32 },
-            { Float64,     Float64 },
-            { Varchar,     Utf8 },
-            { Bytea,       Bytea },
-            { Date,        Date },
-            { Time,        Time },
-            { Timestamp,   Timestamp },
-            { Timestamptz, Int64 },
-            { Interval,    Interval },
-            { Decimal,     Decimal },
-            { Jsonb,       Jsonb },
-            { Serial,      Serial },
-            { List,        List },
-            { Struct,      Struct }
-        }
-    };
 }
 
 /// Returns whether the `literal` matches the `data_type`.
