@@ -81,6 +81,11 @@ pub struct StreamingMetrics {
     pub lookup_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub lookup_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
+    // temporal join
+    pub temporal_join_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub temporal_join_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub temporal_join_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
     // Backfill
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
     pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
@@ -469,6 +474,30 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let temporal_join_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_temporal_join_cache_miss_count",
+            "Temporal join executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let temporal_join_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_temporal_join_total_query_cache_count",
+            "Temporal join executor query cache total count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let temporal_join_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_temporal_join_cached_entry_count",
+            "Total entry count in temporal join executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
@@ -652,6 +681,9 @@ impl StreamingMetrics {
             lookup_cache_miss_count,
             lookup_total_query_cache_count,
             lookup_cached_entry_count,
+            temporal_join_cache_miss_count,
+            temporal_join_total_query_cache_count,
+            temporal_join_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
             barrier_inflight_latency,
