@@ -40,42 +40,40 @@ impl CacheRefillPolicy {
         }
     }
 
-    pub async fn execute(self: &Arc<Self>, delta: HummockVersionDelta, max_level: u32) {
+    pub async fn execute(&self, delta: HummockVersionDelta) {
         if self.max_preload_wait_time_mill > 0 {
-            let policy = self.clone();
-            let handle = tokio::spawn(async move {
-                let timer = policy.metrics.refill_cache_duration.start_timer();
-                let mut preload_count = 0;
-                let stats = StoreLocalStatistic::default();
-                let mut flatten_reqs = Vec::new();
-                for group_delta in delta.group_deltas.values() {
-                    let mut is_bottommost_level = false;
-                    let last_pos = flatten_reqs.len();
-                    for d in &group_delta.group_deltas {
-                        if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
-                            d.delta_type.as_ref()
-                        {
-                            if level_delta.level_idx >= max_level {
-                                is_bottommost_level = true;
-                                break;
+            let mut flatten_reqs = vec![];
+            let mut stats = StoreLocalStatistic::default();
+            let mut fill_count = 0;
+            for group_delta in delta.group_deltas.values() {
+                let mut ssts = vec![];
+                let mut hit_count = 0;
+                let mut total_file_count = 0;
+                for d in &group_delta.group_deltas {
+                    if let Some(group_delta::DeltaType::IntraLevel(level_delta)) =
+                        d.delta_type.as_ref()
+                    {
+                        if level_delta.level_idx != 0 {
+                            for sst_id in &level_delta.removed_table_ids {
+                                if self.sstable_store.is_hot_sstable(sst_id) {
+                                    hit_count += 1;
+                                }
+                                total_file_count += 1;
                             }
-                            for sst in &level_delta.inserted_table_infos {
-                                flatten_reqs
-                                    .push(policy.sstable_store.sstable_syncable(sst, &stats));
-                            }
-                            preload_count += level_delta.inserted_table_infos.len();
                         }
-                    }
-                    if is_bottommost_level {
-                        while flatten_reqs.len() > last_pos {
-                            flatten_reqs.pop();
-                        }
+                        ssts.extend(level_delta.inserted_table_infos.clone());
                     }
                 }
-                policy.metrics.preload_io_count.inc_by(preload_count as u64);
-                let _ = try_join_all(flatten_reqs).await;
-                timer.observe_duration();
-            });
+                if hit_count * 2 > total_file_count {
+                    fill_count += ssts.len();
+                    for sst in &ssts {
+                        flatten_reqs.push(self.sstable_store.sstable(sst, &mut stats));
+                    }
+                }
+            }
+
+            self.metrics.preload_io_count.inc_by(fill_count as u64);
+            let handle = try_join_all(flatten_reqs);
             let _ = tokio::time::timeout(
                 Duration::from_millis(self.max_preload_wait_time_mill),
                 handle,

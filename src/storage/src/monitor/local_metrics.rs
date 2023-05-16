@@ -75,11 +75,6 @@ impl StoreLocalStatistic {
         }
     }
 
-    pub fn apply_meta_fetch(&mut self, local_cache_meta_block_miss: u64) {
-        self.cache_meta_block_total += 1;
-        self.cache_meta_block_miss += local_cache_meta_block_miss;
-    }
-
     fn report(&self, metrics: &mut LocalStoreMetrics) {
         metrics.add_count(self);
         metrics.add_histogram(self);

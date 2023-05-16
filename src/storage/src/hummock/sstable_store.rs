@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::clone::Clone;
+use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -341,6 +342,10 @@ impl SstableStore {
         self.meta_cache.clone()
     }
 
+    pub fn is_hot_sstable(&self, sst_id: &HummockSstableObjectId) -> bool {
+        self.meta_cache.is_hot_entry(*sst_id, sst_id)
+    }
+
     pub fn get_block_cache(&self) -> BlockCache {
         self.block_cache.clone()
     }
@@ -357,13 +362,11 @@ impl SstableStore {
 
     /// Returns `table_holder`, `local_cache_meta_block_miss` (1 if cache miss) and
     /// `local_cache_meta_block_unhit` (1 if not cache hit).
-    pub async fn sstable_syncable(
+    pub fn sstable(
         &self,
         sst: &SstableInfo,
-        stats: &StoreLocalStatistic,
-    ) -> HummockResult<(TableHolder, u64, u64)> {
-        let mut local_cache_meta_block_miss = 0;
-        let mut local_cache_meta_block_unhit = 0;
+        stats: &mut StoreLocalStatistic,
+    ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static {
         let object_id = sst.get_object_id();
         let lookup_response = self
             .meta_cache
@@ -374,7 +377,6 @@ impl SstableStore {
                 || {
                     let store = self.store.clone();
                     let meta_path = self.get_sst_data_path(object_id);
-                    local_cache_meta_block_miss += 1;
                     let stats_ptr = stats.remote_io_time.clone();
                     let loc = BlockLocation {
                         offset: sst.meta_offset as usize,
@@ -395,32 +397,14 @@ impl SstableStore {
                     }
                 },
             );
-        if !matches!(lookup_response, LookupResponse::Cached(..)) {
-            local_cache_meta_block_unhit += 1;
+        stats.cache_meta_block_total += 1;
+        match &lookup_response {
+            LookupResponse::Miss(_) | LookupResponse::WaitPendingRequest(_) => {
+                stats.cache_meta_block_miss += 1;
+            }
+            _ => (),
         }
-        let result = lookup_response
-            .verbose_instrument_await("meta_cache_lookup")
-            .await;
-        result.map(|table_holder| {
-            (
-                table_holder,
-                local_cache_meta_block_miss,
-                local_cache_meta_block_unhit,
-            )
-        })
-    }
-
-    pub async fn sstable(
-        &self,
-        sst: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        self.sstable_syncable(sst, stats).await.map(
-            |(table_holder, local_cache_meta_block_miss, ..)| {
-                stats.apply_meta_fetch(local_cache_meta_block_miss);
-                table_holder
-            },
-        )
+        lookup_response.verbose_instrument_await("sstable")
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {

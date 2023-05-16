@@ -43,6 +43,7 @@ const IN_LRU: u8 = 1 << 1;
 const REVERSE_IN_LRU: u8 = !IN_LRU;
 const IS_HIGH_PRI: u8 = 1 << 2;
 const IN_HIGH_PRI_POOL: u8 = 1 << 3;
+const HAS_HIT: u8 = 1 << 4;
 
 pub trait LruKey: Eq + Send + Hash {}
 impl<T: Eq + Send + Hash> LruKey for T {}
@@ -197,6 +198,14 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
     /// hash table.
     fn is_in_cache(&self) -> bool {
         (self.flags & IN_CACHE) > 0
+    }
+
+    fn set_hit(&mut self) {
+        self.flags |= HAS_HIT;
+    }
+
+    fn is_hit(&self) -> bool {
+        (self.flags & HAS_HIT) > 0
     }
 
     unsafe fn get_key(&self) -> &K {
@@ -581,6 +590,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             if !(*e).has_refs() {
                 self.lru_remove(e);
             }
+            (*e).set_hit();
             (*e).add_ref();
         }
         e
@@ -707,11 +717,11 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
-    pub fn contains(self: &Arc<Self>, hash: u64, key: &K) -> bool {
-        let mut shard = self.shards[self.shard(hash)].lock();
+    pub fn is_hot_entry(self: &Arc<Self>, hash: u64, key: &K) -> bool {
+        let shard = self.shards[self.shard(hash)].lock();
         unsafe {
-            let ptr = shard.lookup(hash, key);
-            !ptr.is_null()
+            let ptr = shard.table.lookup(hash, key);
+            !ptr.is_null() && (*ptr).is_hit()
         }
     }
 

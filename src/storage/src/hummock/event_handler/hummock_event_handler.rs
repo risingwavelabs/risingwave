@@ -411,18 +411,10 @@ impl HummockEventHandler {
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
-                let max_level = version_to_apply
-                    .levels
-                    .values()
-                    .map(|levels| levels.levels.last().unwrap().level_idx)
-                    .max()
-                    .unwrap();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
-                        self.cache_fill_policy
-                            .execute(version_delta.clone(), max_level)
-                            .await;
+                        self.cache_fill_policy.execute(version_delta.clone()).await;
                     }
                     version_to_apply.apply_version_delta(version_delta);
                 }
