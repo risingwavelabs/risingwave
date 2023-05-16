@@ -822,16 +822,17 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, date_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr1 ORDER BY $expr12 DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalFilter { predicate: ($expr1 = $expr10) AND (date_time >= date_time) AND (date_time <= $expr6) }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalShare { id = 3 }
-              | └─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8, Field(auction, 9:Int32) as $expr9] }
-              |   └─LogicalFilter { predicate: (event_type = 1:Int32) }
-              |     └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
-              └─LogicalShare { id = 6 }
-                └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr10, Field(bid, 1:Int32) as $expr11, Field(bid, 2:Int32) as $expr12, Field(bid, 3:Int32) as $expr13, Field(bid, 4:Int32) as $expr14, date_time, Field(bid, 6:Int32) as $expr15] }
-                  └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                    └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr13, $expr14, date_time, $expr15] }
+            └─LogicalFilter { predicate: ($expr1 = $expr10) AND (date_time >= date_time) AND (date_time <= $expr6) }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalShare { id = 3 }
+                | └─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8, Field(auction, 9:Int32) as $expr9] }
+                |   └─LogicalFilter { predicate: (event_type = 1:Int32) }
+                |     └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
+                └─LogicalShare { id = 6 }
+                  └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr10, Field(bid, 1:Int32) as $expr11, Field(bid, 2:Int32) as $expr12, Field(bid, 3:Int32) as $expr13, Field(bid, 4:Int32) as $expr14, date_time, Field(bid, 6:Int32) as $expr15] }
+                    └─LogicalFilter { predicate: (event_type = 2:Int32) }
+                      └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[$expr11 DESC, date_time ASC]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalJoin { type: Inner, on: ($expr1 = $expr9) AND (date_time >= date_time) AND (date_time <= $expr6), output: all }
@@ -1337,10 +1338,11 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2, $expr1 ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalShare { id = 3 }
-            └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
-              └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6] }
+            └─LogicalShare { id = 3 }
+              └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
+                └─LogicalFilter { predicate: (event_type = 2:Int32) }
+                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[$expr1 DESC]", limit: 1, offset: 0, group_key: [1, 0] }
@@ -1404,10 +1406,11 @@
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, rank] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY $expr2, $expr1 ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalShare { id = 3 }
-            └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
-              └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6] }
+            └─LogicalShare { id = 3 }
+              └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
+                └─LogicalFilter { predicate: (event_type = 2:Int32) }
+                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[$expr1 DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
@@ -1475,10 +1478,11 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr1 ORDER BY $expr3 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalShare { id = 3 }
-            └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
-              └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6] }
+            └─LogicalShare { id = 3 }
+              └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
+                └─LogicalFilter { predicate: (event_type = 2:Int32) }
+                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:
   - create_sources
