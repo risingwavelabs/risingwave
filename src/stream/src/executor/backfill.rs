@@ -28,7 +28,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
@@ -360,19 +359,25 @@ where
             "Backfill has already finished and forward messages directly to the downstream"
         );
 
-        // Wait for first barrier after backfill finish to come
-        // so we can update our progress + persist the status.
+        // Wait for first barrier to come after backfill is finished.
+        // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
             match &msg {
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
                     self.progress.finish(barrier.epoch.curr);
-                    let mut current_pos: Vec<Datum> =
-                        current_pos.clone().unwrap().as_inner().into();
-                    current_pos.push(Some(true.into()));
-                    let current_pos = OwnedRow::new(current_pos);
-                    Self::flush_data(&mut self.state_table, barrier.epoch, &old_pos, &current_pos)
-                        .await?;
+                    // FIXME(kwannoel)
+                    let current_pos_inner = current_pos.as_ref().unwrap();
+                    Self::persist_state(
+                        barrier.epoch,
+                        true,
+                        &mut self.state_table,
+                        state_table_len,
+                        &old_pos,
+                        current_pos_inner,
+                    )
+                    .await?;
+                    mem::swap(&mut old_pos, &mut current_pos);
                     yield msg;
                     break;
                 }
