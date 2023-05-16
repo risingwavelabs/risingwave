@@ -914,10 +914,11 @@ where
                     .map(|actor| actor.actor_id)
                     .collect_vec();
 
-                let actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+                let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+
                 let actor_splits = self
                     .source_manager
-                    .reallocate_splits(&prev_actor_ids, &actor_ids)
+                    .reallocate_splits(&prev_actor_ids, &curr_actor_ids)
                     .await?;
 
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);

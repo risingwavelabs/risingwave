@@ -582,7 +582,7 @@ where
     pub async fn reallocate_splits(
         &self,
         prev_actor_ids: &[ActorId],
-        actor_ids: &[ActorId],
+        curr_actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
 
@@ -592,7 +592,7 @@ where
             .cloned()
             .collect_vec();
 
-        let empty_actor_splits = actor_ids
+        let empty_actor_splits = curr_actor_ids
             .iter()
             .map(|actor_id| (*actor_id, vec![]))
             .collect();

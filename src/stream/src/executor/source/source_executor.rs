@@ -231,6 +231,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
+
         stream.replace_data_stream(reader);
 
         self.stream_source_core
@@ -258,7 +259,7 @@ impl<S: StateStore> SourceExecutor<S> {
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
 
-        if let Some(target_splits) = target_state && should_trim_state {
+        if let Some(target_splits) = target_state {
             let target_split_ids: HashSet<_> =
                 target_splits.iter().map(|split| split.id()).collect();
 
@@ -266,7 +267,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 .drain_filter(|split| !target_split_ids.contains(&split.id()))
                 .collect_vec();
 
-            if !dropped_splits.is_empty() {
+            if should_trim_state && !dropped_splits.is_empty() {
                 for split in &dropped_splits {
                     // should be already trimmed in `replace_stream_reader_with_target_state`
                     assert!(!core.stream_source_splits.contains_key(&split.id()));
@@ -283,6 +284,8 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // commit anyway, even if no message saved
         core.split_state_store.state_store.commit(epoch).await?;
+
+        core.state_cache.clear();
 
         Ok(())
     }
