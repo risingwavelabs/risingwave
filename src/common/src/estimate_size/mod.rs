@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
+pub use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::Decimal as RustDecimal;
 
 use crate::types::DataType;

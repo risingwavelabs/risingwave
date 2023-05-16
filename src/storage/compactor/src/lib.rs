@@ -18,7 +18,7 @@ mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 
 use crate::server::compactor_serve;
 

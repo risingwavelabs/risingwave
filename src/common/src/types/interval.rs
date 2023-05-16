@@ -24,7 +24,6 @@ use bytes::BytesMut;
 use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;

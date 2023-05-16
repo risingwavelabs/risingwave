@@ -24,7 +24,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::ExprError;
 
 use super::{StreamingAggImpl, StreamingAggInput, StreamingAggOutput};
