@@ -188,7 +188,12 @@ where
         let mut current_pos: Option<OwnedRow> = None;
 
         // NOTE(kwannoel): Only updated when flushing to state table.
-        let mut old_pos: Option<OwnedRow> = None;
+        // `None` means it starts from the beginning.
+        let mut current_state: Option<OwnedRow> = None;
+
+        // NOTE(kwannoel): Only updated when flushing to state table.
+        // `None` means it starts from the beginning.
+        let mut old_state: Option<OwnedRow> = None;
 
         // Keep track of rows from the snapshot.
         let mut total_snapshot_processed_rows: u64 = 0;
@@ -293,16 +298,19 @@ where
 
                                 // Persist state on barrier
                                 if let Some(current_pos_inner) = &current_pos {
+                                    let new_state = Self::build_new_state(
+                                        false,
+                                        current_pos_inner,
+                                        &pk_in_output_indices,
+                                        &upstream_dist_key,
+                                    );
                                     Self::persist_state(
                                         barrier.epoch,
-                                        false,
                                         &mut self.state_table,
-                                        state_table_len,
-                                        &old_pos,
-                                        current_pos_inner,
+                                        &mut old_state,
+                                        new_state,
                                     )
                                     .await?;
-                                    old_pos = current_pos.clone();
                                 }
 
                                 yield Message::Barrier(barrier);
@@ -343,21 +351,7 @@ where
                                 // Raise the current position.
                                 // As snapshot read streams are ordered by pk, so we can
                                 // just use the last row to update `current_pos`.
-                                let mut current_pos_by_vnode = vec![None; pk_in_output_indices.len() + 1];
-                                let current_row =
-                                    chunk
-                                        .rows()
-                                        .last()
-                                        .unwrap()
-                                        .1;
-                                let current_vnode = VirtualNode::compute_row(current_row, &upstream_dist_key).to_scalar();
-                                let current_vnode = Some(current_vnode.into());
-                                current_pos_by_vnode[0] = current_vnode;
-                                for (i, pos) in pk_in_output_indices.iter().enumerate() {
-                                    current_pos_by_vnode[i+1] = current_row.datum_at(*pos).to_owned_datum();
-                                }
-
-                                current_pos = Some(OwnedRow::new(current_pos_by_vnode));
+                                current_pos = Self::update_pos(&chunk, &pk_in_output_indices);
 
                                 let chunk_cardinality = chunk.cardinality() as u64;
                                 cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -385,18 +379,19 @@ where
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
                     self.progress.finish(barrier.epoch.curr);
-                    // FIXME(kwannoel)
-                    let current_pos_inner = current_pos.as_ref().unwrap();
+                    let new_state = Self::build_new_state(
+                        true,
+                        &current_pos.unwrap(),
+                        &pk_in_output_indices,
+                        &upstream_dist_key,
+                    );
                     Self::persist_state(
                         barrier.epoch,
-                        true,
                         &mut self.state_table,
-                        state_table_len,
-                        &old_pos,
-                        current_pos_inner,
+                        &mut old_state,
+                        new_state,
                     )
                     .await?;
-                    // old_pos = current_pos.clone();
                     yield msg;
                     break;
                 }
@@ -473,59 +468,6 @@ where
         yield None;
     }
 
-    /// Schema
-    /// | vnode | pk | `backfill_finished` |
-    ///
-    /// For `current_pos` and `old_pos` are just pk of upstream.
-    /// They should be strictly increasing.
-    async fn persist_state(
-        epoch: EpochPair,
-        is_finished: bool,
-        table: &mut StateTable<S>,
-        row_len: usize,
-        old_pos: &Option<OwnedRow>,
-        current_pos: &OwnedRow,
-    ) -> StreamExecutorResult<()> {
-        let mut state = Vec::with_capacity(row_len);
-        // vnode
-        let vnode = table.compute_vnode_by_pk(current_pos).to_scalar();
-        state.push(Some(vnode.into()));
-
-        // pk
-        for d in current_pos.as_inner() {
-            state.push(d.clone());
-        }
-
-        // backfill_finished
-        state.push(Some(is_finished.into()));
-
-        Self::flush_data(table, epoch, old_pos, current_pos).await
-    }
-
-    /// For `current_pos` and `old_pos` are just pk of upstream.
-    /// They should be strictly increasing.
-    async fn flush_data(
-        table: &mut StateTable<S>,
-        epoch: EpochPair,
-        old_pos: &Option<OwnedRow>,
-        current_pos: &OwnedRow,
-    ) -> StreamExecutorResult<()> {
-        debug_assert!(old_pos.as_ref() != Some(current_pos));
-        if let Some(old_pos) = old_pos {
-            debug_assert_eq!(old_pos.len(), current_pos.len());
-            debug_assert_eq!(old_pos.len(), table.value_indices().as_ref().unwrap().len() + table.pk_indices().len());
-            table.write_record(Record::Update {
-                old_row: old_pos,
-                new_row: current_pos,
-            })
-        } else {
-            table.write_record(Record::Insert {
-                new_row: current_pos,
-            })
-        }
-        table.commit(epoch).await
-    }
-
     /// Mark chunk:
     /// For each row of the chunk, forward it to downstream if its pk <= `current_pos`, otherwise
     /// ignore it. We implement it by changing the visibility bitmap.
@@ -559,10 +501,7 @@ where
     /// Builds a new stream chunk with output_indices.
     fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
         let (ops, columns, visibility) = chunk.into_inner();
-        let mapped_columns = output_indices
-            .iter()
-            .map(|&i| columns[i].clone())
-            .collect();
+        let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
         StreamChunk::new(ops, mapped_columns, visibility)
     }
 
@@ -580,6 +519,85 @@ where
                 Some(Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)))
             }
         }
+    }
+
+    /// Schema
+    /// | vnode | pk | `backfill_finished` |
+    ///
+    /// For `current_pos` and `old_pos` are just pk of upstream.
+    /// They should be strictly increasing.
+    async fn persist_state(
+        epoch: EpochPair,
+        table: &mut StateTable<S>,
+        old_state: &mut Option<OwnedRow>,
+        current_state: OwnedRow,
+    ) -> StreamExecutorResult<()> {
+        Self::flush_data(table, epoch, old_state, &current_state).await?;
+        *old_state = Some(current_state);
+        Ok(())
+    }
+
+    /// For `current_pos` and `old_pos` are just pk of upstream.
+    /// They should be strictly increasing.
+    async fn flush_data(
+        table: &mut StateTable<S>,
+        epoch: EpochPair,
+        old_pos: &Option<OwnedRow>,
+        current_pos: &OwnedRow,
+    ) -> StreamExecutorResult<()> {
+        debug_assert!(old_pos.as_ref() != Some(current_pos));
+        if let Some(old_pos) = old_pos {
+            debug_assert_eq!(old_pos.len(), current_pos.len());
+            debug_assert_eq!(
+                old_pos.len(),
+                table.value_indices().as_ref().unwrap().len() + table.pk_indices().len()
+            );
+            table.write_record(Record::Update {
+                old_row: old_pos,
+                new_row: current_pos,
+            })
+        } else {
+            table.write_record(Record::Insert {
+                new_row: current_pos,
+            })
+        }
+        table.commit(epoch).await
+    }
+
+    fn build_new_state(
+        is_finished: bool,
+        current_pos: &OwnedRow,
+        pk_in_output_indices: &[usize],
+        upstream_dist_key: &[usize],
+    ) -> OwnedRow {
+        let mut state = vec![None; pk_in_output_indices.len() + 2];
+
+        // vnode
+        let current_vnode = VirtualNode::compute_row(current_pos, &upstream_dist_key).to_scalar();
+        let current_vnode = Some(current_vnode.into());
+        state[0] = current_vnode;
+
+        // pk
+        for (i, pos) in pk_in_output_indices.iter().enumerate() {
+            state[i + 1] = current_pos.datum_at(*pos).to_owned_datum();
+        }
+
+        // is_finished
+        state[pk_in_output_indices.len() + 1] = Some(is_finished.into());
+
+        OwnedRow::new(state)
+    }
+
+    fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -> Option<OwnedRow> {
+        Some(
+            chunk
+                .rows()
+                .last()
+                .unwrap()
+                .1
+                .project(pk_in_output_indices)
+                .into_owned_row(),
+        )
     }
 }
 

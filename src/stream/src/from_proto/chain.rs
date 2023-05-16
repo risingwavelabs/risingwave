@@ -158,7 +158,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .await;
 
-                let upstream_dist_key = node.upstream_dist_key.iter().map(|k| *k as usize).collect();
+                let upstream_dist_key =
+                    node.upstream_dist_key.iter().map(|k| *k as usize).collect();
 
                 BackfillExecutor::new(
                     upstream_table,
