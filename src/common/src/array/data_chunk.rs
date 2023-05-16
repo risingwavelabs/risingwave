@@ -186,6 +186,8 @@ impl DataChunk {
         &self.columns
     }
 
+    /// Divides one chunk into two at an column index.
+    ///
     /// # Panics
     ///
     /// Panics if `idx > columns.len()`.

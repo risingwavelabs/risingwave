@@ -53,8 +53,8 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains at least two columns:
-    /// - The first column is the row indexes of input chunk. It should be consecutive integers
-    ///   starting from 0.
+    /// - The first column is the row indexes of input chunk. It should be
+    ///   monotonically increasing.
     /// - The remaining columns are the output values. More than one columns are allowed, which will
     ///   be transformed into a single `STRUCT` column later.
     ///
@@ -101,7 +101,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     ///       └---------> 2 1 -------------------------> 0 1
     ///                   ---                            ---
     ///                   2 2                            1 2
-    ///                   2 3                            1 3
+    ///                   2 3                            2 3
     ///          row idx--^ ^--values  projected_row_id--^ ^--values
     /// ```
     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>>;
