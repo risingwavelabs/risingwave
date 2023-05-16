@@ -7,7 +7,7 @@ REPO_ROOT=${PWD}
 
 echo "+++ Run python UDF SDK unit tests"
 cd ${REPO_ROOT}/src/udf/python
-python -m pytest
+python3 -m pytest
 cd ${REPO_ROOT}
 
 echo "+++ Run unit tests with coverage"
