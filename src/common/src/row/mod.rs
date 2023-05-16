@@ -386,7 +386,6 @@ pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
 pub use once::{once, Once};
-pub use ordered::OrdRow;
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};

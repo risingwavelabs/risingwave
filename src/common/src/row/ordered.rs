@@ -16,9 +16,7 @@ use super::{OwnedRow, Row};
 use crate::types::{DefaultOrd, DefaultOrdered, DefaultPartialOrd};
 use crate::util::sort_util::{cmp_datum_iter, partial_cmp_datum_iter, OrderType};
 
-pub type OrdRow<R> = DefaultOrdered<R>;
-
-impl<R: Row> Row for OrdRow<R> {
+impl<R: Row> Row for DefaultOrdered<R> {
     type Iter<'a> = R::Iter<'a> where Self: 'a;
 
     deref_forward_row! {}

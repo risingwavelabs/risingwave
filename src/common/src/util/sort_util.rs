@@ -25,7 +25,7 @@ use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::row::Row;
-use crate::types::{ScalarRefImpl, ToDatumRef};
+use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
@@ -411,16 +411,8 @@ pub fn partial_cmp_datum(
     rhs: impl ToDatumRef,
     order_type: OrderType,
 ) -> Option<Ordering> {
-    #[derive(PartialEq, Eq)]
-    struct OrdScalarRefImpl<'a>(ScalarRefImpl<'a>);
-    impl PartialOrd for OrdScalarRefImpl<'_> {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            crate::types::default_partial_cmp_scalar_ref_impl(self.0, other.0)
-        }
-    }
-
-    let lhs = lhs.to_datum_ref().map(OrdScalarRefImpl);
-    let rhs = rhs.to_datum_ref().map(OrdScalarRefImpl);
+    let lhs = lhs.to_datum_ref().map(DefaultOrdered);
+    let rhs = rhs.to_datum_ref().map(DefaultOrdered);
     generic_partial_cmp(lhs.as_ref(), rhs.as_ref(), order_type)
 }
 

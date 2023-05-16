@@ -95,27 +95,25 @@ impl DefaultOrd for DatumRef<'_> {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct DefaultOrdered<T: DefaultOrd> {
-    inner: T,
-}
+pub struct DefaultOrdered<T: DefaultOrd>(pub T);
 
 impl<T: DefaultOrd + EstimateSize> EstimateSize for DefaultOrdered<T> {
     fn estimated_heap_size(&self) -> usize {
-        self.inner.estimated_heap_size()
+        self.0.estimated_heap_size()
     }
 }
 
 impl<T: DefaultOrd> DefaultOrdered<T> {
     pub fn new(inner: T) -> Self {
-        Self { inner }
+        Self(inner)
     }
 
     pub fn into_inner(self) -> T {
-        self.inner
+        self.0
     }
 
     pub fn as_inner(&self) -> &T {
-        &self.inner
+        &self.0
     }
 }
 
@@ -135,15 +133,12 @@ impl<T: DefaultOrd> From<T> for DefaultOrdered<T> {
 
 impl<T: DefaultOrd> PartialOrd for DefaultOrdered<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.inner.default_partial_cmp(other.as_inner())
+        self.0.default_partial_cmp(other.as_inner())
     }
 }
 
 impl<T: DefaultOrd> Ord for DefaultOrdered<T> {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.inner.default_cmp(other.as_inner())
+        self.0.default_cmp(other.as_inner())
     }
 }
-
-pub type OrdScalarImpl = DefaultOrdered<ScalarImpl>;
-pub type OrdDatum = DefaultOrdered<Datum>;

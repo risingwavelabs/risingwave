@@ -22,7 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{
-    DefaultOrd, OrdScalarImpl, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+    DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
 };
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -35,8 +35,8 @@ use crate::common::table::state_table::StateTable;
 type MemcmpEncoded = Box<[u8]>;
 
 type CacheKey = (
-    OrdScalarImpl, // sort (watermark) column value
-    MemcmpEncoded, // memcmp-encoded pk
+    DefaultOrdered<ScalarImpl>, // sort (watermark) column value
+    MemcmpEncoded,              // memcmp-encoded pk
 );
 
 fn row_to_cache_key<S: StateStore>(
