@@ -232,13 +232,13 @@ mod tests {
             executor_snapshot(
                 || std::future::ready(create_executor()),
                 r###"
-- !chunk |-
+- !chunk |2
     I I
     + 1 4
     + 2 5
     + 3 6
-- !chunk |-
-    I I
+- !chunk |2
+      I I
     + 7 8
     - 3 6
 "###

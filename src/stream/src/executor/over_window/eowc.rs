@@ -584,14 +584,13 @@ mod tests {
                 || create_executor(calls.clone(), store.clone()),
                 r###"
 - barrier
-# FIXME: the header cannot be aligned. What's the correct YAML format?
-- !chunk |-
-    I T  I   i
+- !chunk |2
+      I T  I   i
     + 1 p1 100 10
     + 1 p1 101 16
     + 4 p2 200 20
-- !chunk |-
-    I T  I   i
+- !chunk |2
+      I T  I   i
     + 5 p1 102 18
     + 7 p2 201 22
     + 8 p3 300 33
@@ -600,8 +599,8 @@ mod tests {
 - barrier
 - recovery
 - barrier
-- !chunk |-
-    I  T  I   i
+- !chunk |2
+      I  T  I   i
     + 10 p1 103 13
     + 12 p2 202 28
     + 13 p3 301 39
@@ -627,8 +626,8 @@ mod tests {
                 || create_executor(calls.clone(), store.clone()),
                 r###"
 - barrier
-- !chunk |-
-    I T  I   i
+- !chunk |2
+      I T  I   i
     + 1 p1 100 10
     + 1 p1 101 16
     + 4 p1 102 20
