@@ -50,6 +50,11 @@ values ('nan'::decimal), ('inf'), ('-inf'), ('2.') order by 1;
  Infinity
       NaN
 
+query TTT
+select '-inf'::decimal < 2, 2 < 'inf'::decimal, 'inf'::decimal < 'nan'::decimal;
+----
+t t t
+
 query IIIIII
 select
 	'-32768'::int2::decimal,
