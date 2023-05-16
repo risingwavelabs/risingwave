@@ -189,10 +189,6 @@ where
 
         // NOTE(kwannoel): Only updated when flushing to state table.
         // `None` means it starts from the beginning.
-        let _current_state: Option<OwnedRow> = None;
-
-        // NOTE(kwannoel): Only updated when flushing to state table.
-        // `None` means it starts from the beginning.
         let mut old_state: Option<OwnedRow> = None;
 
         // Keep track of rows from the snapshot.
