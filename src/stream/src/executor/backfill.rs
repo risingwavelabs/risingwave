@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::iter::once;
 use std::mem;
 use std::ops::Bound;
 use std::pin::pin;
@@ -27,7 +28,9 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
@@ -128,8 +131,11 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
+
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
+
         let state_table_len = self.info().schema.len();
+        let upstream_dist_key = self.upstream_dist_key;
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
@@ -295,7 +301,7 @@ where
                                         current_pos_inner,
                                     )
                                     .await?;
-                                    mem::swap(&mut old_pos, &mut current_pos);
+                                    old_pos = current_pos.clone();
                                 }
 
                                 yield Message::Barrier(barrier);
@@ -336,15 +342,22 @@ where
                                 // Raise the current position.
                                 // As snapshot read streams are ordered by pk, so we can
                                 // just use the last row to update `current_pos`.
-                                current_pos = Some(
+                                let mut current_pos_by_vnode = vec![None; pk_in_output_indices.len() + 1];
+                                let current_row =
                                     chunk
                                         .rows()
                                         .last()
                                         .unwrap()
-                                        .1
-                                        .project(&pk_in_output_indices)
-                                        .into_owned_row(),
-                                );
+                                        .1;
+                                let current_vnode = VirtualNode::compute_row(current_row, &upstream_dist_key).to_scalar();
+                                let current_vnode = Some(current_vnode.into());
+                                current_pos_by_vnode[0] = current_vnode;
+                                for (i, pos) in pk_in_output_indices.iter().enumerate() {
+                                    current_pos_by_vnode[i+1] = current_row.datum_at(*pos).to_owned_datum();
+                                }
+
+                                current_pos = Some(OwnedRow::new(current_pos_by_vnode));
+
                                 let chunk_cardinality = chunk.cardinality() as u64;
                                 cur_barrier_snapshot_processed_rows += chunk_cardinality;
                                 total_snapshot_processed_rows += chunk_cardinality;
@@ -382,7 +395,7 @@ where
                         current_pos_inner,
                     )
                     .await?;
-                    mem::swap(&mut old_pos, &mut current_pos);
+                    old_pos = current_pos.clone();
                     yield msg;
                     break;
                 }

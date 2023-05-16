@@ -132,7 +132,7 @@ impl VirtualNode {
             .collect()
     }
 
-    // `compute_row` is used to calculate the `VirtualNode` for the corresponding column in a `Row`.
+    // `compute_row` is used to calculate the `VirtualNode` for the corresponding columns in a `Row`.
     // Similar to `compute_chunk`, it also contains special handling for serial columns.
     pub fn compute_row(row: impl Row, indices: &[usize]) -> VirtualNode {
         let project = row.project(indices);
