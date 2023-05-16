@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound;
+use std::pin::pin;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -192,10 +193,13 @@ where
 
             let left_upstream = upstream.by_ref().map(Either::Left);
 
-            let right_snapshot = Box::pin(
-                Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone(), true)
-                    .map(Either::Right),
-            );
+            let right_snapshot = pin!(Self::snapshot_read(
+                &self.table,
+                snapshot_read_epoch,
+                current_pos.clone(),
+                true
+            )
+            .map(Either::Right),);
 
             // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
             // comes.
