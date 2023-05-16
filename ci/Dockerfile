@@ -16,13 +16,14 @@ WORKDIR /risingwave
 
 COPY rust-toolchain rust-toolchain
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y && \
-    rustup show
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+
+ENV PATH /root/.cargo/bin/:$PATH
+
+RUN rustup show
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
     tar -xvzf - -C /usr/local --strip-components 1
-
-ENV PATH /root/.cargo/bin/:$PATH
 
 # install python dependencies
 RUN pip3 install pyarrow
