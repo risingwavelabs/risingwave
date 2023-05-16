@@ -2,7 +2,6 @@
 # Check detailed comments in src/common/src/config.rs
 [server]
 heartbeat_interval_ms = 1000
-max_heartbeat_interval_secs = 600
 connection_pool_size = 16
 metrics_level = 0
 telemetry_enabled = true

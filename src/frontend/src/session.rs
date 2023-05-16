@@ -198,7 +198,6 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
         let mut join_handles = vec![heartbeat_join_handle];
