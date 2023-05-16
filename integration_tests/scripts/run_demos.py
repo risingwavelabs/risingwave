@@ -73,6 +73,7 @@ def run_debezium_sink_demo():
 
     # produce data
     run_sql_file(test_file, demo_dir)
+    sleep(5)
 
     # query data
     print("PostgreSQL result")
