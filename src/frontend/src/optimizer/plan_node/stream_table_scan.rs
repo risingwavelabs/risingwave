@@ -118,6 +118,70 @@ impl StreamTableScan {
         self.chain_type
     }
 
+    pub fn compute_output_distribution_key(&self) -> Vec<usize> {
+        // Construct distribution key for the backfill executor to compute vnode of upstream
+        // TODO(kwannoel): Should we use project executor instead?
+        let output_distribution_key = match self.base.distribution() {
+            // For sharded distribution, we need to remap dist_key.
+            // Suppose we had Order Key (Primary Key) of Upstream table: [0, 4],
+            // and Distribution Key [0].
+            // Output schema will be:
+            // [0, 4]
+            // So the new distribution key indices will be: [0]
+            // ---
+            // Q: Why distribution key is needed?
+            // A: We need distribution key so we can compute vnode.
+            //
+            // Q: Why do we need vnode?
+            // A: We need to partition state by it,
+            // since there can be parallel table scans. Without it when we recover,
+            // we don't know what is the backfill progress of each backfill executor,
+            // since they all override the same row (no key prefix).
+            // If we use vnode as prefix key, that will partition their states.
+            // The upstream pk will still serve as the value.
+            //
+            // Q: Why don't we actually use this distribution key for state table itself?
+            // A: State Table interface expects that distribution key
+            // is a subset of primary key.
+            // Here we don't have primary key for state table. We only partition it by vnode.
+
+            Distribution::UpstreamHashShard(dist_key, _) => {
+                // 1. Map distribution key to the position in primary key.
+                println!("primary key {:?}", self.logical.primary_key());
+                let distribution_key = dist_key.iter().map(|i| {
+                    self.logical
+                        .primary_key()
+                        .iter()
+                        .position(|j| *i == j.column_index)
+                        .unwrap()
+                }).collect_vec();
+                distribution_key
+                // // 2. Add 1 to offset, since there's a vnode column prepended.
+                // debug_assert_eq!(*dist_key, self.logical.table_desc.distribution_key);
+                // // println!("logical pk: {:?}", self.logical.primary_key());
+                // // println!("base schema: {:?}", self.base.schema());
+                // println!("logical table desc: {:?}", self.logical.table_desc);
+                // println!("logical dist key: {:?}", self.logical.table_desc.distribution_key);
+                // // println!("base pk: {:?}", self.base.logical_pk);
+                // let mut mapping = vec![None; self.base.schema().len()];
+                // for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
+                //     mapping[*old_pos] = Some(new_pos);
+                // }
+                // let mapping = ColIndexMapping::new(mapping);
+                // // println!("mapping {:?}", mapping);
+                // // println!("dist_key {:?}", dist_key);
+                // let new_dist_key = mapping.rewrite_dist_key(dist_key).unwrap();
+                // // println!("dist_key {:?}", new_dist_key);
+                // new_dist_key
+            }
+            Distribution::SomeShard | Distribution::Single => {
+                vec![]
+            }
+            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!(),
+        };
+        output_distribution_key
+    }
+
     /// Build catalog for backfill state
     /// Schema for `Distribution::UpstreamHashShard`
     /// | vnode | pk | `backfill_finished` |
@@ -131,54 +195,12 @@ impl StreamTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let upstream_schema = self.base.schema();
 
+        // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
-
-        // Construct distribution key for the state of the backfill executor.
-        let state_distribution_key = match self.base.distribution() {
-            // For sharded distribution, we need to remap dist_key.
-            // Suppose we had Order Key (Primary Key) of Upstream table: [0, 4],
-            // and Distribution Key [0].
-            // Output schema will be:
-            // [vnode, 0, 4]
-            // So the new distribution key indices will be: [1]
-            // ---
-            // Q: Why distribution key is needed?
-            // A: We need distribution key so we can compute vnode.
-            // Q: Why do we need vnode?
-            // A: We need to partition state by it,
-            // since there can be parallel table scans. Without it when we recover,
-            // we don't know what is the backfill progress of each backfill executor,
-            // since they all override to the same spot.
-            // If we use vnode as prefix key, that will partition their states.
-            // The upstream pk will still serve as the value.
-            Distribution::UpstreamHashShard(dist_key, _) => {
-                debug_assert_eq!(*dist_key, self.logical.table_desc.distribution_key);
-                // println!("logical pk: {:?}", self.logical.primary_key());
-                // println!("base schema: {:?}", self.base.schema());
-                println!("logical table desc: {:?}", self.logical.table_desc);
-                println!("logical dist key: {:?}", self.logical.table_desc.distribution_key);
-                // println!("base pk: {:?}", self.base.logical_pk);
-                let mut mapping = vec![None; self.base.schema().len()];
-                for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
-                    mapping[*old_pos] = Some(new_pos);
-                }
-                let mapping = ColIndexMapping::new(mapping);
-                // println!("mapping {:?}", mapping);
-                // println!("dist_key {:?}", dist_key);
-                let new_dist_key = mapping.rewrite_dist_key(dist_key).unwrap();
-                // println!("dist_key {:?}", new_dist_key);
-                new_dist_key
-            }
-            Distribution::SomeShard | Distribution::Single => {
-                vec![]
-            }
-            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!(),
-        };
+        catalog_builder.add_order_column(0, OrderType::ascending());
 
         for (i, pos) in self.base.logical_pk.iter().enumerate() {
-            // Add pks, required since distribution key ⊆ pk.
-            catalog_builder.add_order_column(i, OrderType::ascending());
 
             let field = &upstream_schema[*pos];
             catalog_builder.add_column(field);
@@ -191,7 +213,7 @@ impl StreamTableScan {
         ));
 
         catalog_builder
-            .build(state_distribution_key, 0)
+            .build(vec![], 1)
             .with_id(state.gen_table_id_wrapped())
     }
 }
