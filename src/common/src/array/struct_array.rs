@@ -28,7 +28,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, StructType, ToDatumRef,
+    ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -434,25 +435,14 @@ impl PartialEq for StructRef<'_> {
 
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        iter_fields_ref!(*self, l, {
-            iter_fields_ref!(*other, r, {
-                if l.len() != r.len() {
+        iter_fields_ref!(*self, lhs, {
+            iter_fields_ref!(*other, rhs, {
+                if lhs.len() != rhs.len() {
                     return None;
                 }
-                Some(l.cmp_by(r, |lv, rv| cmp_struct_field(&lv, &rv)))
+                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
             })
         })
-    }
-}
-
-fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
-    match (l, r) {
-        // Comparability check was performed by frontend beforehand.
-        (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
-        // Nulls are larger than everything, (1, null) > (1, 2) for example.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
     }
 }
 
@@ -595,9 +585,9 @@ mod tests {
             StructValue::new(vec![Some(1.into()), Some(1.0.into())]),
         );
         // null > 1
-        assert_eq!(
-            cmp_struct_field(&None, &Some(ScalarRefImpl::Int32(1))),
-            Ordering::Greater
+        assert_gt!(
+            StructValue::new(vec![None]),
+            StructValue::new(vec![Some(1.into())]),
         );
         // (1, null, 3) > (1, 1.0, 2)
         assert_gt!(

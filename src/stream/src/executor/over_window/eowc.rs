@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -255,7 +255,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -330,7 +330,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -386,7 +386,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
                         let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key)))
+                            .chain(row::once(Some(key.order_key.into_inner())))
                             .chain(pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
@@ -455,7 +455,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .expect("order key must not be NULL");
 
                         if vars.last_watermark.is_none()
-                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                            || vars
+                                .last_watermark
+                                .as_ref()
+                                .unwrap()
+                                .default_cmp(&first_order_key)
+                                .is_lt()
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(

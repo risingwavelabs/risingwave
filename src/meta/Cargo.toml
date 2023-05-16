@@ -33,7 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
-memcomparable = { version = "0.1" }
+memcomparable = { version = "0.2" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
