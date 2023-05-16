@@ -423,7 +423,7 @@ message ChainNode {
   catalog.Table state_table = 5;
 
   /// The output distribution key used to compute vnode.
-  repeated uint32 upstream_dist_key = 6;
+  repeated uint32 dist_key_in_pk = 6;
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
