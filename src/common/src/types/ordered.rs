@@ -17,9 +17,6 @@
 use std::cmp::{Ord, Ordering};
 use std::ops::Deref;
 
-use paste::paste;
-use risingwave_common_proc_macro::EstimateSize;
-
 use crate::estimate_size::EstimateSize;
 use crate::for_all_scalar_variants;
 use crate::types::{Datum, DatumRef, ScalarImpl, ScalarRefImpl};
@@ -37,138 +34,116 @@ macro_rules! gen_default_partial_cmp_scalar_ref_impl {
 }
 for_all_scalar_variants!(gen_default_partial_cmp_scalar_ref_impl);
 
-/// Variant of [`PartialOrd`] that compares with default order.
-pub trait DefaultPartialOrd {
+pub trait DefaultPartialOrd: PartialEq {
     fn default_partial_cmp(&self, other: &Self) -> Option<Ordering>;
 }
 
 /// Variant of [`Ord`] that compares with default order.
-pub trait DefaultOrd: DefaultPartialOrd {
+pub trait DefaultOrd: DefaultPartialOrd + Eq {
     fn default_cmp(&self, other: &Self) -> Ordering;
 }
 
 impl DefaultPartialOrd for ScalarImpl {
-    fn default_partial_cmp(&self, other: &ScalarImpl) -> Option<Ordering> {
+    fn default_partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref_impl()
             .default_partial_cmp(&other.as_scalar_ref_impl())
     }
 }
 
 impl DefaultOrd for ScalarImpl {
-    fn default_cmp(&self, other: &ScalarImpl) -> Ordering {
+    fn default_cmp(&self, other: &Self) -> Ordering {
         self.as_scalar_ref_impl()
             .default_cmp(&other.as_scalar_ref_impl())
     }
 }
 
 impl DefaultPartialOrd for ScalarRefImpl<'_> {
-    fn default_partial_cmp(&self, other: &ScalarRefImpl<'_>) -> Option<Ordering> {
+    fn default_partial_cmp(&self, other: &Self) -> Option<Ordering> {
         default_partial_cmp_scalar_ref_impl(*self, *other)
     }
 }
 
 impl DefaultOrd for ScalarRefImpl<'_> {
-    fn default_cmp(&self, other: &ScalarRefImpl<'_>) -> Ordering {
+    fn default_cmp(&self, other: &Self) -> Ordering {
         self.default_partial_cmp(other)
             .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
     }
 }
 
 impl DefaultPartialOrd for Datum {
-    fn default_partial_cmp(&self, other: &Datum) -> Option<Ordering> {
+    fn default_partial_cmp(&self, other: &Self) -> Option<Ordering> {
         partial_cmp_datum(self, other, OrderType::default())
     }
 }
 
 impl DefaultOrd for Datum {
-    fn default_cmp(&self, other: &Datum) -> Ordering {
+    fn default_cmp(&self, other: &Self) -> Ordering {
         cmp_datum(self, other, OrderType::default())
     }
 }
 
 impl DefaultPartialOrd for DatumRef<'_> {
-    fn default_partial_cmp(&self, other: &DatumRef<'_>) -> Option<Ordering> {
+    fn default_partial_cmp(&self, other: &Self) -> Option<Ordering> {
         partial_cmp_datum(*self, *other, OrderType::default())
     }
 }
 
 impl DefaultOrd for DatumRef<'_> {
-    fn default_cmp(&self, other: &DatumRef<'_>) -> Ordering {
+    fn default_cmp(&self, other: &Self) -> Ordering {
         cmp_datum(*self, *other, OrderType::default())
     }
 }
 
-/// Wrapper of [`ScalarImpl`] that can be sorted in default order.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, EstimateSize)]
-pub struct OrdScalarImpl {
-    inner: ScalarImpl,
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct DefaultOrdered<T: DefaultOrd> {
+    inner: T,
 }
 
-impl Deref for OrdScalarImpl {
-    type Target = ScalarImpl;
+impl<T: DefaultOrd + EstimateSize> EstimateSize for DefaultOrdered<T> {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_heap_size()
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
+impl<T: DefaultOrd> DefaultOrdered<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+
+    pub fn as_inner(&self) -> &T {
         &self.inner
     }
 }
 
-/// Wrapper of [`Datum`] that can be sorted in default order.
-#[derive(Debug, Clone, Hash, PartialEq, Eq, EstimateSize)]
-pub struct OrdDatum {
-    inner: Datum,
-}
-
-impl Deref for OrdDatum {
-    type Target = Datum;
+impl<T: DefaultOrd> Deref for DefaultOrdered<T> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        self.as_inner()
     }
 }
 
-macro_rules! gen_impl_and_convert {
-    ($( $inner:ident ),*) => {
-        paste! {
-            $(
-                impl [<Ord $inner>] {
-                    pub fn new(inner: $inner) -> Self {
-                        Self { inner }
-                    }
-
-                    pub fn into_inner(self) -> $inner {
-                        self.inner
-                    }
-
-                    pub fn as_inner(&self) -> &$inner {
-                        &self.inner
-                    }
-                }
-
-                impl From<$inner> for [<Ord $inner>] {
-                    fn from(inner: $inner) -> Self {
-                        Self::new(inner)
-                    }
-                }
-
-                impl From<[<Ord $inner>]> for $inner {
-                    fn from(wrapper: [<Ord $inner>]) -> Self {
-                        wrapper.inner
-                    }
-                }
-
-                impl PartialOrd for [<Ord $inner>] {
-                    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                        self.inner.default_partial_cmp(&other.inner)
-                    }
-                }
-
-                impl Ord for [<Ord $inner>] {
-                    fn cmp(&self, other: &Self) -> Ordering {
-                        self.inner.default_cmp(&other.inner)
-                    }
-                }
-            )*
-        }
-    };
+impl<T: DefaultOrd> From<T> for DefaultOrdered<T> {
+    fn from(inner: T) -> Self {
+        Self::new(inner)
+    }
 }
-gen_impl_and_convert!(ScalarImpl, Datum);
+
+impl<T: DefaultOrd> PartialOrd for DefaultOrdered<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.inner.default_partial_cmp(other.as_inner())
+    }
+}
+
+impl<T: DefaultOrd> Ord for DefaultOrdered<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.inner.default_cmp(other.as_inner())
+    }
+}
+
+pub type OrdScalarImpl = DefaultOrdered<ScalarImpl>;
+pub type OrdDatum = DefaultOrdered<Datum>;
