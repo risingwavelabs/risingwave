@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
+
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
@@ -33,7 +33,7 @@ use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ColIndexMappingRewriteExt;
+
 use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -153,15 +153,23 @@ impl StreamTableScan {
                 println!("logical_pk: {:?}", self.logical.logical_pk());
                 println!("logical_primary_key: {:?}", self.logical.primary_key());
                 println!("table_desc_primary_key: {:?}", self.logical().table_desc.pk);
-                println!("table_desc_distribution_key: {:?}", self.logical().table_desc.distribution_key);
+                println!(
+                    "table_desc_distribution_key: {:?}",
+                    self.logical().table_desc.distribution_key
+                );
                 println!("base pk: {:?}", self.base.logical_pk());
-                let distribution_key = dist_key.iter().map(|i| {
-                    self.logical.logical_pk().unwrap()
-                        .iter()
-                        .position(|j| i == j)
-                        .map(|k| k as u32)
-                        .unwrap()
-                }).collect_vec();
+                let distribution_key = dist_key
+                    .iter()
+                    .map(|i| {
+                        self.logical
+                            .logical_pk()
+                            .unwrap()
+                            .iter()
+                            .position(|j| i == j)
+                            .map(|k| k as u32)
+                            .unwrap()
+                    })
+                    .collect_vec();
                 println!("distribution key: {:?}", distribution_key);
                 println!("--------------");
                 distribution_key
@@ -210,7 +218,7 @@ impl StreamTableScan {
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        for pos in self.logical.logical_pk().unwrap().iter() {
+        for pos in &self.logical.logical_pk().unwrap() {
             let field = &upstream_schema[*pos];
             catalog_builder.add_column(field);
         }

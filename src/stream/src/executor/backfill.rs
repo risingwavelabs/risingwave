@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-
-
 use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
@@ -24,7 +22,6 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use tracing::log;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -40,6 +37,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+use tracing::log;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
@@ -313,9 +311,12 @@ where
                                         new_state,
                                     )
                                     .await?;
-                                    log::debug!("comitting updates on epoch {:?}", barrier.epoch);
+                                    log::debug!("committing updates on epoch {:?}", barrier.epoch);
                                 } else {
-                                    log::debug!("not comitting updates on epoch {:?}", barrier.epoch);
+                                    log::debug!(
+                                        "not committing updates on epoch {:?}",
+                                        barrier.epoch
+                                    );
                                     self.state_table.commit_no_data_expected(barrier.epoch);
                                 }
 
@@ -385,11 +386,8 @@ where
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
                     self.progress.finish(barrier.epoch.curr);
-                    let new_state = Self::build_new_state(
-                        true,
-                        &current_pos.unwrap(),
-                        &dist_key_in_pk,
-                    );
+                    let new_state =
+                        Self::build_new_state(true, &current_pos.unwrap(), &dist_key_in_pk);
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
