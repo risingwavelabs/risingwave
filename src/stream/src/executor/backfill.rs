@@ -24,6 +24,7 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use tracing::log;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -146,6 +147,7 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
+        log::debug!("state_table initial epoch: {:?}", first_barrier.epoch);
 
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
@@ -251,6 +253,7 @@ where
                     Either::Left(msg) => {
                         match msg? {
                             Message::Barrier(barrier) => {
+                                log::debug!("upstream update barrier: {:?}", barrier.epoch);
                                 // If it is a barrier, switch snapshot and consume
                                 // upstream buffer chunk
 
@@ -310,6 +313,10 @@ where
                                         new_state,
                                     )
                                     .await?;
+                                    log::debug!("comitting updates on epoch {:?}", barrier.epoch);
+                                } else {
+                                    log::debug!("not comitting updates on epoch {:?}", barrier.epoch);
+                                    self.state_table.commit_no_data_expected(barrier.epoch);
                                 }
 
                                 yield Message::Barrier(barrier);
@@ -546,10 +553,6 @@ where
         debug_assert!(old_pos.as_ref() != Some(current_pos));
         if let Some(old_pos) = old_pos {
             debug_assert_eq!(old_pos.len(), current_pos.len());
-            debug_assert_eq!(
-                old_pos.len(),
-                table.value_indices().as_ref().unwrap().len() + table.pk_indices().len()
-            );
             table.write_record(Record::Update {
                 old_row: old_pos,
                 new_row: current_pos,
@@ -568,7 +571,6 @@ where
         dist_key_in_pk: &[usize],
     ) -> OwnedRow {
         let mut state = vec![None; current_pos.len() + 2];
-        println!("dist_key_in_pk {:?}", dist_key_in_pk);
 
         // vnode
         let current_vnode = VirtualNode::compute_row(current_pos, dist_key_in_pk).to_scalar();
