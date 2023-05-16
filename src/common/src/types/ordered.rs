@@ -94,6 +94,8 @@ impl DefaultOrd for DatumRef<'_> {
     }
 }
 
+/// Wrapper that delegates [`PartialOrd`] and [`Ord`] to the [`DefaultPartialOrd`] and
+/// [`DefaultOrd`] implementations of inner type.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct DefaultOrdered<T: DefaultOrd>(pub T);
 
