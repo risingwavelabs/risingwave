@@ -74,6 +74,9 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Internal state table for persisting state of backfill state.
     state_table: StateTable<S>,
 
+    /// Upstream dist key to compute vnode
+    upstream_dist_key: Vec<usize>,
+
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
@@ -97,6 +100,7 @@ where
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         state_table: StateTable<S>,
+        upstream_dist_key: Vec<usize>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -112,6 +116,7 @@ where
             upstream_table,
             upstream,
             state_table,
+            upstream_dist_key,
             output_indices,
             actor_id: progress.actor_id(),
             progress,
