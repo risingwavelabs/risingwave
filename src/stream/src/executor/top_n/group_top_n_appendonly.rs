@@ -133,8 +133,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             pk_indices, schema, ..
         } = input_info;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {

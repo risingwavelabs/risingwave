@@ -5647,6 +5647,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hashbrown 0.13.2",
  "hytra",
  "itertools",
  "madsim-tokio",

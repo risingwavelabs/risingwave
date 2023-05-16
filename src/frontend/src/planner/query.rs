@@ -51,7 +51,7 @@ impl Planner {
                 LogicalLimit::create(plan, limit, offset)
             } else {
                 // Create a logical top-n if with limit/offset and order-by
-                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties)?
+                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties, vec![])?
             }
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
