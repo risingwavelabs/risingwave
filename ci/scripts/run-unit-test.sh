@@ -8,7 +8,8 @@ REPO_ROOT=${PWD}
 echo "+++ Run python UDF SDK unit tests"
 cd ${REPO_ROOT}/src/udf/python
 pip3 install pytest # pyarrow
-python3 -m pytest
+# python3 -m pytest
+pytest
 cd ${REPO_ROOT}
 
 echo "+++ Run unit tests with coverage"
