@@ -24,7 +24,7 @@ WORKDIR /risingwave
 ENV PATH /root/.cargo/bin/:$PATH
 
 # install python dependencies
-RUN pip3 install pyarrow
+RUN pip3 install pyarrow multiprocessing pytest
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy
