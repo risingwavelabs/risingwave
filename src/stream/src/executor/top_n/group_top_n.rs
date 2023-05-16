@@ -181,7 +181,7 @@ where
             let group_key = row_ref.project(&self.group_by);
             self.ctx
                 .streaming_metrics
-                .group_top_n_total_cache_count
+                .group_top_n_total_query_cache_count
                 .with_label_values(&[&table_id_str, &actor_id_str])
                 .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new

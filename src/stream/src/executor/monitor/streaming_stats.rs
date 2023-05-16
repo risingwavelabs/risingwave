@@ -70,11 +70,16 @@ pub struct StreamingMetrics {
 
     // Streaming TopN
     pub group_top_n_cache_miss_count: GenericCounterVec<AtomicU64>,
-    pub group_top_n_total_cache_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub group_top_n_cached_entry_count: GenericGaugeVec<AtomicI64>,
     pub group_top_n_appendonly_cache_miss_count: GenericCounterVec<AtomicU64>,
-    pub group_top_n_appendonly_total_cache_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_appendonly_total_query_cache_count: GenericCounterVec<AtomicU64>,
     pub group_top_n_appendonly_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
+    // look up
+    pub lookup_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub lookup_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub lookup_cached_entry_count: GenericGaugeVec<AtomicI64>,
 
     // Backfill
     pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
@@ -399,9 +404,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let group_top_n_total_cache_count = register_int_counter_vec_with_registry!(
-            "stream_group_top_n_total_cache_count",
-            "Group top n executor cache total count",
+        let group_top_n_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_group_top_n_total_query_cache_count",
+            "Group top n executor query cache total count",
             &["table_id", "actor_id"],
             registry
         )
@@ -423,17 +428,42 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let group_top_n_appendonly_total_cache_count = register_int_counter_vec_with_registry!(
-            "stream_group_top_n_appendonly_total_cache_count",
-            "Group top n appendonly executor total cache count",
+        let group_top_n_appendonly_total_query_cache_count =
+            register_int_counter_vec_with_registry!(
+                "stream_group_top_n_appendonly_total_query_cache_count",
+                "Group top n appendonly executor total cache count",
+                &["table_id", "actor_id"],
+                registry
+            )
+            .unwrap();
+
+        let group_top_n_appendonly_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_group_top_n_appendonly_cached_entry_count",
+            "Total entry counts in group top n appendonly executor cache",
             &["table_id", "actor_id"],
             registry
         )
         .unwrap();
 
-        let group_top_n_appendonly_cached_entry_count = register_int_gauge_vec_with_registry!(
-            "stream_group_top_n_appendonly_cached_entry_count",
-            "Total entry counts in group top n appendonly executor cache",
+        let lookup_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_lookup_cache_miss_count",
+            "Lookup executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let lookup_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_lookup_total_query_cache_count",
+            "Lookup executor query cache total count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let lookup_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_lookup_cached_entry_count",
+            "Total entry counts in lookup executor cache",
             &["table_id", "actor_id"],
             registry
         )
@@ -614,11 +644,14 @@ impl StreamingMetrics {
             agg_distinct_total_cache_count,
             agg_distinct_cached_entry_count,
             group_top_n_cache_miss_count,
-            group_top_n_total_cache_count,
+            group_top_n_total_query_cache_count,
             group_top_n_cached_entry_count,
             group_top_n_appendonly_cache_miss_count,
-            group_top_n_appendonly_total_cache_count,
+            group_top_n_appendonly_total_query_cache_count,
             group_top_n_appendonly_cached_entry_count,
+            lookup_cache_miss_count,
+            lookup_total_query_cache_count,
+            lookup_cached_entry_count,
             backfill_snapshot_read_row_count,
             backfill_upstream_output_row_count,
             barrier_inflight_latency,
