@@ -34,7 +34,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
+    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -1141,7 +1141,25 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let stream_agg = self.gen_dist_stream_agg_plan(self.input().to_stream(ctx)?)?;
+        let stream_input = self.input().to_stream(ctx)?;
+        // Use Dedup operator, if possible.
+        if stream_input.append_only() && self.agg_calls().is_empty() {
+            let input = if self.group_key().count_ones(..) != self.input().schema().len() {
+                let cols = &self.group_key().ones().collect_vec();
+                LogicalProject::with_mapping(
+                    self.input(),
+                    ColIndexMapping::with_remaining_columns(cols, self.input().schema().len()),
+                )
+                .into()
+            } else {
+                self.input()
+            };
+            let input_schema_len = input.schema().len();
+            let logical_dedup = LogicalDedup::new(input, (0..input_schema_len).collect());
+            return logical_dedup.to_stream(ctx);
+        }
+
+        let stream_agg = self.gen_dist_stream_agg_plan(stream_input)?;
 
         let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_simple_agg() {
             final_agg.agg_calls()
