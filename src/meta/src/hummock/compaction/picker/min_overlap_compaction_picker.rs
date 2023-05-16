@@ -207,13 +207,17 @@ impl NonOverlapSubLevelPicker {
             }
 
             let target_tables = &target_level.table_infos;
-            let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+            let mut overlap_files = overlap_info.check_multiple_include(target_tables);
 
             if overlap_files.is_empty() {
-                // We allow a layer in the middle without overlap, so we need to continue to
-                // the next layer to search for overlap
-                continue;
+                overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                if overlap_files.is_empty() {
+                    // We allow a layer in the middle without overlap, so we need to continue to
+                    // the next layer to search for overlap
+                    continue;
+                }
             }
+
             let mut pending_compact = false;
             let mut current_level_size = 0;
             for other in &overlap_files {
@@ -295,7 +299,7 @@ impl NonOverlapSubLevelPicker {
             }
 
             ret.total_file_count += add_files_count;
-            ret.total_file_size += add_files_size;
+            ret.total_file_size += add_files_size + current_level_size;
             ret.sstable_infos[target_index].extend(overlap_files);
             for (reverse_index, files) in extra_overlap_levels {
                 ret.sstable_infos[reverse_index].extend(files);

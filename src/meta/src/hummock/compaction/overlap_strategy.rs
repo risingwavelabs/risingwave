@@ -17,11 +17,13 @@ use std::ops::Range;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
     fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
+    fn check_multiple_include(&self, others: &[SstableInfo]) -> Vec<SstableInfo>;
     fn update(&mut self, table: &SstableInfo);
 }
 
@@ -105,6 +107,36 @@ impl OverlapInfo for RangeOverlapInfo {
             }
             None => others.len()..others.len(),
         }
+    }
+
+    fn check_multiple_include(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
+        match self.target_range.as_ref() {
+            Some(key_range) => {
+                let mut tables = vec![];
+                let overlap_begin = others.partition_point(|table_status| {
+                    KeyComparator::compare_encoded_full_key(&table_status
+                        .key_range
+                        .as_ref()
+                        .unwrap()
+                        .left, &key_range.left)
+                        == cmp::Ordering::Less
+                });
+                if overlap_begin >= others.len() {
+                    return vec![];
+                }
+                for table in &others[overlap_begin..] {
+                    if key_range.compare_right_with(&table.key_range.as_ref().unwrap().right)
+                        == cmp::Ordering::Less
+                    {
+                        break;
+                    }
+                    tables.push(table.clone());
+                }
+                tables
+            }
+            None => vec![],
+        }
+
     }
 
     fn update(&mut self, table: &SstableInfo) {
