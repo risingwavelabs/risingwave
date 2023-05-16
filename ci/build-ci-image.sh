@@ -50,7 +50,7 @@ else
     export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
-docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache" .
+docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache .
 
 echo "--- Docker push"
 docker push ${BUILD_TAG}
