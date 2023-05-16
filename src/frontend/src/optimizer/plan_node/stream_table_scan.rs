@@ -123,10 +123,6 @@ impl StreamTableScan {
     /// | vnode | pk | `backfill_finished` |
     /// Schema for `Distribution::Single`
     /// | pk | `backfill_finished` |
-    ///
-    /// FIXME(kwannoel): Schema for `Distribution::SomeShard` just uses `Distribution::Single`.
-    /// It has to be supported because `SOURCEs` have `Distribution::SomeShard`.
-    /// This means we can't recover for `Distribution::SomeShard`.
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
