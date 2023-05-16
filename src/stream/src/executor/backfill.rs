@@ -453,6 +453,37 @@ where
         yield None;
     }
 
+    /// Schema
+    /// | vnode | pk | `backfill_finished` |
+    ///
+    /// For `current_pos` and `old_pos` are just pk of upstream.
+    /// They should be strictly increasing.
+    async fn persist_state(
+        epoch: EpochPair,
+        is_finished: bool,
+        table: &mut StateTable<S>,
+        row_len: usize,
+        old_pos: Option<&OwnedRow>,
+        current_pos: &OwnedRow,
+    ) -> StreamExecutorResult<()> {
+        let mut state = Vec::with_capacity(row_len);
+        // vnode
+        let vnode = table.compute_vnode_by_pk(current_pos).to_scalar();
+        state.push(Some(vnode.into()));
+
+        // pk
+        for d in current_pos.as_inner() {
+            state.push(d.clone());
+        }
+
+        // backfill_finished
+        state.push(Some(is_finished.into()));
+
+        Self::flush_data(table, epoch, old_pos, current_pos).await
+    }
+
+    /// For `current_pos` and `old_pos` are just pk of upstream.
+    /// They should be strictly increasing.
     async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
