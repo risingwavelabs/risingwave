@@ -16,7 +16,7 @@ RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
 
-RUN echo ${RUST_TOOLCHAIN} > rust-toolchain && \
+RUN printf "%s" "${RUST_TOOLCHAIN}" > rust-toolchain && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y && \
     rustup show
 
