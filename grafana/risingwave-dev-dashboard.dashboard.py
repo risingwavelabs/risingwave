@@ -902,6 +902,13 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
                             "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
                         ),
+                    ],
+                ),
+
+                panels.timeseries_actor_ops(
+                    "Temporal Join Executor Cache",
+                    "",
+                    [
                         panels.target(
                             f"rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])",
                             "temporal join cache miss, table_id {{table_id}} actor {{actor_id}}",
