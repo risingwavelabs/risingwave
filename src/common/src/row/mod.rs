@@ -20,7 +20,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use itertools::Itertools;
 
 use self::empty::EMPTY;
-use crate::hash::{HashCode, VirtualNode};
+use crate::hash::{HashCode};
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
 use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
