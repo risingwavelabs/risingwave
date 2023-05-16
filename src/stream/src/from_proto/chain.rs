@@ -113,6 +113,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
+
                 let vnodes = params.vnode_bitmap.map(Arc::new);
                 let distribution = match &vnodes {
                     Some(vnodes) => Distribution {
@@ -157,10 +158,13 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .await;
 
+                let upstream_dist_key = node.upstream_dist_key.iter().map(|k| *k as usize).collect();
+
                 BackfillExecutor::new(
                     upstream_table,
                     mview,
                     state_table,
+                    upstream_dist_key,
                     output_indices,
                     progress,
                     schema,
