@@ -21,7 +21,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
+const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.1;
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
