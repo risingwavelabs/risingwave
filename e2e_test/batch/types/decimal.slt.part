@@ -42,6 +42,14 @@ select '  -inF '::decimal;
 ----
 -Infinity
 
+query R
+values ('nan'::decimal), ('inf'), ('-inf'), ('2.') order by 1;
+----
+-Infinity
+        2
+ Infinity
+      NaN
+
 query IIIIII
 select
 	'-32768'::int2::decimal,
