@@ -298,7 +298,14 @@ pub fn handle_show_create_object(
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
             source.create_sql()
         }
-        _ => {
+        ShowCreateType::Index => {
+            let index = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_index())
+                .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
+            index.create_sql()
+        }
+        ShowCreateType::Function => {
             return Err(ErrorCode::NotImplemented(
                 format!("show create on: {}", show_create_type),
                 None.into(),
