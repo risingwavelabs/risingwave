@@ -61,10 +61,6 @@ def test_io_concurrency():
     ], names=["x"])
     batches = data.to_batches(max_chunksize=512)
 
-    # Check that our original function is available in the module root
-    # when using io_threads
-    assert '__original_wait_concurrent' in globals()
-
     with flight_client() as client, flight_server() as server:
         # Single-threaded function takes a long time
         flight_info = flight.FlightDescriptor.for_path(b"wait")
