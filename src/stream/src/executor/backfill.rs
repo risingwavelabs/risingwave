@@ -535,9 +535,10 @@ where
         StreamChunk::new(ops, columns, Some(new_visibility.finish()))
     }
 
-    fn mapping_chunk(chunk: StreamChunk, upstream_indices: &[usize]) -> StreamChunk {
+    /// Builds a new stream chunk with output_indices.
+    fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
         let (ops, columns, visibility) = chunk.into_inner();
-        let mapped_columns = upstream_indices
+        let mapped_columns = output_indices
             .iter()
             .map(|&i| columns[i].clone())
             .collect();
