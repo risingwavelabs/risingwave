@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::mem;
 use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
@@ -124,6 +125,7 @@ where
         // The primary key columns, in the output columns of the upstream_table scan.
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
+        let state_table_len = self.info().schema.len();
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
@@ -279,18 +281,17 @@ where
                                 );
 
                                 // Persist state on barrier
-                                if let Some(current_pos) = &current_pos {
-                                    let mut current_pos: Vec<Datum> = current_pos.as_inner().into();
-                                    current_pos.push(Some(false.into()));
-                                    let current_pos = OwnedRow::new(current_pos);
-                                    Self::flush_data(
-                                        &mut self.state_table,
+                                if let Some(current_pos_inner) = &current_pos {
+                                    Self::persist_state(
                                         barrier.epoch,
-                                        old_pos.as_ref(),
-                                        &current_pos,
+                                        false,
+                                        &mut self.state_table,
+                                        state_table_len,
+                                        &old_pos,
+                                        current_pos_inner,
                                     )
                                     .await?;
-                                    old_pos = Some(current_pos);
+                                    mem::swap(&mut old_pos, &mut current_pos);
                                 }
 
                                 yield Message::Barrier(barrier);
@@ -370,13 +371,8 @@ where
                         current_pos.clone().unwrap().as_inner().into();
                     current_pos.push(Some(true.into()));
                     let current_pos = OwnedRow::new(current_pos);
-                    Self::flush_data(
-                        &mut self.state_table,
-                        barrier.epoch,
-                        old_pos.as_ref(),
-                        &current_pos,
-                    )
-                    .await?;
+                    Self::flush_data(&mut self.state_table, barrier.epoch, &old_pos, &current_pos)
+                        .await?;
                     yield msg;
                     break;
                 }
@@ -463,7 +459,7 @@ where
         is_finished: bool,
         table: &mut StateTable<S>,
         row_len: usize,
-        old_pos: Option<&OwnedRow>,
+        old_pos: &Option<OwnedRow>,
         current_pos: &OwnedRow,
     ) -> StreamExecutorResult<()> {
         let mut state = Vec::with_capacity(row_len);
@@ -487,10 +483,10 @@ where
     async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
-        old_pos: Option<&OwnedRow>,
+        old_pos: &Option<OwnedRow>,
         current_pos: &OwnedRow,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(old_pos != Some(current_pos));
+        debug_assert!(old_pos.as_ref() != Some(current_pos));
         if let Some(old_pos) = old_pos {
             table.write_record(Record::Update {
                 old_row: old_pos,
