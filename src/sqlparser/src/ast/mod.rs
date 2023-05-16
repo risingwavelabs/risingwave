@@ -820,7 +820,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
-            ShowObject::Indexes { table } => write!(f, "INDEXES{}", table),
+            ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
         }
     }
 }
