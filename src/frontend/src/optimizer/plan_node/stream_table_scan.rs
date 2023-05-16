@@ -141,12 +141,15 @@ impl StreamTableScan {
         // Construct distribution key
         let distribution_key = match self.base.distribution() {
             Distribution::UpstreamHashShard(dist_key, _) => {
-                let mut mapping = vec![None];
+                let mut mapping = vec![None; self.base.schema().len()];
                 for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
                     mapping[*old_pos] = Some(new_pos);
                 }
                 let mapping = ColIndexMapping::new(mapping);
-                mapping.rewrite_dist_key(dist_key).unwrap()
+                println!("mapping {:?}", mapping);
+                println!("dist_key {:?}", dist_key);
+                let new_dist_key = mapping.rewrite_dist_key(dist_key).unwrap()
+                println!("dist_key {:?}", new_dist_key);
             }
             Distribution::SomeShard | Distribution::Single => {
                 vec![]
