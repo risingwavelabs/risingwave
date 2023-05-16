@@ -2,8 +2,6 @@ FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
 
-ARG RUST_TOOLCHAIN
-
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
@@ -16,8 +14,9 @@ RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
 
-RUN printf "%s" "${RUST_TOOLCHAIN}" > rust-toolchain && \
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y && \
+COPY rust-toolchain rust-toolchain
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y && \
     rustup show
 
 RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
