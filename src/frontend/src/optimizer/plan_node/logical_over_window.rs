@@ -77,7 +77,7 @@ impl LogicalOverWindow {
                 let new_input_from_partition_by: Vec<_> = window_function
                     .partition_by
                     .iter()
-                    .map(|x| input_proj_builder.add_expr(&x))
+                    .map(|x| input_proj_builder.add_expr(x))
                     .try_collect()
                     .map_err(|err| {
                         ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
