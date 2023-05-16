@@ -1,2 +1,1 @@
-[toolchain]
-channel = "nightly-2023-04-07"
+ci/rust-toolchain
