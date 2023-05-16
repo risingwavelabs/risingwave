@@ -65,7 +65,7 @@ impl LogicalOverWindow {
         let mut input_len = input.schema().len();
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
-                let new_input_from_order_by: Vec<_> = window_function
+                let input_idx_in_order_by: Vec<_> = window_function
                     .order_by
                     .sort_exprs
                     .iter()
@@ -74,7 +74,7 @@ impl LogicalOverWindow {
                     .map_err(|err| {
                         ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into())
                     })?;
-                let new_input_from_partition_by: Vec<_> = window_function
+                let input_idx_in_partition_by: Vec<_> = window_function
                     .partition_by
                     .iter()
                     .map(|x| input_proj_builder.add_expr(x))
@@ -83,8 +83,8 @@ impl LogicalOverWindow {
                         ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
                     })?;
                 input_len = input_len
-                    .max(*new_input_from_order_by.iter().max().unwrap_or(&0) + 1)
-                    .max(*new_input_from_partition_by.iter().max().unwrap_or(&0) + 1);
+                    .max(*input_idx_in_order_by.iter().max().unwrap_or(&0) + 1)
+                    .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
             }
         }
 
