@@ -24,6 +24,7 @@ use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_expr::expr::BoxedExpression;
 
 use crate::executor::join::chunked_data::ChunkedData;
@@ -86,7 +87,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                             .collect_vec()
                     })
                 })
-                .sorted()
+                .sorted_by(|a, b| cmp_datum_iter(a, b, std::iter::repeat(OrderType::default())))
                 .dedup()
                 .collect_vec();
 
