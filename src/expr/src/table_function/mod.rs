@@ -53,8 +53,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains at least two columns:
-    /// - The first column is the row indexes of input chunk. It should be
-    ///   monotonically increasing.
+    /// - The first column is the row indexes of input chunk. It should be monotonically increasing.
     /// - The remaining columns are the output values. More than one columns are allowed, which will
     ///   be transformed into a single `STRUCT` column later.
     ///
