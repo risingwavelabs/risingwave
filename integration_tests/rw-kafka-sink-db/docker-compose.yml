@@ -29,28 +29,10 @@ services:
      - MYSQL_DATABASE=Test
     container_name: mysql
   #======================= Kafka ======================
-  zookeeper:
-    image: quay.io/debezium/zookeeper:2.2
-    ports:
-     - 2181:2181
-     - 2888:2888
-     - 3888:3888
-    container_name: zookeeper
-  kafka:
-    image: quay.io/debezium/kafka:2.2
-    ports:
-     - 9092:9092
-     - 9093:9093
-    links:
-     - zookeeper
-     - risingwave
-    environment:
-     - ZOOKEEPER_CONNECT=zookeeper:2181
-     - KAFKA_LISTENERS= INT://kafka:9092,EXT://0.0.0.0:9093
-     - KAFKA_ADVERTISED_LISTENERS= INT://kafka:9092,EXT://localhost:9093
-     - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INT:PLAINTEXT,EXT:PLAINTEXT
-     - KAFKA_INTER_BROKER_LISTENER_NAME=INT
-    container_name: kafka
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
   connect:
     image: debezium/connect:2.2
     build:
@@ -61,14 +43,17 @@ services:
      - 8083:8083
      - 5005:5005
     links:
-     - kafka
+     - message_queue
      - postgres
      - risingwave
     environment:
-     - BOOTSTRAP_SERVERS=kafka:9092
+     - BOOTSTRAP_SERVERS=message_queue:29092
      - GROUP_ID=1
      - CONFIG_STORAGE_TOPIC=my_connect_configs
      - OFFSET_STORAGE_TOPIC=my_connect_offsets
      - STATUS_STORAGE_TOPIC=my_source_connect_statuses
     container_name: connect
+volumes:
+  message_queue:
+    external: false
 name: risingwave-compose

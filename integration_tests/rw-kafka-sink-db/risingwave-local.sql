@@ -20,7 +20,7 @@ CREATE SINK IF NOT EXISTS types
 FROM type_test
 WITH (
 connector = 'kafka',
-properties.bootstrap.server='localhost:9093',
+properties.bootstrap.server='localhost:9092',
 topic = 'type_test',
 type = 'debezium',
 use_transaction = 'false',
