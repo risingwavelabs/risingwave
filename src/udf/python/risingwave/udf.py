@@ -5,6 +5,8 @@ import pyarrow.parquet
 import inspect
 import traceback
 import json
+from concurrent.futures import ThreadPoolExecutor
+import concurrent
 
 
 class UserDefinedFunction:
@@ -15,6 +17,8 @@ class UserDefinedFunction:
     _name: str
     _input_schema: pa.Schema
     _result_schema: pa.Schema
+    _io_threads: Optional[int]
+    _executor: Optional[ThreadPoolExecutor]
 
     def eval_batch(self, batch: pa.RecordBatch) -> Iterator[pa.RecordBatch]:
         """
@@ -29,6 +33,11 @@ class ScalarFunction(UserDefinedFunction):
     or multiple scalar values to a new scalar value.
     """
 
+    def __init__(self, *args, **kwargs):
+        self._io_threads = kwargs.pop("io_threads")
+        self._executor = ThreadPoolExecutor(max_workers=self._io_threads) if self._io_threads is not None else None
+        super().__init__(*args, **kwargs)
+
     def eval(self, *args) -> Any:
         """
         Method which defines the logic of the scalar function.
@@ -42,9 +51,14 @@ class ScalarFunction(UserDefinedFunction):
             _process_input_array(array, type)
             for array, type in zip(inputs, self._input_schema.types)
         ]
-
-        # evaluate the function for each row
-        column = [self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)]
+        if self._executor is not None:
+            # evaluate the function for each row
+            tasks = [self._executor.submit(self._func, *[col[i] for col in inputs])
+                    for i in range(batch.num_rows)]
+            column = [future.result() for future in concurrent.futures.as_completed(tasks)]
+        else:
+            # evaluate the function for each row
+            column = [self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)]
 
         # convert value to json for jsonb columns
         if self._result_schema.types[0] == pa.large_string():
@@ -132,7 +146,7 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
 
     _func: Callable
 
-    def __init__(self, func, input_types, result_type, name=None):
+    def __init__(self, func, input_types, result_type, name=None, io_threads=None):
         self._func = func
         self._input_schema = pa.schema(
             zip(
@@ -144,13 +158,13 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
         self._name = name or (
             func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
         )
+        super().__init__(io_threads=io_threads)
 
     def __call__(self, *args):
         return self._func(*args)
 
     def eval(self, *args):
         return self._func(*args)
-
 
 class UserDefinedTableFunctionWrapper(TableFunction):
     """
@@ -181,7 +195,6 @@ class UserDefinedTableFunctionWrapper(TableFunction):
     def eval(self, *args):
         return self._func(*args)
 
-
 def _to_list(x):
     if isinstance(x, list):
         return x
@@ -193,6 +206,7 @@ def udf(
     input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
     result_type: Union[str, pa.DataType],
     name: Optional[str] = None,
+    io_threads: Optional[int] = None,
 ) -> Callable:
     """
     Annotation for creating a user-defined scalar function.
@@ -201,6 +215,7 @@ def udf(
     - input_types: A list of strings or Arrow data types that specifies the input data types.
     - result_type: A string or an Arrow data type that specifies the return value type.
     - name: An optional string specifying the function name. If not provided, the original name will be used.
+    - io_threads: Number of I/O threads used per data chunk for I/O bound functions.
 
     Example:
     ```
@@ -210,9 +225,20 @@ def udf(
             (x, y) = (y, x % y)
         return x
     ```
+
+    I/O bound Example:
+    ```
+    @udf(input_types=['INT'], result_type='INT', io_threads=64)
+    def external_api(x):
+        response = requests.get(my_endpoint + '?param=' + x)
+        return response["data"]
+    ```
     """
 
-    return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
+    if io_threads is not None and io_threads > 1:
+        return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name, io_threads=io_threads)
+    else:
+        return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
 
 
 def udtf(
