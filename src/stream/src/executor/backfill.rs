@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound;
+use std::pin::pin;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -26,7 +27,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{compare_datum, OrderType};
+use risingwave_common::util::sort_util::{cmp_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -192,10 +193,13 @@ where
 
             let left_upstream = upstream.by_ref().map(Either::Left);
 
-            let right_snapshot = Box::pin(
-                Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone(), true)
-                    .map(Either::Right),
-            );
+            let right_snapshot = pin!(Self::snapshot_read(
+                &self.table,
+                snapshot_read_epoch,
+                current_pos.clone(),
+                true
+            )
+            .map(Either::Right),);
 
             // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
             // comes.
@@ -407,9 +411,8 @@ where
                 .project(pk_in_output_indices)
                 .iter()
                 .zip_eq_fast(pk_order.iter().copied())
-                .cmp_by(current_pos.iter(), |(x, order), y| {
-                    compare_datum(x, y, order)
-                }) {
+                .cmp_by(current_pos.iter(), |(x, order), y| cmp_datum(x, y, order))
+            {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
             }

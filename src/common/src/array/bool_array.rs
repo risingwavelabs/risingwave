@@ -164,6 +164,10 @@ impl ArrayBuilder for BoolArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> BoolArray {
         BoolArray {
             bitmap: self.bitmap.finish(),

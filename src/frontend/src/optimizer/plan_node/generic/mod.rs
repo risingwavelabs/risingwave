@@ -54,6 +54,8 @@ mod except;
 pub use except::*;
 mod update;
 pub use update::*;
+mod delete;
+pub use delete::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;

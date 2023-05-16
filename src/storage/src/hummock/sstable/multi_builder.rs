@@ -30,7 +30,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, XorFilterBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -343,12 +343,12 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
-    type Filter = XorFilterBuilder;
+    type Filter = Xor16FilterBuilder;
     type Writer = BatchUploadWriter;
 
     async fn open_builder(
         &mut self,
-    ) -> HummockResult<SstableBuilder<BatchUploadWriter, XorFilterBuilder>> {
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, Xor16FilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {

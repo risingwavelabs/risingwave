@@ -26,9 +26,12 @@ use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
-use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+use risingwave_expr::function::window::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+};
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
 };
 
 use crate::binder::bind_context::Clause;
@@ -249,7 +252,25 @@ impl Binder {
                 .collect::<Result<_>>()?,
         );
         let frame = if let Some(frame) = window_frame {
-            let frame = match frame.units {
+            let exclusion = if let Some(exclusion) = frame.exclusion {
+                match exclusion {
+                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
+                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!(
+                                "window frame exclusion `{}` is not supported yet",
+                                exclusion
+                            ),
+                            9124.into(),
+                        )
+                        .into());
+                    }
+                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
+                }
+            } else {
+                FrameExclusion::NoOthers
+            };
+            let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
                     let convert_bound = |bound| match bound {
                         WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
@@ -268,23 +289,26 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    Frame::Rows(start, end)
+                    FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window frame in `{}` mode is not supported", frame.units),
+                        format!(
+                            "window frame in `{}` mode is not supported yet",
+                            frame.units
+                        ),
                         9124.into(),
                     )
                     .into());
                 }
             };
-            if !frame.is_valid() {
+            if !bounds.is_valid() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame `{frame}` is not valid",
+                    "window frame bounds `{bounds}` is not valid",
                 ))
                 .into());
             }
-            Some(frame)
+            Some(Frame { bounds, exclusion })
         } else {
             None
         };
@@ -411,6 +435,7 @@ impl Binder {
                 ("cosd", raw_call(ExprType::Cosd)),
                 ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
+                ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),

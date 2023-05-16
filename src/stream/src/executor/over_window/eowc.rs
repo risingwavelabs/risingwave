@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -122,7 +122,7 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 /// (2): additional delay (already able to output) for some window
 /// ```
 ///
-/// - State table schema = input schema, pk = `partition key | order key | input pk`.
+/// - State table schema = input schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
 /// - Rows in range (`curr evict row`, `curr input row`] are in state table.
 /// - `curr evict row` <= min(last evict rows of all `WindowState`s).
@@ -143,6 +143,7 @@ struct ExecutorInner<S: StateStore> {
     partition_key_indices: Vec<usize>,
     order_key_index: usize, // no `OrderType` here, cuz we expect the input is ascending
     state_table: StateTable<S>,
+    state_table_schema_len: usize,
     watermark_epoch: AtomicU64Ref,
 }
 
@@ -217,6 +218,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 partition_key_indices: args.partition_key_indices,
                 order_key_index: args.order_key_index,
                 state_table: args.state_table,
+                state_table_schema_len: input_info.schema.len(),
                 watermark_epoch: args.watermark_epoch,
             },
         }
@@ -253,7 +255,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -328,7 +330,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -384,11 +386,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
                         let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key)))
+                            .chain(row::once(Some(key.order_key.into_inner())))
                             .chain(pk);
+                        let state_row = {
+                            // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
+                            let mut state_row = vec![None; this.state_table_schema_len];
+                            for (i_in_pk, &i) in this.state_table.pk_indices().iter().enumerate() {
+                                state_row[i] = state_row_pk.datum_at(i_in_pk).to_owned_datum();
+                            }
+                            OwnedRow::new(state_row)
+                        };
                         // NOTE: We don't know the value of the row here, so the table must allow
                         // inconsistent ops.
-                        this.state_table.delete(state_row_pk);
+                        this.state_table.delete(state_row);
                     }
                 }
             }
@@ -445,7 +455,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .expect("order key must not be NULL");
 
                         if vars.last_watermark.is_none()
-                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                            || vars
+                                .last_watermark
+                                .as_ref()
+                                .unwrap()
+                                .default_cmp(&first_order_key)
+                                .is_lt()
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(
@@ -560,13 +575,13 @@ mod tests {
                 kind: WindowFuncKind::Lag,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+                frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
             },
             WindowFuncCall {
                 kind: WindowFuncKind::Lead,
                 args: AggArgs::Unary(DataType::Int32, 3),
                 return_type: DataType::Int32,
-                frame: Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(1)),
+                frame: Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
             },
         ];
 
@@ -648,7 +663,7 @@ mod tests {
             kind: WindowFuncKind::Aggregate(AggKind::Sum),
             args: AggArgs::Unary(DataType::Int32, 3),
             return_type: DataType::Int64,
-            frame: Frame::Rows(FrameBound::Preceding(1), FrameBound::Following(1)),
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
         }];
 
         let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;

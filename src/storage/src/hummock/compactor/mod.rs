@@ -38,7 +38,6 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
@@ -58,7 +57,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::value::HummockValue;
-use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, XorFilterBuilder};
+use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
@@ -69,8 +68,8 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, HummockError, SstableWriterFactory,
-    StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, FilterBuilder, HummockError, SstableWriterFactory,
+    StreamingSstableWriterFactory, Xor8FilterBuilder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -446,8 +445,7 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
-        let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
-
+        let cpu_core_num = compactor_context.compaction_executor.worker_num() as u32;
         let mut system =
             System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         let pid = sysinfo::get_current_pid().unwrap();
@@ -470,9 +468,8 @@ impl Compactor {
                     }
                 }
 
-                let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(config.max_concurrent_task_number, cpu_core_num)
+                    .subscribe_compact_tasks(cpu_core_num)
                     .await
                 {
                     Ok(stream) => {
@@ -487,7 +484,6 @@ impl Compactor {
                         continue 'start_stream;
                     }
                 };
-                drop(config);
 
                 let executor = compactor_context.compaction_executor.clone();
                 let mut last_workload = CompactorWorkload::default();
@@ -818,25 +814,51 @@ impl Compactor {
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
             > self.context.storage_opts.min_sst_size_for_streaming_upload
         {
-            self.compact_key_range_impl(
-                StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
-                iter,
-                compaction_filter,
-                del_agg,
-                filter_key_extractor,
-                task_progress.clone(),
-            )
-            .await?
+            let factory = StreamingSstableWriterFactory::new(self.context.sstable_store.clone());
+            if self.task_config.is_target_l0_or_lbase {
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .await?
+            } else {
+                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .await?
+            }
         } else {
-            self.compact_key_range_impl(
-                BatchSstableWriterFactory::new(self.context.sstable_store.clone()),
-                iter,
-                compaction_filter,
-                del_agg,
-                filter_key_extractor,
-                task_progress.clone(),
-            )
-            .await?
+            let factory = BatchSstableWriterFactory::new(self.context.sstable_store.clone());
+            if self.task_config.is_target_l0_or_lbase {
+                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .await?
+            } else {
+                self.compact_key_range_impl::<_, Xor8FilterBuilder>(
+                    factory,
+                    iter,
+                    compaction_filter,
+                    del_agg,
+                    filter_key_extractor,
+                    task_progress.clone(),
+                )
+                .await?
+            }
         };
 
         compact_timer.observe_duration();
@@ -889,7 +911,7 @@ impl Compactor {
         Ok((ssts, table_stats_map))
     }
 
-    async fn compact_key_range_impl<F: SstableWriterFactory>(
+    async fn compact_key_range_impl<F: SstableWriterFactory, B: FilterBuilder>(
         &self,
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
@@ -898,7 +920,7 @@ impl Compactor {
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
-        let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
+        let builder_factory = RemoteBuilderFactory::<F, B> {
             sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
             limiter: self.context.output_memory_limiter.clone(),
             options: self.options.clone(),

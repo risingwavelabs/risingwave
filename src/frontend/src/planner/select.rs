@@ -162,7 +162,7 @@ impl Planner {
                 // clause now.
                 LogicalDedup::new(root, distinct_list_index_to_select_items_index).into()
             } else {
-                LogicalTopN::with_group(
+                LogicalTopN::new(
                     root,
                     1,
                     0,

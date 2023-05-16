@@ -144,6 +144,14 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append(other.value_at(idx));
     }
 
+    /// Return the number of elements in the builder.
+    fn len(&self) -> usize;
+
+    /// Return `true` if the array has a length of 0.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Finish build and return a new array.
     fn finish(self) -> Self::ArrayType;
 }
@@ -545,6 +553,16 @@ macro_rules! impl_array_builder {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             }
+
+            pub fn len(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.len(), )*
+                }
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.len() == 0
+            }
         }
     }
 }
@@ -656,6 +674,7 @@ macro_rules! impl_array {
                 }
             }
 
+            /// Returns the `DataType` of this array.
             pub fn data_type(&self) -> DataType {
                 match self {
                     $( Self::$variant_name(inner) => inner.data_type(), )*
