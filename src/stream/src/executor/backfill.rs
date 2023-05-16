@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::iter::once;
-use std::mem;
+
+
 use std::ops::Bound;
 use std::pin::pin;
 use std::sync::Arc;
@@ -134,7 +134,7 @@ where
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
-        let state_table_len = pk_in_output_indices.len() + 2;
+        let _state_table_len = pk_in_output_indices.len() + 2;
 
         let upstream_dist_key = self.upstream_dist_key;
 
@@ -189,7 +189,7 @@ where
 
         // NOTE(kwannoel): Only updated when flushing to state table.
         // `None` means it starts from the beginning.
-        let mut current_state: Option<OwnedRow> = None;
+        let _current_state: Option<OwnedRow> = None;
 
         // NOTE(kwannoel): Only updated when flushing to state table.
         // `None` means it starts from the beginning.
@@ -498,7 +498,7 @@ where
         StreamChunk::new(ops, columns, Some(new_visibility.finish()))
     }
 
-    /// Builds a new stream chunk with output_indices.
+    /// Builds a new stream chunk with `output_indices`.
     fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
         let (ops, columns, visibility) = chunk.into_inner();
         let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
@@ -573,7 +573,7 @@ where
         let mut state = vec![None; pk_in_output_indices.len() + 2];
 
         // vnode
-        let current_vnode = VirtualNode::compute_row(current_pos, &upstream_dist_key).to_scalar();
+        let current_vnode = VirtualNode::compute_row(current_pos, upstream_dist_key).to_scalar();
         let current_vnode = Some(current_vnode.into());
         state[0] = current_vnode;
 
