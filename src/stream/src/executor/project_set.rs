@@ -230,7 +230,7 @@ mod tests {
     async fn test_project_set() {
         insta::assert_snapshot!(
             executor_snapshot(
-                async || create_executor(),
+                || std::future::ready(create_executor()),
                 r###"
 - !chunk |-
     I I

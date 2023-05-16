@@ -581,7 +581,7 @@ mod tests {
 
         insta::assert_snapshot!(
             executor_snapshot(
-                Box::new(async || create_executor(calls.clone(), store.clone()).await),
+                || create_executor(calls.clone(), store.clone()),
                 r###"
 - barrier
 # FIXME: the header cannot be aligned. What's the correct YAML format?
@@ -624,7 +624,7 @@ mod tests {
 
         insta::assert_snapshot!(
             executor_snapshot(
-                async || create_executor(calls.clone(), store.clone()).await,
+                || create_executor(calls.clone(), store.clone()),
                 r###"
 - barrier
 - !chunk |-
