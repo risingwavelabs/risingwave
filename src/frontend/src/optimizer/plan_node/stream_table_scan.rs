@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -187,25 +187,24 @@ impl StreamTableScan {
     }
 
     /// Build catalog for backfill state
-    /// Schema for `Distribution::UpstreamHashShard`
+    ///
+    /// Schema
+    /// ------
     /// | vnode | pk | `backfill_finished` |
-    /// Schema for `Distribution::Single`
-    /// | pk | `backfill_finished` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let upstream_schema = self.base.schema();
+        let upstream_schema = self.logical.schema();
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        for (i, pos) in self.base.logical_pk.iter().enumerate() {
-
+        for pos in self.logical.logical_pk().unwrap().iter() {
             let field = &upstream_schema[*pos];
             catalog_builder.add_column(field);
         }

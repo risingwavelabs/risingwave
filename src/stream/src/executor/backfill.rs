@@ -134,7 +134,8 @@ where
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
-        let state_table_len = self.info().schema.len();
+        let state_table_len = pk_in_output_indices.len() + 2;
+
         let upstream_dist_key = self.upstream_dist_key;
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
@@ -395,7 +396,7 @@ where
                         current_pos_inner,
                     )
                     .await?;
-                    old_pos = current_pos.clone();
+                    // old_pos = current_pos.clone();
                     yield msg;
                     break;
                 }
@@ -511,6 +512,8 @@ where
     ) -> StreamExecutorResult<()> {
         debug_assert!(old_pos.as_ref() != Some(current_pos));
         if let Some(old_pos) = old_pos {
+            debug_assert_eq!(old_pos.len(), current_pos.len());
+            debug_assert_eq!(old_pos.len(), table.value_indices().as_ref().unwrap().len() + table.pk_indices().len());
             table.write_record(Record::Update {
                 old_row: old_pos,
                 new_row: current_pos,
