@@ -231,7 +231,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
 
         // We short-circuit here for mview to avoid streaming nested loop join,
-        // since CROSS JOIN below maybe correlated.
+        // since CROSS JOIN below could be correlated.
         if self.is_mview {
             assert!(!self.tables.is_empty());
             return from;

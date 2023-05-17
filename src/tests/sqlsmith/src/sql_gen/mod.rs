@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 mod expr;
 pub use expr::print_function_table;
 
-mod insert;
+mod dml;
 mod query;
 mod relation;
 mod scalar;
