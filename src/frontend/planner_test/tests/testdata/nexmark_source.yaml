@@ -433,7 +433,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
@@ -448,7 +448,7 @@
 
     Fragment 4
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -549,7 +549,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
@@ -563,7 +563,7 @@
 
     Fragment 4
     StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price, _row_id] }
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ auction, bidder, price, date_time, _row_id ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
@@ -1512,7 +1512,7 @@
 
     Fragment 2
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 3
+    └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [auction, _row_id] }
@@ -1530,7 +1530,7 @@
 
     Fragment 6
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 3
+    └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ id, item_name, count(auction) ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
