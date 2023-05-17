@@ -234,7 +234,7 @@ impl LogicalOverWindow {
         assert!(group_rule.len() == self.window_functions().len());
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
-        group_rule.iter().unique().for_each(|group_id| {
+        group_rule.iter().unique().sorted().for_each(|group_id| {
             let cur_group = group_rule
                 .iter()
                 .enumerate()
