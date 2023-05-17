@@ -304,9 +304,11 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                         .payload(obj.to_string().as_bytes()),
                 )
                 .await?;
+                // Tomestone event
+                // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
                 if op == Op::Delete {
                     self.send(
-                        BaseRecord::to(self.config.common.topic.as_str())
+                        BaseRecord::<[u8],[u8]>::to(self.config.common.topic.as_str())
                             .key(key_obj.to_string().as_bytes())
                     )
                     .await?;
