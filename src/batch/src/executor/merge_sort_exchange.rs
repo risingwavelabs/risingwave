@@ -19,6 +19,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::collections::MemMonitoredHeap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
@@ -100,15 +101,22 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
         assert!(source_idx < self.source_inputs.len());
         let res = self.sources[source_idx].take_data().await?;
-        match res {
+        let old = match res {
             Some(chunk) => {
                 assert_ne!(chunk.cardinality(), 0);
-                let _ = std::mem::replace(&mut self.source_inputs[source_idx], Some(chunk));
+                let new_chunk_size = chunk.estimated_heap_size() as i64;
+                let old = std::mem::replace(&mut self.source_inputs[source_idx], Some(chunk));
+                self.mem_ctx.add(new_chunk_size);
+                old
             }
-            None => {
-                let _ = std::mem::replace(&mut self.source_inputs[source_idx], None);
-            }
+            None => std::mem::replace(&mut self.source_inputs[source_idx], None),
+        };
+
+        if let Some(chunk) = old {
+            // Reduce the heap size of retired chunk
+            self.mem_ctx.add(-(chunk.estimated_heap_size() as i64));
         }
+
         Ok(())
     }
 
