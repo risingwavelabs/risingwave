@@ -151,6 +151,9 @@ statement ok
 drop materialized view mv;
 
 statement ok
+drop materialized view mv_with_expr_in_window;
+
+statement ok
 drop table t;
 
 # Test Window TopN
