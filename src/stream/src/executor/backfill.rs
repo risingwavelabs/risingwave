@@ -24,7 +24,7 @@ use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
@@ -132,8 +132,6 @@ where
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
-
-        let _state_table_len = pk_in_output_indices.len() + 2;
 
         let dist_key_in_pk = self.dist_key_in_pk;
 
@@ -522,7 +520,7 @@ where
     ) -> StreamExecutorResult<()> {
         if let Some(current_pos_inner) = current_pos {
             let current_state =
-                Self::build_new_state(is_finished, current_pos_inner, dist_key_in_pk);
+                Self::build_new_state(&table.vnode_bitmap(), is_finished, current_pos_inner, dist_key_in_pk);
             Self::flush_data(table, epoch, old_state, &current_state).await?;
             *old_state = Some(current_state);
         } else {
@@ -559,6 +557,7 @@ where
     }
 
     fn build_new_state(
+        vnodes: &Bitmap,
         is_finished: bool,
         current_pos: &OwnedRow,
         dist_key_in_pk: &[usize],
@@ -567,6 +566,7 @@ where
 
         // vnode
         let current_vnode = VirtualNode::compute_row(current_pos, dist_key_in_pk).to_scalar();
+        debug_assert!(vnodes.is_set(current_vnode as usize));
         let current_vnode = Some(current_vnode.into());
         state[0] = current_vnode;
 
