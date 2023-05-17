@@ -431,3 +431,113 @@
     └─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
       └─StreamExchange { dist: HashShard(t.x) }
         └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: cte1
+  sql: |
+    create table t (x int, y int, z int);
+    with cte as (SELECT x, y, z FROM (
+      SELECT *, row_number() OVER (PARTITION BY x ORDER BY y) AS rank FROM t
+    ) WHERE rank <= 3) select z from cte;
+  logical_plan: |
+    LogicalProject { exprs: [t.z] }
+    └─LogicalShare { id = 5 }
+      └─LogicalProject { exprs: [t.x, t.y, t.z] }
+        └─LogicalFilter { predicate: (row_number <= 3:Int32) }
+          └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
+            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+              └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [t.z] }
+    └─LogicalTopN { order: "[t.y ASC]", limit: 3, offset: 0, group_key: [0] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+  stream_plan: |
+    StreamMaterialize { columns: [z, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck" }
+    └─StreamExchange { dist: HashShard(t._row_id) }
+      └─StreamProject { exprs: [t.z, t._row_id] }
+        └─StreamGroupTopN { order: "[t.y ASC]", limit: 3, offset: 0, group_key: [0] }
+          └─StreamExchange { dist: HashShard(t.x) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: cte2
+  sql: |
+    create table t (x int, y int, z int);
+    with cte as (
+    select x, z from (
+        select x, y, z, row_number() over (partition by x order by y) as rank from t
+    ) t
+    where rank = 1
+    )
+    select t1.x as t1x, t2.x as t2x, t1.z as t1z, t2.y as t2y, t2.z as t2z from cte t1
+    inner join t t2
+    on t1.x = t2.x;
+  logical_plan: |
+    LogicalProject { exprs: [t.x, t.x, t.z, t.y, t.z] }
+    └─LogicalJoin { type: Inner, on: (t.x = t.x), output: all }
+      ├─LogicalShare { id = 5 }
+      | └─LogicalProject { exprs: [t.x, t.z] }
+      |   └─LogicalFilter { predicate: (row_number = 1:Int32) }
+      |     └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
+      |       └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      |         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: Inner, on: (t.x = t.x), output: [t.x, t.x, t.z, t.y, t.z] }
+    ├─LogicalTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+    | └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+    └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+  stream_plan: |
+    StreamMaterialize { columns: [t1x, t2x, t1z, t2y, t2z, t._row_id(hidden)], stream_key: [t1x, t._row_id], pk_columns: [t1x, t._row_id], pk_conflict: "NoCheck" }
+    └─StreamHashJoin { type: Inner, predicate: t.x = t.x, output: [t.x, t.x, t.z, t.y, t.z, t._row_id] }
+      ├─StreamGroupTopN { order: "[t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+      | └─StreamExchange { dist: HashShard(t.x) }
+      |   └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamExchange { dist: HashShard(t.x) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: group_topn_with_same_key
+  sql: |
+    create table t (x int, y int, z int);
+    SELECT z FROM (
+      SELECT *, row_number() over (partition by x,y order by x) as rank FROM t
+    )
+    WHERE rank <=1;
+  logical_plan: |
+    LogicalProject { exprs: [t.z] }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x, t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+          └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [t.z] }
+    └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+  stream_plan: |
+    StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [t.z, t.x, t.y] }
+      └─StreamGroupTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] }
+        └─StreamExchange { dist: HashShard(t.x, t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [z, t.x(hidden), t.y(hidden)], stream_key: [t.x, t.y], pk_columns: [t.x, t.y], pk_conflict: "NoCheck" }
+    ├── materialized table: 4294967294
+    └── StreamProject { exprs: [t.z, t.x, t.y] }
+        └── StreamGroupTopN { order: "[t.x ASC]", limit: 1, offset: 0, group_key: [0, 1] } { state table: 0 }
+            └──  StreamExchange Hash([0, 1]) from 1
+
+    Fragment 1
+    Chain { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    ├──  Upstream
+    └──  BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_x, t_y, t_z, t__row_id ]
+    ├── primary key: [ $0 ASC, $1 ASC, $0 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 2
+
+    Table 4294967294
+    ├── columns: [ z, t.x, t.y ]
+    ├── primary key: [ $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 1, 2 ]
+    └── read pk prefix len hint: 2
+

@@ -25,7 +25,7 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_pb::common::WorkerType;
 use tokio::sync::oneshot::Sender;
@@ -625,8 +625,8 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                     let frament_id_str = fragment_id.to_string();
                     for actor in fragment.actors {
                         let actor_id_str = actor.actor_id.to_string();
-                        // Report a dummay gauge metrics with (table id, actor id, table
-                        // name) as its label
+                        // Report a dummay gauge metrics with (fragment id, actor id, node
+                        // address) as its label
                         if let Some(actor_status) =
                             table_fragments.actor_status.get(&actor.actor_id)
                         {
@@ -647,7 +647,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                         // Report a dummay gauge metrics with (table id, actor id, table
                         // name) as its label
                         if let Some(mut node) = actor.nodes {
-                            visit_stream_node_internal_tables(&mut node, |table, _| {
+                            visit_stream_node_tables(&mut node, |table, _| {
                                 let table_id_str = table.id.to_string();
                                 meta_metrics
                                     .table_info

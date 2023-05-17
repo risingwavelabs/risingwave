@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -196,7 +195,6 @@ pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 pub fn create_cache_key_serde(
     storage_key: &[ColumnOrder],
-    pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
     order_by: &[ColumnOrder],
     group_by: &[usize],
@@ -208,15 +206,6 @@ pub fn create_cache_key_serde(
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
             assert_eq!(storage_key[i], order_by[i - group_by.len()]);
-        }
-        let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
-        for i in (group_by.len() + order_by.len())..storage_key.len() {
-            assert!(
-                pk_indices.contains(&storage_key[i].column_index),
-                "storage_key = {:?}, pk_indices = {:?}",
-                storage_key,
-                pk_indices
-            );
         }
     }
 

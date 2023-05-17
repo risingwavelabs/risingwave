@@ -19,6 +19,13 @@ select x, y from (
 where rank <= 3 AND rank > 1;
 
 statement ok
+create materialized view mv_rank_order_group_same_key as 
+SELECT x, y FROM (
+    SELECT *, rank() over (partition by x order by x) as rank FROM t
+)
+WHERE rank <=1;
+
+statement ok
 create materialized view mv_rank_no_group as 
 select x, y from (
     select *, RANK() OVER (ORDER BY y) as rank from t
@@ -89,6 +96,28 @@ select * from mv_rank;
 3  3
 3  3
 
+query II rowsort
+select * from mv_rank_order_group_same_key;
+----
+1  1
+1  2
+1  3
+1  3
+1  4
+1  5
+2  1
+2  2
+2  3
+2  3
+2  4
+2  5
+3  1
+3  2
+3  3
+3  3
+3  4
+3  5
+
 statement ok
 DROP MATERIALIZED VIEW mv_rank_no_group;
 
@@ -97,6 +126,9 @@ DROP MATERIALIZED VIEW mv_rank;
 
 statement ok
 DROP MATERIALIZED VIEW mv_with_lb;
+
+statement ok
+DROP MATERIALIZED VIEW mv_rank_order_group_same_key;
 
 statement ok
 drop materialized view mv;

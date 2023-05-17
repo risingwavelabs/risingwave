@@ -378,6 +378,7 @@ mod chain;
 mod compacted_row;
 mod empty;
 mod once;
+mod ordered;
 mod owned_row;
 mod project;
 mod repeat_n;
