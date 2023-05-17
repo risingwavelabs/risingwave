@@ -405,6 +405,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             output_indices,
             chunk_size,
             identity: source.plan_node().get_identity().clone(),
+            shutdown_rx: Some(source.shutdown_rx.clone()),
         }
         .dispatch())
     }
@@ -426,6 +427,7 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -448,6 +450,7 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
             identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
             _phantom: PhantomData,
         }))
     }
@@ -549,6 +552,7 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
+            shutdown_rx: None,
         }
         .dispatch()
     }
