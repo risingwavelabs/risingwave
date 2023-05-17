@@ -16,8 +16,9 @@ use std::collections::HashSet;
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 
 use super::{Aggregator, BoxedAggState};
 use crate::Result;
@@ -67,5 +68,19 @@ impl Aggregator for Distinct {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         self.inner.output(builder)
+    }
+}
+
+impl EstimateSize for Distinct {
+    fn estimated_heap_size(&self) -> usize {
+        let set_size = match self.exists.is_empty() {
+            true => 0,
+            false => {
+                self.exists.capacity()
+                    * self.exists.iter().next().unwrap().len()
+                    * std::mem::size_of::<Datum>()
+            }
+        };
+        self.inner.estimated_heap_size() + set_size
     }
 }

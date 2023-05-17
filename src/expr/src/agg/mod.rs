@@ -15,6 +15,7 @@
 use dyn_clone::DynClone;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, DataTypeName};
 
 use crate::{ExprError, Result};
@@ -45,7 +46,7 @@ use self::projection::Projection;
 
 /// An `Aggregator` supports `update` data and `output` result.
 #[async_trait::async_trait]
-pub trait Aggregator: Send + DynClone + 'static {
+pub trait Aggregator: EstimateSize + Send + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// `update_single` update the aggregator with a single row with type checked at runtime.

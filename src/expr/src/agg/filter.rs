@@ -14,6 +14,7 @@
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -92,6 +93,12 @@ impl Aggregator for Filter {
     }
 }
 
+impl EstimateSize for Filter {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_heap_size()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -126,6 +133,12 @@ mod tests {
 
         fn output(&mut self, _builder: &mut ArrayBuilderImpl) -> Result<()> {
             unimplemented!()
+        }
+    }
+
+    impl EstimateSize for MockAgg {
+        fn estimated_heap_size(&self) -> usize {
+            0
         }
     }
 

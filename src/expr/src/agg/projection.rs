@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::DataType;
 
 use super::{Aggregator, BoxedAggState};
@@ -53,5 +54,11 @@ impl Aggregator for Projection {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         self.inner.output(builder)
+    }
+}
+
+impl EstimateSize for Projection {
+    fn estimated_heap_size(&self) -> usize {
+        self.inner.estimated_heap_size()
     }
 }

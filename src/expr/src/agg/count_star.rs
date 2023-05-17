@@ -14,6 +14,7 @@
 
 use risingwave_common::array::*;
 use risingwave_common::bail;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
@@ -26,7 +27,7 @@ fn build_count_star(_: AggCall) -> Result<Box<dyn Aggregator>> {
     Ok(Box::<CountStar>::default())
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, EstimateSize)]
 pub struct CountStar {
     result: usize,
 }
