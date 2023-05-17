@@ -450,7 +450,6 @@ mod tests {
             tand_f64(F64::from(-10)),
         );
         assert_similar(tan_f64(50_f64.to_radians().into()), tand_f64(F64::from(50)));
-        // we get slightly different result here, which is why I reduce the required accuracy
         assert!(
             (tan_f64(250_f64.to_radians().into()) - tand_f64(F64::from(250)))
                 .0
