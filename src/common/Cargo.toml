@@ -46,7 +46,7 @@ hytra = { workspace = true }
 itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
-memcomparable = { version = "0.1", features = ["decimal"] }
+memcomparable = { version = "0.2", features = ["decimal"] }
 num-traits = "0.2"
 number_prefix = "0.4.0"
 parking_lot = "0.12"

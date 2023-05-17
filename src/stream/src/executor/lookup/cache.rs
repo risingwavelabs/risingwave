@@ -59,6 +59,10 @@ impl LookupCache {
         self.data.evict()
     }
 
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
     /// Update the current epoch.
     pub fn update_epoch(&mut self, epoch: u64) {
         self.data.update_epoch(epoch);
