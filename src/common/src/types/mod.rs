@@ -39,7 +39,7 @@ use crate::array::{
     StructRef, StructValue, NULL_VAL_FOR_HASH,
 };
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
-use crate::estimate_size::{EstimateSize, ZeroHeapSize};
+use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
 
 mod datetime;

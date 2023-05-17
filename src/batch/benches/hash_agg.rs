@@ -17,7 +17,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::memory::MonitoredGlobalAlloc;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::agg;
@@ -100,7 +100,7 @@ fn create_hash_agg_executor(
         input,
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
-        MonitoredGlobalAlloc::for_test(),
+        MemoryContext::none(),
     ))
 }
 
