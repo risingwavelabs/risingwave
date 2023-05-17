@@ -333,18 +333,17 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 }
             };
             if let Some(obj) = event_object {
-                let event_key = Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?);
-                let payload = if op == Op::Delete {
-                    "".to_string()
-                } else {
-                    obj.to_string()
+                let event_key = Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?).to_string();
+                let event_value = obj.to_string();
+                let msg = match op {
+                    Op::Delete => BaseRecord::<[u8],[u8]>::to(self.config.common.topic.as_str())
+                            .key(event_key.as_bytes()),
+                    _ => BaseRecord::to(self.config.common.topic.as_str())
+                            .key(event_key.as_bytes())
+                            .payload(event_value.as_bytes()),
                 };
-                self.send(
-                    BaseRecord::to(self.config.common.topic.as_str())
-                        .key(event_key.to_string().as_bytes())
-                        .payload(payload.as_bytes()),
-                )
-                .await?;
+                self.send(msg).await?;
+
             }
         }
         Ok(())
