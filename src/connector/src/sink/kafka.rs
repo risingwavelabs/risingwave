@@ -298,9 +298,10 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 }
             };
             if let (Some(key_obj), Some(obj)) = (event_key_object, event_object) {
+                let key_str = key_obj.to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
-                        .key(key_obj.to_string().as_bytes())
+                        .key(key_str.as_bytes())
                         .payload(obj.to_string().as_bytes()),
                 )
                 .await?;
@@ -309,7 +310,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 if op == Op::Delete {
                     self.send(
                         BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
-                            .key(key_obj.to_string().as_bytes()),
+                            .key(key_str.as_bytes()),
                     )
                     .await?;
                 }
