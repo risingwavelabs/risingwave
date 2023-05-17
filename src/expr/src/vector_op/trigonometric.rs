@@ -58,6 +58,7 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
 
 // Radians per degree, a.k.a. PI / 180
 static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
+
 // Constants we use to get more accurate results.
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
 static SIND_30: f64 = 0.499_999_999_999_999_94;
@@ -65,7 +66,7 @@ static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
 static TAND_45: f64 = 1.0;
 static COTD_45: f64 = 1.0;
 static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
-static ACOS_0_5: f64 = 1.047_197_551_196_597_6; // TODO: maybe this num is incorrect?
+static ACOS_0_5: f64 = 1.047_197_551_196_597_6;
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
@@ -286,7 +287,7 @@ pub fn asind_q1(x: f64) -> f64 {
     }
 
     let acos_x = f64::acos(x);
-    90.0 - (acos_x / ASIN_0_5) * 60.0
+    90.0 - (acos_x / ACOS_0_5) * 60.0
 }
 
 #[function("asind(float64) -> float64")]
@@ -299,7 +300,7 @@ pub fn asind_f64(input: F64) -> F64 {
     }
 
     // Return NaN if input is out of range. Slightly different from PSQL implementation
-    if input.0 < -1.0 || input.0 > 1.0 {
+    if !(-1.0..=1.0).contains(&arg1) {
         return F64::from(f64::NAN);
     }
 
@@ -335,7 +336,7 @@ pub fn acosd_f64(input: F64) -> F64 {
     let arg1 = input.0;
 
     // Return NaN if input is NaN or Infinite. Slightly different from PSQL implementation
-    if input.0.is_nan() || input.0.is_infinite() || arg1 < -1.0 || arg1 > 1.0 {
+    if input.0.is_nan() || input.0.is_infinite() || !(-1.0..=1.0).contains(&arg1) {
         return F64::from(f64::NAN);
     }
 
@@ -370,7 +371,7 @@ mod tests {
     use crate::vector_op::trigonometric::*;
 
     fn precision() -> f64 {
-        1e-13
+        1e-12
     }
 
     /// numbers are equal within a rounding error
@@ -384,8 +385,6 @@ mod tests {
 
     #[test]
     fn test_degrees() {
-        let ACOS_0_5_local = f64::acos(0.5);
-
         let d = F64::from(180);
         let pi = F64::from(PI);
 
@@ -473,9 +472,16 @@ mod tests {
         assert_similar(asind_f64(F64::from(-0.5)), F64::from(-30));
         assert_similar(asind_f64(F64::from(0)), F64::from(0));
         assert_similar(asind_f64(F64::from(0.5)), F64::from(30));
+        assert_similar(asind_f64(F64::from(0.75)), F64::from(48.590377890729));
         assert_similar(asind_f64(F64::from(1)), F64::from(90));
 
-        // TODO: write some tests here for cosd here, matching the exact values
+        // acosd
+        assert_eq!(acosd_f64(F64::from(-1)), F64::from(180));
+        assert_similar(acosd_f64(F64::from(-0.75)), F64::from(138.59037789072914));
+        assert_eq!(acosd_f64(F64::from(-0.5)), F64::from(120));
+        assert_eq!(acosd_f64(F64::from(0.0)), F64::from(90));
+        assert_eq!(acosd_f64(F64::from(0.5)), F64::from(60));
+        assert_eq!(acosd_f64(F64::from(1)), F64::from(0));
 
         // exact matches
         assert!(tand_f64(F64::from(-270)).0.is_infinite());

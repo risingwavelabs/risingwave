@@ -536,7 +536,7 @@ SELECT abs(acosd(-0.75) - 138.59037789072914) < 1e-14
 t
 
 query R
-SELECT abs(acosd(-0.5) - 120.00000000000001) < 1e-14
+SELECT abs(acosd(-0.5) - 120.0) < 1e-14
 ----
 t
 
