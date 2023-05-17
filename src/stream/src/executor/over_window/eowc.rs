@@ -582,7 +582,7 @@ mod tests {
         let snapshot = executor_snapshot(
             || create_executor(calls.clone(), store.clone()),
             r###"
-- barrier
+- !barrier 1
 - !chunk |2
       I T  I   i
     + 1 p1 100 10
@@ -595,15 +595,15 @@ mod tests {
     + 8 p3 300 33
 # TODO: preserve comment in snapshot?
 # NOTE: no watermark message here, since watermark(1) was already received
-- barrier
+- !barrier 2
 - recovery
-- barrier
+- !barrier 3
 - !chunk |2
       I  T  I   i
     + 10 p1 103 13
     + 12 p2 202 28
     + 13 p3 301 39
-- barrier
+- !barrier 4
 "###,
         )
         .await;
@@ -611,9 +611,9 @@ mod tests {
         // expect_test, inline
         let expected = expect_test::expect![[r#"
             # This result can be automatically updated. See `TODO:` for more information.
-            - input: barrier
+            - input: !barrier 1
               output:
-              - barrier
+              - !barrier 1
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -640,14 +640,14 @@ mod tests {
                 | + | 1 | p1 | 101 | 16 | 10 | 18 |
                 | + | 4 | p2 | 200 | 20 |    | 22 |
                 +---+---+----+-----+----+----+----+
-            - input: barrier
+            - input: !barrier 2
               output:
-              - barrier
+              - !barrier 2
             - input: recovery
               output: []
-            - input: barrier
+            - input: !barrier 3
               output:
-              - barrier
+              - !barrier 3
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -664,9 +664,9 @@ mod tests {
                 | + | 7 | p2 | 201 | 22 | 20 | 28 |
                 | + | 8 | p3 | 300 | 33 |    | 39 |
                 +---+---+----+-----+----+----+----+
-            - input: barrier
+            - input: !barrier 4
               output:
-              - barrier
+              - !barrier 4
         "#]];
 
         expected.assert_eq(&snapshot);
@@ -678,9 +678,9 @@ mod tests {
         }, {
             insta::assert_snapshot!(snapshot, @r###"
             # This result can be automatically updated. See `TODO:` for more information.
-            - input: barrier
+            - input: !barrier 1
               output:
-              - barrier
+              - !barrier 1
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |
@@ -707,14 +707,14 @@ mod tests {
                 | + | 1 | p1 | 101 | 16 | 10 | 18 |
                 | + | 4 | p2 | 200 | 20 |    | 22 |
                 +---+---+----+-----+----+----+----+
-            - input: barrier
+            - input: !barrier 2
               output:
-              - barrier
+              - !barrier 2
             - input: recovery
               output: []
-            - input: barrier
+            - input: !barrier 3
               output:
-              - barrier
+              - !barrier 3
             - input: !chunk |-
                 +---+----+----+-----+----+
                 | + | 10 | p1 | 103 | 13 |
@@ -731,9 +731,9 @@ mod tests {
                 | + | 7 | p2 | 201 | 22 | 20 | 28 |
                 | + | 8 | p3 | 300 | 33 |    | 39 |
                 +---+---+----+-----+----+----+----+
-            - input: barrier
+            - input: !barrier 4
               output:
-              - barrier
+              - !barrier 4
             "###)
         });
     }
@@ -751,7 +751,7 @@ mod tests {
         let snapshot = executor_snapshot(
             || create_executor(calls.clone(), store.clone()),
             r###"
-- barrier
+- !barrier 1
 - !chunk |2
       I T  I   i
     + 1 p1 100 10
@@ -764,9 +764,9 @@ mod tests {
         // expect_test, inline, indentation modified
         let expected = expect_test::expect![[r#"
             # This result can be automatically updated. See `TODO:` for more information.
-            - input: barrier
+            - input: !barrier 1
               output:
-              - barrier
+              - !barrier 1
             - input: !chunk |-
                 +---+---+----+-----+----+
                 | + | 1 | p1 | 100 | 10 |

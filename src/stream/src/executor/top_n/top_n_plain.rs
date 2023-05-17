@@ -710,6 +710,7 @@ mod tests {
         use risingwave_storage::memory::MemoryStateStore;
 
         use super::*;
+        use crate::executor::test_utils::snapshot::check_until_pending;
         use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
         use crate::executor::ActorContext;
 
@@ -863,53 +864,32 @@ mod tests {
             );
             let mut top_n_executor = top_n_executor.execute();
 
-            // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            // should be empty
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty("  I I I I")
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                +  5 1 4 1002
-                "
-                )
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                +  1 9 1 1003
-                +  9 8 1 1004
-                -  9 8 1 1004
-                +  1 1 4 1001",
-                ),
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                -  5 1 4 1002
-                +  1 0 2 1006",
-                )
-            );
-
-            // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            check_until_pending(
+                &mut top_n_executor,
+                expect_test::expect![[r#"
+                    - !barrier 1
+                    - !chunk (empty)
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | + | 5 | 1 | 4 | 1002 |
+                      +---+---+---+---+------+
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | + | 1 | 9 | 1 | 1003 |
+                      | + | 9 | 8 | 1 | 1004 |
+                      | - | 9 | 8 | 1 | 1004 |
+                      | + | 1 | 1 | 4 | 1001 |
+                      +---+---+---+---+------+
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | - | 5 | 1 | 4 | 1002 |
+                      | + | 1 | 0 | 2 | 1006 |
+                      +---+---+---+---+------+
+                    - !barrier 2
+                    - !barrier 7
+                "#]],
+            )
+            .await;
         }
 
         #[tokio::test]
@@ -941,31 +921,20 @@ mod tests {
             );
             let mut top_n_executor = top_n_executor.execute();
 
-            // consume the init barrier
-            top_n_executor.next().await.unwrap().unwrap();
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            // should be empty
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty("  I I I I")
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                +  5 1 4 1002
-                "
-                )
-            );
-
-            // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            check_until_pending(
+                &mut top_n_executor,
+                expect_test::expect![[r#"
+                    - !barrier 1
+                    - !chunk (empty)
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | + | 5 | 1 | 4 | 1002 |
+                      +---+---+---+---+------+
+                    - !barrier 2
+                    - !barrier 5
+                "#]],
+            )
+            .await;
 
             let state_table = create_in_memory_state_table_from_state_store(
                 &[
@@ -995,39 +964,27 @@ mod tests {
             );
             let mut top_n_executor = top_n_executor_after_recovery.execute();
 
-            // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                +  1 9 1 1003
-                +  9 8 1 1004
-                -  9 8 1 1004
-                +  1 1 4 1001",
-                ),
-            );
-
-            let res = top_n_executor.next().await.unwrap().unwrap();
-            assert_eq!(
-                *res.as_chunk().unwrap(),
-                StreamChunk::from_pretty(
-                    "  I I I I
-                -  5 1 4 1002
-                +  1 0 2 1006",
-                )
-            );
-
-            // barrier
-            assert_matches!(
-                top_n_executor.next().await.unwrap().unwrap(),
-                Message::Barrier(_)
-            );
+            check_until_pending(
+                &mut top_n_executor,
+                expect_test::expect![[r#"
+                    - !barrier 3
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | + | 1 | 9 | 1 | 1003 |
+                      | + | 9 | 8 | 1 | 1004 |
+                      | - | 9 | 8 | 1 | 1004 |
+                      | + | 1 | 1 | 4 | 1001 |
+                      +---+---+---+---+------+
+                    - !chunk |-
+                      +---+---+---+---+------+
+                      | - | 5 | 1 | 4 | 1002 |
+                      | + | 1 | 0 | 2 | 1006 |
+                      +---+---+---+---+------+
+                    - !barrier 4
+                    - !barrier 5
+                "#]],
+            )
+            .await;
         }
     }
 

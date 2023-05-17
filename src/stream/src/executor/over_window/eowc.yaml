@@ -1,7 +1,7 @@
 # This result can be automatically updated. See `TODO:` for more information.
-- input: barrier
+- input: !barrier 1
   output:
-  - barrier
+  - !barrier 1
 - input: !chunk |-
     +---+---+----+-----+----+
     | + | 1 | p1 | 100 | 10 |

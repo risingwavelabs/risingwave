@@ -556,10 +556,13 @@ pub mod snapshot {
     use super::MessageSender;
     use crate::executor::{BoxedMessageStream, Message};
 
+    /// This is a DSL for the input and output of executor snapshot tests.
+    ///
+    /// It immitates [`Message`], but more ser/de friendly.
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     #[serde(rename_all = "lowercase")]
     enum SnapshotEvent {
-        Barrier,
+        Barrier(u64),
         Noop,
         Recovery,
         Chunk(String),
@@ -573,6 +576,9 @@ pub mod snapshot {
         }
     }
 
+    /// One input [event](`SnapshotEvent`) and its corresponding output events.
+    ///
+    /// A `Vec<Snapshot>` can represent a whole test scenario.
     #[derive(Debug, serde::Serialize, serde::Deserialize)]
     struct Snapshot {
         input: SnapshotEvent,
@@ -587,14 +593,12 @@ pub mod snapshot {
         let inputs = SnapshotEvent::parse(inputs);
 
         let (mut tx, mut executor) = create_executor().await;
-        let mut epoch = 1;
 
         let mut snapshot = Vec::with_capacity(inputs.len());
         for mut event in inputs {
             match &mut event {
-                SnapshotEvent::Barrier => {
-                    tx.push_barrier(epoch, false);
-                    epoch += 1;
+                SnapshotEvent::Barrier(epoch) => {
+                    tx.push_barrier(*epoch, false);
                 }
                 SnapshotEvent::Noop => unreachable!(),
                 SnapshotEvent::Recovery => {
@@ -609,26 +613,72 @@ pub mod snapshot {
                     tx.push_watermark(*col_idx, DataType::Int64, (*val).into())
                 }
             }
-            let mut output = vec![];
-            while let Some(msg) = executor.try_next().now_or_never() {
-                output.push(match msg.unwrap().unwrap() {
-                    Message::Chunk(chunk) => SnapshotEvent::Chunk(chunk.to_pretty_string()),
-                    Message::Barrier(_) => SnapshotEvent::Barrier,
-                    Message::Watermark(watermark) => SnapshotEvent::Watermark {
-                        col_idx: watermark.col_idx,
-                        val: watermark.val.into_int64(),
-                    },
-                });
-            }
+
             snapshot.push(Snapshot {
                 input: event,
-                output,
+                output: run_until_pending(&mut executor).await,
             });
         }
         // Note: we serialize ourselves, instead of relying on insta::assert_yaml_snapshot,
         // because serde_yaml is prettier. https://github.com/mitsuhiko/insta/issues/372
-        let note = "# This result can be automatically updated. See `TODO:` for more information.\n";
+        let note =
+            "# This result can be automatically updated. See `TODO:` for more information.\n";
         let snapshot = serde_yaml::to_string(&snapshot).unwrap();
         format!("{}{}", note, snapshot)
+    }
+
+    async fn run_until_pending(executor: &mut BoxedMessageStream) -> Vec<SnapshotEvent> {
+        let mut output = vec![];
+
+        while let Some(msg) = executor.try_next().now_or_never() {
+            let msg = msg.unwrap();
+            let msg = match msg {
+                Some(msg) => msg,
+                None => return output,
+            };
+            output.push(match msg {
+                Message::Chunk(chunk) => SnapshotEvent::Chunk(chunk.to_pretty_string()),
+                Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr),
+                Message::Watermark(watermark) => SnapshotEvent::Watermark {
+                    col_idx: watermark.col_idx,
+                    val: watermark.val.into_int64(),
+                },
+            });
+        }
+
+        output
+    }
+
+    /// Drives the executor until it is pending, and then asserts that the output matches
+    /// `expect`.
+    ///
+    /// `expect` can be altomatically updated by running the test suite with`UPDATE_EXPECT`
+    /// environmental variable set.
+    ///
+    /// TODO: Do we want sth like `check_n_steps` instead, where we do want to wait for a
+    /// `.await` to complete?
+    ///
+    /// # Suggested workflow to add a new test
+    ///
+    /// Just drop this one-liner after creating the executor and sending input messages.
+    ///
+    /// ```no_run
+    /// check_until_pending(&mut executor, expect_test::expect![[""]]).await;
+    /// ```
+    ///
+    /// Then just run the tests with env var `UPDATE_EXPECT=1`.
+    ///
+    /// ```shell
+    /// UPDATE_EXPECT=1 cargo nextest run -p risingwave_stream
+    /// # or
+    /// UPDATE_EXPECT=1 risedev test -p risingwave_stream
+    /// ```
+    pub async fn check_until_pending(
+        executor: &mut BoxedMessageStream,
+        expect: expect_test::Expect,
+    ) {
+        let output = run_until_pending(executor).await;
+        let output = serde_yaml::to_string(&output).unwrap();
+        expect.assert_eq(&output);
     }
 }
