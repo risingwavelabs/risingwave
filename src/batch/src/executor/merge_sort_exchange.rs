@@ -56,6 +56,45 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
 }
 
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        context: C,
+        column_orders: Arc<Vec<ColumnOrder>>,
+        proto_sources: Vec<PbExchangeSource>,
+        source_creators: Vec<CS>,
+        schema: Schema,
+        task_id: TaskId,
+        identity: String,
+        chunk_size: usize,
+    ) -> Self {
+        let mem_ctx = context.create_executor_mem_context(&identity);
+        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
+
+        let source_inputs = {
+            let mut v = Vec::with_capacity_in(proto_sources.len(), alloc.clone());
+            (0..proto_sources.len()).for_each(|_| v.push(None));
+            v
+        };
+
+        let num_sources = proto_sources.len();
+
+        Self {
+            context,
+            source_inputs,
+            column_orders,
+            min_heap: MemMonitoredHeap::with_capacity(num_sources, mem_ctx.clone()),
+            proto_sources,
+            sources: Vec::with_capacity(num_sources),
+            source_creators,
+            schema,
+            task_id,
+            identity,
+            chunk_size,
+            mem_ctx,
+            alloc,
+        }
+    }
+
     /// We assume that the source would always send `Some(chunk)` with cardinality > 0
     /// or `None`, but never `Some(chunk)` with cardinality == 0.
     async fn get_source_chunk(&mut self, source_idx: usize) -> Result<()> {
@@ -212,27 +251,16 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        let num_sources = proto_sources.len();
-
-        let identity = source.plan_node().get_identity().clone();
-        let mem_ctx = source.context().create_executor_mem_context(&identity);
-        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
-
-        Ok(Box::new(MergeSortExchangeExecutor::<C> {
-            context: source.context().clone(),
-            source_inputs: Vec::with_capacity_in(num_sources, alloc.clone()),
+        Ok(Box::new(MergeSortExchangeExecutor::<C>::new(
+            source.context().clone(),
             column_orders,
-            min_heap: MemMonitoredHeap::with_capacity(num_sources, mem_ctx.clone()),
             proto_sources,
-            sources: vec![],
             source_creators,
-            schema: Schema { fields },
-            task_id: source.task_id.clone(),
-            identity,
-            chunk_size: source.context.get_config().developer.chunk_size,
-            mem_ctx,
-            alloc,
-        }))
+            Schema { fields },
+            source.task_id.clone(),
+            source.plan_node().get_identity().clone(),
+            source.context.get_config().developer.chunk_size,
+        )))
     }
 }
 
@@ -275,29 +303,21 @@ mod tests {
             order_type: OrderType::ascending(),
         }]);
 
-        let mem_ctx = MemoryContext::none();
-        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
-
         let executor = Box::new(MergeSortExchangeExecutorImpl::<
             FakeCreateSource,
             ComputeNodeContext,
-        > {
-            context: ComputeNodeContext::for_test(),
-            source_inputs: Vec::with_capacity_in(proto_sources.len(), alloc.clone()),
+        >::new(
+            ComputeNodeContext::for_test(),
             column_orders,
-            min_heap: MemMonitoredHeap::new_with(mem_ctx.clone()),
             proto_sources,
-            sources: vec![],
             source_creators,
-            schema: Schema {
+            Schema {
                 fields: vec![Field::unnamed(DataType::Int32)],
             },
-            task_id: TaskId::default(),
-            identity: "MergeSortExchangeExecutor2".to_string(),
-            chunk_size: CHUNK_SIZE,
-            mem_ctx,
-            alloc,
-        });
+            TaskId::default(),
+            "MergeSortExchangeExecutor2".to_string(),
+            CHUNK_SIZE,
+        ));
 
         let mut stream = executor.execute();
         let res = stream.next().await;

@@ -61,3 +61,29 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         self.inner.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use prometheus::IntGauge;
+
+    use crate::estimate_size::collections::MemMonitoredHeap;
+    use crate::memory::MemoryContext;
+
+    #[test]
+    fn test_heap() {
+        let gauge = IntGauge::new("test", "test").unwrap();
+        let mem_ctx = MemoryContext::root(gauge.clone());
+
+        let mut heap = MemMonitoredHeap::<u8>::new_with(mem_ctx);
+        assert_eq!(0, gauge.get());
+
+        heap.push(9u8);
+        heap.push(1u8);
+        assert_eq!(heap.inner.capacity() as i64, gauge.get());
+
+        heap.pop().unwrap();
+        assert_eq!(heap.inner.capacity() as i64, gauge.get());
+
+        assert!(!heap.is_empty());
+    }
+}
