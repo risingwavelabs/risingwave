@@ -1,3 +1,11 @@
+statement ok
+create table s0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = '127.0.0.1:9092',
+  scan.startup.mode = 'earliest'
+) row format csv DELIMITED BY ',';
+
 # expect fail with invalid broker address
 statement error
 create table s1 (v1 int, v2 varchar) with (
@@ -321,6 +329,14 @@ flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 1s
+
+query IT rowsort
+select v1, v2 from s0;
+----
+1 1
+2 22
+3 333
+4 4444
 
 query IT rowsort
 select * from s1
