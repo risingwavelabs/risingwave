@@ -179,7 +179,7 @@ impl StreamTableScan {
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let upstream_schema = self.logical.schema();
+        let upstream_schema = &self.logical.table_desc.columns;
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
@@ -187,9 +187,13 @@ impl StreamTableScan {
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         // pk columns
-        for col in self.logical.primary_key().iter() {
-            let field = &upstream_schema[col.column_index];
-            catalog_builder.add_column(field);
+        println!("table_desc: {:?}", self.logical.table_desc);
+        println!("primary_key: {:?}", self.logical.primary_key());
+        println!("pk: {:?}", self.logical.table_desc.pk);
+        println!("logical_pk: {:?}", self.logical.logical_pk());
+        for col_order in self.logical.primary_key().iter() {
+            let col = &upstream_schema[col_order.column_index];
+            catalog_builder.add_column(&Field::from(col));
         }
 
         // `backfill_finished` column
