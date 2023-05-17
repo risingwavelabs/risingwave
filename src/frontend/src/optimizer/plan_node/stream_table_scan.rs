@@ -143,11 +143,11 @@ impl StreamTableScan {
             // A: State Table interface expects that distribution key
             // is a subset of primary key.
             // Here we don't have primary key for state table. We only partition it by vnode.
-            Distribution::UpstreamHashShard(dist_key, _) => {
+            Distribution::UpstreamHashShard(_, _) => {
                 // 1. Map distribution key to the position in primary key.
                 // println!("primary key {:?}", self.logical.primary_key());
                 println!("--------------");
-                println!("upstream_hash_shard dist_key: {:?}", dist_key);
+                // println!("upstream_hash_shard dist_key: {:?}", dist_key);
                 println!("logical_pk: {:?}", self.logical.logical_pk());
                 println!("logical_primary_key: {:?}", self.logical.primary_key());
                 println!("table_desc_primary_key: {:?}", self.logical().table_desc.pk);
@@ -156,7 +156,10 @@ impl StreamTableScan {
                     self.logical().table_desc.distribution_key
                 );
                 println!("base pk: {:?}", self.base.logical_pk());
-                let distribution_key = dist_key
+                let distribution_key = self
+                    .logical()
+                    .table_desc
+                    .distribution_key
                     .iter()
                     .map(|i| {
                         self.logical
