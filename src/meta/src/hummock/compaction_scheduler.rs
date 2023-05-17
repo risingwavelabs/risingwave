@@ -657,22 +657,25 @@ where
         let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
             .map(|_| SchedulerEvent::CheckDeadTaskTrigger);
 
-        let mut split_group_trigger_interval =
-            tokio::time::interval(Duration::from_secs(periodic_check_split_group_interval_sec));
-        split_group_trigger_interval
-            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        split_group_trigger_interval.reset();
-
-        let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
-            .map(|_| SchedulerEvent::GroupSplitTrigger);
-        let triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
+        let mut triggers: Vec<BoxStream<'static, SchedulerEvent>> = vec![
             Box::pin(dynamic_channel_trigger),
             Box::pin(dynamic_tick_trigger),
             Box::pin(space_reclaim_trigger),
             Box::pin(ttl_reclaim_trigger),
             Box::pin(check_compact_trigger),
-            Box::pin(split_group_trigger),
         ];
+
+        if periodic_check_split_group_interval_sec > 0 {
+            let mut split_group_trigger_interval =
+                tokio::time::interval(Duration::from_secs(periodic_check_split_group_interval_sec));
+            split_group_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            split_group_trigger_interval.reset();
+
+            let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
+                .map(|_| SchedulerEvent::GroupSplitTrigger);
+            triggers.push(Box::pin(split_group_trigger));
+        }
         select_all(triggers)
     }
 }
