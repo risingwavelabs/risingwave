@@ -546,7 +546,6 @@ pub mod top_n_executor {
     }
 }
 
-#[cfg(test)]
 pub mod snapshot {
     use futures::{Future, FutureExt, TryStreamExt};
     use risingwave_common::array::StreamChunk;
@@ -662,7 +661,7 @@ pub mod snapshot {
     ///
     /// Just drop this one-liner after creating the executor and sending input messages.
     ///
-    /// ```no_run
+    /// ```no_compile
     /// check_until_pending(&mut executor, expect_test::expect![[""]]).await;
     /// ```
     ///
