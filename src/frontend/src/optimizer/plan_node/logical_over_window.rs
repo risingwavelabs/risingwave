@@ -238,7 +238,7 @@ impl LogicalOverWindow {
             let cur_group = group_rule
                 .iter()
                 .enumerate()
-                .filter(|(_, x)| x == &&group_id)
+                .filter(|(_, x)| x == &group_id)
                 .map(|(idx, _)| idx)
                 .collect_vec();
             cur_input = cur_node.clone().into();
