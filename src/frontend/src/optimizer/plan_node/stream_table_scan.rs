@@ -123,10 +123,10 @@ impl StreamTableScan {
         let output_distribution_key = match self.base.distribution() {
             // For sharded distribution, we need to remap dist_key.
             // Suppose we had Order Key (Primary Key) of Upstream table: [0, 4],
-            // and Distribution Key [0].
+            // and Distribution Key [4].
             // Output schema will be:
             // [0, 4]
-            // So the new distribution key indices will be: [0]
+            // So the new distribution key indices will be: [1]
             // ---
             // Q: Why distribution key is needed?
             // A: We need distribution key so we can compute vnode.
@@ -186,8 +186,9 @@ impl StreamTableScan {
         catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        for pos in &self.logical.logical_pk().unwrap() {
-            let field = &upstream_schema[*pos];
+        // pk columns
+        for col in self.logical.primary_key().iter() {
+            let field = &upstream_schema[*col.column_index];
             catalog_builder.add_column(field);
         }
 
