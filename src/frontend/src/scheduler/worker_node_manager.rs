@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet, LinkedList, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -31,6 +32,8 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 /// `WorkerNodeManager` manages live worker nodes and table vnode mapping information.
 pub struct WorkerNodeManager {
     inner: RwLock<WorkerNodeManagerInner>,
+    /// Temporarily make worker invisible from serving cluster.
+    worker_node_mask: Arc<RwLock<HashSet<u32>>>,
 }
 
 struct WorkerNodeManagerInner {
@@ -57,6 +60,7 @@ impl WorkerNodeManager {
                 streaming_fragment_vnode_mapping: Default::default(),
                 serving_fragment_vnode_mapping: Default::default(),
             }),
+            worker_node_mask: Arc::new(Default::default()),
         }
     }
 
@@ -67,7 +71,10 @@ impl WorkerNodeManager {
             streaming_fragment_vnode_mapping: HashMap::new(),
             serving_fragment_vnode_mapping: HashMap::new(),
         });
-        Self { inner }
+        Self {
+            inner,
+            worker_node_mask: Arc::new(Default::default()),
+        }
     }
 
     pub fn list_worker_nodes(&self) -> Vec<WorkerNode> {
@@ -214,6 +221,26 @@ impl WorkerNodeManager {
         let pu_mapping = guard.reschedule_serving(fragment_id)?;
         Ok(pu_mapping)
     }
+
+    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<u32>> {
+        self.worker_node_mask.read().unwrap()
+    }
+
+    pub fn mask_worker_node(&self, worker_node_id: u32, duration: Duration) {
+        let mut worker_node_mask = self.worker_node_mask.write().unwrap();
+        if worker_node_mask.contains(&worker_node_id) {
+            return;
+        }
+        worker_node_mask.insert(worker_node_id);
+        let worker_node_mask_ref = self.worker_node_mask.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            worker_node_mask_ref
+                .write()
+                .unwrap()
+                .remove(&worker_node_id);
+        });
+    }
 }
 
 impl WorkerNodeManagerInner {
@@ -249,7 +276,8 @@ impl WorkerNodeManagerInner {
                 )
             })?;
         let serving_parallelism = std::cmp::min(
-            std::cmp::min(serving_pus_total_num, VirtualNode::COUNT),
+            serving_pus_total_num,
+            // Follow streaming vnode mapping is not a must.
             streaming_vnode_mapping.iter_unique().count(),
         );
         assert!(serving_parallelism > 0);
@@ -297,7 +325,8 @@ impl WorkerNodeSelector {
         if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes().len()
         } else {
-            self.manager.list_serving_worker_nodes().len()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
+                .len()
         }
     }
 
@@ -305,7 +334,7 @@ impl WorkerNodeSelector {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()
         } else {
-            self.manager.list_serving_worker_nodes()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
             .iter()
@@ -327,7 +356,14 @@ impl WorkerNodeSelector {
                     ))
                 })
         } else {
-            self.manager.get_serving_fragment_mapping(fragment_id)
+            let origin = self.manager.get_serving_fragment_mapping(fragment_id)?;
+            if self.manager.worker_node_mask().is_empty() {
+                return Ok(origin);
+            }
+            let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
+            let masked_mapping =
+                rebalance_serving_vnode(&origin, &new_workers, origin.iter_unique().count());
+            masked_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes)
         }
     }
 
@@ -335,12 +371,20 @@ impl WorkerNodeSelector {
         let worker_nodes = if self.enable_barrier_read {
             self.manager.list_streaming_worker_nodes()
         } else {
-            self.manager.list_serving_worker_nodes()
+            self.apply_worker_node_mask(self.manager.list_serving_worker_nodes())
         };
         worker_nodes
             .choose(&mut rand::thread_rng())
             .ok_or_else(|| SchedulerError::EmptyWorkerNodes)
             .map(|w| (*w).clone())
+    }
+
+    fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
+        let mask = self.manager.worker_node_mask();
+        origin
+            .into_iter()
+            .filter(|w| !mask.contains(&w.id))
+            .collect()
     }
 }
 
@@ -349,9 +393,7 @@ impl WorkerNodeSelector {
 /// new constraints accordingly.
 fn rebalance_serving_vnode(
     old_pu_mapping: &ParallelUnitMapping,
-    old_workers: &[WorkerNode],
-    added_workers: &[WorkerNode],
-    removed_workers: &[WorkerNode],
+    new_workers: &[WorkerNode],
     max_parallelism: usize,
 ) -> Option<ParallelUnitMapping> {
     let get_pu_map = |worker_nodes: &[WorkerNode]| {
@@ -361,11 +403,8 @@ fn rebalance_serving_vnode(
             .map(|w| (w.id, w.parallel_units.clone()))
             .collect::<BTreeMap<u32, Vec<ParallelUnit>>>()
     };
-    let removed_pu_map = get_pu_map(removed_workers);
-    let mut new_pus: LinkedList<_> = get_pu_map(old_workers)
+    let mut new_pus: LinkedList<_> = get_pu_map(new_workers)
         .into_iter()
-        .filter(|(w_id, _)| !removed_pu_map.contains_key(w_id))
-        .chain(get_pu_map(added_workers))
         .map(|(_, pus)| pus.into_iter().sorted_by_key(|p| p.id))
         .collect();
     let serving_parallelism = std::cmp::min(
@@ -401,7 +440,6 @@ fn rebalance_serving_vnode(
     }
     let (expected, mut remain) = VirtualNode::COUNT.div_rem(&selected_pu_ids.len());
     assert!(expected <= i32::MAX as usize);
-    // TODO comments
     let mut balances: HashMap<ParallelUnitId, Balance> = HashMap::default();
     for pu_id in &selected_pu_ids {
         let mut balance = Balance {
@@ -576,9 +614,9 @@ mod tests {
             ..Default::default()
         };
         let pu_mapping = ParallelUnitMapping::build(&worker_1.parallel_units);
-        assert!(rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], &[], &[], 0).is_none());
+        assert!(rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 0).is_none());
         let re_pu_mapping =
-            rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], &[], &[], 10000).unwrap();
+            rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 10000).unwrap();
         assert_eq!(re_pu_mapping, pu_mapping);
         assert_eq!(re_pu_mapping.iter_unique().count(), 1);
         let worker_2 = WorkerNode {
@@ -587,14 +625,9 @@ mod tests {
             property: Some(serving_property.clone()),
             ..Default::default()
         };
-        let re_pu_mapping = rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_1.clone()],
-            &[worker_2.clone()],
-            &[],
-            10000,
-        )
-        .unwrap();
+        let re_pu_mapping =
+            rebalance_serving_vnode(&re_pu_mapping, &[worker_1.clone(), worker_2.clone()], 10000)
+                .unwrap();
         assert_ne!(re_pu_mapping, pu_mapping);
         assert_eq!(re_pu_mapping.iter_unique().count(), 51);
         // 1*256+0 -> 5*51+1
@@ -608,9 +641,7 @@ mod tests {
         };
         let re_pu_mapping_2 = rebalance_serving_vnode(
             &re_pu_mapping,
-            &[worker_1.clone(), worker_2.clone()],
-            &[worker_3.clone()],
-            &[],
+            &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
             10000,
         )
         .unwrap();
@@ -620,8 +651,6 @@ mod tests {
         let re_pu_mapping = rebalance_serving_vnode(
             &re_pu_mapping_2,
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            &[],
-            &[],
             50,
         )
         .unwrap();
@@ -631,8 +660,6 @@ mod tests {
         let re_pu_mapping_2 = rebalance_serving_vnode(
             &re_pu_mapping,
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            &[],
-            &[],
             10000,
         )
         .unwrap();
@@ -640,39 +667,17 @@ mod tests {
         // TODO count_same_vnode_mapping
         let re_pu_mapping = rebalance_serving_vnode(
             &re_pu_mapping_2,
-            &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            &[],
-            &[worker_2.clone()],
+            &[worker_1.clone(), worker_3.clone()],
             10000,
         )
         .unwrap();
         // limited by total pu number
         assert_eq!(re_pu_mapping.iter_unique().count(), 61);
         // TODO count_same_vnode_mapping
-        assert!(rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_1.clone(), worker_3.clone()],
-            &[],
-            &[worker_1.clone(), worker_3.clone()],
-            10000
-        )
-        .is_none());
-        let re_pu_mapping = rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_1.clone(), worker_3.clone()],
-            &[],
-            &[worker_1.clone()],
-            10000,
-        )
-        .unwrap();
+        assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
+        let re_pu_mapping =
+            rebalance_serving_vnode(&re_pu_mapping, &[worker_3.clone()], 10000).unwrap();
         assert_eq!(re_pu_mapping.iter_unique().count(), 60);
-        assert!(rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_3.clone()],
-            &[],
-            &[worker_3.clone()],
-            10000
-        )
-        .is_none());
+        assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
     }
 }
