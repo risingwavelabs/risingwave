@@ -2,7 +2,7 @@ statement ok
 create table s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
-  properties.bootstrap.server = '127.0.0.1:9092',
+  properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
 ) row format csv DELIMITED BY ',';
 
