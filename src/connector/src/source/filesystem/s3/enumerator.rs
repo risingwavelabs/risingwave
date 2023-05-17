@@ -94,35 +94,41 @@ impl SplitEnumerator for S3SplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
-        let list_obj_out = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket_name)
-            .set_prefix(self.prefix.clone())
-            .send()
-            .await?;
+        let mut objects = Vec::new();
+        let mut next_continuation_token = None;
+        loop {
+            let mut req = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket_name)
+                .set_prefix(self.prefix.clone());
+            if let Some(continuation_token) = next_continuation_token.take() {
+                req = req.continuation_token(continuation_token);
+            }
+            let mut res = req.send().await?;
+            objects.extend(res.contents.take().unwrap_or_default());
+            if res.is_truncated() {
+                next_continuation_token = Some(res.next_continuation_token.unwrap())
+            } else {
+                break;
+            }
+        }
 
-        let objects = list_obj_out.contents();
-        let splits = if let Some(objs) = objects {
-            let matched_objs = objs
-                .iter()
-                .filter(|obj| obj.key().is_some())
-                .filter(|obj| {
-                    self.matcher
-                        .as_ref()
-                        .map(|m| m.is_match(obj.key().unwrap()))
-                        .unwrap_or(true)
-                })
-                .collect_vec();
+        let matched_objs = objects
+            .iter()
+            .filter(|obj| obj.key().is_some())
+            .filter(|obj| {
+                self.matcher
+                    .as_ref()
+                    .map(|m| m.is_match(obj.key().unwrap()))
+                    .unwrap_or(true)
+            })
+            .collect_vec();
 
-            matched_objs
-                .into_iter()
-                .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
-                .collect_vec()
-        } else {
-            Vec::new()
-        };
-        Ok(splits)
+        Ok(matched_objs
+            .into_iter()
+            .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
+            .collect_vec())
     }
 }
 
