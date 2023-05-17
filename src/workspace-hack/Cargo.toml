@@ -42,7 +42,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["nightly"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 itertools = { version = "0.10" }
@@ -126,7 +126,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["nightly"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 itertools = { version = "0.10" }
