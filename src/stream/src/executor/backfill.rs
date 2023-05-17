@@ -519,8 +519,12 @@ where
         old_state: &mut Option<OwnedRow>,
     ) -> StreamExecutorResult<()> {
         if let Some(current_pos_inner) = current_pos {
-            let current_state =
-                Self::build_new_state(&table.vnode_bitmap(), is_finished, current_pos_inner, dist_key_in_pk);
+            let current_state = Self::build_new_state(
+                table.vnode_bitmap(),
+                is_finished,
+                current_pos_inner,
+                dist_key_in_pk,
+            );
             Self::flush_data(table, epoch, old_state, &current_state).await?;
             *old_state = Some(current_state);
         } else {
