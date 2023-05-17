@@ -257,6 +257,7 @@ define_keywords!(
     IN,
     INCLUDE,
     INDEX,
+    INDEXES,
     INDICATOR,
     INITIALLY,
     INNER,

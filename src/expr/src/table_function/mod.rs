@@ -50,6 +50,59 @@ use self::user_defined::*;
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
+    /// # Contract of the output
+    ///
+    /// The returned `DataChunk` contains at least two columns:
+    /// - The first column is the row indexes of input chunk. It should be monotonically increasing.
+    /// - The remaining columns are the output values. More than one columns are allowed, which will
+    ///   be transformed into a single `STRUCT` column later.
+    ///
+    /// i.e., for the `i`-th input row, the output rows are `(i, output_1)`, `(i, output_2)`, ...
+    ///
+    /// How the output is splited into the `Stream` is arbitrary. It's usually done by a
+    /// `DataChunkBuilder`.
+    ///
+    /// ## Example
+    ///
+    /// ```text
+    /// select generate_series(1, x) from t(x);
+    ///
+    /// # input chunk     output chunks
+    /// 1 --------------> 0 1
+    /// 2 --------------> 1 1
+    /// 3 ----┐           ---
+    ///       │           1 2
+    ///       └---------> 2 1
+    ///                   ---
+    ///                   2 2
+    ///                   2 3
+    ///          row idx--^ ^--values
+    /// ```
+    ///
+    /// # Relationship with `ProjectSet` executor
+    ///
+    /// (You don't need to understand this section to implement a `TableFunction`)
+    ///
+    /// The output of the `TableFunction` is different from the output of the `ProjectSet` executor.
+    /// `ProjectSet` executor uses the row indexes to stitch multiple table functions and produces
+    /// `projected_row_id`.
+    ///
+    /// ## Example
+    ///
+    /// ```text
+    /// select generate_series(1, x) from t(x);
+    ///
+    /// # input chunk     output chunks (TableFunction)  output chunks (ProjectSet)
+    /// 1 --------------> 0 1 -------------------------> 0 1
+    /// 2 --------------> 1 1 -------------------------> 0 1
+    /// 3 ----┐           ---                            ---
+    ///       │           1 2                            1 2
+    ///       └---------> 2 1 -------------------------> 0 1
+    ///                   ---                            ---
+    ///                   2 2                            1 2
+    ///                   2 3                            2 3
+    ///          row idx--^ ^--values  projected_row_id--^ ^--values
+    /// ```
     async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>>;
 
     fn boxed(self) -> BoxedTableFunction

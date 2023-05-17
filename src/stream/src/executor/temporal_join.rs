@@ -61,6 +61,7 @@ struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
+    ctx: ActorContextRef,
 }
 
 impl<S: StateStore> TemporalSide<S> {
@@ -70,9 +71,22 @@ impl<S: StateStore> TemporalSide<S> {
         epoch: HummockEpoch,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
         let key = key.into_owned_row();
+        let table_id_str = self.source.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        self.ctx
+            .streaming_metrics
+            .temporal_join_total_query_cache_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
         Ok(match self.cache.get(&key) {
             Some(res) => res.clone(),
             None => {
+                // cache miss
+                self.ctx
+                    .streaming_metrics
+                    .temporal_join_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
                 let res = self
                     .source
                     .get_row(key.clone(), HummockReadEpoch::NoWait(epoch))
@@ -198,13 +212,14 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
         let cache = new_with_hasher_in(watermark_epoch, DefaultHasher::default(), alloc);
 
         Self {
-            ctx,
+            ctx: ctx.clone(),
             left,
             right,
             right_table: TemporalSide {
                 source: table,
                 table_output_indices,
                 cache,
+                ctx,
             },
             left_join_keys,
             right_join_keys,
@@ -228,10 +243,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
         );
 
         let mut prev_epoch = None;
+
+        let table_id_str = self.right_table.source.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
         #[for_await]
         for msg in align_input(self.left, self.right) {
             self.right_table.cache.evict();
-
+            self.ctx
+                .streaming_metrics
+                .temporal_join_cached_entry_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::Chunk(chunk) => {
                     let mut builder = StreamChunkBuilder::new(

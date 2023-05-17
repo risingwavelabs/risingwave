@@ -904,6 +904,17 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_actor_ops(
+                    "Temporal Join Executor Cache",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])",
+                            "temporal join cache miss, table_id {{table_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_ops(
                     "Materialize Executor Cache",
                     "",
@@ -935,6 +946,26 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
 
                         panels.target(
@@ -1022,10 +1053,25 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
                             "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
+
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
+                            "Group top n cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
+                            "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
            
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "total lookups - table {{table_id}} actor {{actor_id}}",
+                            "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
+                            "Lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
@@ -1048,9 +1094,38 @@ def section_streaming_actors(outer_panels):
                     "The number of keys cached in each hash aggregation executor's executor cache.",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "table {{table_id}} actor {{actor_id}}"),
+                                      "stream agg cached keys count | table {{table_id}} actor {{actor_id}}"),
                         panels.target(f"{metric('stream_agg_distinct_cached_keys')}",
-                                      "table {{table_id}} actor {{actor_id}}"),
+                                      "stream agg distinct cached keys count |table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "TopN Cached Keys",
+                    "The number of keys cached in each top_n executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_group_top_n_cached_entry_count')}",
+                                      "group top_n cached count | table {{table_id}} actor {{actor_id}}"),
+                        panels.target(f"{metric('stream_group_top_n_appendonly_cached_entry_count')}",
+                                      "group top_n appendonly cached count | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Temporal Join Cache Count",
+                    "The number of keys cached in temporal join executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_temporal_join_cached_entry_count')}",
+                                      "Temporal Join cached count | table {{table_id}} actor {{actor_id}}"),
+                       
+                    ],
+                ),
+
+                panels.timeseries_count(
+                    "Lookup Cached Keys",
+                    "The number of keys cached in lookup executor's executor cache.",
+                    [
+                        panels.target(f"{metric('stream_lookup_cached_entry_count')}",
+                                      "lookup cached count | table {{table_id}} actor {{actor_id}}"),
+                       
                     ],
                 ),
             ],

@@ -30,6 +30,7 @@ pub struct OrderedStateCache<K: Ord + EstimateSize, V: EstimateSize> {
 impl<K: Ord + EstimateSize, V: EstimateSize> EstimateSize for OrderedStateCache<K, V> {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.kv_heap_size
     }
 }
