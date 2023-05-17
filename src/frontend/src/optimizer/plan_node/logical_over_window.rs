@@ -229,6 +229,29 @@ impl LogicalOverWindow {
             .collect();
         Self::new(window_functions, input)
     }
+
+    pub fn split_with_rule(&self, group_rule: Vec<usize>) -> Self {
+        assert!(group_rule.len() == self.window_functions().len());
+        let mut cur_input = self.input();
+        let mut cur_node = self.clone();
+        group_rule.iter().unique().for_each(|group_id| {
+            let cur_group = group_rule
+                .iter()
+                .enumerate()
+                .filter(|(_, x)| x == &&group_id)
+                .map(|(idx, _)| idx)
+                .collect_vec();
+            cur_input = cur_node.clone().into();
+            cur_node = Self::new(
+                cur_group
+                    .iter()
+                    .map(|&idx| self.window_functions()[idx].clone())
+                    .collect_vec(),
+                cur_input.clone(),
+            );
+        });
+        cur_node
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalOverWindow {
