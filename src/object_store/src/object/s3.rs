@@ -16,11 +16,7 @@ use std::cmp;
 use std::iter::{Map, Take};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::Level;
-use tracing_subscriber::filter::{Directive, Targets, LevelFilter};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter, EnvFilter};
+
 use aws_sdk_s3::client::fluent_builders::GetObject;
 use aws_sdk_s3::error::GetObjectError;
 use aws_sdk_s3::model::{
@@ -40,6 +36,11 @@ use itertools::Itertools;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tracing::Level;
+use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter, EnvFilter};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
@@ -769,7 +770,6 @@ impl S3ObjectStore {
 
     #[inline(always)]
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
-
         let directives = "retry";
 
         tracing_subscriber::fmt()
