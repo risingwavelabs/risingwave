@@ -46,7 +46,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    pub(crate) fn gen_update_stmt(&mut self, table: Table, row_count: usize, table_rows: Vec<Vec<Expr>>) -> Statement {
+    pub(crate) fn gen_update_stmt(
+        &mut self,
+        table: Table,
+        row_count: usize,
+        table_rows: Vec<Vec<Expr>>,
+    ) -> Statement {
         let table_name = ObjectName(vec![table.name.as_str().into()]);
         let data_types = table
             .columns
