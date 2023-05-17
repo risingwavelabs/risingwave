@@ -162,7 +162,7 @@
 
     Table 0 { columns: [ lineitem_l_returnflag, lineitem_l_linestatus, sum(lineitem_l_quantity), sum(lineitem_l_extendedprice), sum($expr1), sum($expr2), count(lineitem_l_quantity), count(lineitem_l_extendedprice), sum(lineitem_l_discount), count(lineitem_l_discount), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 1 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc, count_order ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -492,11 +492,11 @@
 
     Table 13 { columns: [ nation_n_regionkey, nation_n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ vnode, region_r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 14 { columns: [ vnode, r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 16 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 17 { columns: [ part_p_partkey, min(partsupp_ps_supplycost) ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
@@ -520,7 +520,7 @@
 
     Table 27 { columns: [ part_p_partkey, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 28 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 28 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 29 { columns: [ partsupp_ps_partkey, partsupp_ps_supplycost, supplier_s_nationkey, partsupp_ps_suppkey, supplier_s_suppkey ], primary key: [ $2 ASC, $0 ASC, $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
@@ -538,9 +538,9 @@
 
     Table 36 { columns: [ supplier_s_suppkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 37 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 37 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 38 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 38 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 39 { columns: [ region_r_regionkey ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -550,9 +550,9 @@
 
     Table 42 { columns: [ nation_n_regionkey, nation_n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 43 { columns: [ vnode, region_r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 43 { columns: [ vnode, r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 44 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 44 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 45 { columns: [ part_p_partkey, part_p_mfgr ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -562,9 +562,9 @@
 
     Table 48 { columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 49 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 49 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 50 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 50 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, min(partsupp.ps_supplycost) ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [], read pk prefix len hint: 8 }
 
@@ -740,11 +740,11 @@
 
     Table 10 { columns: [ orders_o_custkey, orders_o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 11 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 12 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ l_orderkey, revenue, o_orderdate, o_shippriority ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 3 }
 
@@ -857,9 +857,9 @@
 
     Table 4 { columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 5 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 6 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ o_orderpriority, order_count ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1081,9 +1081,9 @@
 
     Table 8 { columns: [ nation_n_regionkey, nation_n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ vnode, region_r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ vnode, r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 11 { columns: [ orders_o_orderkey, customer_c_nationkey, orders_o_custkey, customer_c_custkey ], primary key: [ $0 ASC, $1 ASC, $3 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -1101,9 +1101,9 @@
 
     Table 18 { columns: [ customer_c_custkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 20 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 21 { columns: [ lineitem_l_orderkey, lineitem_l_suppkey, lineitem_l_extendedprice, lineitem_l_discount, lineitem_l_linenumber ], primary key: [ $1 ASC, $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -1113,9 +1113,9 @@
 
     Table 24 { columns: [ supplier_s_suppkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ n_name, revenue ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1180,7 +1180,7 @@
 
     Table 0 { columns: [ sum(sum($expr1)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ revenue ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1408,11 +1408,11 @@
 
     Table 12 { columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 14 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 16 { columns: [ nation_n_name, customer_c_custkey, nation_n_nationkey ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -1430,11 +1430,11 @@
 
     Table 23 { columns: [ customer_c_nationkey, customer_c_custkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 24 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 24 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
@@ -1703,11 +1703,11 @@
 
     Table 12 { columns: [ nation_n_regionkey, nation_n_nationkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ vnode, region_r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ vnode, r_regionkey, region_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 14 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 14 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 16 { columns: [ nation_n_name, lineitem_l_orderkey, lineitem_l_extendedprice, lineitem_l_discount, nation_n_nationkey, supplier_s_suppkey, part_p_partkey, lineitem_l_linenumber ], primary key: [ $1 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -1733,9 +1733,9 @@
 
     Table 27 { columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 28 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 28 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 29 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 29 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 30 { columns: [ part_p_partkey ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1745,11 +1745,11 @@
 
     Table 33 { columns: [ lineitem_l_partkey, lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 34 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 34 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 35 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 35 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 36 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 36 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ o_year, mkt_share ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1963,9 +1963,9 @@
 
     Table 8 { columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 11 { columns: [ nation_n_name, supplier_s_suppkey, nation_n_nationkey ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -1983,9 +1983,9 @@
 
     Table 18 { columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 20 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 21 { columns: [ orders_o_orderkey, orders_o_orderdate ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1995,9 +1995,9 @@
 
     Table 24 { columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ nation, o_year, sum_profit ], primary key: [ $0 ASC, $1 DESC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -2194,9 +2194,9 @@
 
     Table 10 { columns: [ customer_c_nationkey, customer_c_custkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 11 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 12 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 13 { columns: [ lineitem_l_orderkey, lineitem_l_extendedprice, lineitem_l_discount, lineitem_l_linenumber ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2206,9 +2206,9 @@
 
     Table 16 { columns: [ orders_o_orderkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 17 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ c_custkey, c_name, revenue, c_acctbal, n_name, c_address, c_phone, c_comment ], primary key: [ $2 DESC, $0 ASC, $1 ASC, $3 ASC, $6 ASC, $4 ASC, $5 ASC, $7 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [], read pk prefix len hint: 7 }
 
@@ -2433,11 +2433,11 @@
 
     Table 10 { columns: [ supplier_s_suppkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 11 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 12 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 13 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 13 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 14 { columns: [ sum(sum($expr2)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2554,9 +2554,9 @@
 
     Table 4 { columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 5 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 6 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ l_shipmode, high_line_count, low_line_count ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2692,14 +2692,14 @@
     └── read pk prefix len hint: 1
 
     Table 6
-    ├── columns: [ vnode, customer_c_custkey, customer_backfill_finished ]
+    ├── columns: [ vnode, c_custkey, customer_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
 
     Table 7
-    ├── columns: [ vnode, orders_o_orderkey, orders_backfill_finished ]
+    ├── columns: [ vnode, o_orderkey, orders_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
@@ -2809,9 +2809,9 @@
 
     Table 4 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 5 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 6 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ promo_revenue ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2974,11 +2974,11 @@
 
     Table 7 { columns: [ lineitem_l_suppkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 8 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 9 { columns: [ lineitem_l_suppkey, sum($expr1), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 11 { columns: [ max(sum($expr1)), $expr2 ], primary key: [ $0 DESC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -3151,11 +3151,11 @@
 
     Table 9 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 11 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 11 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 12 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 12 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ p_brand, p_type, p_size, supplier_cnt ], primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
@@ -3344,9 +3344,9 @@
 
     Table 8 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 10 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 10 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 11 { columns: [ part_p_partkey, sum(lineitem_l_quantity), count(lineitem_l_quantity), count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -3360,9 +3360,9 @@
 
     Table 16 { columns: [ part_p_partkey, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 17 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ avg_yearly ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -3584,15 +3584,15 @@
 
     Table 14 { columns: [ orders_o_custkey, orders_o_orderkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 15 { columns: [ vnode, customer_c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 15 { columns: [ vnode, c_custkey, customer_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 16 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 16 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 17 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 17 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 18 { columns: [ lineitem_l_orderkey, sum(lineitem_l_quantity), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, quantity ], primary key: [ $4 DESC, $3 ASC, $1 ASC, $0 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [], read pk prefix len hint: 5 }
 
@@ -3717,9 +3717,9 @@
 
     Table 4 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 5 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 6 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ revenue ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -3948,9 +3948,9 @@
 
     Table 7 { columns: [ nation_n_nationkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 8 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 8 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 9 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 9 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 10 { columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, $expr1 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -3968,9 +3968,9 @@
 
     Table 17 { columns: [ part_p_partkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 18 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 18 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ vnode, part_p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ vnode, p_partkey, part_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 20 { columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, sum(lineitem_l_quantity), count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -3984,9 +3984,9 @@
 
     Table 25 { columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, count ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
-    Table 26 { columns: [ vnode, partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ vnode, ps_partkey, ps_suppkey, partsupp_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 27 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 27 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_name, s_address, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey ], primary key: [ $0 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 3 }
 
@@ -4267,9 +4267,9 @@
 
     Table 18 { columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 19 { columns: [ vnode, nation_n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 19 { columns: [ vnode, n_nationkey, nation_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ vnode, supplier_s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 20 { columns: [ vnode, s_suppkey, supplier_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 21 { columns: [ orders_o_orderkey ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -4279,13 +4279,13 @@
 
     Table 24 { columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 25 { columns: [ vnode, orders_o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 25 { columns: [ vnode, o_orderkey, orders_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 26 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 26 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 27 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 27 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 28 { columns: [ vnode, lineitem_l_orderkey, lineitem_l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 28 { columns: [ vnode, l_orderkey, l_linenumber, lineitem_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_name, numwait ], primary key: [ $1 DESC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
