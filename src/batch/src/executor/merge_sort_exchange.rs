@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::collections::MemMonitoredHeap;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -38,9 +39,9 @@ pub type MergeSortExchangeExecutor<C> = MergeSortExchangeExecutorImpl<DefaultCre
 pub struct MergeSortExchangeExecutorImpl<CS, C> {
     context: C,
     /// keeps one data chunk of each source if any
-    source_inputs: Vec<Option<DataChunk>>,
+    source_inputs: Vec<Option<DataChunk>, MonitoredGlobalAlloc>,
     column_orders: Arc<Vec<ColumnOrder>>,
-    min_heap: BinaryHeap<HeapElem>,
+    min_heap: MemMonitoredHeap<HeapElem>,
     proto_sources: Vec<PbExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
@@ -50,6 +51,8 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     identity: String,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
+    mem_ctx: MemoryContext,
+    alloc: MonitoredGlobalAlloc,
 }
 
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
@@ -75,13 +78,13 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
     fn push_row_into_heap(&mut self, source_idx: usize, row_idx: usize) {
         assert!(source_idx < self.source_inputs.len());
         let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
-        self.min_heap.push(HeapElem {
-            column_orders: self.column_orders.clone(),
-            chunk: chunk_ref.clone(),
-            chunk_idx: source_idx,
-            elem_idx: row_idx,
-            encoded_chunk: None,
-        });
+        self.min_heap.push(HeapElem::new(
+            self.column_orders.clone(),
+            chunk_ref.clone(),
+            source_idx,
+            row_idx,
+            None,
+        ));
     }
 }
 
@@ -137,9 +140,9 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
             let mut array_len = 0;
             while want_to_produce > 0 && !self.min_heap.is_empty() {
                 let top_elem = self.min_heap.pop().unwrap();
-                let child_idx = top_elem.chunk_idx;
-                let cur_chunk = top_elem.chunk;
-                let row_idx = top_elem.elem_idx;
+                let child_idx = top_elem.chunk_idx();
+                let cur_chunk = top_elem.chunk();
+                let row_idx = top_elem.elem_idx();
                 for (idx, builder) in builders.iter_mut().enumerate() {
                     let chunk_arr = cur_chunk.column_at(idx).array();
                     let chunk_arr = chunk_arr.as_ref();
@@ -210,18 +213,25 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
+
+        let identity = source.plan_node().get_identity().clone();
+        let mem_ctx = source.context().create_executor_mem_context(&identity);
+        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
+
         Ok(Box::new(MergeSortExchangeExecutor::<C> {
             context: source.context().clone(),
-            source_inputs: vec![None; num_sources],
+            source_inputs: Vec::with_capacity_in(num_sources, alloc.clone()),
             column_orders,
-            min_heap: BinaryHeap::new(),
+            min_heap: MemMonitoredHeap::with_capacity(num_sources, mem_ctx.clone()),
             proto_sources,
             sources: vec![],
             source_creators,
             schema: Schema { fields },
             task_id: source.task_id.clone(),
-            identity: source.plan_node().get_identity().clone(),
+            identity,
             chunk_size: source.context.get_config().developer.chunk_size,
+            mem_ctx,
+            alloc,
         }))
     }
 }
@@ -265,14 +275,17 @@ mod tests {
             order_type: OrderType::ascending(),
         }]);
 
+        let mem_ctx = MemoryContext::none();
+        let alloc = MonitoredGlobalAlloc::with_memory_context(mem_ctx.clone());
+
         let executor = Box::new(MergeSortExchangeExecutorImpl::<
             FakeCreateSource,
             ComputeNodeContext,
         > {
             context: ComputeNodeContext::for_test(),
-            source_inputs: vec![None; proto_sources.len()],
+            source_inputs: Vec::with_capacity_in(proto_sources.len(), alloc.clone()),
             column_orders,
-            min_heap: BinaryHeap::new(),
+            min_heap: MemMonitoredHeap::new_with(mem_ctx.clone()),
             proto_sources,
             sources: vec![],
             source_creators,
@@ -282,6 +295,8 @@ mod tests {
             task_id: TaskId::default(),
             identity: "MergeSortExchangeExecutor2".to_string(),
             chunk_size: CHUNK_SIZE,
+            mem_ctx,
+            alloc,
         });
 
         let mut stream = executor.execute();
