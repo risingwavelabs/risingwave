@@ -20,7 +20,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
-use risingwave_common::memory::{MonitoredAlloc, MonitoredGlobalAlloc};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
@@ -47,7 +47,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.child,
             self.identity,
             self.chunk_size,
-            self.alloc,
+            self.mem_context,
         ))
     }
 
@@ -65,7 +65,7 @@ pub struct HashAggExecutorBuilder {
     task_id: TaskId,
     identity: String,
     chunk_size: usize,
-    alloc: MonitoredGlobalAlloc,
+    mem_context: MemoryContext,
 }
 
 impl HashAggExecutorBuilder {
@@ -75,7 +75,7 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
         chunk_size: usize,
-        alloc: MonitoredGlobalAlloc,
+        mem_context: MemoryContext,
     ) -> Result<BoxedExecutor> {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
@@ -112,7 +112,7 @@ impl HashAggExecutorBuilder {
             task_id,
             identity,
             chunk_size,
-            alloc,
+            mem_context,
         };
 
         Ok(builder.dispatch())
@@ -132,19 +132,15 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             NodeBody::HashAgg
         )?;
 
-        let identity = source.plan_node().get_identity().clone();
-
-        let alloc = MonitoredAlloc::with_memory_context(
-            source.context.create_executor_mem_context(&identity),
-        );
+        let identity = source.plan_node().get_identity();
 
         Self::deserialize(
             hash_agg_node,
             child,
             source.task_id.clone(),
-            identity,
+            identity.clone(),
             source.context.get_config().developer.chunk_size,
-            alloc,
+            source.context.create_executor_mem_context(identity),
         )
     }
 }
@@ -162,7 +158,7 @@ pub struct HashAggExecutor<K> {
     child: BoxedExecutor,
     identity: String,
     chunk_size: usize,
-    alloc: MonitoredGlobalAlloc,
+    mem_context: MemoryContext,
     _phantom: PhantomData<K>,
 }
 
@@ -176,7 +172,7 @@ impl<K> HashAggExecutor<K> {
         child: BoxedExecutor,
         identity: String,
         chunk_size: usize,
-        alloc: MonitoredGlobalAlloc,
+        mem_context: MemoryContext,
     ) -> Self {
         HashAggExecutor {
             agg_init_states,
@@ -186,7 +182,7 @@ impl<K> HashAggExecutor<K> {
             child,
             identity,
             chunk_size,
-            alloc,
+            mem_context,
             _phantom: PhantomData,
         }
     }
@@ -210,12 +206,13 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
-        let mut groups = AggHashMap::<K, MonitoredGlobalAlloc>::with_hasher_in(
+        let mut groups = AggHashMap::<K, _>::with_hasher_in(
             PrecomputedBuildHasher::default(),
-            self.alloc.clone(),
+            self.mem_context.allocator(),
         );
 
         // consume all chunks to compute the agg result
+        let mut states_memory_usage = 0;
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = chunk?.compact();
@@ -230,6 +227,20 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     state.update_single(&chunk, row_id).await?
                 }
             }
+
+            // update memory usage
+            self.mem_context.add(-(states_memory_usage as i64));
+            states_memory_usage = if groups.is_empty() {
+                0
+            } else {
+                // sample at most 4 groups to estimate the total memory usage
+                let sample_size = groups.len().min(4);
+                let sum = (groups.values().take(sample_size).flatten())
+                    .map(|s| s.estimated_size())
+                    .sum::<usize>();
+                sum * groups.len() / sample_size
+            };
+            self.mem_context.add(states_memory_usage as i64);
         }
 
         // generate output data chunks
@@ -344,7 +355,7 @@ mod tests {
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
-            MonitoredAlloc::for_test(),
+            MemoryContext::none(),
         )
         .unwrap();
 
@@ -413,7 +424,7 @@ mod tests {
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
-            MonitoredAlloc::for_test(),
+            MemoryContext::none(),
         )
         .unwrap();
         let schema = Schema {

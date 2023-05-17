@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use prometheus::IntGauge;
 
+use super::MonitoredGlobalAlloc;
 use crate::metrics::TrAdderGauge;
 
 struct MemoryContextInner {
@@ -50,7 +51,7 @@ impl From<TrAdderGauge> for MemCounter {
 }
 
 impl MemoryContext {
-    pub fn new<C: Into<MemCounter>>(parent: Option<MemoryContext>, counter: C) -> Self {
+    pub fn new(parent: Option<MemoryContext>, counter: impl Into<MemCounter>) -> Self {
         Self {
             inner: Some(Arc::new(MemoryContextInner {
                 counter: counter.into(),
@@ -64,7 +65,7 @@ impl MemoryContext {
         Self { inner: None }
     }
 
-    pub fn root<C: Into<MemCounter>>(counter: C) -> Self {
+    pub fn root(counter: impl Into<MemCounter>) -> Self {
         Self::new(None, counter)
     }
 
@@ -91,6 +92,11 @@ impl MemoryContext {
         } else {
             0
         }
+    }
+
+    /// Creates a new allocator that reports memory usage to this context.
+    pub fn allocator(&self) -> MonitoredGlobalAlloc {
+        MonitoredGlobalAlloc::with_memory_context(self.clone())
     }
 }
 
