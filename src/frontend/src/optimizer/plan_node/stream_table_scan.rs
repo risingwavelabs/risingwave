@@ -188,7 +188,7 @@ impl StreamTableScan {
 
         // pk columns
         for col in self.logical.primary_key().iter() {
-            let field = &upstream_schema[*col.column_index];
+            let field = &upstream_schema[col.column_index];
             catalog_builder.add_column(field);
         }
 
@@ -300,8 +300,9 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
-        let catalog = self.build_backfill_state_catalog(state);
-        let catalog = catalog.to_internal_table_prost();
+        let catalog = self
+            .build_backfill_state_catalog(state)
+            .to_internal_table_prost();
 
         PbStreamNode {
             fields: self.schema().to_prost(),

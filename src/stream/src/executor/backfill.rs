@@ -143,7 +143,6 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
-        log::debug!("state_table initial epoch: {:?}", first_barrier.epoch);
 
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
@@ -244,7 +243,6 @@ where
                     Either::Left(msg) => {
                         match msg? {
                             Message::Barrier(barrier) => {
-                                log::debug!("Upstream Barrier: {:?}", barrier.epoch);
                                 // If it is a barrier, switch snapshot and consume
                                 // upstream buffer chunk
 
