@@ -108,7 +108,7 @@ impl SplitEnumerator for S3SplitEnumerator {
             let mut res = req.send().await?;
             objects.extend(res.contents.take().unwrap_or_default());
             if res.is_truncated() {
-                next_continuation_token = Some(res.next_continuation_token().unwrap())
+                next_continuation_token = Some(res.next_continuation_token.unwrap())
             } else {
                 break;
             }
