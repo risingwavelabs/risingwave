@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -24,7 +23,8 @@ use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
-use super::{GroupKey, ManagedTopNState};
+use super::topn_cache_state::TopNCacheState;
+use super::{CacheKey, GroupKey, ManagedTopNState};
 use crate::executor::error::StreamExecutorResult;
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
@@ -42,17 +42,17 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 /// since they have different semantics.
 pub struct TopNCache<const WITH_TIES: bool> {
     /// Rows in the range `[0, offset)`
-    pub low: BTreeMap<CacheKey, CompactedRow>,
+    pub low: TopNCacheState,
     /// Rows in the range `[offset, offset+limit)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `limit`.
-    pub middle: BTreeMap<CacheKey, CompactedRow>,
+    pub middle: TopNCacheState,
     /// Rows in the range `[offset+limit, offset+limit+high_capacity)`
     ///
     /// When `WITH_TIES` is true, it also stores ties for the last element,
     /// and thus the size can be larger than `high_capacity`.
-    pub high: BTreeMap<CacheKey, CompactedRow>,
+    pub high: TopNCacheState,
     pub high_capacity: usize,
     pub offset: usize,
     /// Assumption: `limit != 0`
@@ -66,9 +66,9 @@ pub struct TopNCache<const WITH_TIES: bool> {
 
 impl<const WITH_TIES: bool> EstimateSize for TopNCache<WITH_TIES> {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        self.low.estimated_heap_size()
+            + self.middle.estimated_heap_size()
+            + self.high.estimated_heap_size()
     }
 }
 
@@ -82,7 +82,7 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
 
         fn format_cache(
             f: &mut std::fmt::Formatter<'_>,
-            cache: &BTreeMap<CacheKey, CompactedRow>,
+            cache: &TopNCacheState,
             data_types: &[DataType],
         ) -> std::fmt::Result {
             if cache.is_empty() {
@@ -112,9 +112,6 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
         Ok(())
     }
 }
-
-/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
-pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
 /// `TopNCache::<true>::f` and `TopNCache::<false>::f`
@@ -164,9 +161,9 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             assert!(offset == 0, "OFFSET is not supported with WITH TIES");
         }
         Self {
-            low: BTreeMap::new(),
-            middle: BTreeMap::new(),
-            high: BTreeMap::new(),
+            low: TopNCacheState::new(),
+            middle: TopNCacheState::new(),
+            high: TopNCacheState::new(),
             high_capacity: offset
                 .checked_add(limit)
                 .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
