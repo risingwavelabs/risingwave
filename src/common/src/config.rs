@@ -248,10 +248,6 @@ pub struct ServerConfig {
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
 
-    /// The maximum allowed heartbeat interval for workers.
-    #[serde(default = "default::server::max_heartbeat_interval_secs")]
-    pub max_heartbeat_interval_secs: u32,
-
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
 
@@ -625,10 +621,6 @@ mod default {
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
-        }
-
-        pub fn max_heartbeat_interval_secs() -> u32 {
-            600
         }
 
         pub fn connection_pool_size() -> u16 {

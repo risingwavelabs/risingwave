@@ -42,6 +42,10 @@ const ENABLE_QUERY_LOG_FILE: bool = false;
 /// Includes line numbers for each log.
 const ENABLE_PRETTY_LOG: bool = false;
 
+const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
+
+const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
+
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
@@ -210,7 +214,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_thread_names(true)
             .with_thread_ids(true)
             .with_writer(std::sync::Mutex::new(file))
-            .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
+            .with_filter(filter::Targets::new().with_target(PGWIRE_QUERY_LOG, Level::TRACE));
         layers.push(layer.boxed());
     }
 
@@ -245,9 +249,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         .with_thread_names(true)
         .with_thread_ids(true)
         .with_writer(std::sync::Mutex::new(file))
-        .with_filter(
-            filter::Targets::new().with_target("risingwave_frontend_slow_query_log", Level::TRACE),
-        );
+        .with_filter(filter::Targets::new().with_target(SLOW_QUERY_LOG, Level::TRACE));
     layers.push(layer.boxed());
 
     if settings.enable_tokio_console {

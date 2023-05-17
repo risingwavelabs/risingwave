@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip
 
 FROM base as builder
 

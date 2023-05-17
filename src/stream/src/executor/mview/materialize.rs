@@ -33,6 +33,7 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
@@ -442,21 +443,13 @@ pub struct MaterializeCache<SD> {
     table_id: String,
 }
 
-#[derive(EnumAsInner)]
+#[derive(EnumAsInner, EstimateSize)]
 pub enum CacheValue {
     Overwrite(Option<CompactedRow>),
     Ignore(Option<EmptyValue>),
 }
 
 type EmptyValue = ();
-
-impl EstimateSize for CacheValue {
-    fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
-    }
-}
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(

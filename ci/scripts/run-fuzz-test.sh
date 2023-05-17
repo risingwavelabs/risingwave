@@ -28,11 +28,11 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     download_and_prepare_rw "$profile" common
 
     echo "--- Download artifacts"
-    buildkite-agent artifact download risingwave_simulation .
+    download-and-decompress-artifact risingwave_simulation .
     chmod +x ./risingwave_simulation
 
     echo "--- Download sqlsmith e2e bin"
-    buildkite-agent artifact download sqlsmith-"$profile" target/debug/
+    download-and-decompress-artifact sqlsmith-"$profile" target/debug/
     mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
     chmod +x ./target/debug/sqlsmith
 
