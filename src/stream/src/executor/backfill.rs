@@ -187,8 +187,7 @@ where
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
 
-        // NOTE(kwannoel): Only updated when flushing to state table.
-        // `None` means it starts from the beginning.
+        // Use this to track old persisted state.
         let mut old_state: Option<OwnedRow> = None;
 
         // Keep track of rows from the snapshot.
@@ -247,7 +246,7 @@ where
                     Either::Left(msg) => {
                         match msg? {
                             Message::Barrier(barrier) => {
-                                log::debug!("upstream update barrier: {:?}", barrier.epoch);
+                                log::debug!("Upstream Barrier: {:?}", barrier.epoch);
                                 // If it is a barrier, switch snapshot and consume
                                 // upstream buffer chunk
 
@@ -294,27 +293,15 @@ where
                                 );
 
                                 // Persist state on barrier
-                                if let Some(current_pos_inner) = &current_pos {
-                                    let new_state = Self::build_new_state(
-                                        false,
-                                        current_pos_inner,
-                                        &dist_key_in_pk,
-                                    );
-                                    Self::persist_state(
-                                        barrier.epoch,
-                                        &mut self.state_table,
-                                        &mut old_state,
-                                        new_state,
-                                    )
-                                    .await?;
-                                    log::debug!("committing updates on epoch {:?}", barrier.epoch);
-                                } else {
-                                    log::debug!(
-                                        "not committing updates on epoch {:?}",
-                                        barrier.epoch
-                                    );
-                                    self.state_table.commit_no_data_expected(barrier.epoch);
-                                }
+                                Self::persist_state(
+                                    barrier.epoch,
+                                    &mut self.state_table,
+                                    false,
+                                    &dist_key_in_pk,
+                                    &current_pos,
+                                    &mut old_state,
+                                )
+                                .await?;
 
                                 yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
@@ -382,13 +369,13 @@ where
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
                     self.progress.finish(barrier.epoch.curr);
-                    let new_state =
-                        Self::build_new_state(true, &current_pos.unwrap(), &dist_key_in_pk);
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
+                        true,
+                        &dist_key_in_pk,
+                        &current_pos,
                         &mut old_state,
-                        new_state,
                     )
                     .await?;
                     yield msg;
@@ -528,11 +515,19 @@ where
     async fn persist_state(
         epoch: EpochPair,
         table: &mut StateTable<S>,
+        is_finished: bool,
+        dist_key_in_pk: &[usize],
+        current_pos: &Option<OwnedRow>,
         old_state: &mut Option<OwnedRow>,
-        current_state: OwnedRow,
     ) -> StreamExecutorResult<()> {
-        Self::flush_data(table, epoch, old_state, &current_state).await?;
-        *old_state = Some(current_state);
+        if let Some(current_pos_inner) = current_pos {
+            let current_state =
+                Self::build_new_state(is_finished, current_pos_inner, dist_key_in_pk);
+            Self::flush_data(table, epoch, old_state, &current_state).await?;
+            *old_state = Some(current_state);
+        } else {
+            table.commit_no_data_expected(epoch);
+        }
         Ok(())
     }
 
@@ -544,13 +539,17 @@ where
         old_state: &Option<OwnedRow>,
         current_state: &OwnedRow,
     ) -> StreamExecutorResult<()> {
-        debug_assert_ne!(old_state.as_ref(), Some(current_state));
         if let Some(old_state) = old_state {
-            debug_assert_eq!(old_state.len(), current_state.len());
-            table.write_record(Record::Update {
-                old_row: old_state,
-                new_row: current_state,
-            })
+            if old_state != current_state {
+                debug_assert_eq!(old_state.len(), current_state.len());
+                table.write_record(Record::Update {
+                    old_row: old_state,
+                    new_row: current_state,
+                })
+            } else {
+                table.commit_no_data_expected(epoch);
+                return Ok(());
+            }
         } else {
             table.write_record(Record::Insert {
                 new_row: current_state,
