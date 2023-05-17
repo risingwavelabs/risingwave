@@ -288,6 +288,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
@@ -302,10 +303,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let t32 = DataType::Int32;
-        let t64 = DataType::Int64;
-
-        let src_exec = MockExecutor::with_chunk(
+        let src_exec = Box::new(MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i i
                  0 1 1
@@ -317,14 +315,12 @@ mod tests {
                  1 1 3
                  0 1 2",
             ),
-            Schema {
-                fields: vec![
-                    Field::unnamed(t32.clone()),
-                    Field::unnamed(t32.clone()),
-                    Field::unnamed(t32.clone()),
-                ],
-            },
-        );
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
 
         let agg_call = AggCall {
             r#type: Type::Sum as i32,
@@ -349,26 +345,19 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
+        let mem_context = MemoryContext::root(IntGauge::new("memory_usage", " ").unwrap());
         let actual_exec = HashAggExecutorBuilder::deserialize(
             &agg_prost,
-            Box::new(src_exec),
+            src_exec,
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
-            MemoryContext::none(),
+            mem_context.clone(),
         )
         .unwrap();
 
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(t32.clone()),
-                Field::unnamed(t32),
-                Field::unnamed(t64),
-            ],
-        };
-
         // TODO: currently the order is fixed unless the hasher is changed
-        let expect_exec = MockExecutor::with_chunk(
+        let expect_exec = Box::new(MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i I
                  1 0 1
@@ -376,14 +365,20 @@ mod tests {
                  0 1 3
                  1 1 6",
             ),
-            schema,
-        );
-        diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+        diff_executor_output(actual_exec, expect_exec).await;
+
+        // check estimated memory usage = 4 groups x state size
+        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 40);
     }
 
     #[tokio::test]
     async fn execute_count_star() {
-        let t32 = DataType::Int32;
         let src_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i
@@ -396,9 +391,7 @@ mod tests {
                  1
                  0",
             ),
-            Schema {
-                fields: vec![Field::unnamed(t32.clone())],
-            },
+            Schema::new(vec![Field::unnamed(DataType::Int32)]),
         );
 
         let agg_call = AggCall {
@@ -427,16 +420,13 @@ mod tests {
             MemoryContext::none(),
         )
         .unwrap();
-        let schema = Schema {
-            fields: vec![Field::unnamed(t32)],
-        };
 
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "I
                  8",
             ),
-            schema,
+            Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
     }
