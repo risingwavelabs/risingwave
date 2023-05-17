@@ -160,10 +160,9 @@ impl StreamTableScan {
                     .iter()
                     .map(|i| {
                         self.logical
-                            .logical_pk()
-                            .unwrap()
+                            .primary_key()
                             .iter()
-                            .position(|j| i == j)
+                            .position(|j| *i == j.column_index)
                             .map(|k| k as u32)
                             .unwrap()
                     })
