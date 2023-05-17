@@ -579,10 +579,9 @@ mod tests {
             },
         ];
 
-        insta::assert_snapshot!(
-            executor_snapshot(
-                || create_executor(calls.clone(), store.clone()),
-                r###"
+        let snapshot = executor_snapshot(
+            || create_executor(calls.clone(), store.clone()),
+            r###"
 - barrier
 - !chunk |2
       I T  I   i
@@ -606,9 +605,15 @@ mod tests {
     + 13 p3 301 39
 - barrier
 "###,
-            )
-            .await
-        );
+        )
+        .await;
+
+        insta::with_settings!({
+            description => "lag over (1 preceding, current), lead over (current, 1 following)",
+            omit_expression => true
+        }, {
+            insta::assert_snapshot!(snapshot)
+        });
     }
 
     #[tokio::test]
@@ -621,19 +626,24 @@ mod tests {
             frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
         }];
 
-        insta::assert_snapshot!(
-            executor_snapshot(
-                || create_executor(calls.clone(), store.clone()),
-                r###"
+        let snapshot = executor_snapshot(
+            || create_executor(calls.clone(), store.clone()),
+            r###"
 - barrier
 - !chunk |2
       I T  I   i
     + 1 p1 100 10
     + 1 p1 101 16
     + 4 p1 102 20
-"###
-            )
-            .await
-        );
+"###,
+        )
+        .await;
+
+        insta::with_settings!({
+            description => "sum over (1 preceding, 1 following)",
+            omit_expression => true
+        }, {
+            insta::assert_snapshot!(insta::internals::AutoName, snapshot, "a\nb")
+        });
     }
 }

@@ -1,6 +1,6 @@
 ---
 source: src/stream/src/executor/over_window/eowc.rs
-expression: "executor_snapshot(Box::new(async ||\n                create_executor(calls.clone(), store.clone()).await),\n        SnapshotEvent::parse(inputs)).await"
+description: "lag over (1 preceding, current), lead over (current, 1 following)"
 ---
 - input: barrier
   output:

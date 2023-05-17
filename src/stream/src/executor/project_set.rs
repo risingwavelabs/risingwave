@@ -228,10 +228,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_project_set() {
-        insta::assert_snapshot!(
-            executor_snapshot(
-                || std::future::ready(create_executor()),
-                r###"
+        let snapshot = executor_snapshot(
+            || std::future::ready(create_executor()),
+            r###"
 - !chunk |2
       I I
     + 1 4
@@ -241,9 +240,15 @@ mod tests {
       I I
     + 7 8
     - 3 6
-"###
-            )
-            .await
-        );
+"###,
+        )
+        .await;
+
+        insta::with_settings!({
+            description => "($0+$1), repeat(1,1), repeat(2,2)",
+            omit_expression => true
+        }, {
+            insta::assert_snapshot!(snapshot)
+        });
     }
 }

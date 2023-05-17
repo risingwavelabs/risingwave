@@ -1,6 +1,6 @@
 ---
 source: src/stream/src/executor/project_set.rs
-expression: "executor_snapshot(async || create_executor(),\n        r###\"\n- !chunk |-\n    I I\n    + 1 4\n    + 2 5\n    + 3 6\n- !chunk |-\n    I I\n    + 7 8\n    - 3 6\n\"###).await"
+description: "($0+$1), repeat(1,1), repeat(2,2)"
 ---
 - input: !chunk |-
     +---+---+---+
