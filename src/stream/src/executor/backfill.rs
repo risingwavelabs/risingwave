@@ -37,7 +37,6 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
-use tracing::log;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
