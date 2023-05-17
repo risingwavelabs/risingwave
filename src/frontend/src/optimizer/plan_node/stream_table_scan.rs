@@ -27,7 +27,6 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
