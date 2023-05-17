@@ -119,7 +119,7 @@ impl StreamTableScan {
     /// Compute upstream distribution key. We will use it to compute vnode.
     // TODO(kwannoel): Should we use project executor instead?
     pub fn compute_upstream_distribution_key(&self) -> Vec<u32> {
-        // Construct distribution key for the backfill executor to compute vnode of upstream
+        // Construct output distribution key for the backfill executor to compute vnode of upstream
         let output_distribution_key = match self.base.distribution() {
             // For sharded distribution, we need to remap dist_key.
             // Suppose we had Order Key (Primary Key) of Upstream table: [0, 4],
@@ -144,18 +144,6 @@ impl StreamTableScan {
             // is a subset of primary key.
             // Here we don't have primary key for state table. We only partition it by vnode.
             Distribution::UpstreamHashShard(_, _) => {
-                // 1. Map distribution key to the position in primary key.
-                // println!("primary key {:?}", self.logical.primary_key());
-                println!("--------------");
-                // println!("upstream_hash_shard dist_key: {:?}", dist_key);
-                println!("logical_pk: {:?}", self.logical.logical_pk());
-                println!("logical_primary_key: {:?}", self.logical.primary_key());
-                println!("table_desc_primary_key: {:?}", self.logical().table_desc.pk);
-                println!(
-                    "table_desc_distribution_key: {:?}",
-                    self.logical().table_desc.distribution_key
-                );
-                println!("base pk: {:?}", self.base.logical_pk());
                 let distribution_key = self
                     .logical()
                     .table_desc
@@ -170,27 +158,7 @@ impl StreamTableScan {
                             .unwrap()
                     })
                     .collect_vec();
-                println!("distribution key: {:?}", distribution_key);
-                println!("--------------");
                 distribution_key
-                // dist_key.iter().map(|k| *k as u32).collect()
-                // // 2. Add 1 to offset, since there's a vnode column prepended.
-                // debug_assert_eq!(*dist_key, self.logical.table_desc.distribution_key);
-                // // println!("logical pk: {:?}", self.logical.primary_key());
-                // // println!("base schema: {:?}", self.base.schema());
-                // println!("logical table desc: {:?}", self.logical.table_desc);
-                // println!("logical dist key: {:?}", self.logical.table_desc.distribution_key);
-                // // println!("base pk: {:?}", self.base.logical_pk);
-                // let mut mapping = vec![None; self.base.schema().len()];
-                // for (new_pos, old_pos) in self.base.logical_pk.iter().enumerate() {
-                //     mapping[*old_pos] = Some(new_pos);
-                // }
-                // let mapping = ColIndexMapping::new(mapping);
-                // // println!("mapping {:?}", mapping);
-                // // println!("dist_key {:?}", dist_key);
-                // let new_dist_key = mapping.rewrite_dist_key(dist_key).unwrap();
-                // // println!("dist_key {:?}", new_dist_key);
-                // new_dist_key
             }
             Distribution::SomeShard | Distribution::Single => {
                 vec![]
