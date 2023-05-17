@@ -145,8 +145,6 @@ impl LogicalOverWindow {
         window_function: WindowFunction,
         input_proj_builder: &ProjectBuilder,
     ) -> Result<PlanWindowFunction> {
-        // TODO: rewrite expressions in `ORDER BY`, `PARTITION BY` and arguments to `InputRef` like
-        // in `LogicalAgg`
         let order_by = window_function
             .order_by
             .sort_exprs
