@@ -34,7 +34,7 @@ use crate::utils::Condition;
 /// After:
 ///
 /// ```text
-///      LogicalDedup
+///     LogicalDedup
 ///          |
 ///     LogicalApply
 ///    /            \
@@ -63,13 +63,14 @@ impl Rule for ApplyDedupTransposeRule {
             JoinType::Inner,
             Condition::true_cond(),
             correlated_id,
-            correlated_indices.clone(),
+            correlated_indices,
             false,
-        ).into();
+        )
+        .into();
 
         let new_dedup = {
             let mut new_dedup_cols: Vec<usize> = (0..apply_left_len).collect();
-            new_dedup_cols.extend(dedup_cols.into_iter().map(|key| key + apply_left_len));
+            new_dedup_cols.extend(dedup_cols.iter().map(|key| key + apply_left_len));
             LogicalDedup::new(new_apply, new_dedup_cols).into()
         };
 
