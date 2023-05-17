@@ -494,7 +494,9 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::agg::{AggArgs, AggKind};
@@ -504,8 +506,8 @@ mod tests {
 
     use super::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
     use crate::common::table::state_table::StateTable;
-    use crate::executor::test_utils::snapshot::executor_snapshot;
-    use crate::executor::test_utils::{MessageSender, MockSource};
+    use crate::executor::test_utils::snapshot::{check_until_pending, executor_snapshot};
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, BoxedMessageStream, Executor};
 
     async fn create_executor<S: StateStore>(
@@ -736,6 +738,86 @@ mod tests {
               - !barrier 4
             "###)
         });
+    }
+
+    // TODO: Tell me which is better, this or the above?
+    #[tokio::test]
+    async fn test_over_window_tmp() {
+        let store = MemoryStateStore::new();
+        let calls = vec![
+            WindowFuncCall {
+                kind: WindowFuncKind::Lag,
+                args: AggArgs::Unary(DataType::Int32, 3),
+                return_type: DataType::Int32,
+                frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+            },
+            WindowFuncCall {
+                kind: WindowFuncKind::Lead,
+                args: AggArgs::Unary(DataType::Int32, 3),
+                return_type: DataType::Int32,
+                frame: Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
+            },
+        ];
+
+        {
+            // test basic
+            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
+
+            tx.push_barrier(1, false);
+            // We can also simply do this because it's too simple..
+            // over_window.expect_barrier().await;
+            check_until_pending(&mut over_window, expect_test::expect![[r#"
+                - !barrier 1
+            "#]]).await;
+
+            tx.push_chunk(StreamChunk::from_pretty(
+                " I T  I   i
+                + 1 p1 100 10
+                + 1 p1 101 16
+                + 4 p2 200 20",
+            ));
+
+            check_until_pending(&mut over_window, expect_test::expect![[r#"
+                - !watermark
+                  col_idx: 0
+                  val: 1
+                - !chunk |-
+                  +---+---+----+-----+----+---+----+
+                  | + | 1 | p1 | 100 | 10 |   | 16 |
+                  +---+---+----+-----+----+---+----+
+            "#]]).await;
+
+            tx.push_barrier(2, false);
+            over_window.expect_barrier().await;
+        }
+
+        // we can also push at the same time, and use one single check_until_pending...
+        {
+            // test recovery
+            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
+
+            tx.push_barrier(3, false);
+            tx.push_chunk(StreamChunk::from_pretty(
+                " I  T  I   i
+                + 10 p1 103 13
+                + 12 p2 202 28
+                + 13 p3 301 39",
+            ));
+            tx.push_barrier(4, false);
+
+            check_until_pending(&mut over_window, expect_test::expect![[r#"
+                - !barrier 3
+                - !watermark
+                  col_idx: 0
+                  val: 1
+                - !chunk |-
+                  +---+---+----+-----+----+----+----+
+                  | + | 1 | p1 | 101 | 16 | 10 | 13 |
+                  | + | 4 | p2 | 200 | 20 |    | 28 |
+                  +---+---+----+-----+----+----+----+
+                - !barrier 4
+            "#]]).await;
+        }
     }
 
     #[tokio::test]
