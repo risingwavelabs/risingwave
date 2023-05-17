@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
@@ -30,7 +30,7 @@ mod lead;
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct StateKey {
-    pub order_key: ScalarImpl,
+    pub order_key: DefaultOrdered<ScalarImpl>,
     pub encoded_pk: MemcmpEncoded,
 }
 
@@ -116,7 +116,7 @@ pub(super) trait WindowState {
 pub(super) fn create_window_state(
     call: &WindowFuncCall,
 ) -> StreamExecutorResult<Box<dyn WindowState + Send>> {
-    assert!(call.frame.is_valid());
+    assert!(call.frame.bounds.is_valid());
 
     use WindowFuncKind::*;
     Ok(match call.kind {

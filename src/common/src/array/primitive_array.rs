@@ -268,6 +268,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> PrimitiveArray<T> {
         PrimitiveArray {
             bitmap: self.bitmap.finish(),

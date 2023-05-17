@@ -41,7 +41,6 @@ impl OverWindowToTopNRule {
 impl Rule for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let ctx = plan.ctx();
-
         let (project, plan) = {
             if let Some(project) = plan.as_logical_project() {
                 (Some(project), project.input())
@@ -87,7 +86,7 @@ impl Rule for OverWindowToTopNRule {
         let (limit, offset) = handle_rank_preds(&rank_pred.conjunctions, window_func_pos)?;
 
         if offset > 0 && with_ties {
-            tracing::error!("Failed to optimize with ties and offset");
+            tracing::warn!("Failed to optimize with ties and offset");
             ctx.warn_to_user("group topN with ties and offset is not supported, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
             return None;
         }
@@ -96,7 +95,7 @@ impl Rule for OverWindowToTopNRule {
         if let Some(project) = project {
             let referred_cols = collect_input_refs(output_len, project.exprs());
             if !referred_cols.contains(window_func_pos) {
-                let topn: PlanRef = LogicalTopN::with_group(
+                let topn: PlanRef = LogicalTopN::new(
                     over_window.input(),
                     limit,
                     offset,
@@ -142,7 +141,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq && eq != v {
-                tracing::error!(
+                tracing::warn!(
                     "Failed to optimize rank predicate with conflicting equal conditions."
                 );
                 return None;
@@ -150,7 +149,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             eq = Some(v)
         } else {
             // TODO: support between and in
-            tracing::error!("Failed to optimize complex rank predicate {:?}", cond);
+            tracing::warn!("Failed to optimize complex rank predicate {:?}", cond);
             return None;
         }
     }
@@ -158,7 +157,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     // Note: rank functions start from 1
     if let Some(eq) = eq {
         if eq < 1 {
-            tracing::error!(
+            tracing::warn!(
                 "Failed to optimize rank predicate with invalid predicate rank={}.",
                 eq
             );
@@ -167,7 +166,7 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
         let lb = lb.unwrap_or(i64::MIN);
         let ub = ub.unwrap_or(i64::MAX);
         if !(lb <= eq && eq <= ub) {
-            tracing::error!("Failed to optimize rank predicate with conflicting bounds.");
+            tracing::warn!("Failed to optimize rank predicate with conflicting bounds.");
             return None;
         }
         Some((1, (eq - 1) as u64))

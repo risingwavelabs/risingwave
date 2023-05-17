@@ -4,6 +4,7 @@ The Grafana dashboard is generated with grafanalib. You'll need
 
 - Python
 - grafanalib
+- jsonmerge
 - jq: [instruction here](https://stedolan.github.io/jq/download/)
 
 Preferably installed in a local Python virtual env (venv).

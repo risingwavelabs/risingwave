@@ -824,17 +824,18 @@ impl<'de> Deserialize<'de> for Interval {
     }
 }
 
-impl crate::hash::HashKeySerDe<'_> for Interval {
-    type S = [u8; 16];
-
-    fn serialize(self) -> Self::S {
+impl crate::hash::HashKeySer<'_> for Interval {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let cmp_value = IntervalCmpValue::from(self);
-        cmp_value.0.to_ne_bytes()
+        let b = cmp_value.0.to_ne_bytes();
+        buf.put_slice(&b);
     }
+}
 
-    fn deserialize<R: std::io::Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
+impl crate::hash::HashKeyDe for Interval {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let value = buf.get_i128_ne();
+        let cmp_value = IntervalCmpValue(value);
         cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate())
@@ -1696,7 +1697,7 @@ mod tests {
 
         let buf = i128::MIN.to_ne_bytes();
         std::panic::catch_unwind(|| {
-            <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
+            <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();
     }

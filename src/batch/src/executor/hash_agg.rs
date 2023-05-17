@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
@@ -21,6 +20,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
+use risingwave_common::memory::{MonitoredAlloc, MonitoredGlobalAlloc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
@@ -32,7 +32,7 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
+type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher, A>;
 
 /// A dispatcher to help create specialized hash agg executor.
 impl HashKeyDispatcher for HashAggExecutorBuilder {
@@ -47,6 +47,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
             self.child,
             self.identity,
             self.chunk_size,
+            self.alloc,
         ))
     }
 
@@ -64,6 +65,7 @@ pub struct HashAggExecutorBuilder {
     task_id: TaskId,
     identity: String,
     chunk_size: usize,
+    alloc: MonitoredGlobalAlloc,
 }
 
 impl HashAggExecutorBuilder {
@@ -73,6 +75,7 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
         chunk_size: usize,
+        alloc: MonitoredGlobalAlloc,
     ) -> Result<BoxedExecutor> {
         let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
@@ -109,6 +112,7 @@ impl HashAggExecutorBuilder {
             task_id,
             identity,
             chunk_size,
+            alloc,
         };
 
         Ok(builder.dispatch())
@@ -129,12 +133,18 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         )?;
 
         let identity = source.plan_node().get_identity().clone();
+
+        let alloc = MonitoredAlloc::with_memory_context(
+            source.context.create_executor_mem_context(&identity),
+        );
+
         Self::deserialize(
             hash_agg_node,
             child,
             source.task_id.clone(),
             identity,
             source.context.get_config().developer.chunk_size,
+            alloc,
         )
     }
 }
@@ -152,10 +162,12 @@ pub struct HashAggExecutor<K> {
     child: BoxedExecutor,
     identity: String,
     chunk_size: usize,
+    alloc: MonitoredGlobalAlloc,
     _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor<K> {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         agg_init_states: Vec<BoxedAggState>,
         group_key_columns: Vec<usize>,
@@ -164,6 +176,7 @@ impl<K> HashAggExecutor<K> {
         child: BoxedExecutor,
         identity: String,
         chunk_size: usize,
+        alloc: MonitoredGlobalAlloc,
     ) -> Self {
         HashAggExecutor {
             agg_init_states,
@@ -173,6 +186,7 @@ impl<K> HashAggExecutor<K> {
             child,
             identity,
             chunk_size,
+            alloc,
             _phantom: PhantomData,
         }
     }
@@ -196,7 +210,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
-        let mut groups = AggHashMap::<K>::default();
+        let mut groups = AggHashMap::<K, MonitoredGlobalAlloc>::with_hasher_in(
+            PrecomputedBuildHasher::default(),
+            self.alloc.clone(),
+        );
 
         // consume all chunks to compute the agg result
         #[for_await]
@@ -327,6 +344,7 @@ mod tests {
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredAlloc::for_test(),
         )
         .unwrap();
 
@@ -395,6 +413,7 @@ mod tests {
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
+            MonitoredAlloc::for_test(),
         )
         .unwrap();
         let schema = Schema {

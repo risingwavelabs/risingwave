@@ -21,7 +21,9 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{
+    DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -33,8 +35,8 @@ use crate::common::table::state_table::StateTable;
 type MemcmpEncoded = Box<[u8]>;
 
 type CacheKey = (
-    ScalarImpl,    // sort (watermark) column value
-    MemcmpEncoded, // memcmp-encoded pk
+    DefaultOrdered<ScalarImpl>, // sort (watermark) column value
+    MemcmpEncoded,              // memcmp-encoded pk
 );
 
 fn row_to_cache_key<S: StateStore>(
@@ -50,7 +52,7 @@ fn row_to_cache_key<S: StateStore>(
     buffer_table
         .pk_serde()
         .serialize((&row).project(buffer_table.pk_indices()), &mut pk);
-    (timestamp_val, pk.into_boxed_slice())
+    (timestamp_val.into(), pk.into_boxed_slice())
 }
 
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
@@ -154,9 +156,9 @@ impl<S: StateStore> SortBuffer<S> {
             }
 
             #[for_await]
-            for res in self.consume_from_cache(&watermark) {
+            for res in self.consume_from_cache(watermark.as_scalar_ref_impl()) {
                 let ((timestamp_val, _), row) = res?;
-                last_timestamp = Some(timestamp_val);
+                last_timestamp = Some(timestamp_val.into_inner());
                 yield row;
             }
 
@@ -173,10 +175,10 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     #[try_stream(ok = (CacheKey, OwnedRow), error = StreamExecutorError)]
-    async fn consume_from_cache<'a>(&'a mut self, watermark: &'a ScalarImpl) {
+    async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
         assert!(self.cache.is_synced());
         while let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) {
-            if &key.0 < watermark {
+            if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
                 let row = self.cache.delete(&key).unwrap();
                 yield (key, row);
             } else {
