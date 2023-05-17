@@ -20,7 +20,7 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
-    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo>;
+    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> (Vec<SstableInfo>, usize);
     fn update(&mut self, table: &SstableInfo);
 }
 
@@ -35,7 +35,7 @@ pub trait OverlapStrategy: Send + Sync {
         for table in tables {
             info.update(table);
         }
-        info.check_multiple_overlap(others)
+        info.check_multiple_overlap(others).0
     }
     fn check_overlap_with_tables(
         &self,
@@ -72,7 +72,7 @@ impl OverlapInfo for RangeOverlapInfo {
         }
     }
 
-    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
+    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> (Vec<SstableInfo>, usize) {
         match self.target_range.as_ref() {
             Some(key_range) => {
                 let mut tables = vec![];
@@ -85,7 +85,7 @@ impl OverlapInfo for RangeOverlapInfo {
                         == cmp::Ordering::Less
                 });
                 if overlap_begin >= others.len() {
-                    return vec![];
+                    return (vec![], overlap_begin);
                 }
                 for table in &others[overlap_begin..] {
                     if key_range.compare_right_with(&table.key_range.as_ref().unwrap().left)
@@ -95,9 +95,9 @@ impl OverlapInfo for RangeOverlapInfo {
                     }
                     tables.push(table.clone());
                 }
-                tables
+                (tables, overlap_begin)
             }
-            None => vec![],
+            None => (vec![], others.len()),
         }
     }
 

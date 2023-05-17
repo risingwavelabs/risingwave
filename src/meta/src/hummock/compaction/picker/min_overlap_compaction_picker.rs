@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -75,7 +76,7 @@ impl MinOverlappingPicker {
                 }
                 select_file_size += table.file_size;
                 overlap_info.update(table);
-                let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                let overlap_files = overlap_info.check_multiple_overlap(target_tables).0;
                 let mut total_file_size = 0;
                 let mut pending_compact = false;
                 for other in overlap_files {
@@ -185,7 +186,7 @@ impl NonOverlapSubLevelPicker {
 
         let mut scores = vec![];
         let select_tables = &l0[0].table_infos;
-        for sst in select_tables {
+        for (sst_index, sst) in select_tables.iter().enumerate() {
             if level_handler.is_pending_compact(&sst.sst_id) {
                 continue;
             }
@@ -206,6 +207,7 @@ impl NonOverlapSubLevelPicker {
 
             let mut select_level_count = 1;
             let mut last_level_index = 0;
+            let mut overlap_len_and_begins = vec![(1, sst_index)];
 
             let mut pending_compact = false;
             for (target_index, target_level) in l0.iter().enumerate().skip(1) {
@@ -227,7 +229,8 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 let target_tables = &target_level.table_infos;
-                let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                let (overlap_files, overlap_begin) =
+                    overlap_info.check_multiple_overlap(target_tables);
 
                 for other in &overlap_files {
                     if level_handler.is_pending_compact(&other.sst_id) {
@@ -246,6 +249,7 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 last_level_index = target_index;
+                overlap_len_and_begins.push((overlap_files.len(), overlap_begin));
 
                 if overlap_files.is_empty() {
                     // We allow a layer in the middle without overlap, so we need to continue to
@@ -261,22 +265,33 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            overlap_len_and_begins.pop();
+
             // check reverse overlap
-            for reverse_index in (0..last_level_index).rev() {
+            for (reverse_index, (old_overlap_len, old_overlap_begin)) in (0..last_level_index)
+                .rev()
+                .zip_eq_fast(overlap_len_and_begins.into_iter().rev())
+            {
                 let target_tables = &l0[reverse_index].table_infos;
-                let overlap_files = overlap_info.check_multiple_overlap(target_tables);
+                let (overlap_files, new_overlap_begin) =
+                    overlap_info.check_multiple_overlap(target_tables);
                 let mut extra_overlap_sst = Vec::with_capacity(overlap_files.len());
-                for other in overlap_files {
+                for (new_overlap_offset, other) in overlap_files.into_iter().enumerate() {
+                    if new_overlap_begin + new_overlap_offset >= old_overlap_begin
+                        && new_overlap_begin + new_overlap_offset
+                            < old_overlap_begin + old_overlap_len
+                    {
+                        // Since some of the files have already been selected when selecting
+                        // upwards, we filter here to avoid adding sst repeatedly
+                        continue;
+                    }
+
                     if level_handler.is_pending_compact(&other.sst_id) {
                         pending_compact = true;
                         break;
                     }
 
-                    if select_sst_id_set.contains(&other.sst_id) {
-                        // Since some of the files have already been selected when selecting
-                        // upwards, we filter here to avoid adding sst repeatedly
-                        continue;
-                    }
+                    debug_assert!(!select_sst_id_set.contains(&other.sst_id));
 
                     all_file_size += other.file_size;
                     all_file_count += 1;
