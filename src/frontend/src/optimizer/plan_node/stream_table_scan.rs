@@ -187,10 +187,6 @@ impl StreamTableScan {
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         // pk columns
-        println!("table_desc: {:?}", self.logical.table_desc);
-        println!("primary_key: {:?}", self.logical.primary_key());
-        println!("pk: {:?}", self.logical.table_desc.pk);
-        println!("logical_pk: {:?}", self.logical.logical_pk());
         for col_order in self.logical.primary_key().iter() {
             let col = &upstream_schema[col_order.column_index];
             catalog_builder.add_column(&Field::from(col));
