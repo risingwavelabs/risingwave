@@ -163,7 +163,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 7:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, person, auction, _row_id] }
@@ -176,7 +176,7 @@
     Fragment 3
     StreamProject { exprs: [Field(person, 0:Int32) as $expr4, Field(person, 1:Int32) as $expr5, Field(person, 4:Int32) as $expr6, Field(person, 5:Int32) as $expr7, _row_id] }
     └── StreamFilter { predicate: (((Field(person, 5:Int32) = 'or':Varchar) OR (Field(person, 5:Int32) = 'id':Varchar)) OR (Field(person, 5:Int32) = 'ca':Varchar)) AND (event_type = 0:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -277,7 +277,7 @@
     Fragment 2
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, $expr1, Field(auction, 6:Int32) as $expr3, Field(auction, 8:Int32) as $expr4, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -290,7 +290,7 @@
     Fragment 4
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr5, Field(bid, 2:Int32) as $expr6, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ $expr4, sum(max($expr6)), count(max($expr6)), count ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -430,7 +430,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamAppendOnlyHashAgg { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] } { result table: 4, state tables: [], distinct tables: [] }
@@ -447,7 +447,7 @@
 
     Fragment 4
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -588,7 +588,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -605,7 +605,7 @@
 
     Fragment 4
     StreamProject { exprs: [(TumbleStart($expr1, '00:00:10':Interval) + '00:00:10':Interval) as $expr5, $expr4, _row_id], output_watermarks: [$expr5] }
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr1, _row_id ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
@@ -739,7 +739,7 @@
     Fragment 2
     StreamProject { exprs: [Field(person, 0:Int32) as $expr2, Field(person, 1:Int32) as $expr3, TumbleStart($expr1, '00:00:10':Interval) as $expr4, (TumbleStart($expr1, '00:00:10':Interval) + '00:00:10':Interval) as $expr5], output_watermarks: [$expr4, $expr5] }
     └── StreamFilter { predicate: (event_type = 0:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [event_type, person, auction, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -752,7 +752,7 @@
     Fragment 4
     StreamProject { exprs: [Field(auction, 7:Int32) as $expr6, TumbleStart($expr1, '00:00:10':Interval) as $expr7, (TumbleStart($expr1, '00:00:10':Interval) + '00:00:10':Interval) as $expr8], output_watermarks: [$expr7, $expr8] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5 ], primary key: [ $2 ASC, $3 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
 
@@ -888,7 +888,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([4]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -901,7 +901,7 @@
     Fragment 3
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr10, Field(bid, 1:Int32) as $expr11, Field(bid, 2:Int32) as $expr12, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([4]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1_0, _row_id, _row_id_0 ], primary key: [ $0 ASC, $11 DESC, $12 ASC, $13 ASC, $14 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1530,7 +1530,7 @@
     Fragment 1
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([4]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -1543,7 +1543,7 @@
     Fragment 3
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr7, Field(auction, 1:Int32) as $expr8, Field(auction, 2:Int32) as $expr9, Field(auction, 3:Int32) as $expr10, Field(auction, 4:Int32) as $expr11, $expr1, Field(auction, 6:Int32) as $expr12, Field(auction, 7:Int32) as $expr13, Field(auction, 8:Int32) as $expr14, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (Field(auction, 8:Int32) = 10:Int32) AND (event_type = 1:Int32) }
-        └──  StreamExchange Hash([4]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, $expr4, $expr5, $expr6, $expr1, _row_id ], primary key: [ $0 ASC, $6 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1694,7 +1694,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, _row_id] }
@@ -1707,7 +1707,7 @@
     Fragment 3
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, _row_id] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1830,7 +1830,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, _row_id] }
@@ -1842,12 +1842,12 @@
 
     Fragment 3
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 4
+    └──  StreamExchange NoShuffle from 4
 
     Fragment 4
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 5
     StreamProject { exprs: [(sum0(count) / count($expr4)) as $expr5] }
@@ -1860,7 +1860,7 @@
 
     Fragment 7
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 4
+    └──  StreamExchange NoShuffle from 4
 
     Table 0 { columns: [ $expr2, $expr3, count($expr4) ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1959,7 +1959,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, _row_id] }
@@ -1972,7 +1972,7 @@
     Fragment 3
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2063,7 +2063,7 @@
     Fragment 1
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [event_type, auction, bid, _row_id] }
@@ -2076,7 +2076,7 @@
     Fragment 3
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([3]) from 2
+        └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ $expr2, $expr3, _row_id ], primary key: [ $0 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -2179,7 +2179,7 @@
     Fragment 2
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, _row_id] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([3]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [event_type, auction, bid, _row_id] }
@@ -2192,7 +2192,7 @@
     Fragment 4
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, _row_id] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([3]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ $expr2, $expr3, count($expr4), $expr5 ], primary key: [ $2 DESC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2309,7 +2309,7 @@
     Fragment 2
     StreamProject { exprs: [Field(auction, 0:Int32) as $expr2, $expr1, Field(auction, 6:Int32) as $expr3, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 1:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [event_type, auction, bid, $expr1, _row_id], output_watermarks: [$expr1] }
@@ -2322,7 +2322,7 @@
     Fragment 4
     StreamProject { exprs: [Field(bid, 0:Int32) as $expr4, Field(bid, 2:Int32) as $expr5, $expr1, _row_id], output_watermarks: [$expr1] }
     └── StreamFilter { predicate: (event_type = 2:Int32) }
-        └──  StreamExchange Hash([4]) from 3
+        └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ min(max($expr5)), $expr6 ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
