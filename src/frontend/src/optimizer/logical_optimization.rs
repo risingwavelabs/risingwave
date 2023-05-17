@@ -146,6 +146,7 @@ lazy_static! {
         "General Unnesting(Push Down Apply)",
         vec![
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),

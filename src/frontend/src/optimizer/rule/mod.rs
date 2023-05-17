@@ -111,6 +111,8 @@ mod intersect_merge_rule;
 pub use intersect_merge_rule::*;
 mod except_merge_rule;
 pub use except_merge_rule::*;
+mod apply_dedup_transpose_rule;
+pub use apply_dedup_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -157,6 +159,7 @@ macro_rules! for_all_rules {
             , { ExceptToAntiJoinRule }
             , { IntersectMergeRule }
             , { ExceptMergeRule }
+            , { ApplyDedupTransposeRule }
         }
     };
 }
