@@ -239,6 +239,7 @@ impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: show generated columns
         if let Some(catalog) = self.source_catalog() {
             write!(
                 f,
