@@ -143,9 +143,7 @@ where
         let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        // If the barrier is a conf change of creating this mview, we follow the procedure of
-        // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
-        // directly.
+        // If all states are "finished" for any vnode in the state table, we are done.
         let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -316,7 +314,7 @@ where
                         match msg? {
                             None => {
                                 // End of the snapshot read stream.
-                                // We need to not mark the chunk anymore,
+                                // We should not mark the chunk anymore,
                                 // otherwise, we will ignore some rows
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
