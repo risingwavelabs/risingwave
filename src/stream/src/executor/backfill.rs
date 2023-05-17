@@ -541,19 +541,19 @@ where
     async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
-        old_pos: &Option<OwnedRow>,
-        current_pos: &OwnedRow,
+        old_state: &Option<OwnedRow>,
+        current_state: &OwnedRow,
     ) -> StreamExecutorResult<()> {
-        debug_assert!(old_pos.as_ref() != Some(current_pos));
-        if let Some(old_pos) = old_pos {
-            debug_assert_eq!(old_pos.len(), current_pos.len());
+        debug_assert_ne!(old_state.as_ref(), Some(current_state));
+        if let Some(old_state) = old_state {
+            debug_assert_eq!(old_state.len(), current_state.len());
             table.write_record(Record::Update {
-                old_row: old_pos,
-                new_row: current_pos,
+                old_row: old_state,
+                new_row: current_state,
             })
         } else {
             table.write_record(Record::Insert {
-                new_row: current_pos,
+                new_row: current_state,
             })
         }
         table.commit(epoch).await
