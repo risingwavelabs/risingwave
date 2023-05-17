@@ -132,7 +132,7 @@ definition varchar
 matviewid integer
 matviewtimezone varchar
 matviewgraph varchar
-primary key schemaname
+primary key schemaname, matviewname
 
 query TT
 show columns from pg_catalog.pg_matviews;
