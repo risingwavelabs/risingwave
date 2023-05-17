@@ -2,6 +2,7 @@
 source: src/stream/src/executor/project_set.rs
 description: "($0+$1), repeat(1,1), repeat(2,2)"
 ---
+# This result can be automatically updated. See `TODO:` for more information.
 - input: !chunk |-
     +---+---+---+
     | + | 1 | 4 |

@@ -610,6 +610,7 @@ mod tests {
 
         // expect_test, inline
         let expected = expect_test::expect![[r#"
+            # This result can be automatically updated. See `TODO:` for more information.
             - input: barrier
               output:
               - barrier
@@ -676,6 +677,7 @@ mod tests {
             omit_expression => true
         }, {
             insta::assert_snapshot!(snapshot, @r###"
+            # This result can be automatically updated. See `TODO:` for more information.
             - input: barrier
               output:
               - barrier
@@ -761,25 +763,26 @@ mod tests {
 
         // expect_test, inline, indentation modified
         let expected = expect_test::expect![[r#"
-- input: barrier
-  output:
-  - barrier
-- input: !chunk |-
-    +---+---+----+-----+----+
-    | + | 1 | p1 | 100 | 10 |
-    | + | 1 | p1 | 101 | 16 |
-    | + | 4 | p1 | 102 | 20 |
-    +---+---+----+-----+----+
-  output:
-  - !watermark
-    col_idx: 0
-    val: 1
-  - !chunk |-
-    +---+---+----+-----+----+----+
-    | + | 1 | p1 | 100 | 10 | 26 |
-    | + | 1 | p1 | 101 | 16 | 46 |
-    +---+---+----+-----+----+----+
-"#]];
+            # This result can be automatically updated. See `TODO:` for more information.
+            - input: barrier
+              output:
+              - barrier
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 1 | p1 | 101 | 16 |
+                | + | 4 | p1 | 102 | 20 |
+                +---+---+----+-----+----+
+              output:
+              - !watermark
+                col_idx: 0
+                val: 1
+              - !chunk |-
+                +---+---+----+-----+----+----+
+                | + | 1 | p1 | 100 | 10 | 26 |
+                | + | 1 | p1 | 101 | 16 | 46 |
+                +---+---+----+-----+----+----+
+        "#]];
 
         expected.assert_eq(&snapshot);
 

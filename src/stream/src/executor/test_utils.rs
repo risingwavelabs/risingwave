@@ -627,6 +627,8 @@ pub mod snapshot {
         }
         // Note: we serialize ourselves, instead of relying on insta::assert_yaml_snapshot,
         // because serde_yaml is prettier. https://github.com/mitsuhiko/insta/issues/372
-        serde_yaml::to_string(&snapshot).unwrap()
+        let note = "# This result can be automatically updated. See `TODO:` for more information.\n";
+        let snapshot = serde_yaml::to_string(&snapshot).unwrap();
+        format!("{}{}", note, snapshot)
     }
 }
