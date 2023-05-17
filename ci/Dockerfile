@@ -26,7 +26,7 @@ RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(un
     tar -xvzf - -C /usr/local --strip-components 1
 
 # install python dependencies
-RUN pip3 install pyarrow
+RUN pip3 install pyarrow pytest
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy

@@ -23,7 +23,12 @@ v2 integer
 v3 integer
 
 statement ok
-create index idx1 on t3 (v1,v2);;
+create index idx1 on t3 (v1,v2);
+
+query TTTTT
+show indexes from t3;
+----
+idx1 t3 v1 ASC, v2 ASC v3 v1, v2
 
 query TT
 describe t3;
@@ -33,6 +38,11 @@ v2 integer
 v3 integer
 primary key _row_id
 idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1, v2)
+
+query TT
+show create index idx1;
+----
+public.idx1 CREATE INDEX idx1 ON t3(v1, v2)
 
 statement ok
 drop index idx1;

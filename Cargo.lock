@@ -3730,9 +3730,9 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d853845987d5f2b7ebf64789cc45b4108e2e76bab6b860d1aad1cbc39c686e76"
+checksum = "376101dbd964fc502d5902216e180f92b3d003b5cc3d2e40e044eb5470fca677"
 dependencies = [
  "bytes",
  "rust_decimal",

@@ -360,9 +360,23 @@ impl<S: StateStore> LookupExecutor<S> {
         let lookup_row = stream_row
             .project(&self.key_indices_mapping)
             .into_owned_row();
+        let table_id_str = self.arrangement.storage_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        self.ctx
+            .streaming_metrics
+            .lookup_total_query_cache_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }
+
+        // cache miss
+        self.ctx
+            .streaming_metrics
+            .lookup_cache_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
 
         tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
@@ -408,6 +422,11 @@ impl<S: StateStore> LookupExecutor<S> {
         self.lookup_cache
             .batch_update(lookup_row, all_rows.iter().cloned());
 
+        self.ctx
+            .streaming_metrics
+            .lookup_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.lookup_cache.len() as i64);
         Ok(all_rows)
     }
 }

@@ -108,6 +108,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                     vec![0; n_calls].into_boxed_slice()
                 };
                 self.cache.put(compacted_key.clone(), counts); // TODO(rc): can we avoid this clone?
+
                 self.cache.get_mut(&compacted_key).unwrap()
             };
             debug_assert_eq!(counts.len(), visibilities.len());
