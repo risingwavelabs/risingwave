@@ -608,11 +608,131 @@ mod tests {
         )
         .await;
 
+        // expect_test, inline
+        let expected = expect_test::expect![[r#"
+            - input: barrier
+              output:
+              - barrier
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 1 | p1 | 101 | 16 |
+                | + | 4 | p2 | 200 | 20 |
+                +---+---+----+-----+----+
+              output:
+              - !watermark
+                col_idx: 0
+                val: 1
+              - !chunk |-
+                +---+---+----+-----+----+---+----+
+                | + | 1 | p1 | 100 | 10 |   | 16 |
+                +---+---+----+-----+----+---+----+
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 5 | p1 | 102 | 18 |
+                | + | 7 | p2 | 201 | 22 |
+                | + | 8 | p3 | 300 | 33 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+----+----+
+                | + | 1 | p1 | 101 | 16 | 10 | 18 |
+                | + | 4 | p2 | 200 | 20 |    | 22 |
+                +---+---+----+-----+----+----+----+
+            - input: barrier
+              output:
+              - barrier
+            - input: recovery
+              output: []
+            - input: barrier
+              output:
+              - barrier
+            - input: !chunk |-
+                +---+----+----+-----+----+
+                | + | 10 | p1 | 103 | 13 |
+                | + | 12 | p2 | 202 | 28 |
+                | + | 13 | p3 | 301 | 39 |
+                +---+----+----+-----+----+
+              output:
+              - !watermark
+                col_idx: 0
+                val: 5
+              - !chunk |-
+                +---+---+----+-----+----+----+----+
+                | + | 5 | p1 | 102 | 18 | 16 | 13 |
+                | + | 7 | p2 | 201 | 22 | 20 | 28 |
+                | + | 8 | p3 | 300 | 33 |    | 39 |
+                +---+---+----+-----+----+----+----+
+            - input: barrier
+              output:
+              - barrier
+        "#]];
+
+        expected.assert_eq(&snapshot);
+
+        // insta, inline
         insta::with_settings!({
             description => "lag over (1 preceding, current), lead over (current, 1 following)",
             omit_expression => true
         }, {
-            insta::assert_snapshot!(snapshot)
+            insta::assert_snapshot!(snapshot, @r###"
+            - input: barrier
+              output:
+              - barrier
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 1 | p1 | 101 | 16 |
+                | + | 4 | p2 | 200 | 20 |
+                +---+---+----+-----+----+
+              output:
+              - !watermark
+                col_idx: 0
+                val: 1
+              - !chunk |-
+                +---+---+----+-----+----+---+----+
+                | + | 1 | p1 | 100 | 10 |   | 16 |
+                +---+---+----+-----+----+---+----+
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 5 | p1 | 102 | 18 |
+                | + | 7 | p2 | 201 | 22 |
+                | + | 8 | p3 | 300 | 33 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+----+----+
+                | + | 1 | p1 | 101 | 16 | 10 | 18 |
+                | + | 4 | p2 | 200 | 20 |    | 22 |
+                +---+---+----+-----+----+----+----+
+            - input: barrier
+              output:
+              - barrier
+            - input: recovery
+              output: []
+            - input: barrier
+              output:
+              - barrier
+            - input: !chunk |-
+                +---+----+----+-----+----+
+                | + | 10 | p1 | 103 | 13 |
+                | + | 12 | p2 | 202 | 28 |
+                | + | 13 | p3 | 301 | 39 |
+                +---+----+----+-----+----+
+              output:
+              - !watermark
+                col_idx: 0
+                val: 5
+              - !chunk |-
+                +---+---+----+-----+----+----+----+
+                | + | 5 | p1 | 102 | 18 | 16 | 13 |
+                | + | 7 | p2 | 201 | 22 | 20 | 28 |
+                | + | 8 | p3 | 300 | 33 |    | 39 |
+                +---+---+----+-----+----+----+----+
+            - input: barrier
+              output:
+              - barrier
+            "###)
         });
     }
 
@@ -639,11 +759,40 @@ mod tests {
         )
         .await;
 
+        // expect_test, inline, indentation modified
+        let expected = expect_test::expect![[r#"
+- input: barrier
+  output:
+  - barrier
+- input: !chunk |-
+    +---+---+----+-----+----+
+    | + | 1 | p1 | 100 | 10 |
+    | + | 1 | p1 | 101 | 16 |
+    | + | 4 | p1 | 102 | 20 |
+    +---+---+----+-----+----+
+  output:
+  - !watermark
+    col_idx: 0
+    val: 1
+  - !chunk |-
+    +---+---+----+-----+----+----+
+    | + | 1 | p1 | 100 | 10 | 26 |
+    | + | 1 | p1 | 101 | 16 | 46 |
+    +---+---+----+-----+----+----+
+"#]];
+
+        expected.assert_eq(&snapshot);
+
+        // expect_test, file
+        let expected = expect_test::expect_file!["./eowc.yaml"];
+        expected.assert_eq(&snapshot);
+
+        // insta, file
         insta::with_settings!({
             description => "sum over (1 preceding, 1 following)",
             omit_expression => true
         }, {
-            insta::assert_snapshot!(insta::internals::AutoName, snapshot, "a\nb")
+            insta::assert_snapshot!(snapshot)
         });
     }
 }
