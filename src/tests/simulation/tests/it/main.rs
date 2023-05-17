@@ -20,5 +20,6 @@
 #![feature(stmt_expr_attributes)]
 #![cfg(madsim)]
 
+mod batch;
 mod recovery;
 mod scale;
