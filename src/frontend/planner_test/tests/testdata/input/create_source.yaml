@@ -1,10 +1,10 @@
 - id: create_source_without_with_clause
   sql: |
     create source s() row format json;
-  output_fields:
+  expected_outputs:
   - planner_error
 - id: create_source_without_connector
   sql: |
     create source s() with(a=1) row format json;
-  output_fields:
+  expected_outputs:
   - planner_error

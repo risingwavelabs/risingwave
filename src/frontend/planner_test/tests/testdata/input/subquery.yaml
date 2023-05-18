@@ -1,76 +1,76 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select * from t) where v2 > 1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: merge and then eliminate
   sql: |
     create table t (v1 bigint, v2 double precision);
     select a1 as v1, a2 as v2 from (select v1 as a1, v2 as a2 from t);
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: consecutive projects are merged
   sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, 2 from (select v1, v2, 1 from t);
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t);
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: joins
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t), t;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: table alias
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt join t on tt.v1=t.v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: alias less columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a) join t on a=v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: alias more columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table ab (a int, b int);
@@ -81,7 +81,7 @@
           select * from t where v1 = a
       ) as t0
     );
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: We cannot reference columns in left table if not lateral
   sql: |
@@ -93,7 +93,7 @@
           select * from t where v1 = c
       ) as t0
     );
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
@@ -105,19 +105,19 @@
           select * from t where v1 = a
       ) as t0
     );
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
     select count(1) from (select sum(distinct 1) from t1), t2;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - optimized_logical_plan_for_batch
   - logical_plan
 - sql: |
     SELECT (SELECT pg_catalog.pg_get_userbyid(1))
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - batch_plan
@@ -134,14 +134,14 @@
     AND n.nspname <> 'information_schema'
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1
     where EXISTS (select hop_1.date_time group by hop_1.date_time);
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_error
   - logical_plan
@@ -149,7 +149,7 @@
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - sql: |
@@ -157,14 +157,14 @@
     create table b (b1 int, b2 int);
     create table c (c1 int, c2 int);
     select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - sql: |
     create table a(a1 int, a2 int);
     create table b(b1 int, b2 int);
     select * from a where a1 = (select min(b1) from b where b2 = (select min(b1) from (select b1 from b where b1 = a1) as z ) );
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: test subquery in join on condition
@@ -173,22 +173,22 @@
     create table b (v1 int, v2 int);
     create table c (v1 int, v2 int);
     select * from a left outer join b on a.v1 = b.v1 and a.v2 = (select v2 from c where v1 = 1 limit 1);
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table auction (date_time date);
     select * from auction AS hop_1
     where EXISTS (select hop_1.date_time from auction group by hop_1.date_time );
-  output_fields:
+  expected_outputs:
   - stream_error
 - sql: |
     SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
-  output_fields:
+  expected_outputs:
   - batch_error
 - sql: |
     create table t1 (a int, b int);
     select a, (select count(*) from t1 where t1.a <> t.b) from t1 as t order by 1;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: test subquery on sources
@@ -197,5 +197,5 @@
     create source b (b1 int, b2 int)  with ( connector ='datagen' );
     create source c (c1 int, c2 int) with ( connector ='datagen' );
     select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream

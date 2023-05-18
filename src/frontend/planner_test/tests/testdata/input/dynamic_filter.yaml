@@ -2,13 +2,13 @@
   sql: |
     create table t1 (v1 int);
     create table t2 (v2 int);
-  output_fields: []
+  expected_outputs: []
 - name: With Simple Agg on inner side
   before:
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_plan
 - name: |
@@ -18,7 +18,7 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_error
 - name: |
@@ -28,7 +28,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 + v1 > max;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_plan
 - name: Ensure error on multiple rows on inner side
@@ -36,7 +36,7 @@
   - create_tables
   sql: |
     with max_v2 as (select v2 max from t2 order by v2 desc limit 2) select v1 from t1, max_v2 where v1 > max;
-  output_fields:
+  expected_outputs:
   - stream_error
   - optimized_logical_plan_for_stream
 - name: Ensure error on output columns from inner
@@ -44,7 +44,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 > max;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_error
 - name: Use Inner Join for equi condition
@@ -52,7 +52,7 @@
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1, max from t1, max_v2 where v1 = max;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_stream
   - stream_plan
 - name: Dynamic filter join on unequal types
@@ -60,7 +60,7 @@
     create table t1 (v1 int);
     create table t2 (v2 bigint);
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_stream
 - name: Dynamic filter on semi join
@@ -68,13 +68,13 @@
     create table t1 (v1 int);
     create table t2 (v2 int);
     with max_v2 as (select max(v2) max from t2) select v1 from t1 where exists (select * from max_v2 where v1 > max);
-  output_fields:
+  expected_outputs:
   - stream_plan
 - name: Complex expression on RHS of condition will still result in dynamic filter
   before:
   - create_tables
   sql: |
     with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > 2 * max;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_stream

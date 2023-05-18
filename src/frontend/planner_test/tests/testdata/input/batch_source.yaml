@@ -10,6 +10,6 @@
         int32 id = 1;
         int32 value = 2;
       }
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan

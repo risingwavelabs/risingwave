@@ -2,19 +2,19 @@
   sql: |
     create table t (a int, b int);
     delete from t returning *, a, a+b;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan
 - name: delete with returning constant, should keep `Delete`
   sql: |
     create table t (v int);
     delete from t returning 114514;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - name: insert with returning agg functions, should not run
   sql: |
     create table t (a int, b int);
     delete from t returning sum(a);
-  output_fields:
+  expected_outputs:
   - binder_error

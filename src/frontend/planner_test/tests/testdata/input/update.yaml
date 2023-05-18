@@ -1,59 +1,59 @@
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = 0;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = true;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 real);
     update t set v1 = v2;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 real);
     update t set v1 = DEFAULT;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 int);
     update t set v1 = v2 + 1 where v2 > 0;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 int);
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 int, v2 int);
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2 returning *, v2+1, v1-1;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan
 - name: update with returning statement, should keep `Update`
   sql: |
     create table t (v int);
     update t set v = 114 returning 514;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - sql: |
     create table t (v1 int primary key, v2 int);
     update t set (v2, v1) = (v1, v2);
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t (v1 int default 1+1, v2 int);
     update t set v1 = default;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan

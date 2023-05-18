@@ -92,7 +92,7 @@
             r_comment VARCHAR,
             PRIMARY KEY (r_regionkey)
     );
-  output_fields: []
+  expected_outputs: []
 - id: tpch_q1
   before:
   - create_tables
@@ -118,7 +118,7 @@
     order by
       l_returnflag,
       l_linestatus;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - batch_plan
@@ -172,7 +172,7 @@
           s_name,
           p_partkey
     limit 100;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -205,7 +205,7 @@
       revenue desc,
       o_orderdate
     limit 10;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - optimized_logical_plan_for_batch
@@ -236,7 +236,7 @@
       o_orderpriority
     order by
       o_orderpriority;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_dist_plan
   - batch_plan
@@ -270,7 +270,7 @@
       n_name
     order by
       revenue desc;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - logical_plan
   - batch_plan
@@ -289,7 +289,7 @@
       and l_shipdate < date '1994-01-01' + interval '1' year
       and l_discount between 0.08 - 0.01 and 0.08 + 0.01
       and l_quantity < 24;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - optimized_logical_plan_for_batch
   - stream_plan
@@ -338,7 +338,7 @@
       supp_nation,
       cust_nation,
       l_year;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - optimized_logical_plan_for_batch
   - batch_plan
@@ -385,7 +385,7 @@
       o_year
     order by
       o_year;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -427,7 +427,7 @@
     order by
       nation,
       o_year desc;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - stream_dist_plan
@@ -469,7 +469,7 @@
     order by
       revenue desc
     limit 20;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - logical_plan
@@ -507,7 +507,7 @@
       )
     order by
       value desc;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - optimized_logical_plan_for_batch
@@ -545,7 +545,7 @@
         l_shipmode
     order by
         l_shipmode;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - batch_plan
@@ -575,7 +575,7 @@
     order by
       custdist desc,
       c_count desc;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_dist_plan
   - logical_plan
@@ -598,7 +598,7 @@
       l_partkey = p_partkey
       and l_shipdate >= date '1995-09-01'
       and l_shipdate < date '1995-09-01' + interval '1' month;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -639,7 +639,7 @@
       )
     order by
       s_suppkey;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
   - stream_dist_plan
@@ -678,7 +678,7 @@
       p_brand,
       p_type,
       p_size;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - stream_plan
@@ -705,7 +705,7 @@
         where
           l_partkey = p_partkey
       );
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - optimized_logical_plan_for_batch
@@ -749,7 +749,7 @@
       o_totalprice desc,
       o_orderdate
     LIMIT 100;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - optimized_logical_plan_for_batch
@@ -794,7 +794,7 @@
         and l_shipmode in ('AIR', 'AIR REG')
         and l_shipinstruct = 'DELIVER IN PERSON'
       );
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
   - stream_plan
@@ -841,7 +841,7 @@
       and n_name = 'KENYA'
     order by
       s_name;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_dist_plan
   - batch_plan
@@ -891,7 +891,7 @@
       numwait desc,
       s_name
     LIMIT 100;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
   - stream_dist_plan
@@ -938,7 +938,7 @@
       cntrycode
     order by
       cntrycode;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - batch_plan

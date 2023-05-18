@@ -9,7 +9,7 @@
     datagen.rows.per.second = '10',
     );
     select * from t1, t2 where ts1 = ts2 and a1 = a2;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - name: Window join expression reorder
   sql: |
@@ -22,5 +22,5 @@
     datagen.rows.per.second = '10',
     );
     select * from t1, t2 where a1 = a2 and ts1 = ts2;
-  output_fields:
+  expected_outputs:
   - stream_plan

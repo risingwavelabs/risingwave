@@ -2,21 +2,21 @@
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     select min(v1) from t having false;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter should not transpose limit
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     with cte as (select * from t limit 10) select * from cte where v1=10 AND v2=20 AND v3=30;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: filter should not transpose TopN
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
     with cte as (select * from t order by v1 limit 10 ) select * from cte where v1=10 AND v2=20 AND v3=30;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter hop transpose
@@ -27,7 +27,7 @@
     where v1=10 AND v2=20 AND v3=30 AND ts >= date '1997-07-01'
     AND window_start >= date '1997-07-02' AND window_end >= date '1997-07-03'
     AND window_start >= ts + interval '1' day AND window_end > ts + interval '4' day;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter hop transpose with non-trivial output-indices
@@ -35,7 +35,7 @@
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
     with cte as (select window_end, v4, v2 from hop(t, ts, interval '1' day, interval '3' day))
     select * from cte where window_end > date '2022-01-01' AND v4=10 AND v2 > 20
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: filter union transpose
@@ -43,28 +43,28 @@
     create table t1 (v1 int, v2 int, v3 int);
     create table t2 (v1 int, v2 int, v3 int);
     with cte as (select * from t1 union all select * from t2) select * from cte where v1=10 AND v2=20 AND v3=30;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter project transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
     with cte as (select v1,v2,v3,v4,v1+v2 as expr_a, v3*v4 as expr_b from t) select * from cte where expr_a>10 AND v1=10 AND v2=20 AND v3=30 AND expr_a > expr_b AND expr_a > v1;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: filter agg transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
     with cte as (select v1, v2, v3, count(*) as cnt, count(1) as cnt2 from t group by v1, v2, v3) select * from cte where v1=10 AND v2=20 AND v3=30 AND cnt > v1 AND v2 > v3 AND cnt > cnt2;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter project set transpose
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);
     with cte as (select v1, v2, v3, unnest(arr) as arr_unnested from t) select * from cte where v1=10 AND v2=20 AND v3=30 AND arr_unnested=30;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter inner join transpose
@@ -72,7 +72,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
     with cte as (select * from t1 cross join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter left join transpose
@@ -80,7 +80,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
     with cte as (select * from t1 left join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter right join transpose
@@ -88,7 +88,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
     with cte as (select * from t1 right join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: filter full outer join transpose
@@ -96,7 +96,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v3 int, v4 int);
     with cte as (select * from t1 full outer join t2) select * from cte where v1 is null AND v2 is null AND v3 is null AND v4 is null;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: filter semi join transpose
@@ -104,7 +104,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
     with cte as (select * from t1 where exists (select * from t2)) select * from cte where v1 is null AND v2 is null;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: filter anti join transpose
@@ -112,7 +112,7 @@
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
     with cte as (select * from t1 where not exists (select * from t2)) select * from cte where v1 is null AND v2 is null;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: now() pushdown with delta expression
@@ -120,7 +120,7 @@
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone);
     select * from t1 cross join t2 where v1 = v2 and v1 > now() + '1 hr';
-  output_fields:
+  expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_batch
 - name: now() in a complex cmp expr does not get pushed down
@@ -128,7 +128,7 @@
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1, t2 where v1 = v2 and v1 > now() + v3;
-  output_fields:
+  expected_outputs:
   - stream_error
   - optimized_logical_plan_for_batch
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
@@ -136,14 +136,14 @@
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1 cross join t2 where v1 = v2 and v1 > now() + v3;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_error
 - name: now() does not get pushed to scan, but others do
   sql: |
     create table t1(v1 timestamp with time zone, v2 int);
     select * from t1 where v1 > now() + '30 min' and v2 > 5;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_batch
 - name: eq-predicate derived condition other side pushdown in inner join
@@ -151,27 +151,27 @@
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
     select * from t1 cross join t2 where t1.v1 = t2.v1 and t1.v1 > 1000;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: eq-predicate derived condition other side pushdown in semi join
   sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
     select * from t1 where exists (select * from t2 where t1.v1 = t2.v1 and t2.v1 < 2000) and t1.v1 > 1000;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: eq-predicate derived condition other side pushdown in outer join
   sql: |
     create table t1(v1 int, v2 int);
     create table t2(v1 int, v2 int);
     select * from t1 left join t2 on t1.v1 = t2.v1 where t2.v1 is not null and t1.v1 + 5 is not null;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: eq-predicate derived condition is banned for impure function e.g. `now()`
   sql: |
     create table t1(v1 timestamp with time zone);
     create table t2(v2 timestamp with time zone);
     select * from t1 cross join t2 where v1 = v2 and v1 > now();
-  output_fields:
+  expected_outputs:
   - stream_plan
   - optimized_logical_plan_for_batch

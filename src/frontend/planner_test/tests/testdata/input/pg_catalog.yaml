@@ -1,25 +1,25 @@
 - sql: |
     select * from pg_catalog.pg_type
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - sql: |
     select * from pg_catalog.pg_namespace
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - sql: |
     select * from pg_catalog.pg_cast
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan
 - sql: |
     select pg_catalog.pg_get_userbyid(1)
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - sql: |
     select 'pg_namespace'::regclass
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan

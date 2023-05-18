@@ -22,7 +22,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
 - sql: |
@@ -50,7 +50,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     CREATE TABLE t (
@@ -64,7 +64,7 @@
       rate FLOAT);
     -- select (t).country.city.*,(t.country).*,(country).city.* from t;
     select (t.country).city.*,(t.country).*,(country).city.* from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -93,7 +93,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -120,7 +120,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -147,7 +147,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -173,7 +173,7 @@
         string address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -199,7 +199,7 @@
         int64 address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create materialized view t as select * from s;
@@ -225,12 +225,12 @@
         int64 address = 1;
         string zipcode = 2;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select (v1).v2 from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create materialized view t as select * from s;
@@ -251,7 +251,7 @@
         string address = 1;
         string zipcode = 3;
       }
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create materialized view t as select * from s;
@@ -272,7 +272,7 @@
         string address = 1;
         string zipcode = 3;
       }
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create materialized view t as select * from s;
@@ -293,7 +293,7 @@
         string address = 1;
         string zipcode = 3;
       }
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create materialized view t as select * from s;
@@ -314,7 +314,7 @@
         string address = 1;
         string zipcode = 3;
       }
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     insert into s values (1,2,(1,2,(1,2,null)));
@@ -339,7 +339,7 @@
         int32 v2 = 2;
         int32 v3 = 3;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     select * from s where s.v3 = (1,2,(1,2,3));
@@ -364,15 +364,15 @@
         int32 v2 = 2;
         int32 v3 = 3;
       }
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     CREATE TABLE a (c STRUCT<i STRUCT<a INTEGER>, j INTEGER>);
     INSERT INTO a VALUES (1);
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: test struct type alignment in CASE expression
   sql: |
     select CASE WHEN false THEN ROW(0, INTERVAL '1') WHEN true THEN ROW(1.1, INTERVAL '1') ELSE ROW(1, INTERVAL '1') END;
-  output_fields:
+  expected_outputs:
   - logical_plan

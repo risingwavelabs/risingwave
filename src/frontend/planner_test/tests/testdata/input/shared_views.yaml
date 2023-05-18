@@ -3,6 +3,6 @@
     create view v1 as select x + y as z from t1 where y > 0;
     create view v2 as select x * z as a, y * z as b from t1, v1 where z = x;
     select * from v1, v2 where z = a;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan

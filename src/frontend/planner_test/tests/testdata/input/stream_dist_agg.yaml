@@ -5,13 +5,13 @@
     create index Tk on T(k) include(k, v, o, s);
     create materialized view S as select * from T order by o limit 100;
     create table AO (k int, v int, o int, s varchar) append only;
-  output_fields: []
+  expected_outputs: []
 - id: extreme_on_single
   before:
   - create_tables
   sql: |
     select max(v) as a1 from S;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -20,7 +20,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from S;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -29,7 +29,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from S;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -38,7 +38,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by v) as a1 from S;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -47,7 +47,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from T;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -56,7 +56,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from AO;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
 - id: sum_on_T
@@ -64,7 +64,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from T;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
   - batch_plan
@@ -73,7 +73,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from AO;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
 - id: cnt_on_T
@@ -81,7 +81,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from T;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_dist_plan
   - stream_plan
@@ -90,7 +90,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from AO;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
 - id: string_agg_on_T
@@ -98,7 +98,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from T;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
   - batch_plan
@@ -107,7 +107,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from AO;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: extreme_count_on_T
@@ -115,7 +115,7 @@
   - create_tables
   sql: |
     select max(v) as a1, count(v) as a2 from T;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -124,7 +124,7 @@
   - create_tables
   sql: |
     select max(v) as a1, count(v) as a2 from AO;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: count_string_agg_on_T
@@ -132,7 +132,7 @@
   - create_tables
   sql: |
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -141,7 +141,7 @@
   - create_tables
   sql: |
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
 - id: extreme_string_agg_on_T
@@ -149,7 +149,7 @@
   - create_tables
   sql: |
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -158,7 +158,7 @@
   - create_tables
   sql: |
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from AO;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: extreme_on_T_by_k
@@ -166,7 +166,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from T group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -175,7 +175,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from Tk group by k;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -184,7 +184,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from S group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -193,7 +193,7 @@
   - create_tables
   sql: |
     select max(v) as a1 from AO group by k;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: sum_on_T_by_k
@@ -201,7 +201,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from T group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -210,7 +210,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from Tk group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -219,7 +219,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from S group by k;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -228,7 +228,7 @@
   - create_tables
   sql: |
     select sum(v) as a1 from AO group by k;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: cnt_on_T_by_k
@@ -236,7 +236,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from T group by k;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -245,7 +245,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from Tk group by k;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -254,7 +254,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from S group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -263,7 +263,7 @@
   - create_tables
   sql: |
     select count(v) as a1 from AO group by k;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
 - id: string_agg_on_T_by_k
@@ -271,7 +271,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from T group by k;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -280,7 +280,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from Tk group by k;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -289,7 +289,7 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from S group by k;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -298,6 +298,6 @@
   - create_tables
   sql: |
     select string_agg(s, ',' order by o) as a1 from AO group by k;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan

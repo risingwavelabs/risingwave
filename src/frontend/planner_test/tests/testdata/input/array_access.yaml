@@ -1,9 +1,9 @@
 - sql: |
     select (ARRAY['foo', 'bar'])[1];
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create table t(i int[]);
     select min(i) from t where i[1]>2;
-  output_fields:
+  expected_outputs:
   - batch_plan

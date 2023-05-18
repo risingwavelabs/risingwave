@@ -122,7 +122,7 @@ pub struct TestCase {
     pub with_config_map: Option<BTreeMap<String, String>>,
 
     /// Specify what output fields to check
-    pub output_fields: HashSet<OutputField>,
+    pub expected_outputs: HashSet<OutputField>,
 }
 
 impl TestCase {
@@ -542,7 +542,7 @@ impl TestCase {
 
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
-                if self.output_fields.contains(&OutputField::LogicalPlan) {
+                if self.expected_outputs.contains(&OutputField::LogicalPlan) {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
@@ -554,9 +554,9 @@ impl TestCase {
         };
 
         if self
-            .output_fields
+            .expected_outputs
             .contains(&OutputField::OptimizedLogicalPlanForBatch)
-            || self.output_fields.contains(&OutputField::OptimizerError)
+            || self.expected_outputs.contains(&OutputField::OptimizerError)
         {
             let optimized_logical_plan_for_batch =
                 match logical_plan.gen_optimized_logical_plan_for_batch() {
@@ -569,7 +569,7 @@ impl TestCase {
 
             // Only generate optimized_logical_plan_for_batch if it is specified in test case
             if self
-                .output_fields
+                .expected_outputs
                 .contains(&OutputField::OptimizedLogicalPlanForBatch)
             {
                 ret.optimized_logical_plan_for_batch =
@@ -578,9 +578,9 @@ impl TestCase {
         }
 
         if self
-            .output_fields
+            .expected_outputs
             .contains(&OutputField::OptimizedLogicalPlanForStream)
-            || self.output_fields.contains(&OutputField::OptimizerError)
+            || self.expected_outputs.contains(&OutputField::OptimizerError)
         {
             let optimized_logical_plan_for_stream =
                 match logical_plan.gen_optimized_logical_plan_for_stream() {
@@ -593,7 +593,7 @@ impl TestCase {
 
             // Only generate optimized_logical_plan_for_stream if it is specified in test case
             if self
-                .output_fields
+                .expected_outputs
                 .contains(&OutputField::OptimizedLogicalPlanForStream)
             {
                 ret.optimized_logical_plan_for_stream =
@@ -605,9 +605,9 @@ impl TestCase {
             // if self.batch_plan.is_some()
             //     || self.batch_plan_proto.is_some()
             //     || self.batch_error.is_some()
-            if self.output_fields.contains(&OutputField::BatchPlan)
-                || self.output_fields.contains(&OutputField::BatchPlanProto)
-                || self.output_fields.contains(&OutputField::BatchError)
+            if self.expected_outputs.contains(&OutputField::BatchPlan)
+                || self.expected_outputs.contains(&OutputField::BatchPlanProto)
+                || self.expected_outputs.contains(&OutputField::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
@@ -624,12 +624,12 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.output_fields.contains(&OutputField::BatchPlan) {
+                if self.expected_outputs.contains(&OutputField::BatchPlan) {
                     ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
 
                 // Only generate batch_plan_proto if it is specified in test case
-                if self.output_fields.contains(&OutputField::BatchPlanProto) {
+                if self.expected_outputs.contains(&OutputField::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
                         &batch_plan.to_batch_prost_identity(false),
                     )?);
@@ -638,8 +638,8 @@ impl TestCase {
         }
 
         'local_batch: {
-            if self.output_fields.contains(&OutputField::BatchLocalPlan)
-                || self.output_fields.contains(&OutputField::BatchError)
+            if self.expected_outputs.contains(&OutputField::BatchLocalPlan)
+                || self.expected_outputs.contains(&OutputField::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
@@ -656,7 +656,7 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.output_fields.contains(&OutputField::BatchLocalPlan) {
+                if self.expected_outputs.contains(&OutputField::BatchLocalPlan) {
                     ret.batch_local_plan = Some(explain_plan(&batch_plan));
                 }
             }
@@ -675,21 +675,21 @@ impl TestCase {
             ) in [
                 (
                     EmitMode::Immediately,
-                    self.output_fields.contains(&OutputField::StreamPlan),
+                    self.expected_outputs.contains(&OutputField::StreamPlan),
                     &mut ret.stream_plan,
-                    self.output_fields.contains(&OutputField::StreamDistPlan),
+                    self.expected_outputs.contains(&OutputField::StreamDistPlan),
                     &mut ret.stream_dist_plan,
-                    self.output_fields.contains(&OutputField::StreamError),
+                    self.expected_outputs.contains(&OutputField::StreamError),
                     &mut ret.stream_error,
                 ),
                 (
                     EmitMode::OnWindowClose,
-                    self.output_fields.contains(&OutputField::EowcStreamPlan),
+                    self.expected_outputs.contains(&OutputField::EowcStreamPlan),
                     &mut ret.eowc_stream_plan,
-                    self.output_fields
+                    self.expected_outputs
                         .contains(&OutputField::EowcStreamDistPlan),
                     &mut ret.eowc_stream_dist_plan,
-                    self.output_fields.contains(&OutputField::EowcStreamError),
+                    self.expected_outputs.contains(&OutputField::EowcStreamError),
                     &mut ret.eowc_stream_error,
                 ),
             ] {
@@ -732,7 +732,7 @@ impl TestCase {
         }
 
         'sink: {
-            if self.output_fields.contains(&OutputField::SinkPlan) {
+            if self.expected_outputs.contains(&OutputField::SinkPlan) {
                 let sink_name = "sink_test";
                 let mut options = HashMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());

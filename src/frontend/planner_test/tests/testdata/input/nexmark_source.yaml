@@ -42,13 +42,13 @@
       connector = 'nexmark',
       nexmark.table.type = 'Person'
     );
-  output_fields: []
+  expected_outputs: []
 - id: nexmark_q0
   before:
   - create_sources
   sql: |
     SELECT auction, bidder, price, date_time FROM bid;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -62,7 +62,7 @@
       0.908 * price as price,
       date_time
     FROM bid;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -70,7 +70,7 @@
   before:
   - create_sources
   sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
   - batch_plan
@@ -84,7 +84,7 @@
         auction AS A INNER JOIN person AS P on A.seller = P.id
     WHERE
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - stream_dist_plan
@@ -102,7 +102,7 @@
         GROUP BY A.id, A.category
     ) Q
     GROUP BY Q.category;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -138,7 +138,7 @@
         CountBids.starttime_c
     ) AS MaxBids
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - stream_dist_plan
@@ -158,7 +158,7 @@
         WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
         GROUP BY A.id, A.seller
     ) AS Q;
-  output_fields:
+  expected_outputs:
   - planner_error
 - id: nexmark_q7
   before:
@@ -183,7 +183,7 @@
     WHERE
       B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
       AND B1.date_time;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -223,7 +223,7 @@
     ) A ON P.id = A.seller
       AND P.starttime = A.starttime
       AND P.endtime = A.endtime;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -241,7 +241,7 @@
       WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
     )
     WHERE rownum <= 1;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - stream_dist_plan
@@ -252,7 +252,7 @@
   - create_sources
   sql: |
     SELECT auction, bidder, price, date_time, TO_CHAR(date_time, 'YYYY-MM-DD') as date, TO_CHAR(date_time, 'HH:MI') as time FROM bid;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -267,7 +267,7 @@
       SESSION_END(B.date_time, INTERVAL '10' SECOND) as endtime
     FROM bid B
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
-  output_fields:
+  expected_outputs:
   - binder_error
 - id: nexmark_q12
   before:
@@ -280,7 +280,7 @@
         TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
     FROM (SELECT *, PROCTIME() as p_time FROM bid) B
     GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
-  output_fields:
+  expected_outputs:
   - binder_error
 - id: nexmark_q13
   before:
@@ -296,7 +296,7 @@
     JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
     ON mod(B.auction, 10000) = S.key; */
     select 1;
-  output_fields:
+  expected_outputs:
   - stream_error
 - id: nexmark_q14
   before:
@@ -324,7 +324,7 @@
       -- count_char(extra, 'c') AS c_counts
     FROM bid
     WHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -348,7 +348,7 @@
         count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
     FROM bid
     GROUP BY to_char(date_time, 'yyyy-MM-dd');
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -374,7 +374,7 @@
       count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
     FROM bid
     GROUP BY channel, to_char(date_time, 'yyyy-MM-dd');
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -395,7 +395,7 @@
         sum(price) AS sum_price
     FROM bid
     GROUP BY auction, to_char(date_time, 'YYYY-MM-DD');
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -407,7 +407,7 @@
     FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
           FROM bid)
     WHERE rank_number <= 1;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - logical_plan
   - batch_plan
@@ -420,7 +420,7 @@
     FROM (SELECT *, RANK() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
           FROM bid)
     WHERE rank_number <= 1;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -432,7 +432,7 @@
     SELECT * FROM
     (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
     WHERE rank_number <= 10;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - id: nexmark_q20
   before:
@@ -444,7 +444,7 @@
     FROM
         bid B INNER JOIN auction A on B.auction = A.id
     WHERE A.category = 10;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_dist_plan
   - stream_plan
@@ -464,7 +464,7 @@
         AS channel_id FROM bid
         where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
-  output_fields:
+  expected_outputs:
   - binder_error
 - id: nexmark_q22
   before:
@@ -475,7 +475,7 @@
         SPLIT_PART(url, '/', 4) as dir1,
         SPLIT_PART(url, '/', 5) as dir2,
         SPLIT_PART(url, '/', 6) as dir3 FROM bid;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -499,7 +499,7 @@
         FROM bid b1
         GROUP BY b1.auction
     ) b ON a.id = b.auction;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -521,7 +521,7 @@
     HAVING COUNT(b.auction) >= (
         SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
     )
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan
   - batch_plan
@@ -541,7 +541,7 @@
         GROUP BY b.auction
         HAVING COUNT(*) >= 20
     );
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - stream_plan
   - batch_plan
@@ -561,7 +561,7 @@
         GROUP BY b.auction
         HAVING COUNT(*) < 20
     );
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan
@@ -581,7 +581,7 @@
     GROUP BY a.id, a.item_name
     ORDER BY bid_count DESC
     LIMIT 1000;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_dist_plan
   - stream_plan
@@ -608,7 +608,7 @@
             GROUP BY
                 auction.id
         )
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - stream_dist_plan

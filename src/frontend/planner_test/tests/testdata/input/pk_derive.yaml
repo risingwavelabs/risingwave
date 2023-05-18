@@ -18,7 +18,7 @@
         ) AS Ttwo
     ON
         Tone.id = Ttwo.id;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - sql: |
     create table t (id int, v int);
@@ -39,7 +39,7 @@
         ) AS Ttwo
     ON
         Tone.id = Ttwo.id;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
@@ -51,7 +51,7 @@
         v1,
         v2,
         v3;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
 - sql: |
@@ -71,6 +71,6 @@
         mv
     where
         v3 = 'world' or v3 = 'hello';
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan

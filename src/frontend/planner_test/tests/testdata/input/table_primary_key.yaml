@@ -1,60 +1,60 @@
 - id: create_table_t1
   sql: |
     create table t1 (a int, b double, c varchar);
-  output_fields: []
+  expected_outputs: []
 - id: create_table_t2
   sql: |
     create table t2 (a int primary key, b double, c varchar);
-  output_fields: []
+  expected_outputs: []
 - id: create_table_t3
   sql: |
     create table t3 (a int, b double, c varchar, primary key (a));
-  output_fields: []
+  expected_outputs: []
 - id: create_table_t4
   sql: |
     create table t4 (a int, b double, c varchar, primary key (a, c));
-  output_fields: []
+  expected_outputs: []
 - before:
   - create_table_t1
   sql: |
     select * from t1 where a = 1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: _row_id column is inserted if no pk is specified
   before:
   - create_table_t1
   sql: |
     select _row_id from t1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - before:
   - create_table_t2
   sql: |
     select _row_id from t2;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: selecting on pk should generate range scan
   before:
   - create_table_t2
   sql: |
     select * from t2 where a > 1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - before:
   - create_table_t3
   sql: |
     select * from t3 where a < 1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - before:
   - create_table_t4
   sql: |
     select * from t4 where a = 1 and c = 'abc';
-  output_fields:
+  expected_outputs:
   - batch_plan
 - before:
   - create_table_t4
   sql: |
     select * from t4 where a >= 1;
-  output_fields:
+  expected_outputs:
   - batch_plan

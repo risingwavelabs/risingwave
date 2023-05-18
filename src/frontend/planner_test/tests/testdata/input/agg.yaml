@@ -1,52 +1,52 @@
 - sql: |
     values(sum(1));
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     values(count(1));
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     values(min(1));
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     values(1 + max(1));
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t (v1 int);
     select v1 from t where min(v1);
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, min(v2) + max(v3) * count(v1) as agg from t group by v1;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - batch_local_plan
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) as agg from t;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan
   - stream_plan
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(v1 int, v2 int);
     select sum(v1), v1 from t group by v2, v2;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) as agg from t group by v3;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan
   - stream_plan
@@ -54,79 +54,79 @@
   sql: |
     create table t(v1 int, v2 int);
     select min(v1), sum(v1 + v2) from t group by v1 + v2;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v1 * v2) as sum from t group by (v1 + v2) / v3, v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1 + v2;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: "test logical_agg with complex group expression \nshould complain about nested agg call \n"
   sql: |
     create table t(v1 int, v2 int);
     select avg(sum(v1 + v2)) from t group by v1 + v2;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: test logical_agg with complex select expression
   sql: |
     create table t(v1 int, v2 int);
     select v1 + v2 from t group by v1, v2;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
-  output_fields:
+  expected_outputs:
   - batch_local_plan
   - stream_plan
   - batch_plan
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) as agg from t group by v1;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - sql: |
     create table t (v1 real);
     select v1, count(*) from t group by v1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Use BatchSortAgg, when input provides order
   sql: |
     create table t(v1 int, v2 int);
     create materialized view mv as select * from t order by v1 desc;
     select v1, max(v2) from mv group by v1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Use BatchSortAgg, when output requires order
   sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Use BatchSortAgg, when required order satisfies input order
   sql: |
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Use BatchSortAgg, when output requires order with swapped output
   sql: |
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Not use BatchSortAgg, when input provides order
   sql: |
@@ -135,7 +135,7 @@
     select v1, max(v2) from mv group by v1;
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Not use BatchSortAgg, when output requires order
   sql: |
@@ -143,7 +143,7 @@
     select v1, max(v2) from t group by v1 order by v1 desc;
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Not use BatchSortAgg, when required order satisfies input order
   sql: |
@@ -151,7 +151,7 @@
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: Not use BatchSortAgg, when output requires order with swapped output
   sql: |
@@ -159,75 +159,75 @@
     select max(v2), v1 from t group by v1 order by v1 desc;
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
-  output_fields:
+  expected_outputs:
   - batch_plan
 - sql: |
     create table t (v1 real);
     select count(*) from t;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: having with agg call
   sql: |
     create table t (v1 real);
     select 1 from t having sum(v1) > 5;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: having with group column
   sql: |
     create table t (v1 real);
     select 1 from t group by v1 having v1 > 5;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: having with non-group column
   sql: |
     create table t (v1 real, v2 int);
     select 1 from t group by v1 having v2 > 5;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: distinct without agg
   sql: |
     create table t (v1 int, v2 int);
     select distinct v1 from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: distinct with agg
   sql: |
     create table t (v1 int, v2 int);
     select distinct sum(v1) from t group by v2;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v3, v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on(v1) v2 + v3 from t order by v1;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - logical_plan
 - name: arguments out-of-order
   sql: |
     create table t(v1 int, v2 int, v3 int);
     select count(v3), min(v2), max(v1) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - batch_plan
   - logical_plan
@@ -235,7 +235,7 @@
   sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v3) * count(v2) as agg from t;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -244,7 +244,7 @@
   sql: |
     create table t(v1 int) with (appendonly = false);
     select v1 from t group by v1, v1;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - stream_plan
@@ -252,7 +252,7 @@
   sql: |
     create table t(v1 int, v2 int, v3 int) with (appendonly = false);
     select v2, min(v1) as min_v1, v3, max(v1) as max_v1 from t group by v3, v2, v2;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -260,7 +260,7 @@
   sql: |
     create table t(v1 int);
     select sum(v1 order by v1) as s1 from t;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -268,7 +268,7 @@
   sql: |
     create table t(v1 int, v2 varchar);
     select sum(v1 order by v2) as s1 from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
   - stream_plan
@@ -276,7 +276,7 @@
   sql: |
     create table t(v1 int, v2 varchar, v3 int);
     select sum(v1 order by v1, v2 ASC, v3 DESC) as s1 from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -284,7 +284,7 @@
   sql: |
     create table t(v1 int);
     select sum(v1) FILTER (WHERE v1 > 0) AS sa from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -294,14 +294,14 @@
   sql: |
     create table t(a int, b int);
     select sum(a * b) filter (where a * b > 0) as sab from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: complex filter clause
   sql: |
     create table t(a int, b int);
     select max(a * b) FILTER (WHERE a < b AND a + b < 100 AND a * b != a + b - 1) AS sab from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
   - logical_plan
@@ -309,7 +309,7 @@
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a > b) AS avga from t group by b ;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
   - stream_plan
@@ -317,7 +317,7 @@
   sql: |
     create table t(a int, b int);
     select count(*) FILTER (WHERE a > b) AS cnt_agb from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
   - stream_plan
@@ -325,44 +325,44 @@
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE abs(a)) AS avga from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: filter clause + subquery
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE 0 < (select max(a) from t)) AS avga from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: aggregation in filter clause
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE a < avg(b)) AS avga from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: filter clause + non-boolean function
   sql: |
     create table t(a int, b int);
     select abs(a) FILTER (WHERE a > 0) AS avga from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: prune column before filter
   sql: |
     create table t(v1 int, v2 int);
     with sub(a, b) as (select min(v1), sum(v2) filter (where v2 < 5) from t) select b from sub;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
 - name: only distinct agg
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(distinct c) filter(where c < 100) as distinct_c_sum from t group by a;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: single distinct agg and non-disintct agg
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, sum(c) as sum_c from t group by a;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -370,7 +370,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) as distinct_b_num, count(distinct c) as distinct_c_sum, sum(c) as sum_c from t group by a;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
   - batch_plan
@@ -378,7 +378,7 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b) filter(where b < 100), sum(c) from t group by a;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - optimized_logical_plan_for_batch
   - stream_plan
@@ -386,67 +386,67 @@
   sql: |
     create table t(a int, b int, c int);
     select a, count(distinct b), sum(c) filter(where b < 100) from t group by a;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: combined order by & filter clauses
   sql: |
     create table t(a varchar, b int);
     select sum(length(a) * b order by length(a) + b) filter (where b < 100 AND b * 2 > 10) as s1 from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y varchar);
     select string_agg(y, ',' order by y), count(distinct x) from t;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(v1 int, v2 int);
     with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: input is sharded by group key
   sql: |
     create table t(x int);
     create index i on t(x);
     select count(*) as cnt from i group by x;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - name: distinct aggregates only have one distinct argument doesn't need expand
   sql: |
     create table t(x int, y int);
     select count(x), sum(distinct y), sum(distinct y) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select count(distinct x), sum(distinct y) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x varchar, y int);
     select string_agg(x, ','), count(distinct y) from t;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);
     select max(distinct x), min(distinct y) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - name: agg filter - subquery
   sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where (select true)) from a;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: agg filter - agg
   sql: |
@@ -456,21 +456,21 @@
     select 1 from a having exists(
       select count(b1) filter (where min(a1) < 3) from b
     );
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: agg filter - table function
   sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) filter (where unnest(array[1]) < 1) from a;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: agg order by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select string_agg('', '' order by (select true)) from a;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg order by - agg (correlated in having)
   sql: |
@@ -480,7 +480,7 @@
       select string_agg(b1, '' order by min(a1)) from sb -- valid in PostgreSQL
       -- select string_agg('', '' order by min(a1)) from sb -- NOT valid in PostgreSQL
     );
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg order by - agg (correlated in where)
   sql: |
@@ -490,21 +490,21 @@
     select 1 from a where exists(
       select string_agg(b1, '' order by min(a1)) from sb
     );
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg order by - table function
   sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select string_agg('', '' order by unnest(array[1])) from a;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg input - subquery
   sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1 + (select 1)) from a;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg input - agg
   sql: |
@@ -514,21 +514,21 @@
     select 1 from a having exists(
       select count(b1 + min(a1)) from b
     );
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: agg input - table function
   sql: |
     /* This case is NOT valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1 + unnest(array[1])) from a;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: group by - subquery
   sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) from a group by (select true);
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: group by - agg
   sql: |
@@ -538,39 +538,39 @@
     select 1 from a having exists(
       select count(b1) from b group by min(a1)
     );
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: group by - table function
   sql: |
     /* This case is valid in PostgreSQL */
     create table a (a1 int, a2 int);
     select count(a1) from a group by unnest(array[1]);
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: post-agg project set - ok
   sql: |
     create table t (v1 int, v2 int);
     select min(v1), unnest(array[2, max(v2)]) from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: post-agg project set - error
   sql: |
     create table t (v1 int, v2 int);
     select min(v1), unnest(array[2, v2]) from t;
-  output_fields:
+  expected_outputs:
   - planner_error
 - name: post-agg project set - grouped
   sql: |
     create table t (v1 int, v2 int);
     select min(v1), unnest(array[2, v2]) from t group by v2;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: min/max on index
   sql: |
     create table t (v1 varchar, v2 int);
     create index idx on t(v2 desc);
     select max(v2) from t;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: min/max on index with group by, shall NOT optimize
@@ -578,21 +578,21 @@
     create table t (v1 int, v2 int);
     create index idx on t(v2 desc);
     select max(v2) from t group by v1;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
 - name: min/max on primary key
   sql: |
     create table t (v1 int primary key);
     select min(v1) from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
 - name: stddev_samp
   sql: |
     create table t (v1 int);
     select stddev_samp(v1), stddev_pop(v1) from t;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan
   - stream_plan
@@ -600,13 +600,13 @@
 - name: stddev_samp with other columns
   sql: |
     select count(''), stddev_samp(1);
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: stddev_samp with group
   sql: |
     create table t(v int, w float);
     select stddev_samp(v) from t group by w;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).
   sql: |
@@ -614,7 +614,7 @@
     SET RW_FORCE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 smallint, v3 varchar);
     select min(v3), sum(v1) from t group by v1, v3, v2;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
 - name: enable two phase aggregation with simple agg should have two phase agg
@@ -623,7 +623,7 @@
     SET RW_ENABLE_TWO_PHASE_AGG=true;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
 - name: disable two phase aggregation with simple agg
@@ -632,7 +632,7 @@
     SET RW_ENABLE_TWO_PHASE_AGG=false;
     create table t(v1 int, v2 int);
     select min(v1), sum(v2) from t;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - name: force two phase agg with different distributions on inner and outer agg should have exchange
@@ -662,7 +662,7 @@
         ) AS sq_1
     GROUP BY
         sq_1.col_2;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
 - name: two phase agg on hop window input should use two phase agg
@@ -684,7 +684,7 @@
     ) as CountBids
     GROUP BY
     CountBids.starttime_c;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - name: two phase agg with stream SomeShard (via index) but pk satisfies output dist should use shuffle agg
@@ -694,7 +694,7 @@
     create table t (id int primary key, col int);
     create index idx on t(col);
     with sq as (select id from idx) select count(*) from sq group by sq.id;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - name: two phase agg with stream SomeShard (via index) but pk does not satisfy output dist should use two phase agg
@@ -704,7 +704,7 @@
     create table t (id int primary key, col1 int, col2 int);
     create index idx on t(id);
     with sq as (select col1, col2 from idx) select count(*) from sq group by sq.col1;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - name: sort agg on an ascending index
@@ -713,7 +713,7 @@
     create index idx_asc on t(a asc);
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a asc;
-  output_fields:
+  expected_outputs:
   - batch_plan
 - name: sort agg on a descending index
   sql: |
@@ -721,5 +721,5 @@
     create index idx_asc on t(a asc);
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a desc;
-  output_fields:
+  expected_outputs:
   - batch_plan

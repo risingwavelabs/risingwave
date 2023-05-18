@@ -84,7 +84,7 @@
             r_name VARCHAR,
             r_comment VARCHAR
     ) WITH( connector = 'datagen' ) ROW FORMAT JSON;
-  output_fields: []
+  expected_outputs: []
 - id: tpch_q2
   before:
   - create_tables
@@ -128,7 +128,7 @@
           n_name,
           s_name,
           p_partkey;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
   - stream_dist_plan
@@ -159,7 +159,7 @@
       n_name
     order by
       revenue desc;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - batch_plan
   - stream_plan
@@ -203,7 +203,7 @@
       supp_nation,
       cust_nation,
       l_year;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - batch_plan
   - stream_plan
@@ -247,7 +247,7 @@
       o_year
     order by
       o_year;
-  output_fields:
+  expected_outputs:
   - stream_dist_plan
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -288,7 +288,7 @@
     order by
       nation,
       o_year desc;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - stream_dist_plan
@@ -330,7 +330,7 @@
       and s_nationkey = n_nationkey
     order by
       s_name;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - batch_plan
   - stream_dist_plan
@@ -377,7 +377,7 @@
     order by
       numwait desc,
       s_name;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
   - stream_dist_plan

@@ -14,13 +14,13 @@
     nexmark.split.num = '4',
     nexmark.min.event.gap.in.ns = '1000'
     );
-  output_fields: []
+  expected_outputs: []
 - id: self_join
   before:
   - create_sources
   sql: |
     select count(*) cnt from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - id: nexmark_q5
@@ -55,7 +55,7 @@
         CountBids.starttime_c
     ) AS MaxBids
     ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - logical_plan
   - batch_plan
@@ -63,13 +63,13 @@
     set rw_enable_share_plan=true;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - sql: |
     set rw_enable_share_plan=false;
     create table t(a int, b int);
     with cte as (select count(*) from t) select * from cte union all select * from cte;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - id: force_share_source_for_self_join
   before:
@@ -77,12 +77,12 @@
   sql: |
     set rw_enable_share_plan=false;
     select count(*) cnt from auction A join auction B on A.id = B.id;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - id: self_join_multiple_edges
   sql: |
     create table t (a int, b int);
     with cte as (select a, sum(b) sum from t group by a) select count(*) from cte c1 join cte c2 on c1.a = c2.a;
-  output_fields:
+  expected_outputs:
   - stream_plan
   - stream_dist_plan

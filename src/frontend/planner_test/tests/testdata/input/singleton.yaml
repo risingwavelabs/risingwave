@@ -2,13 +2,13 @@
   sql: |
     create table t (v int);
     create materialized view mv as select v from t order by v limit 10;
-  output_fields: []
+  expected_outputs: []
 - id: select_from_singleton_mv
   before:
   - create_singleton_mv
   sql: |
     select v from mv;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan
 - id: select_from_singleton_mv_join
@@ -16,7 +16,7 @@
   - create_singleton_mv
   sql: |
     select mv1.v from mv mv1, mv mv2 where mv1.v = mv2.v;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan
 - id: select_from_singleton_mv_join_top_n
@@ -24,6 +24,6 @@
   - create_singleton_mv
   sql: |
     select mv1.v from mv mv1, mv mv2 where mv1.v = mv2.v order by mv1.v limit 10;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan

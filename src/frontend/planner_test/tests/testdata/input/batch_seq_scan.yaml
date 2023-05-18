@@ -5,6 +5,6 @@
     create materialized view v as select count(*) cnt from t;
     SET QUERY_MODE TO distributed;
     select * from v cross join (select count(*) from t) T;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - batch_local_plan

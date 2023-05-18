@@ -1,104 +1,104 @@
 - sql: |
     create table t(x int);
     select lag(x) over() from t;
-  output_fields:
+  expected_outputs:
   - batch_error
   - stream_error
   - logical_plan
 - sql: |
     create table t(x int);
     select lag(x) from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select lead(x, 2) over() from t;
-  output_fields:
+  expected_outputs:
   - stream_error
   - logical_plan
   - batch_error
 - sql: |
     create table t(x int);
     select lead(x, x + 1) over() from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select 1+row_number() over(ORDER BY x) from t;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(x int);
     select sum(x) over() from t;
-  output_fields:
+  expected_outputs:
   - stream_error
   - logical_plan
   - batch_error
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 PRECEDING AND 2 FOLLOWING) from t;
-  output_fields:
+  expected_outputs:
   - batch_error
   - logical_plan
   - stream_error
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int, y int);
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_error
   - stream_error
 - sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
-  output_fields:
+  expected_outputs:
   - stream_error
   - logical_plan
   - batch_error
 - sql: |
     create table t(x int);
     select row_number() over() from t;
-  output_fields:
+  expected_outputs:
   - planner_error
 - sql: |
     create table t(x int);
     select * from t order by (row_number() over(PARTITION BY x ORDER BY x));
-  output_fields:
+  expected_outputs:
   - logical_plan
 - sql: |
     create table t(x int);
     select x from t group by (row_number(x) over());
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select x from t having (row_number(x) over() > 1);
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
-  output_fields:
+  expected_outputs:
   - binder_error
 - sql: |
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
-  output_fields:
+  expected_outputs:
   - binder_error
 - name: TopN with rank output
   sql: |
@@ -106,7 +106,7 @@
     select * from
       (select *, row_number() over(PARTITION BY x ORDER BY x) rank from t)
     where rank<3;
-  output_fields:
+  expected_outputs:
   - logical_plan
 - name: TopN without rank output
   sql: |
@@ -114,7 +114,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<3 AND x>y;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_plan
   - stream_plan
@@ -124,14 +124,14 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<=3;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<=3;
-  output_fields:
+  expected_outputs:
   - batch_plan
   - stream_plan
 - sql: |
@@ -140,7 +140,7 @@
       (select *, rank() over(PARTITION BY y ORDER BY x) rank from t)
     where rank<=3 AND rank > 1;
     -- OFFSET for RANK() is not yet supported
-  output_fields:
+  expected_outputs:
   - batch_error
   - stream_error
   - logical_plan
@@ -149,7 +149,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank>3;
-  output_fields:
+  expected_outputs:
   - stream_error
   - optimized_logical_plan_for_batch
 - sql: |
@@ -157,63 +157,63 @@
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank>=3;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank <= 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where rank BETWEEN 3 AND 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank <= 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 <= rank AND rank < 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank < 6 AND rank >= 4 AND rank < 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank = 4 AND rank <= 5;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
 - sql: |
     create table t(x int, y int);
     select x, y from
       (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
     where 3 < rank AND rank = 6 AND rank <= 5;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - batch_error
   - stream_error
@@ -246,7 +246,7 @@
       "item" VARCHAR,
       "supplier_id" VARCHAR
     );
-  output_fields: []
+  expected_outputs: []
 - before:
   - create_bid
   sql: |
@@ -262,7 +262,7 @@
         GROUP BY window_start, window_end, supplier_id
       )
     ) WHERE rownum <= 3;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - before:
   - create_bid
@@ -275,7 +275,7 @@
         FROM
           TUMBLE(Bid, bidtime, INTERVAL '10' MINUTE)
     ) WHERE rownum <= 3;
-  output_fields:
+  expected_outputs:
   - stream_plan
 - name: Deduplication
   sql: |
@@ -283,7 +283,7 @@
     select x, y from
       (select *, row_number() over(PARTITION BY x ORDER BY y) rank from t)
     where rank = 1
-  output_fields:
+  expected_outputs:
   - stream_plan
   - logical_plan
   - optimized_logical_plan_for_batch
@@ -293,7 +293,7 @@
     with cte as (SELECT x, y, z FROM (
       SELECT *, row_number() OVER (PARTITION BY x ORDER BY y) AS rank FROM t
     ) WHERE rank <= 3) select z from cte;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - stream_plan
   - optimized_logical_plan_for_batch
@@ -309,7 +309,7 @@
     select t1.x as t1x, t2.x as t2x, t1.z as t1z, t2.y as t2y, t2.z as t2z from cte t1
     inner join t t2
     on t1.x = t2.x;
-  output_fields:
+  expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
   - stream_plan
@@ -320,7 +320,7 @@
       SELECT *, row_number() over (partition by x,y order by x) as rank FROM t
     )
     WHERE rank <=1;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - stream_plan
   - logical_plan
@@ -332,6 +332,6 @@
         SELECT x, y, z, avg(z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
     )
     WHERE z > 0 and y > 0 and x > 0 and res <= 3;
-  output_fields:
+  expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
