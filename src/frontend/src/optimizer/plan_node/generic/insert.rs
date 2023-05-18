@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
 use std::hash::Hash;
 
 use educe::Educe;
-use risingwave_common::catalog::TableVersionId;
+use itertools::Itertools;
+use risingwave_common::catalog::{Schema, TableVersionId};
 
+use super::GenericPlanRef;
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -33,4 +37,76 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
     pub row_id_index: Option<usize>,
     pub returning: bool,
+}
+
+impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
+    pub fn ctx(&self) -> OptimizerContextRef {
+        self.input.ctx()
+    }
+
+    pub fn schema(&self) -> &Schema {
+        self.input.schema()
+    }
+
+    pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let verbose = self.ctx().is_explain_verbose();
+        write!(
+            f,
+            "{} {{ table: {}{}",
+            name,
+            self.table_name,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
+        )?;
+        if verbose {
+            write!(
+                f,
+                ", mapping: [{}]",
+                self.column_indices
+                    .iter()
+                    .cloned()
+                    .enumerate()
+                    .map(|(k, v)| format!("{}:{}", k, v))
+                    .join(", ")
+            )?;
+            if !self.default_columns.is_empty() {
+                write!(
+                    f,
+                    ", default: [{}]",
+                    self.default_columns
+                        .into_iter()
+                        .map(|(k, v)| format!("{}<-{:?}", k, v))
+                        .join(", ")
+                )?;
+            }
+        }
+        write!(f, " }}")
+    }
+}
+
+impl<PlanRef: Eq + Hash> Insert<PlanRef> {
+    pub fn new(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        table_version_id: TableVersionId,
+        column_indices: Vec<usize>,
+        default_columns: Vec<(usize, ExprImpl)>,
+        row_id_index: Option<usize>,
+        returning: bool,
+    ) -> Self {
+        Self {
+            table_name,
+            table_id,
+            table_version_id,
+            input,
+            column_indices,
+            default_columns,
+            row_id_index,
+            returning,
+        }
+    }
 }
