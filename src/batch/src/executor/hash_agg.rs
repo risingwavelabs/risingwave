@@ -208,7 +208,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
             PrecomputedBuildHasher::default(),
-            self.mem_context.allocator(),
+            self.mem_context.global_allocator(),
         );
 
         // consume all chunks to compute the agg result

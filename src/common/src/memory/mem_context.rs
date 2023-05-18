@@ -94,8 +94,8 @@ impl MemoryContext {
         }
     }
 
-    /// Creates a new allocator that reports memory usage to this context.
-    pub fn allocator(&self) -> MonitoredGlobalAlloc {
+    /// Creates a new global allocator that reports memory usage to this context.
+    pub fn global_allocator(&self) -> MonitoredGlobalAlloc {
         MonitoredGlobalAlloc::with_memory_context(self.clone())
     }
 }

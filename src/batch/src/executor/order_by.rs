@@ -87,14 +87,15 @@ impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        let mut chunks = Vec::new_in(self.mem_context.allocator());
+        let mut chunks = Vec::new_in(self.mem_context.global_allocator());
 
         #[for_await]
         for chunk in self.child.execute() {
             chunks.push(chunk?.compact());
         }
 
-        let mut encoded_rows = Vec::with_capacity_in(chunks.len(), self.mem_context.allocator());
+        let mut encoded_rows =
+            Vec::with_capacity_in(chunks.len(), self.mem_context.global_allocator());
 
         for chunk in &chunks {
             let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
