@@ -96,6 +96,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     }
 }
 
+#[derive(Clone, Default)]
 pub struct TableGroupInfo {
     pub group_id: CompactionGroupId,
     pub group_size: u64,
@@ -220,6 +221,9 @@ impl HummockVersionExt for HummockVersion {
     fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
         let mut infos = vec![];
         for (group_id, group) in &self.levels {
+            if group.member_table_ids.len() == 1 {
+                continue;
+            }
             let group_size = group
                 .levels
                 .iter()
