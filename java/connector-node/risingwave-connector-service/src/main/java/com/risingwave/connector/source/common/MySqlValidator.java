@@ -140,7 +140,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
 
                 var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
+                if (!srcColName.equalsIgnoreCase(field)) {
                     throw ValidatorUtils.invalidArgument(
                             String.format("column name mismatch: %s, [%s]", field, srcColName));
                 }
