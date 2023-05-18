@@ -119,3 +119,23 @@ async fn test_delta_join() -> Result<()> {
 
     Ok(())
 }
+
+#[madsim::test]
+async fn test_share_multiple_no_shuffle_upstream() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (a int, b int);").await?;
+    session
+        .run("create materialized view mv as with cte as (select a, sum(b) sum from t group by a) select count(*) from cte c1 join cte c2 on c1.a = c2.a;")
+        .await?;
+
+    let fragment = cluster
+        .locate_one_fragment([identity_contains("hashagg")])
+        .await?;
+
+    cluster.reschedule(fragment.reschedule([0], [])).await?;
+    cluster.reschedule(fragment.reschedule([], [0])).await?;
+
+    Ok(())
+}

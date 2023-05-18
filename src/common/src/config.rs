@@ -601,7 +601,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 5mi
+            180 // 3mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {

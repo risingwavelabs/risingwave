@@ -1,5 +1,5 @@
 <picture>
-<img src='./docs/images/logo-title.svg' alt='RisingWave Logo' style='visibility:visible'>
+<img src='https://github.com/risingwavelabs/risingwave/assets/100685635/00316e31-f6ca-4290-91bf-e13f70697f3d' alt='RisingWave Logo' style='visibility:visible'>
 </picture>
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
@@ -16,6 +16,9 @@ Data in RisingWave can be output to external targets such as message brokers, da
 
 Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
+![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
+
+
 ## RisingWave Cloud
 
 RisingWave Cloud is the fully managed service of RisingWave Database. It is now in Beta. Feel free to try out at: [risingwave.com/cloud](https://risingwave.com/cloud).
@@ -24,81 +27,12 @@ RisingWave Cloud is the fully managed service of RisingWave Database. It is now 
 
 RisingWave collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. These statistics are related to system resource usage, OS versions and system uptime. RisingWave doesn't have access to any user data or metadata running on RisingWave clusters including source and sink connection parameters, sources, sinks, materialized views, and tables. Users have an option to opt out of this collection using a system parameter. Please refer to the RisingWave user documentation for more details.
 
-## Quick Start
+## Get started
 
-### Installation
-
-There are two ways to install RisingWave: use a pre-built package or compile from source.
-
-**Use a Pre-built Package (Linux)**
-
-```shell
-# Download the pre-built binary
-wget https://github.com/risingwavelabs/risingwave/releases/download/v0.18.0/risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
-# Unzip the binary
-tar xvf risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
-# Start RisingWave in single-binary playground mode
-./risingwave playground
-```
-
-**Use Docker (Linux, macOS)**
-
-```shell
-# Start RisingWave in single-binary playground mode
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.18.0 playground
-```
-
-**Compile from Source (Linux and macOS)**
-
-You will need to first [set up the development environment](docs/developer-guide.md#set-up-the-development-environment). Then, you can run the following command in the project root:
-
-```shell
-# Compile and start the playground
-./risedev playground
-```
-
-You may use `./risedev configure` to configure compile settings. You can launch a RisingWave cluster and process streaming data in a distributed manner, and enable other features like metrics collection and data persistence. Please refer to the [developer guide](docs/developer-guide.md) for more information.
-
-### Your First Query
-
-To connect to the RisingWave server, you will need to [install PostgreSQL shell](docs/developer-guide.md#set-up-the-development-environment) (`psql`) in advance.
-
-```shell
-# Use psql to connect RisingWave cluster
-psql -h localhost -p 4566 -d dev -U root
-```
-
-```sql
-/* create a table */
-create table t1(v1 int);
-
-/* create a materialized view based on the previous table */
-create materialized view mv1 as select sum(v1) as sum_v1 from t1;
-
-/* insert some data into the source table */
-insert into t1 values (1), (2), (3);
-
-/* (optional) ensure the materialized view has been updated */
-flush;
-
-/* the materialized view should reflect the changes in source table */
-select * from mv1;
-```
-
-If everything works correctly, you should see
-
-```
- sum_v1
---------
-      6
-(1 row)
-```
-
-in the terminal.
-
-### Connecting to an External Source
-
-Please refer to [get started guide](https://www.risingwave.dev/docs/current/get-started/) for more information.
+- To learn about how to install and run RisingWave, see [Get started](https://www.risingwave.dev/docs/current/get-started/).
+- To learn about how to ingest data and the supported data sources, see [Sources](https://www.risingwave.dev/docs/current/data-ingestion/).
+- To learn about how to transform data using the PostgreSQL-compatible SQL of RisingWave, see [SQL reference](https://www.risingwave.dev/docs/current/sql-references/).
+- To learn about new features and changes in the current and previous versions, see [Release notes](https://www.risingwave.dev/docs/current/release-notes/).
 
 ## Documentation
 

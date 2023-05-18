@@ -433,7 +433,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
@@ -448,7 +448,7 @@
 
     Fragment 4
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -549,7 +549,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamProject { exprs: [auction, bidder, price, date_time, _row_id] }
@@ -563,7 +563,7 @@
 
     Fragment 4
     StreamProject { exprs: [(TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, price, _row_id] }
-    └──  StreamExchange Hash([4]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ auction, bidder, price, date_time, _row_id ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
@@ -706,10 +706,11 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, auction, bidder, price, date_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
-              └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+                └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[price DESC, date_time ASC]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalJoin { type: Inner, on: (id = auction) AND (date_time >= date_time) AND (date_time <= expires), output: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time] }
@@ -1116,7 +1117,8 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
@@ -1171,7 +1173,8 @@
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, rank] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[date_time DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
@@ -1229,7 +1232,8 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:
   - create_sources
@@ -1508,7 +1512,7 @@
 
     Fragment 2
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 3
+    └──  StreamExchange NoShuffle from 3
 
     Fragment 3
     StreamProject { exprs: [auction, _row_id] }
@@ -1526,7 +1530,7 @@
 
     Fragment 6
     StreamNoOp
-    └──  StreamExchange Hash([1]) from 3
+    └──  StreamExchange NoShuffle from 3
 
     Table 0 { columns: [ id, item_name, count(auction) ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
