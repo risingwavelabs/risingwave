@@ -6089,6 +6089,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools",
+ "lazy_static",
  "madsim-tokio",
  "md5",
  "num-traits",
