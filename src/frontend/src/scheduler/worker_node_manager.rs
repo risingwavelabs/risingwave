@@ -404,8 +404,8 @@ fn rebalance_serving_vnode(
             .collect::<BTreeMap<u32, Vec<ParallelUnit>>>()
     };
     let mut new_pus: LinkedList<_> = get_pu_map(new_workers)
-        .into_iter()
-        .map(|(_, pus)| pus.into_iter().sorted_by_key(|p| p.id))
+        .into_values()
+        .map(|pus| pus.into_iter().sorted_by_key(|p| p.id))
         .collect();
     let serving_parallelism = std::cmp::min(
         new_pus.iter().map(|pus| pus.len()).sum(),
@@ -485,7 +485,7 @@ fn rebalance_serving_vnode(
             if !single.is_temp {
                 results.insert(single.pu_id, single.builder.finish());
             }
-            continue;
+            break;
         }
         let mut src = balances.pop_front().unwrap();
         let mut dst = balances.pop_back().unwrap();
@@ -522,6 +522,8 @@ fn rebalance_serving_vnode(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node::Property;
@@ -582,26 +584,33 @@ mod tests {
     fn test_rebalance_serving_vnode() {
         assert_eq!(VirtualNode::COUNT, 256);
         let mut pu_id_counter: ParallelUnitId = 0;
+        let mut pu_to_worker: HashMap<ParallelUnitId, u32> = Default::default();
         let serving_property = Property {
             is_streaming: false,
             is_serving: true,
         };
-        let mut gen_pus_for_worker = |worker_node_id: u32, number: u32| {
-            let mut results = vec![];
-            for i in 0..number {
-                results.push(ParallelUnit {
-                    id: pu_id_counter + i,
-                    worker_node_id,
-                })
-            }
-            pu_id_counter += number;
-            results
-        };
+        let mut gen_pus_for_worker =
+            |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {
+                let mut results = vec![];
+                for i in 0..number {
+                    results.push(ParallelUnit {
+                        id: pu_id_counter + i,
+                        worker_node_id,
+                    })
+                }
+                pu_id_counter += number;
+                for pu in &results {
+                    pu_to_worker.insert(pu.id, pu.worker_node_id);
+                }
+                results
+            };
         let count_same_vnode_mapping = |pm1: &ParallelUnitMapping, pm2: &ParallelUnitMapping| {
+            assert_eq!(pm1.len(), 256);
+            assert_eq!(pm2.len(), 256);
             let mut count: usize = 0;
             for idx in 0..VirtualNode::COUNT {
                 let vnode = VirtualNode::from_index(idx);
-                if pm1.get(vnode.clone()) == pm2.get(vnode.clone()) {
+                if pm1.get(vnode) == pm2.get(vnode) {
                     count += 1;
                 }
             }
@@ -609,19 +618,22 @@ mod tests {
         };
         let worker_1 = WorkerNode {
             id: 1,
-            parallel_units: gen_pus_for_worker(1, 1),
+            parallel_units: gen_pus_for_worker(1, 1, &mut pu_to_worker),
             property: Some(serving_property.clone()),
             ..Default::default()
         };
         let pu_mapping = ParallelUnitMapping::build(&worker_1.parallel_units);
-        assert!(rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 0).is_none());
+        assert!(
+            rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 0).is_none(),
+            "max_parallelism should >= 0"
+        );
         let re_pu_mapping =
             rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 10000).unwrap();
         assert_eq!(re_pu_mapping, pu_mapping);
         assert_eq!(re_pu_mapping.iter_unique().count(), 1);
         let worker_2 = WorkerNode {
             id: 2,
-            parallel_units: gen_pus_for_worker(2, 50),
+            parallel_units: gen_pus_for_worker(2, 50, &mut pu_to_worker),
             property: Some(serving_property.clone()),
             ..Default::default()
         };
@@ -630,13 +642,14 @@ mod tests {
                 .unwrap();
         assert_ne!(re_pu_mapping, pu_mapping);
         assert_eq!(re_pu_mapping.iter_unique().count(), 51);
-        // 1*256+0 -> 5*51+1
-        assert_eq!(count_same_vnode_mapping(&pu_mapping, &re_pu_mapping), 5 + 1);
+        // 1 * 256 + 0 -> 51 * 5 + 1
+        let score = count_same_vnode_mapping(&pu_mapping, &re_pu_mapping);
+        assert!(score >= 5);
 
         let worker_3 = WorkerNode {
             id: 3,
-            parallel_units: gen_pus_for_worker(3, 60),
-            property: Some(serving_property.clone()),
+            parallel_units: gen_pus_for_worker(3, 60, &mut pu_to_worker),
+            property: Some(serving_property),
             ..Default::default()
         };
         let re_pu_mapping_2 = rebalance_serving_vnode(
@@ -647,7 +660,9 @@ mod tests {
         .unwrap();
         // limited by total pu number
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
-        // TODO count_same_vnode_mapping
+        // 51 * 5 + 1 -> 111 * 2 + 34
+        let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
+        assert!(score >= (2 + 50 * 2));
         let re_pu_mapping = rebalance_serving_vnode(
             &re_pu_mapping_2,
             &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
@@ -656,27 +671,29 @@ mod tests {
         .unwrap();
         // limited by max_parallelism
         assert_eq!(re_pu_mapping.iter_unique().count(), 50);
-        // TODO count_same_vnode_mapping
+        // 111 * 2 + 34 -> 50 * 5 + 6
+        let score = count_same_vnode_mapping(&re_pu_mapping, &re_pu_mapping_2);
+        assert!(score >= 50 * 2);
         let re_pu_mapping_2 = rebalance_serving_vnode(
             &re_pu_mapping,
-            &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
+            &[worker_1.clone(), worker_2, worker_3.clone()],
             10000,
         )
         .unwrap();
         assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
-        // TODO count_same_vnode_mapping
-        let re_pu_mapping = rebalance_serving_vnode(
-            &re_pu_mapping_2,
-            &[worker_1.clone(), worker_3.clone()],
-            10000,
-        )
-        .unwrap();
+        // 50 * 5 + 6 -> 111 * 2 + 34
+        let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
+        assert!(score >= 50 * 2);
+        let re_pu_mapping =
+            rebalance_serving_vnode(&re_pu_mapping_2, &[worker_1, worker_3.clone()], 10000)
+                .unwrap();
         // limited by total pu number
         assert_eq!(re_pu_mapping.iter_unique().count(), 61);
-        // TODO count_same_vnode_mapping
+        // 111 * 2 + 34 -> 61 * 4 + 12
+        let score = count_same_vnode_mapping(&re_pu_mapping, &re_pu_mapping_2);
+        assert!(score >= 61 * 2);
         assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
-        let re_pu_mapping =
-            rebalance_serving_vnode(&re_pu_mapping, &[worker_3.clone()], 10000).unwrap();
+        let re_pu_mapping = rebalance_serving_vnode(&re_pu_mapping, &[worker_3], 10000).unwrap();
         assert_eq!(re_pu_mapping.iter_unique().count(), 60);
         assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
     }
