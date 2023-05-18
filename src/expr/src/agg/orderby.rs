@@ -119,10 +119,8 @@ impl Aggregator for ProjectionOrderBy {
         }
         self.inner.output(builder)
     }
-}
 
-impl EstimateSize for ProjectionOrderBy {
-    fn estimated_heap_size(&self) -> usize {
-        self.inner.estimated_heap_size() + self.unordered_values_estimated_size
+    fn estimated_size(&self) -> usize {
+        self.inner.estimated_size() + self.unordered_values_estimated_size
     }
 }

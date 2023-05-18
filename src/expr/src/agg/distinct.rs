@@ -76,10 +76,8 @@ impl Aggregator for Distinct {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         self.inner.output(builder)
     }
-}
 
-impl EstimateSize for Distinct {
-    fn estimated_heap_size(&self) -> usize {
-        self.inner.estimated_heap_size() + self.exists_estimated_size
+    fn estimated_size(&self) -> usize {
+        self.inner.estimated_size() + self.exists_estimated_size
     }
 }

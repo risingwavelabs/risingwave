@@ -154,6 +154,10 @@ impl Aggregator for ApproxCountDistinct {
             _ => bail!("Unexpected builder for count(*)."),
         }
     }
+
+    fn estimated_size(&self) -> usize {
+        EstimateSize::estimated_size(self)
+    }
 }
 
 #[cfg(test)]

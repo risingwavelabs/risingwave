@@ -32,8 +32,11 @@ pub trait EstimateSize {
 
     /// The estimated total size of the current struct in bytes, including the `estimated_heap_size`
     /// and the size of `Self`.
-    fn estimated_size(&self) -> usize {
-        self.estimated_heap_size() + std::mem::size_of_val(self)
+    fn estimated_size(&self) -> usize
+    where
+        Self: Sized,
+    {
+        self.estimated_heap_size() + std::mem::size_of::<Self>()
     }
 }
 

@@ -64,4 +64,8 @@ impl Aggregator for CountStar {
         b.append(Some(res));
         Ok(())
     }
+
+    fn estimated_size(&self) -> usize {
+        EstimateSize::estimated_size(self)
+    }
 }

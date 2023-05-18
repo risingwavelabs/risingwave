@@ -416,6 +416,9 @@ impl FunctionAttr {
                         }
                         Ok(())
                     }
+                    fn estimated_size(&self) -> usize {
+                        EstimateSize::estimated_size(self)
+                    }
                 }
 
                 Ok(Box::new(Agg {
