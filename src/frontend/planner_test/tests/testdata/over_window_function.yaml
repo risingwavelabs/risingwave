@@ -356,23 +356,19 @@
   sql: |
     create table t(x int, y int, z int);
     select x, y, rank0, rank1, rank2, rank3 from
-      (select *, row_number() over(PARTITION BY x ORDER BY y) rank0, row_number() over(PARTITION BY z ORDER BY x) rank1, rank() over(PARTITION BY x ORDER BY y) rank2, rank() over(PARTITION BY y ORDER BY x) rank3 from t)
-    where rank0 = 1
+      (select *, rank() over(PARTITION BY x ORDER BY y) rank0, sum(x) over(PARTITION BY z ORDER BY y) rank1, row_number() over(PARTITION BY x ORDER BY y) rank2, rank() over(PARTITION BY y ORDER BY x) rank3 from t)
   logical_plan: |
-    LogicalProject { exprs: [t.x, t.y, row_number, row_number, rank, rank] }
-    └─LogicalFilter { predicate: (row_number = 1:Int32) }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, row_number, row_number, rank, rank] }
-        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), row_number() OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
+    LogicalProject { exprs: [t.x, t.y, rank, sum, row_number, rank] }
+    └─LogicalProject { exprs: [t.x, t.y, t.z, rank, sum, row_number, rank] }
+      └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+        └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalProject { exprs: [t.x, t.y, row_number, row_number, rank, rank] }
-    └─LogicalFilter { predicate: (row_number = 1:Int32) }
-      └─LogicalProject { exprs: [t.x, t.y, t.z, row_number, row_number, rank, rank] }
-        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-            └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-              └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
+    LogicalProject { exprs: [t.x, t.y, rank, sum, row_number, rank] }
+    └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+          └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
