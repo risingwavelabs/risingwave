@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
-use super::generic::{OverWindow, PlanWindowFunction};
+use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
@@ -230,8 +230,27 @@ impl LogicalOverWindow {
         Self::new(window_functions, input)
     }
 
-    pub fn split_with_rule(&self, group_rule: Vec<usize>) -> Self {
+    pub fn split_with_rule(&self, group_rule: Vec<usize>) -> PlanRef {
         assert!(group_rule.len() == self.window_functions().len());
+
+        let mut output_proj_builder = ProjectBuilder::default();
+        group_rule
+            .iter()
+            .enumerate()
+            .map(|(idx, &group_id)| (group_id, idx))
+            .sorted()
+            .enumerate()
+            .map(|(input_idx, (_, output_idx))| (output_idx, input_idx))
+            .sorted()
+            .for_each(|(output_idx, input_idx)| {
+                let _ = output_proj_builder
+                    .add_expr(
+                        &InputRef::new(input_idx, self.schema().fields()[output_idx].data_type())
+                            .into(),
+                    )
+                    .unwrap();
+            });
+
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
         group_rule.iter().unique().sorted().for_each(|group_id| {
@@ -250,7 +269,7 @@ impl LogicalOverWindow {
                 cur_input.clone(),
             );
         });
-        cur_node
+        LogicalProject::with_core(output_proj_builder.build(cur_node.into())).into()
     }
 }
 
