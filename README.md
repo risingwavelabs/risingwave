@@ -1,7 +1,9 @@
-<picture>
-  <source srcset="https://github.com/risingwavelabs/risingwave/assets/100549427/00b1c319-293a-4025-aadd-8436977075d6" width="300px" media="(prefers-color-scheme: dark)">
-  <img src="https://github.com/risingwavelabs/risingwave/assets/100549427/f4ed97a1-804c-4f5c-b548-1b82cf0e7063" width="250px">
-</picture>
+<p align="center">
+  <picture>
+    <source srcset="https://github.com/risingwavelabs/risingwave/assets/100549427/00b1c319-293a-4025-aadd-8436977075d6" width="500px" media="(prefers-color-scheme: dark)">
+    <img src="https://github.com/risingwavelabs/risingwave/assets/100549427/f4ed97a1-804c-4f5c-b548-1b82cf0e7063" width="400px">
+  </picture>
+</p>
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
 [![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/risingwavelabs/main)
