@@ -43,8 +43,8 @@ use risingwave_stream::executor::{BoxedMessageStream, Message};
 /// # or
 /// UPDATE_EXPECT=1 risedev test -p risingwave_stream
 /// ```
-pub async fn check_until_pending(executor: &mut BoxedMessageStream, expect: expect_test::Expect) {
-    let output = run_until_pending(executor).await;
+pub fn check_until_pending(executor: &mut BoxedMessageStream, expect: expect_test::Expect) {
+    let output = run_until_pending(executor);
     let output = serde_yaml::to_string(&output).unwrap();
     expect.assert_eq(&output);
 }
@@ -124,7 +124,7 @@ where
 
         snapshot.push(Snapshot {
             input: event,
-            output: run_until_pending(&mut executor).await,
+            output: run_until_pending(&mut executor),
         });
     }
     // Note: we serialize ourselves, instead of relying on insta::assert_yaml_snapshot,
@@ -134,7 +134,7 @@ where
     format!("{}{}", note, snapshot)
 }
 
-async fn run_until_pending(executor: &mut BoxedMessageStream) -> Vec<SnapshotEvent> {
+fn run_until_pending(executor: &mut BoxedMessageStream) -> Vec<SnapshotEvent> {
     let mut output = vec![];
 
     while let Some(msg) = executor.try_next().now_or_never() {
