@@ -1,5 +1,5 @@
 <picture>
-<img src='https://github.com/risingwavelabs/risingwave/assets/100685635/00316e31-f6ca-4290-91bf-e13f70697f3d' alt='RisingWave Logo' style='visibility:visible'>
+<img src='https://github.com/risingwavelabs/risingwave/assets/100549427/a475bee2-0f6d-48d2-b12e-ddc3919e9c00' width="300px" alt='RisingWave Logo' style='visibility:visible'>
 </picture>
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
