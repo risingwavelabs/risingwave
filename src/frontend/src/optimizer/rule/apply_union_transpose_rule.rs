@@ -44,6 +44,9 @@ pub struct ApplyUnionTransposeRule {}
 impl Rule for ApplyUnionTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
+        if apply.max_one_row() {
+            return None;
+        }
         let left = apply.left();
         let right = apply.right();
         let union: &LogicalUnion = right.as_logical_union()?;
