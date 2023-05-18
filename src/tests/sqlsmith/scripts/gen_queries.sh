@@ -252,7 +252,7 @@ cleanup() {
 
 ################### ENTRY POINTS
 
-main() {
+generate() {
   setup
 
   build
@@ -266,4 +266,27 @@ main() {
 
 extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
+  pushd failed > /dev/null
+  for QUERY_ID in *
+  do
+    QUERY_FILE="${QUERY_ID}/queries.sql"
+    OUTFILE="${QUERY_ID}/queries-reduced.sql"
+    if [[ $(cargo run --bin sqlsmith-reducer -- --input-file "$QUERY_FILE" --output-file "$OUTFILE") ]]; then
+      echo "[INFO] REDUCED QUERY: $QUERY_FILE. WROTE TO $OUTFILE"
+    else
+      echo "[INFO] FAILED TO REDUCE QUERY: $QUERY_FILE."
+    fi
+  done
+  popd > /dev/null
 }
+
+main() {
+  if [[ $1 == "extract" ]]; then
+    echo "[INFO] Extracting queries"
+    extract
+  else
+    generate
+  fi
+}
+
+main "$1"
