@@ -78,6 +78,6 @@ impl Aggregator for Distinct {
     }
 
     fn estimated_size(&self) -> usize {
-        self.inner.estimated_size() + self.exists_estimated_size
+        std::mem::size_of::<Self>() + self.inner.estimated_size() + self.exists_estimated_size
     }
 }

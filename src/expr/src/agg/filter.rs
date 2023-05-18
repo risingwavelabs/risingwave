@@ -92,7 +92,7 @@ impl Aggregator for Filter {
     }
 
     fn estimated_size(&self) -> usize {
-        self.inner.estimated_size()
+        std::mem::size_of::<Self>() + self.inner.estimated_size()
     }
 }
 

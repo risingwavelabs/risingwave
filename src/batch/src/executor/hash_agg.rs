@@ -368,7 +368,7 @@ mod tests {
         diff_executor_output(actual_exec, expect_exec).await;
 
         // check estimated memory usage = 4 groups x state size
-        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 32);
+        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
     }
 
     #[tokio::test]

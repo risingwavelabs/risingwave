@@ -121,6 +121,8 @@ impl Aggregator for ProjectionOrderBy {
     }
 
     fn estimated_size(&self) -> usize {
-        self.inner.estimated_size() + self.unordered_values_estimated_size
+        std::mem::size_of::<Self>()
+            + self.inner.estimated_size()
+            + self.unordered_values_estimated_size
     }
 }
