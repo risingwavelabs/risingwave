@@ -115,7 +115,6 @@ async fn test_over_window() {
 - !barrier 4
 "###,
         expect![[r#"
-            # This result can be automatically updated. See `TODO:` for more information.
             - input: !barrier 1
               output:
               - !barrier 1
@@ -198,7 +197,6 @@ async fn test_over_window_aggregate() {
     + 4 p1 102 20
 "###,
         expect![[r#"
-            # This result can be automatically updated. See `TODO:` for more information.
             - input: !barrier 1
               output:
               - !barrier 1
