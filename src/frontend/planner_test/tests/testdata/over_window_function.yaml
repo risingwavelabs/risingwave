@@ -356,7 +356,7 @@
   sql: |
     create table t(x int, y int, z int);
     select x, y, rank0, rank1, rank2, rank3 from
-      (select *, rank() over(PARTITION BY x ORDER BY y) rank0, sum(x) over(PARTITION BY z ORDER BY y) rank1, row_number() over(PARTITION BY x ORDER BY y) rank2, rank() over(PARTITION BY y ORDER BY x) rank3 from t)
+      (select *, rank() over(PARTITION BY x ORDER BY y) rank0, sum(x) over(PARTITION BY z ORDER BY y) rank1, row_number() over(PARTITION BY x ORDER BY y) rank2, rank() over(PARTITION BY y ORDER BY x) rank3 from t);
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, rank, sum, row_number, rank] }
     └─LogicalProject { exprs: [t.x, t.y, t.z, rank, sum, row_number, rank] }
