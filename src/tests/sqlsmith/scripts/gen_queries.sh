@@ -284,8 +284,32 @@ main() {
   if [[ $1 == "extract" ]]; then
     echo "[INFO] Extracting queries"
     extract
-  else
+  elif [[ $1 == "generate" ]]; then
     generate
+  else
+    echo "
+================================================================
+ Extract / Generate Sqlsmith queries
+================================================================
+ SYNOPSIS
+    ./gen_queries.sh [COMMANDS]
+
+ DESCRIPTION
+    This script can extract sqlsmith queries from failing logs.
+    It can also generate sqlsmith queries and store them in \$SNAPSHOT_DIR.
+
+ COMMANDS
+    generate                      Expects \$SNAPSHOT_DIR to be set.
+    extract                       Extracts failing query from logs.
+                                  E.g. fuzzing-66.log
+
+ EXAMPLES
+    # Generate queries
+    SNAPSHOT_DIR=~/projects/sqlsmith-query-snapshots ./gen_queries.sh generate
+
+    # Extract queries from log
+    ./gen_queries.sh extract
+"
   fi
 }
 
