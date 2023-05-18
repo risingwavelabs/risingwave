@@ -273,6 +273,7 @@ impl LogicalOverWindow {
                 .add_expr(&InputRef::new(idx, field.data_type()).into())
                 .unwrap();
         }
+        let input_len = self.input().schema().len();
         group_rule
             .iter()
             .enumerate()
@@ -285,7 +286,7 @@ impl LogicalOverWindow {
                 let _ = output_proj_builder
                     .add_expr(
                         &InputRef::new(
-                            input_idx,
+                            input_idx + input_len,
                             self.window_functions()[output_idx].return_type.clone(),
                         )
                         .into(),
@@ -302,7 +303,6 @@ impl LogicalOverWindow {
                 .filter(|(_, x)| x == &group_id)
                 .map(|(idx, _)| idx)
                 .collect_vec();
-            cur_input = cur_node.clone().into();
             cur_node = Self::new(
                 cur_group
                     .iter()
@@ -310,6 +310,7 @@ impl LogicalOverWindow {
                     .collect_vec(),
                 cur_input.clone(),
             );
+            cur_input = cur_node.clone().into();
         });
         LogicalProject::with_core(output_proj_builder.build(cur_node.into())).into()
     }

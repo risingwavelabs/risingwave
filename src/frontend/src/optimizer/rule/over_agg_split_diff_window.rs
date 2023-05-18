@@ -31,15 +31,15 @@ impl Rule for OverWindowSplitDiffWindow {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let mut hash_map = HashMap::new();
-        for (idx, (order_by, partition_by)) in over_window
+        over_window
             .window_functions()
             .iter()
             .map(|window| (&window.order_by, &window.partition_by))
             .unique()
             .enumerate()
-        {
-            let _ = hash_map.insert((order_by.clone(), partition_by.clone()), idx)?;
-        }
+            .for_each(|(idx, (order_by, partition_by))| {
+                hash_map.insert((order_by.clone(), partition_by.clone()), idx);
+            });
         let group_rule = over_window
             .window_functions()
             .iter()
