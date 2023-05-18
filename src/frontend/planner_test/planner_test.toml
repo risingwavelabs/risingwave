@@ -8,6 +8,14 @@ set -e
 
 UPDATE_EXPECT=1 cargo nextest run -p risingwave_planner_test --retries 0
 
+# If there is a file in /output, but no corresponding one in /input, remove it
+for f in $(find src/frontend/planner_test/tests/testdata/output -type f); do
+    if [ ! -f "src/frontend/planner_test/tests/testdata/input/$(basename $f)" ]; then
+        echo "Removing $(tput setaf 4)$f$(tput sgr0), because there is no corresponding input file."
+        rm $f
+    fi
+done
+
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 echo "Tip: use the alias $(tput setaf 4)./risedev dapt$(tput sgr0)."
 '''
