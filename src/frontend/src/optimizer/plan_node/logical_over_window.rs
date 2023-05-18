@@ -272,7 +272,7 @@ impl LogicalOverWindow {
             .all(|&idx| idx < self.window_functions().len()));
 
         let input_len = self.input().schema().len();
-        let mut out_fields = (0..input_len).collect_vec();
+        let mut out_fields = (0..input_len + self.window_functions().len()).collect_vec();
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
         let mut cur_win_func_pos = input_len;
@@ -282,7 +282,7 @@ impl LogicalOverWindow {
                     .iter()
                     .map(|&idx| {
                         let func = &self.window_functions()[idx];
-                        out_fields.push(cur_win_func_pos);
+                        out_fields[input_len + idx] = cur_win_func_pos;
                         cur_win_func_pos += 1;
                         func.clone()
                     })
