@@ -36,11 +36,12 @@ CREATE TABLE lineitem_rw (
    L_COMMENT VARCHAR,
    PRIMARY KEY(L_ORDERKEY, L_LINENUMBER)
 ) WITH (
-      connector = 'mysql-cdc',
-      hostname = 'mysql',
-      username = 'root',
-      password = '123456',
-      database.name = 'mydb',
-      table.name = 'lineitem',
-      server.id = '2'
+    connector = 'mysql-cdc',
+    hostname = 'mysql',
+    port = '3306',
+    username = 'root',
+    password = '123456',
+    database.name = 'mydb',
+    table.name = 'lineitem',
+    server.id = '2'
 );
