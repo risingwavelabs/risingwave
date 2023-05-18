@@ -1,0 +1,7 @@
+- sql: select 1 # WOW! I can write YAML comments!
+  expected_outputs:
+    - batch_plan # HAHA!
+    # If add this, and remove stream_error, there should be an error: unexpected ...
+    # - stream_plan 
+    - stream_error
+    # - batch_error # this should be an error: expected ..., but

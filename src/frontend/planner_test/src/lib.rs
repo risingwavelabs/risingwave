@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub enum OutputField {
+pub enum TestType {
     /// The result of an `EXPLAIN` statement.
     ///
     /// This field is used when `sql` is an `EXPLAIN` statement.
@@ -122,7 +122,7 @@ pub struct TestCase {
     pub with_config_map: Option<BTreeMap<String, String>>,
 
     /// Specify what output fields to check
-    pub expected_outputs: HashSet<OutputField>,
+    pub expected_outputs: HashSet<TestType>,
 }
 
 impl TestCase {
@@ -542,7 +542,7 @@ impl TestCase {
 
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
-                if self.expected_outputs.contains(&OutputField::LogicalPlan) {
+                if self.expected_outputs.contains(&TestType::LogicalPlan) {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
@@ -555,8 +555,8 @@ impl TestCase {
 
         if self
             .expected_outputs
-            .contains(&OutputField::OptimizedLogicalPlanForBatch)
-            || self.expected_outputs.contains(&OutputField::OptimizerError)
+            .contains(&TestType::OptimizedLogicalPlanForBatch)
+            || self.expected_outputs.contains(&TestType::OptimizerError)
         {
             let optimized_logical_plan_for_batch =
                 match logical_plan.gen_optimized_logical_plan_for_batch() {
@@ -570,7 +570,7 @@ impl TestCase {
             // Only generate optimized_logical_plan_for_batch if it is specified in test case
             if self
                 .expected_outputs
-                .contains(&OutputField::OptimizedLogicalPlanForBatch)
+                .contains(&TestType::OptimizedLogicalPlanForBatch)
             {
                 ret.optimized_logical_plan_for_batch =
                     Some(explain_plan(&optimized_logical_plan_for_batch));
@@ -579,8 +579,8 @@ impl TestCase {
 
         if self
             .expected_outputs
-            .contains(&OutputField::OptimizedLogicalPlanForStream)
-            || self.expected_outputs.contains(&OutputField::OptimizerError)
+            .contains(&TestType::OptimizedLogicalPlanForStream)
+            || self.expected_outputs.contains(&TestType::OptimizerError)
         {
             let optimized_logical_plan_for_stream =
                 match logical_plan.gen_optimized_logical_plan_for_stream() {
@@ -594,7 +594,7 @@ impl TestCase {
             // Only generate optimized_logical_plan_for_stream if it is specified in test case
             if self
                 .expected_outputs
-                .contains(&OutputField::OptimizedLogicalPlanForStream)
+                .contains(&TestType::OptimizedLogicalPlanForStream)
             {
                 ret.optimized_logical_plan_for_stream =
                     Some(explain_plan(&optimized_logical_plan_for_stream));
@@ -605,9 +605,9 @@ impl TestCase {
             // if self.batch_plan.is_some()
             //     || self.batch_plan_proto.is_some()
             //     || self.batch_error.is_some()
-            if self.expected_outputs.contains(&OutputField::BatchPlan)
-                || self.expected_outputs.contains(&OutputField::BatchPlanProto)
-                || self.expected_outputs.contains(&OutputField::BatchError)
+            if self.expected_outputs.contains(&TestType::BatchPlan)
+                || self.expected_outputs.contains(&TestType::BatchPlanProto)
+                || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
@@ -624,12 +624,12 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.expected_outputs.contains(&OutputField::BatchPlan) {
+                if self.expected_outputs.contains(&TestType::BatchPlan) {
                     ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
 
                 // Only generate batch_plan_proto if it is specified in test case
-                if self.expected_outputs.contains(&OutputField::BatchPlanProto) {
+                if self.expected_outputs.contains(&TestType::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
                         &batch_plan.to_batch_prost_identity(false),
                     )?);
@@ -638,8 +638,8 @@ impl TestCase {
         }
 
         'local_batch: {
-            if self.expected_outputs.contains(&OutputField::BatchLocalPlan)
-                || self.expected_outputs.contains(&OutputField::BatchError)
+            if self.expected_outputs.contains(&TestType::BatchLocalPlan)
+                || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
@@ -656,7 +656,7 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.expected_outputs.contains(&OutputField::BatchLocalPlan) {
+                if self.expected_outputs.contains(&TestType::BatchLocalPlan) {
                     ret.batch_local_plan = Some(explain_plan(&batch_plan));
                 }
             }
@@ -675,21 +675,21 @@ impl TestCase {
             ) in [
                 (
                     EmitMode::Immediately,
-                    self.expected_outputs.contains(&OutputField::StreamPlan),
+                    self.expected_outputs.contains(&TestType::StreamPlan),
                     &mut ret.stream_plan,
-                    self.expected_outputs.contains(&OutputField::StreamDistPlan),
+                    self.expected_outputs.contains(&TestType::StreamDistPlan),
                     &mut ret.stream_dist_plan,
-                    self.expected_outputs.contains(&OutputField::StreamError),
+                    self.expected_outputs.contains(&TestType::StreamError),
                     &mut ret.stream_error,
                 ),
                 (
                     EmitMode::OnWindowClose,
-                    self.expected_outputs.contains(&OutputField::EowcStreamPlan),
+                    self.expected_outputs.contains(&TestType::EowcStreamPlan),
                     &mut ret.eowc_stream_plan,
                     self.expected_outputs
-                        .contains(&OutputField::EowcStreamDistPlan),
+                        .contains(&TestType::EowcStreamDistPlan),
                     &mut ret.eowc_stream_dist_plan,
-                    self.expected_outputs.contains(&OutputField::EowcStreamError),
+                    self.expected_outputs.contains(&TestType::EowcStreamError),
                     &mut ret.eowc_stream_error,
                 ),
             ] {
@@ -732,7 +732,7 @@ impl TestCase {
         }
 
         'sink: {
-            if self.expected_outputs.contains(&OutputField::SinkPlan) {
+            if self.expected_outputs.contains(&TestType::SinkPlan) {
                 let sink_name = "sink_test";
                 let mut options = HashMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());
@@ -763,131 +763,50 @@ fn explain_plan(plan: &PlanRef) -> String {
     plan.explain_to_string().expect("failed to explain")
 }
 
-fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
-    // TODO:
-    // check_err("binder", &expected.binder_error, &actual.binder_error)?;
-    // check_err("planner", &expected.planner_error, &actual.planner_error)?;
-    // check_err(
-    //     "optimizer",
-    //     &expected.optimizer_error,
-    //     &actual.optimizer_error,
-    // )?;
-    // check_err("batch", &expected.batch_error, &actual.batch_error)?;
-    // check_err(
-    //     "batch_local",
-    //     &expected.batch_local_error,
-    //     &actual.batch_local_error,
-    // )?;
-    // check_err("stream", &expected.stream_error, &actual.stream_error)?;
-    // check_err(
-    //     "eowc_stream",
-    //     &expected.eowc_stream_error,
-    //     &actual.eowc_stream_error,
-    // )?;
-    // check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
-    // check_option_plan_eq(
-    //     "optimized_logical_plan_for_batch",
-    //     &expected.optimized_logical_plan_for_batch,
-    //     &actual.optimized_logical_plan_for_batch,
-    // )?;
-    // check_option_plan_eq(
-    //     "optimized_logical_plan_for_stream",
-    //     &expected.optimized_logical_plan_for_stream,
-    //     &actual.optimized_logical_plan_for_stream,
-    // )?;
-    // check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
-    // check_option_plan_eq(
-    //     "batch_local_plan",
-    //     &expected.batch_local_plan,
-    //     &actual.batch_local_plan,
-    // )?;
-    // check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
-    // check_option_plan_eq(
-    //     "stream_dist_plan",
-    //     &expected.stream_dist_plan,
-    //     &actual.stream_dist_plan,
-    // )?;
-    // check_option_plan_eq(
-    //     "eowc_stream_plan",
-    //     &expected.eowc_stream_plan,
-    //     &actual.eowc_stream_plan,
-    // )?;
-    // check_option_plan_eq(
-    //     "eowc_stream_dist_plan",
-    //     &expected.eowc_stream_dist_plan,
-    //     &actual.eowc_stream_dist_plan,
-    // )?;
-    // check_option_plan_eq(
-    //     "batch_plan_proto",
-    //     &expected.batch_plan_proto,
-    //     &actual.batch_plan_proto,
-    // )?;
-
-    // check_option_plan_eq(
-    //     "explain_output",
-    //     &expected.explain_output,
-    //     &actual.explain_output,
-    // )?;
-    // check_option_plan_eq("sink_plan", &expected.sink_plan, &actual.sink_plan)?;
-    Ok(())
-}
-
-fn check_option_plan_eq(
-    ctx: &str,
-    expected_plan: &Option<String>,
-    actual_plan: &Option<String>,
-) -> Result<()> {
-    match (expected_plan, actual_plan) {
-        (Some(expected_plan), Some(actual_plan)) => check_plan_eq(ctx, expected_plan, actual_plan),
-        (None, None) => Ok(()),
-        (None, Some(_)) => Ok(()),
-        (Some(expected_plan), None) => Err(anyhow!(
-            "Expected {}:\n{},\nbut failure occurred or no statement executed.",
-            ctx,
-            *expected_plan
-        )),
-    }
-}
-
-fn check_plan_eq(ctx: &str, expected: &String, actual: &String) -> Result<()> {
-    if expected.trim() != actual.trim() {
-        Err(anyhow!(
-            "Expected {}:\n{}\nActual {}:\n{}",
-            ctx,
-            expected,
-            ctx,
-            actual,
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-/// Compare the error with the expected error, fail if they are mismatched.
-fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<String>) -> Result<()> {
-    match (expected_err, actual_err) {
-        (None, None) => Ok(()),
-        (None, Some(e)) => Err(anyhow!("unexpected {} error: {}", ctx, e)),
-        (Some(e), None) => Err(anyhow!(
-            "expected {} error: {}, but there's no error during execution",
-            ctx,
-            e
-        )),
-        (Some(l), Some(r)) => {
-            let expected_err = l.trim().to_string();
-            let actual_err = r.trim().to_string();
-            if expected_err == actual_err {
-                Ok(())
-            } else {
-                Err(anyhow!(
-                    "Expected {context} error: {}\n  Actual {context} error: {}",
-                    expected_err,
-                    actual_err,
-                    context = ctx
-                ))
+/// Checks that the result matches `test_case.expected_outputs`.
+///
+/// We don't check the result matches here.
+fn check_result(test_case: &TestCase, actual: &TestCaseResult) -> Result<()> {
+    macro_rules! check {
+        ($field:ident) => {
+            paste::paste! {
+                let case_contains = test_case.expected_outputs.contains(&TestType:: [< $field:camel >]  );
+                let actual_contains = &actual.$field;
+                match (case_contains, actual_contains) {
+                    (false, None) | (true, Some(_)) => {},
+                    (false, Some(e)) => return Err(anyhow!("unexpected {}: {}", stringify!($field), e)),
+                    (true, None) => return Err(anyhow!(
+                        "expected {}, but there's no such result during execution",
+                        stringify!($field)
+                    )),
+                }
             }
-        }
+        };
     }
+
+    check!(binder_error);
+    check!(planner_error);
+    check!(optimizer_error);
+    check!(batch_error);
+    check!(batch_local_error);
+    check!(stream_error);
+    check!(eowc_stream_error);
+
+    check!(logical_plan);
+    check!(optimized_logical_plan_for_batch);
+    check!(optimized_logical_plan_for_stream);
+    check!(batch_plan);
+    check!(batch_local_plan);
+    check!(stream_plan);
+    check!(stream_dist_plan);
+    check!(eowc_stream_plan);
+    check!(eowc_stream_dist_plan);
+    check!(batch_plan_proto);
+    check!(sink_plan);
+
+    check!(explain_output);
+
+    Ok(())
 }
 
 /// `/tests/testdata` directory.
@@ -929,7 +848,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
             }
             Err(e) => {
                 eprintln!(
-                    "Test #{i} (id: {}) failed, SQL:\n{}Error: {}",
+                    "Test #{i} (id: {}) failed, SQL:\n{}\nError: {}",
                     c.id().clone().unwrap_or_else(|| "<none>".to_string()),
                     c.sql(),
                     e
@@ -939,7 +858,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
         }
     }
 
-    let output_path = test_data_dir().join("output").join(&file_name);
+    let output_path = test_data_dir().join("output").join(file_name);
     check(outputs, expect_test::expect_file![output_path]);
 
     if failed_num > 0 {

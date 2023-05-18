@@ -37,8 +37,8 @@ fn main() {
             continue;
         }
 
-        if (path.extension() == Some(OsStr::new("yml"))
-            || path.extension() == Some(OsStr::new("yaml")))
+        if path.extension() == Some(OsStr::new("yml"))
+            || path.extension() == Some(OsStr::new("yaml"))
         {
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
             let test_case_name = file_name.split('.').next().unwrap().to_string();
