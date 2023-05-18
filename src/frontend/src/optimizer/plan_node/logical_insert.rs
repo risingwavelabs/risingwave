@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
