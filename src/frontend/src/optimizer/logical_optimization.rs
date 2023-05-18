@@ -152,6 +152,7 @@ lazy_static! {
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
+            ApplyUnionTransposeRule::create(),
             ApplyShareEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
