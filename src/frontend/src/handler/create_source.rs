@@ -423,12 +423,20 @@ pub(crate) async fn resolve_source_schema(
             }
         }
 
-        SourceSchema::Csv(csv_info) => StreamSourceInfo {
-            row_format: RowFormatType::Csv as i32,
-            csv_delimiter: csv_info.delimiter as i32,
-            csv_has_header: csv_info.has_header,
-            ..Default::default()
-        },
+        SourceSchema::Csv(csv_info) => {
+            if is_kafka && csv_info.has_header {
+                return Err(RwError::from(ProtocolError(
+                    "CSV HEADER is not supported when creating table with Kafka connector"
+                        .to_owned(),
+                )));
+            }
+            StreamSourceInfo {
+                row_format: RowFormatType::Csv as i32,
+                csv_delimiter: csv_info.delimiter as i32,
+                csv_has_header: csv_info.has_header,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::Native => StreamSourceInfo {
             row_format: RowFormatType::Native as i32,

@@ -1,10 +1,19 @@
-statement ok
+# We don't support CSV header for Kafka
+statement error CSV HEADER is not supported when creating table with Kafka connector
 create table s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
 ) row format csv DELIMITED BY ',';
+
+statement ok
+create table s0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format csv WITHOUT HEADER DELIMITED BY ',';
 
 # expect fail with invalid broker address
 statement error
