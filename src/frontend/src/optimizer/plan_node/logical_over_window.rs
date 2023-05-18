@@ -276,7 +276,7 @@ impl LogicalOverWindow {
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
         let mut cur_win_func_pos = input_len;
-        for func_indices in groups.iter() {
+        for func_indices in &groups {
             cur_node = Self::new(
                 func_indices
                     .iter()
