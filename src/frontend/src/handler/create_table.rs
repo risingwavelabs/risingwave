@@ -589,7 +589,7 @@ fn gen_table_plan_inner(
         false,
         true,
         context.clone(),
-    )
+    )?
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
