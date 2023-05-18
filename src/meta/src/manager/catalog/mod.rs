@@ -920,6 +920,7 @@ where
         &self,
         index_id: IndexId,
         index_table_id: TableId,
+        internal_table_ids: Vec<TableId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -946,11 +947,23 @@ where
                     table.name, ref_count
                 ))),
                 None => {
+                    let internal_tables = internal_table_ids
+                        .iter()
+                        .map(|internal_table_id| {
+                            tables
+                                .remove(*internal_table_id)
+                                .expect("internal table should exist")
+                        })
+                        .collect_vec();
+
                     let dependent_relations = table.dependent_relations.clone();
 
-                    let objects = &[Object::TableId(table.id)];
+                    let objects = iter::once(table.id)
+                        .chain(internal_table_ids)
+                        .map(Object::TableId)
+                        .collect_vec();
 
-                    let users_need_update = Self::update_user_privileges(&mut users, objects);
+                    let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
                     commit_meta!(self, tables, indexes, users)?;
 
@@ -977,7 +990,12 @@ where
                                     Relation {
                                         relation_info: RelationInfo::Index(index).into(),
                                     },
-                                ],
+                                ]
+                                .into_iter()
+                                .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                                    relation_info: RelationInfo::Table(internal_table).into(),
+                                }))
+                                .collect_vec(),
                             }),
                         )
                         .await;
@@ -1725,6 +1743,7 @@ where
 
     pub async fn finish_create_index_procedure(
         &self,
+        internal_tables: Vec<Table>,
         index: &Index,
         table: &Table,
     ) -> MetaResult<NotificationVersion> {
@@ -1747,7 +1766,9 @@ where
 
         indexes.insert(index.id, index.clone());
         tables.insert(table.id, table.clone());
-
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
+        }
         commit_meta!(self, indexes, tables)?;
 
         let version = self
@@ -1761,7 +1782,12 @@ where
                         Relation {
                             relation_info: RelationInfo::Index(index.to_owned()).into(),
                         },
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
                 }),
             )
             .await;

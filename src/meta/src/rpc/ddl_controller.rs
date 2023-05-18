@@ -314,7 +314,7 @@ where
                 let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
                 let version = self
                     .catalog_manager
-                    .drop_index(index_id, index_table_id)
+                    .drop_index(index_id, index_table_id, internal_table_ids)
                     .await?;
                 (version, vec![index_table_id.into()])
             }
@@ -503,7 +503,7 @@ where
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_index_procedure(index, table)
+                    .finish_create_index_procedure(internal_tables, index, table)
                     .await?
             }
         };
