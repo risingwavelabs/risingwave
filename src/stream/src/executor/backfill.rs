@@ -143,7 +143,10 @@ where
         let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        // If all states are "finished" for any vnode in the state table, we are done.
+        // If the internal persisted state is "finished" for this executor, we are done, no need
+        // to_create_mv
+        // FIXME(kwannoel): This is unimplemented.
+
         let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
