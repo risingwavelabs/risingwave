@@ -258,9 +258,15 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let mut expr_impl = binder.bind_expr(expr)?;
 
                     check_default_column_constraints(&expr_impl, column_catalogs)?;
+
+                    let target = column_catalogs[idx].data_type().clone();
+
+                    if expr_impl.return_type() != target {
+                        expr_impl = expr_impl.cast_assign(target)?;
+                    }
 
                     column_catalogs[idx].column_desc.generated_or_default_column =
                         Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
