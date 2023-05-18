@@ -1,3 +1,0 @@
-test:
-  runner: nextest
-  auto_review: true
