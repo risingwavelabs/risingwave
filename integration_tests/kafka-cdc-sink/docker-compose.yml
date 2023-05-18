@@ -55,23 +55,6 @@ services:
     restart: always
     container_name: postgres
 
-  postgres2:
-    image: postgres
-    environment:
-      - POSTGRES_USER=myuser
-      - POSTGRES_PASSWORD=123456
-      - POSTGRES_DB=mydb
-    ports:
-      - 5435:5432
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready --username=myuser --dbname=mydb" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    command: [ "postgres", "-c", "wal_level=logical" ]
-    restart: always
-    container_name: postgres2
-
   mysql:
     image: mysql
     ports:
@@ -138,7 +121,6 @@ services:
      - 5005:5005
     links:
      - message_queue
-     - postgres2
     environment:
      - BOOTSTRAP_SERVERS=message_queue:29092
      - GROUP_ID=1

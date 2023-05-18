@@ -4,7 +4,7 @@
         "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
         "tasks.max": "1",
         "topics": "counts",
-        "connection.url": "jdbc:postgresql://postgres2:5432/mydb?user=myuser&password=123456",
+        "connection.url": "jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456",
         "transforms": "unwrap",
         "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
         "transforms.unwrap.drop.tombstones": "false",
