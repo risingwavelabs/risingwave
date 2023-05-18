@@ -770,18 +770,9 @@ impl S3ObjectStore {
 
     #[inline(always)]
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
-        let directives = "retry";
-
-        tracing_subscriber::fmt()
-            .with_env_filter(
-                EnvFilter::builder()
-                    .with_default_directive(LevelFilter::ERROR.into())
-                    .parse_lossy(directives),
-            )
-            .init();
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
-                tracing::warn!("{:?} occurs, trying to retry S3 get_object request.", e);
+                tracing::warn!(target: "http timout retry", "{:?} occurs, trying to retry S3 get_object request.", e);
                 return true;
             }
         }
