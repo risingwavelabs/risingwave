@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::f64::consts::PI;
+
+use lazy_static::lazy_static;
 use risingwave_common::types::F64;
 use risingwave_expr_macro::function;
 
@@ -56,32 +59,73 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
-// Radians per degree, a.k.a. PI / 180
-static RADIANS_PER_DEGREE: f64 = 0.017_453_292_519_943_295;
-
 // Constants we use to get more accurate results.
+// Depend on the machine and have to be evaluated at runtime
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
-static SIND_30: f64 = 0.499_999_999_999_999_94;
-static ONE_MINUS_COSD_60: f64 = 0.499_999_999_999_999_9;
-static TAND_45: f64 = 1.0;
-static COTD_45: f64 = 1.0;
-static ASIN_0_5: f64 = 0.523_598_775_598_298_8;
-static ACOS_0_5: f64 = 1.047_197_551_196_597_6;
+fn sind_30() -> f64 {
+    lazy_static! {
+        static ref SIND_30: f64 = f64::sin(30.0 * radians_per_degree());
+    }
+    *SIND_30
+}
+
+fn one_minus_cosd_60() -> f64 {
+    lazy_static! {
+        static ref ONE_MINUS_COSD_60: f64 = 1.0 - f64::cos(60.0 * radians_per_degree());
+    }
+    *ONE_MINUS_COSD_60
+}
+
+fn tand_45() -> f64 {
+    lazy_static! {
+        static ref TAND_45: f64 = f64::tan(45.0 * radians_per_degree());
+    }
+    *TAND_45
+}
+
+fn cotd_45() -> f64 {
+    lazy_static! {
+        static ref COTD_45: f64 =
+            f64::cos(45.0 * radians_per_degree()) / f64::sin(45.0 * radians_per_degree());
+    }
+    *COTD_45
+}
+
+fn asin_0_5() -> f64 {
+    lazy_static! {
+        static ref ASIN_0_5: f64 = f64::asin(0.5);
+    }
+    *ASIN_0_5
+}
+
+fn acos_0_5() -> f64 {
+    lazy_static! {
+        static ref ACOS_0_5: f64 = f64::acos(0.5);
+    }
+    *ACOS_0_5
+}
+
+fn radians_per_degree() -> f64 {
+    lazy_static! {
+        static ref RADIANS_PER_DEGREE: f64 = PI / 180.0;
+    }
+    *RADIANS_PER_DEGREE
+}
 
 // returns the cosine of an angle that lies between 0 and 60 degrees. This will return exactly 1
 // when xi s 0, and exactly 0.5 when x is 60 degrees.
 fn cosd_0_to_60(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * RADIANS_PER_DEGREE);
-    1.0 - (one_minus_cos_x / ONE_MINUS_COSD_60) / 2.0
+    let one_minus_cos_x: f64 = 1.0 - f64::cos(x * radians_per_degree());
+    1.0 - (one_minus_cos_x / one_minus_cosd_60()) / 2.0
 }
 
 // returns the sine of an angle that lies between 0 and 30 degrees. This will return exactly 0 when
 // x is 0, and exactly 0.5 when x is 30 degrees.
 fn sind_0_to_30(x: f64) -> f64 {
     // https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c
-    let sin_x = f64::sin(x * RADIANS_PER_DEGREE);
-    (sin_x / SIND_30) / 2.0
+    let sin_x = f64::sin(x * radians_per_degree());
+    (sin_x / sind_30()) / 2.0
 }
 
 // returns the cosine of an angle in the first quadrant (0 to 90 degrees).
@@ -219,7 +263,7 @@ pub fn cotd_f64(input: F64) -> F64 {
     }
 
     let cot_arg1 = cosd_q1(arg1) / sind_q1(arg1);
-    let result = sign * (cot_arg1 / COTD_45);
+    let result = sign * (cot_arg1 / cotd_45());
 
     // On some machines we get cotd(270) = minus zero, but this isn't always
     // true. For portability, and because the user constituency for this
@@ -259,7 +303,7 @@ pub fn tand_f64(input: F64) -> F64 {
     }
 
     let tan_arg1 = sind_q1(arg1) / cosd_q1(arg1);
-    let result = sign * (tan_arg1 / TAND_45);
+    let result = sign * (tan_arg1 / tand_45());
 
     // On some machines we get tand(180) = minus zero, but this isn't always true. For portability,
     // and because the user constituency for this function probably doesn't want minus zero, force
@@ -278,11 +322,11 @@ pub fn asind_q1(x: f64) -> f64 {
     // monotonic functionover the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
-        return (asin_x / ASIN_0_5) * 30.0;
+        return (asin_x / asin_0_5()) * 30.0;
     }
 
     let acos_x = f64::acos(x);
-    90.0 - (acos_x / ACOS_0_5) * 60.0
+    90.0 - (acos_x / acos_0_5()) * 60.0
 }
 
 #[function("asind(float64) -> float64")]
@@ -320,10 +364,10 @@ fn acosd_q1(x: f64) -> f64 {
     // monotonic function over the full range.
     if x <= 0.5 {
         let asin_x = f64::asin(x);
-        return 90.0 - (asin_x / ASIN_0_5) * 30.0;
+        return 90.0 - (asin_x / asin_0_5()) * 30.0;
     }
     let acos_x = f64::acos(x);
-    (acos_x / ACOS_0_5) * 60.0
+    (acos_x / acos_0_5()) * 60.0
 }
 
 #[function("acosd(float64) -> float64")]
