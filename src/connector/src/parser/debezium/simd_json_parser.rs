@@ -645,6 +645,20 @@ mod tests {
     // postgres-specific data-type tests
     #[tokio::test]
     async fn test_date_time() {
+        // this test includes temporal types, with the schema
+        // CREATE TABLE orders (
+        //     o_key integer,
+        //     o_time_0 time(0),
+        //     o_time_6 time(6),
+        //     o_timez_0 time(0) with time zone,
+        //     o_timez_6 time(6) with time zone,
+        //     o_timestamp_0 timestamp(0),
+        //     o_timestamp_6 timestamp(6),
+        //     o_timestampz_0 timestamp(0) with time zone,
+        //     o_timestampz_6 timestamp(6) with time zone,
+        //     o_interval interval,
+        //     PRIMARY KEY (o_key)
+        // );
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"o_key"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_6"},{"type":"int64","optional":true,"name":"io.debezium.time.Timestamp","version":1,"field":"o_timestamp_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"o_timestamp_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_6"},{"type":"string","optional":true,"name":"io.debezium.time.Interval","version":1,"field":"o_interval"}],"optional":true,"name":"RW_CDC_localhost.test.orders.public.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"o_key"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_6"},{"type":"int64","optional":true,"name":"io.debezium.time.Timestamp","version":1,"field":"o_timestamp_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"o_timestamp_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_6"},{"type":"string","optional":true,"name":"io.debezium.time.Interval","version":1,"field":"o_interval"}],"optional":true,"name":"RW_CDC_localhost.test.orders.public.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_localhost.test.orders.public.orders.Envelope"},"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P0Y0M0DT1H0M0S"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684308877859,"snapshot":"last","db":"test","sequence":"[null,\"26504912\"]","schema":"public","table":"orders","txId":729,"lsn":26504912,"xmin":null},"op":"r","ts_ms":1684308878023,"transaction":null}}"#;
         let columns = get_temporal_test_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
@@ -672,8 +686,12 @@ mod tests {
         assert!(row[6].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
             "2011-11-11T11:11:11.123456".parse().unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::Interval(
-            Interval::from_year_month_day_hour_minute_usec(0, 0, 0, 1, 0, 0)
-        ))));
+        assert!(
+            row[9].eq(&Some(ScalarImpl::Interval(Interval::from_month_day_usec(
+                0,
+                0,
+                3_600_000_000
+            ))))
+        );
     }
 }

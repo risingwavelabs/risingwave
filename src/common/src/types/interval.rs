@@ -73,23 +73,6 @@ impl Interval {
         }
     }
 
-    /// Creates a new `Interval` from the given number of years, months, days, hours and
-    /// microseconds.
-    pub fn from_year_month_day_hour_minute_usec(
-        years: i32,
-        months: i32,
-        days: i32,
-        hours: i32,
-        minutes: i32,
-        usecs: i64,
-    ) -> Self {
-        Interval {
-            months: years * 12 + months,
-            days,
-            usecs: (hours as i64 * 3_600 + minutes as i64 * 60) * 1_000_000 + usecs,
-        }
-    }
-
     /// Returns the total number of whole months.
     ///
     /// Note the difference between `months` and `months_field`.

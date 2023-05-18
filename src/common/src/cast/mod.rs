@@ -191,20 +191,22 @@ pub fn str_to_interval(s: &str) -> Result<Interval> {
         .captures(s)
         .ok_or(PARSE_ERROR_STR_TO_INTERVAL.to_string())?;
     // safe to unwrap, since capture group is `Some`
-    let years = caps.get(1).unwrap().as_str().parse().unwrap();
-    let months = caps.get(2).unwrap().as_str().parse().unwrap();
+    let years: i32 = caps.get(1).unwrap().as_str().parse().unwrap();
+    let months: i32 = caps.get(2).unwrap().as_str().parse().unwrap();
     let days = caps.get(3).unwrap().as_str().parse().unwrap();
-    let hours = caps.get(4).unwrap().as_str().parse().unwrap();
-    let minutes = caps.get(5).unwrap().as_str().parse().unwrap();
+    let hours: i64 = caps.get(4).unwrap().as_str().parse().unwrap();
+    let minutes: i64 = caps.get(5).unwrap().as_str().parse().unwrap();
     // usecs = sec * 1000000, use decimal to be exact
-    let usecs = (Decimal::from_str_exact(caps.get(5).unwrap().as_str())
+    let usecs: i64 = (Decimal::from_str_exact(caps.get(5).unwrap().as_str())
         .map_err(|_| PARSE_ERROR_STR_TO_INTERVAL.to_string())?
         * Decimal::from_str_exact("1000000").unwrap())
     .to_string()
     .parse()
     .unwrap();
-    Ok(Interval::from_year_month_day_hour_minute_usec(
-        years, months, days, hours, minutes, usecs,
+    Ok(Interval::from_month_day_usec(
+        years * 12 + months,
+        days,
+        (hours * 3_600 + minutes * 60) * 1_000_000 + usecs,
     ))
 }
 

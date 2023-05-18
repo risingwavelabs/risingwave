@@ -84,20 +84,32 @@ fn do_parse_simd_json_value(
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
-        // debezium converts date to i32 for mysql and postgres
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => {
+                // debezium converts date to i32 for mysql and postgres
                 Date::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
             }
             _ => anyhow::bail!("expect date, but found {v}"),
         },
-        // debezium converts time to i64 for mysql and postgres
-        DataType::Time => match v {
-            BorrowedValue::String(s) => str_to_time(s).map_err(|e| anyhow!(e))?.into(),
-            BorrowedValue::Static(_) => Time::with_micro(ensure_i64!(v, i64))?.into(),
-            _ => anyhow::bail!("expect time, but found {v}"),
-        },
+        DataType::Time => {
+            match v {
+                BorrowedValue::String(s) => str_to_time(s).map_err(|e| anyhow!(e))?.into(),
+                BorrowedValue::Static(_) => {
+                    match format {
+                        SourceFormat::DebeziumJson => {
+                            // debezium converts time to i64 for mysql and postgres in microseconds
+                            Time::with_micro(ensure_i64!(v, i64))?.into()
+                        }
+                        _ => Time::with_milli(ensure_i64!(v, i64).try_into().map_err(|_| {
+                            anyhow!("cannot cast i64 to time, value out of range")
+                        })?)?
+                        .into(),
+                    }
+                }
+                _ => anyhow::bail!("expect time, but found {v}"),
+            }
+        }
         DataType::Timestamp => match v {
             BorrowedValue::String(s) => str_to_timestamp(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))
@@ -154,10 +166,12 @@ fn do_parse_simd_json_value(
                 return Err(anyhow!(err_msg));
             }
         }
-        DataType::Interval => {
-            let s = ensure_str!(v, "varchar");
-            ScalarImpl::Interval(str_to_interval(s).unwrap())
-        }
+        DataType::Interval => match format {
+            SourceFormat::DebeziumJson => {
+                ScalarImpl::Interval(str_to_interval(ensure_str!(v, "interval")).unwrap())
+            }
+            _ => unimplemented!(),
+        },
     };
     Ok(v)
 }
