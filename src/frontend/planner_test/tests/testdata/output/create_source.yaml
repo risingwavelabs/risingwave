@@ -1,0 +1,8 @@
+- id: create_source_without_with_clause
+  sql: |
+    create source s() row format json;
+  planner_error: 'Invalid input syntax: missing WITH clause'
+- id: create_source_without_connector
+  sql: |
+    create source s() with(a=1) row format json;
+  planner_error: 'Protocol error: missing field ''connector'''

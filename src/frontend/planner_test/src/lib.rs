@@ -20,7 +20,7 @@
 mod resolve_id;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
@@ -81,6 +81,7 @@ pub enum OutputField {
     BatchError,
     BatchLocalError,
     StreamError,
+    EowcStreamError,
 }
 
 pub fn v1_to_v2(test_case: TestCase) -> TestCaseV2 {
@@ -126,6 +127,11 @@ pub fn v1_to_v2(test_case: TestCase) -> TestCaseV2 {
     convert!(EowcStreamPlan);
     convert!(EowcStreamDistPlan);
     test_case_v2
+}
+
+pub fn check(actual: Vec<TestCase>, expect: expect_test::ExpectFile) {
+    let actual = serde_yaml::to_string(&actual).unwrap();
+    expect.assert_eq(&actual);
 }
 
 #[serde_with::skip_serializing_none]
@@ -329,17 +335,17 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn into_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
-        if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
-            return Err(anyhow!("unexpected binder error: {}", err));
-        }
-        if original_test_case.planner_error.is_none() && let Some(ref err) = self.planner_error {
-            return Err(anyhow!("unexpected planner error: {}", err));
-        }
-        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error
-        {
-            return Err(anyhow!("unexpected optimizer error: {}", err));
-        }
+    pub fn into_test_case(self, original_test_case: &TestCaseV2) -> Result<TestCase> {
+        // if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
+        //     return Err(anyhow!("unexpected binder error: {}", err));
+        // }
+        // if original_test_case.planner_error.is_none() && let Some(ref err) = self.planner_error {
+        //     return Err(anyhow!("unexpected planner error: {}", err));
+        // }
+        // if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error
+        // {
+        //     return Err(anyhow!("unexpected optimizer error: {}", err));
+        // }
 
         let case = TestCase {
             id: original_test_case.id.clone(),
@@ -374,7 +380,7 @@ impl TestCaseResult {
     }
 }
 
-impl TestCase {
+impl TestCaseV2 {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let session = {
@@ -508,7 +514,7 @@ impl TestCase {
                     );
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
-                        check_result(self, &ret)?;
+                        // check_result(self, &ret)?;
                     }
                     result = Some(ret);
                 }
@@ -543,7 +549,7 @@ impl TestCase {
                             ..Default::default()
                         };
 
-                        check_result(self, &actual_result)?;
+                        // check_result(self, &actual_result)?;
                         result = Some(actual_result);
                     }
                 }
@@ -622,7 +628,8 @@ impl TestCase {
                         ..Default::default()
                     };
                     if do_check_result {
-                        check_result(self, &ret)?;
+                        // check_result(self, &ret)?;
+                        todo!()
                     }
                     result = Some(ret);
                 }
@@ -662,7 +669,7 @@ impl TestCase {
 
         let mut logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
-                if self.logical_plan.is_some() {
+                if self.output_fields.contains(&OutputField::LogicalPlan) {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().into_subplan()));
                 }
                 logical_plan
@@ -673,7 +680,11 @@ impl TestCase {
             }
         };
 
-        if self.optimized_logical_plan_for_batch.is_some() || self.optimizer_error.is_some() {
+        if self
+            .output_fields
+            .contains(&OutputField::OptimizedLogicalPlanForBatch)
+            || self.output_fields.contains(&OutputField::OptimizerError)
+        {
             let optimized_logical_plan_for_batch =
                 match logical_plan.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
@@ -684,13 +695,20 @@ impl TestCase {
                 };
 
             // Only generate optimized_logical_plan_for_batch if it is specified in test case
-            if self.optimized_logical_plan_for_batch.is_some() {
+            if self
+                .output_fields
+                .contains(&OutputField::OptimizedLogicalPlanForBatch)
+            {
                 ret.optimized_logical_plan_for_batch =
                     Some(explain_plan(&optimized_logical_plan_for_batch));
             }
         }
 
-        if self.optimized_logical_plan_for_stream.is_some() || self.optimizer_error.is_some() {
+        if self
+            .output_fields
+            .contains(&OutputField::OptimizedLogicalPlanForStream)
+            || self.output_fields.contains(&OutputField::OptimizerError)
+        {
             let optimized_logical_plan_for_stream =
                 match logical_plan.gen_optimized_logical_plan_for_stream() {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
@@ -701,16 +719,22 @@ impl TestCase {
                 };
 
             // Only generate optimized_logical_plan_for_stream if it is specified in test case
-            if self.optimized_logical_plan_for_stream.is_some() {
+            if self
+                .output_fields
+                .contains(&OutputField::OptimizedLogicalPlanForStream)
+            {
                 ret.optimized_logical_plan_for_stream =
                     Some(explain_plan(&optimized_logical_plan_for_stream));
             }
         }
 
         'batch: {
-            if self.batch_plan.is_some()
-                || self.batch_plan_proto.is_some()
-                || self.batch_error.is_some()
+            // if self.batch_plan.is_some()
+            //     || self.batch_plan_proto.is_some()
+            //     || self.batch_error.is_some()
+            if self.output_fields.contains(&OutputField::BatchPlan)
+                || self.output_fields.contains(&OutputField::BatchPlanProto)
+                || self.output_fields.contains(&OutputField::BatchError)
             {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
@@ -727,12 +751,12 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.batch_plan.is_some() {
+                if self.output_fields.contains(&OutputField::BatchPlan) {
                     ret.batch_plan = Some(explain_plan(&batch_plan));
                 }
 
                 // Only generate batch_plan_proto if it is specified in test case
-                if self.batch_plan_proto.is_some() {
+                if self.output_fields.contains(&OutputField::BatchPlanProto) {
                     ret.batch_plan_proto = Some(serde_yaml::to_string(
                         &batch_plan.to_batch_prost_identity(false),
                     )?);
@@ -741,7 +765,9 @@ impl TestCase {
         }
 
         'local_batch: {
-            if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
+            if self.output_fields.contains(&OutputField::BatchLocalPlan)
+                || self.output_fields.contains(&OutputField::BatchError)
+            {
                 let batch_plan = match logical_plan.gen_batch_plan() {
                     Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
                         Ok(batch_plan) => batch_plan,
@@ -757,7 +783,7 @@ impl TestCase {
                 };
 
                 // Only generate batch_plan if it is specified in test case
-                if self.batch_local_plan.is_some() {
+                if self.output_fields.contains(&OutputField::BatchLocalPlan) {
                     ret.batch_local_plan = Some(explain_plan(&batch_plan));
                 }
             }
@@ -767,33 +793,34 @@ impl TestCase {
             // stream
             for (
                 emit_mode,
-                plan_str,
+                plan,
                 ret_plan_str,
-                dist_plan_str,
+                dist_plan,
                 ret_dist_plan_str,
-                error_str,
+                error,
                 ret_error_str,
             ) in [
                 (
                     EmitMode::Immediately,
-                    self.stream_plan.as_ref(),
+                    self.output_fields.contains(&OutputField::StreamPlan),
                     &mut ret.stream_plan,
-                    self.stream_dist_plan.as_ref(),
+                    self.output_fields.contains(&OutputField::StreamDistPlan),
                     &mut ret.stream_dist_plan,
-                    self.stream_error.as_ref(),
+                    self.output_fields.contains(&OutputField::StreamError),
                     &mut ret.stream_error,
                 ),
                 (
                     EmitMode::OnWindowClose,
-                    self.eowc_stream_plan.as_ref(),
+                    self.output_fields.contains(&OutputField::EowcStreamPlan),
                     &mut ret.eowc_stream_plan,
-                    self.eowc_stream_dist_plan.as_ref(),
+                    self.output_fields
+                        .contains(&OutputField::EowcStreamDistPlan),
                     &mut ret.eowc_stream_dist_plan,
-                    self.eowc_stream_error.as_ref(),
+                    self.output_fields.contains(&OutputField::EowcStreamError),
                     &mut ret.eowc_stream_error,
                 ),
             ] {
-                if plan_str.is_none() && dist_plan_str.is_none() && error_str.is_none() {
+                if !plan && !dist_plan && !error {
                     continue;
                 }
 
@@ -819,12 +846,12 @@ impl TestCase {
                 };
 
                 // Only generate stream_plan if it is specified in test case
-                if plan_str.is_some() {
+                if plan {
                     *ret_plan_str = Some(explain_plan(&stream_plan));
                 }
 
                 // Only generate stream_dist_plan if it is specified in test case
-                if dist_plan_str.is_some() {
+                if dist_plan {
                     let graph = build_graph(stream_plan);
                     *ret_dist_plan_str = Some(explain_stream_graph(&graph, false));
                 }
@@ -832,7 +859,7 @@ impl TestCase {
         }
 
         'sink: {
-            if self.sink_plan.is_some() {
+            if self.output_fields.contains(&OutputField::SinkPlan) {
                 let sink_name = "sink_test";
                 let mut options = HashMap::new();
                 options.insert("connector".to_string(), "blackhole".to_string());
@@ -989,12 +1016,19 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     }
 }
 
+/// `/tests/testdata` directory.
+pub fn test_data_dir() -> PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("testdata")
+}
+
 pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     let file_name = file_path.file_name().unwrap().to_str().unwrap();
     println!("-- running {file_name} --");
 
     let mut failed_num = 0;
-    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
+    let cases: Vec<TestCaseV2> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
                 "failed to parse yaml: {e}, at {}:{}:{}",

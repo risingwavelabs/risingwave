@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-use crate::TestCase;
+use crate::{TestCase, TestCaseV2};
 
-pub fn resolve_testcase_id(testcases: Vec<TestCase>) -> Result<Vec<TestCase>> {
+pub fn resolve_testcase_id(testcases: Vec<TestCaseV2>) -> Result<Vec<TestCaseV2>> {
     let mut testcases_with_ids = HashMap::new();
     for testcase in &testcases {
         if let Some(id) = &testcase.id {
@@ -46,7 +46,7 @@ pub fn resolve_testcase_id(testcases: Vec<TestCase>) -> Result<Vec<TestCase>> {
                 None
             };
 
-            Ok(TestCase {
+            Ok(TestCaseV2 {
                 before_statements,
                 ..testcase
             })

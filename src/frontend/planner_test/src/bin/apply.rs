@@ -20,7 +20,7 @@ use anyhow::{anyhow, Context, Result};
 use backtrace::Backtrace;
 use console::style;
 use futures::StreamExt;
-use risingwave_planner_test::{resolve_testcase_id, v1_to_v2, TestCase};
+use risingwave_planner_test::{check, resolve_testcase_id, test_data_dir, v1_to_v2, TestCase, TestCaseV2};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,8 +38,7 @@ async fn main() -> Result<()> {
         std::process::abort();
     }));
 
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let dir = Path::new(manifest_dir).join("tests").join("testdata/input");
+    let dir = test_data_dir().join("input_v2");
     println!("Using test cases from {:?}", dir);
 
     let mut futures = vec![];
@@ -55,23 +54,13 @@ async fn main() -> Result<()> {
         if (path.extension() == Some(OsStr::new("yml"))
             || path.extension() == Some(OsStr::new("yaml")))
         {
-            let target = path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .split('.')
-                .next()
-                .unwrap()
-                .to_string()
-                + ".apply.yaml";
-
             let path = path.to_path_buf();
             let filename = entry.file_name().to_os_string();
 
             futures.push(async move {
                 let func = async {
                     let file_content = tokio::fs::read_to_string(&path).await?;
-                    let cases: Vec<TestCase> = serde_yaml::from_str(&file_content)?;
+                    let cases: Vec<TestCaseV2> = serde_yaml::from_str(&file_content)?;
                     let cases = resolve_testcase_id(cases)?;
                     let mut updated_cases = vec![];
 
@@ -81,33 +70,22 @@ async fn main() -> Result<()> {
                             idx,
                             case.id.clone().unwrap_or_else(|| "<none>".to_string())
                         );
-                        // let result = case.run(false).await.context(case_desc.clone())?;
-                        // let updated_case = result.into_test_case(&case).context(case_desc)?;
-                        let updated_case = v1_to_v2(case);
+                        let result = case.run(false).await.context(case_desc.clone())?;
+                        let updated_case = result.into_test_case(&case).context(case_desc)?;
                         updated_cases.push(updated_case);
                     }
 
-                    let contents = serde_yaml::to_string(&updated_cases)?;
-
-                    tokio::fs::write(
-                        Path::new(manifest_dir)
-                            .join("tests")
-                            .join("testdata/output")
-                            .join(&target),
-                        &contents,
-                    )
-                    .await?;
-
+                    let output_path = test_data_dir().join("output").join(&filename);
+                    check(updated_cases, expect_test::expect_file![output_path]);
                     Ok::<_, anyhow::Error>(())
                 };
 
                 match func.await {
                     Ok(_) => {
                         println!(
-                            "{} {} -> {}",
+                            "{} {}",
                             style("success").green().bold(),
                             filename.to_string_lossy(),
-                            target,
                         );
                         true
                     }

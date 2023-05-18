@@ -15,7 +15,7 @@
 use std::ffi::OsStr;
 
 use libtest_mimic::{Arguments, Trial};
-use risingwave_planner_test::run_test_file;
+use risingwave_planner_test::{run_test_file, test_data_dir};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
@@ -45,9 +45,7 @@ fn main() {
             let test_case_name = file_name.split('.').next().unwrap().to_string();
 
             tests.push(Trial::test(format!("{test_case_name}_test"), move || {
-                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests")
-                    .join("testdata")
+                let path = test_data_dir()
                     .join(file_name);
 
                 let file_content = std::fs::read_to_string(&path).unwrap();

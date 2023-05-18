@@ -1,0 +1,255 @@
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select * from t1 union all select * from t2;
+  batch_plan: |
+    BatchUnion { all: true }
+    ├─BatchExchange { order: [], dist: Single }
+    | └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: "NoCheck" }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
+      | └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+      |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+          └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], stream_key: [t1._row_id, null:Serial, 0:Int32], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: "NoCheck" }
+    ├── materialized table: 4294967294
+    └── StreamUnion { all: true }
+        ├──  StreamExchange Hash([3, 4, 5]) from 1
+        └──  StreamExchange Hash([3, 4, 5]) from 2
+
+    Fragment 1
+    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Fragment 2
+    StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Table 4294967294 { columns: [ a, b, c, t1._row_id, null:Serial, 0:Int32 ], primary key: [ $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3, 4, 5 ], read pk prefix len hint: 3 }
+
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select * from t1 union select * from t2;
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+    └─LogicalUnion { all: true }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+        └─BatchUnion { all: true }
+          ├─BatchExchange { order: [], dist: Single }
+          | └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+      └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+        └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
+          └─StreamUnion { all: true }
+            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
+            | └─StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+            |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+                └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" }
+    ├── materialized table: 4294967294
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+            ├── result table: 0
+            ├── state tables: []
+            ├── distinct tables: []
+            └──  StreamExchange Hash([0, 1, 2]) from 1
+
+    Fragment 1
+    StreamUnion { all: true }
+    ├──  StreamExchange Hash([3, 4, 5]) from 2
+    └──  StreamExchange Hash([3, 4, 5]) from 3
+
+    Fragment 2
+    StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
+    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
+    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Table 0
+    ├── columns: [ t1_a, t1_b, t1_c, count ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 3 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
+
+    Table 4294967294
+    ├── columns: [ a, b, c ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
+
+- sql: |
+    create table t1 (a int, b numeric, c bigint, primary key(a));
+    create table t2 (a int, b numeric, c bigint, primary key(a));
+    select * from t1 union select * from t2;
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+    └─LogicalUnion { all: true }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+        └─BatchUnion { all: true }
+          ├─BatchExchange { order: [], dist: Single }
+          | └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: UpstreamHashShard(t1.a) }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: UpstreamHashShard(t2.a) }
+  stream_plan: |
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [t1.a, t1.b, t1.c] }
+      └─StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+        └─StreamExchange { dist: HashShard(t1.a, t1.b, t1.c) }
+          └─StreamUnion { all: true }
+            ├─StreamExchange { dist: HashShard(t1.a, 0:Int32) }
+            | └─StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
+            |   └─StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+            └─StreamExchange { dist: HashShard(t2.a, 1:Int32) }
+              └─StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
+                └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: "NoCheck" }
+    ├── materialized table: 4294967294
+    └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
+        └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
+            ├── result table: 0
+            ├── state tables: []
+            ├── distinct tables: []
+            └──  StreamExchange Hash([0, 1, 2]) from 1
+
+    Fragment 1
+    StreamUnion { all: true }
+    ├──  StreamExchange Hash([0, 3]) from 2
+    └──  StreamExchange Hash([0, 3]) from 3
+
+    Fragment 2
+    StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
+    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Fragment 3
+    StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
+    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+        ├──  Upstream
+        └──  BatchPlanNode
+
+    Table 0
+    ├── columns: [ t1_a, t1_b, t1_c, count ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 3 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
+
+    Table 4294967294
+    ├── columns: [ a, b, c ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0, 1, 2 ]
+    └── read pk prefix len hint: 3
+
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    (select * from t1 limit 1) union (select * from t2 limit 1);
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+    └─LogicalUnion { all: true }
+      ├─LogicalLimit { limit: 1, offset: 0 }
+      | └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalScan { table: t2, columns: [t2.a, t2.b, t2.c] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(t1.a, t1.b, t1.c) }
+        └─BatchUnion { all: true }
+          ├─BatchLimit { limit: 1, offset: 0 }
+          | └─BatchExchange { order: [], dist: Single }
+          |   └─BatchLimit { limit: 1, offset: 0 }
+          |     └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
+          └─BatchLimit { limit: 1, offset: 0 }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchLimit { limit: 1, offset: 0 }
+                └─BatchScan { table: t2, columns: [t2.a, t2.b, t2.c], distribution: SomeShard }
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select a from ((select * from t1 limit 1) union (select * from t2 limit 1)) T;
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { group_key: [t1.a], aggs: [] }
+    └─LogicalUnion { all: true }
+      ├─LogicalLimit { limit: 1, offset: 0 }
+      | └─LogicalScan { table: t1, columns: [t1.a] }
+      └─LogicalLimit { limit: 1, offset: 0 }
+        └─LogicalScan { table: t2, columns: [t2.a] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t1.a], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(t1.a) }
+        └─BatchUnion { all: true }
+          ├─BatchLimit { limit: 1, offset: 0 }
+          | └─BatchExchange { order: [], dist: Single }
+          |   └─BatchLimit { limit: 1, offset: 0 }
+          |     └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
+          └─BatchLimit { limit: 1, offset: 0 }
+            └─BatchExchange { order: [], dist: Single }
+              └─BatchLimit { limit: 1, offset: 0 }
+                └─BatchScan { table: t2, columns: [t2.a], distribution: SomeShard }
+- sql: |
+    select 1 union all select 1
+  optimized_logical_plan_for_batch: |
+    LogicalValues { rows: [[1:Int32], [1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  batch_plan: |
+    BatchValues { rows: [[1:Int32], [1:Int32]] }
+- sql: |
+    select 1 union all select 2 union all select 3 union all select 4 union all select 5
+  optimized_logical_plan_for_batch: |
+    LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  batch_plan: |
+    BatchValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]] }
+- sql: |
+    select 1 union select 2 union select 3 union select 4 union select 5 union select 5
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { group_key: [1:Int32], aggs: [] }
+    └─LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
+      └─BatchExchange { order: [], dist: HashShard(1:Int32) }
+        └─BatchValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]] }
