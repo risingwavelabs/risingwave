@@ -47,6 +47,9 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
       --count "$SQLSMITH_COUNT" \
       --testdata ./src/tests/sqlsmith/tests/testdata \
       2>"$LOGDIR/fuzzing.log" && rm "$LOGDIR/fuzzing.log"
+    # Sqlsmith does not write to stdout, so we need this to ensure buildkite
+    # shows the right timing.
+    echo "fuzzing complete"
 
     # Using `kill` instead of `ci-kill` avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
