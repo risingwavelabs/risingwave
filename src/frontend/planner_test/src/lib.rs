@@ -109,7 +109,7 @@ pub struct TestInput {
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct TestCaseV2 {
+pub struct TestCase {
     #[serde(flatten)]
     pub input: TestInput,
 
@@ -125,7 +125,7 @@ pub struct TestCaseV2 {
     pub output_fields: HashSet<OutputField>,
 }
 
-impl TestCaseV2 {
+impl TestCase {
     pub fn id(&self) -> &Option<String> {
         &self.input.id
     }
@@ -248,7 +248,7 @@ pub struct TestCaseResult {
     pub with_config_map: Option<BTreeMap<String, String>>,
 }
 
-impl TestCaseV2 {
+impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let session = {
@@ -763,7 +763,7 @@ fn explain_plan(plan: &PlanRef) -> String {
     plan.explain_to_string().expect("failed to explain")
 }
 
-fn check_result(expected: &TestCaseV2, actual: &TestCaseResult) -> Result<()> {
+fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
     // TODO:
     // check_err("binder", &expected.binder_error, &actual.binder_error)?;
     // check_err("planner", &expected.planner_error, &actual.planner_error)?;
@@ -902,7 +902,7 @@ pub async fn run_test_file(file_path: &Path, file_content: &str) -> Result<()> {
     println!("-- running {file_name} --");
 
     let mut failed_num = 0;
-    let cases: Vec<TestCaseV2> = serde_yaml::from_str(file_content).map_err(|e| {
+    let cases: Vec<TestCase> = serde_yaml::from_str(file_content).map_err(|e| {
         if let Some(loc) = e.location() {
             anyhow!(
                 "failed to parse yaml: {e}, at {}:{}:{}",
