@@ -170,23 +170,6 @@ mod tests {
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
 
-    // temporal type test
-    fn get_temporal_test_columns() -> Vec<SourceColumnDesc> {
-        vec![
-            SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
-            SourceColumnDesc::simple("o_time_0", DataType::Time, ColumnId::from(1)),
-            SourceColumnDesc::simple("o_time_6", DataType::Time, ColumnId::from(2)),
-            SourceColumnDesc::simple("o_timez_0", DataType::Time, ColumnId::from(3)),
-            SourceColumnDesc::simple("o_timez_6", DataType::Time, ColumnId::from(4)),
-            SourceColumnDesc::simple("o_timestamp_0", DataType::Timestamp, ColumnId::from(5)),
-            SourceColumnDesc::simple("o_timestamp_6", DataType::Timestamp, ColumnId::from(6)),
-            SourceColumnDesc::simple("o_timestampz_0", DataType::Timestamptz, ColumnId::from(7)),
-            SourceColumnDesc::simple("o_timestampz_6", DataType::Timestamptz, ColumnId::from(8)),
-            SourceColumnDesc::simple("o_interval", DataType::Interval, ColumnId::from(9)),
-            SourceColumnDesc::simple("o_date", DataType::Date, ColumnId::from(10)),
-        ]
-    }
-
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
         if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
             let mut json_string = String::new();
@@ -667,9 +650,49 @@ mod tests {
     mod test3_postgres {
         use super::*;
 
+        // schema for temporal-type test
+        fn get_temporal_test_columns() -> Vec<SourceColumnDesc> {
+            vec![
+                SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
+                SourceColumnDesc::simple("o_time_0", DataType::Time, ColumnId::from(1)),
+                SourceColumnDesc::simple("o_time_6", DataType::Time, ColumnId::from(2)),
+                SourceColumnDesc::simple("o_timez_0", DataType::Time, ColumnId::from(3)),
+                SourceColumnDesc::simple("o_timez_6", DataType::Time, ColumnId::from(4)),
+                SourceColumnDesc::simple("o_timestamp_0", DataType::Timestamp, ColumnId::from(5)),
+                SourceColumnDesc::simple("o_timestamp_6", DataType::Timestamp, ColumnId::from(6)),
+                SourceColumnDesc::simple(
+                    "o_timestampz_0",
+                    DataType::Timestamptz,
+                    ColumnId::from(7),
+                ),
+                SourceColumnDesc::simple(
+                    "o_timestampz_6",
+                    DataType::Timestamptz,
+                    ColumnId::from(8),
+                ),
+                SourceColumnDesc::simple("o_interval", DataType::Interval, ColumnId::from(9)),
+                SourceColumnDesc::simple("o_date", DataType::Date, ColumnId::from(10)),
+            ]
+        }
+
+        // schema for numeric-type test
+        fn get_numeric_test_columns() -> Vec<SourceColumnDesc> {
+            vec![
+                SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
+                SourceColumnDesc::simple("o_smallint", DataType::Int16, ColumnId::from(1)),
+                SourceColumnDesc::simple("o_integer", DataType::Int32, ColumnId::from(2)),
+                SourceColumnDesc::simple("o_bigint", DataType::Int64, ColumnId::from(3)),
+                SourceColumnDesc::simple("o_real", DataType::Float32, ColumnId::from(4)),
+                SourceColumnDesc::simple("o_double", DataType::Float64, ColumnId::from(5)),
+                SourceColumnDesc::simple("o_numeric", DataType::Decimal, ColumnId::from(6)),
+                SourceColumnDesc::simple("o_numeric_6_3", DataType::Decimal, ColumnId::from(7)),
+                SourceColumnDesc::simple("o_money", DataType::Decimal, ColumnId::from(8)),
+            ]
+        }
+
         #[tokio::test]
         async fn test_temporal_types() {
-            // this test includes temporal types, with the schema
+            // this test includes all supported temporal types, with the schema
             // CREATE TABLE orders (
             //     o_key integer,
             //     o_time_0 time(0),
@@ -722,6 +745,41 @@ mod tests {
             assert!(row[10].eq(&Some(ScalarImpl::Date(Date::new(
                 NaiveDate::from_ymd_opt(1999, 9, 9).unwrap()
             )))));
+        }
+
+        #[tokio::test]
+        async fn test_numeric_types() {
+            // this test includes all supported numeric types, with the schema
+            // CREATE TABLE orders (
+            //     o_key integer,
+            //     o_smallint smallint,
+            //     o_integer integer,
+            //     o_bigint bigint,
+            //     o_real real,
+            //     o_double double precision,
+            //     o_numeric numeric,
+            //     o_numeric_6_3 numeric(6,3),
+            //     o_money money,
+            //     PRIMARY KEY (o_key)
+            // );
+            // this test covers an insert event on the table above
+            let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_smallint":32767,"o_integer":2147483647,"o_bigint":9223372036854775807,"o_real":9.999,"o_double":9.999999,"o_numeric":123456.789,"o_numeric_6_3":123.456,"o_money":123.12},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684404343201,"snapshot":"last","db":"test","sequence":"[null,\"26519216\"]","schema":"public","table":"orders","txId":729,"lsn":26519216,"xmin":null},"op":"r","ts_ms":1684404343349,"transaction":null}}"#;
+            let columns = get_numeric_test_columns();
+            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+                .await
+                .try_into()
+                .unwrap();
+            assert_eq!(op, Op::Insert);
+            assert!(row[0].eq(&Some(ScalarImpl::Int32(0))));
+            assert!(row[1].eq(&Some(ScalarImpl::Int16(32767))));
+            assert!(row[2].eq(&Some(ScalarImpl::Int32(2147483647))));
+            assert!(row[3].eq(&Some(ScalarImpl::Int64(9223372036854775807))));
+            assert!(row[4].eq(&Some(ScalarImpl::Float32((9.999).into()))));
+            assert!(row[5].eq(&Some(ScalarImpl::Float64((9.999999).into()))));
+            assert!(row[6].eq(&Some(ScalarImpl::Decimal("123456.7890".parse().unwrap()))));
+            assert!(row[7].eq(&Some(ScalarImpl::Decimal("123.456".parse().unwrap()))));
+            assert!(row[8].eq(&Some(ScalarImpl::Decimal("123.12".parse().unwrap()))));
         }
     }
 }

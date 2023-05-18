@@ -326,4 +326,34 @@ public class PostgresSourceTest {
         Thread.sleep(1000);
         connection.close();
     }
+
+    @Ignore
+    @Test
+    public void getTestJsonNumeric() throws InterruptedException, SQLException {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query =
+                "CREATE TABLE orders (o_key integer, o_smallint smallint, o_integer integer, o_bigint bigint, o_real real, o_double double precision, o_numeric numeric, o_numeric_6_3 numeric(6,3), o_money money, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "INSERT INTO orders VALUES (0, 32767, 2147483647, 9223372036854775807, 9.999, 9.999999, 123456.7890, 123.456, 123.12)";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStreamStart(
+                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+        Thread t1 =
+                new Thread(
+                        () -> {
+                            while (eventStream.hasNext()) {
+                                List<ConnectorServiceProto.CdcMessage> messages =
+                                        eventStream.next().getEventsList();
+                                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                                    System.out.printf("%s\n", msg.getPayload());
+                                }
+                            }
+                        });
+        Thread.sleep(1000);
+        t1.start();
+        Thread.sleep(1000);
+        connection.close();
+    }
 }
