@@ -636,12 +636,12 @@
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_columns: [id, name, starttime, $expr2, seller, $expr3, $expr4], pk_conflict: "NoCheck" }
     └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all }
       ├─StreamExchange { dist: HashShard(id, $expr1, $expr2) }
-      | └─StreamAppendOnlyDedup { dedup_cols: [0, 1, 2, 3] }
+      | └─StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] }
       |   └─StreamExchange { dist: HashShard(id, name, $expr1, $expr2) }
       |     └─StreamProject { exprs: [id, name, TumbleStart(date_time, '00:00:10':Interval) as $expr1, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
       |       └─StreamRowIdGen { row_id_index: 8 }
       |         └─StreamSource { source: "person", columns: ["id", "name", "email_address", "credit_card", "city", "state", "date_time", "extra", "_row_id"] }
-      └─StreamAppendOnlyDedup { dedup_cols: [0, 1, 2] }
+      └─StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] }
         └─StreamExchange { dist: HashShard(seller, $expr3, $expr4) }
           └─StreamProject { exprs: [seller, TumbleStart(date_time, '00:00:10':Interval) as $expr3, (TumbleStart(date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr4] }
             └─StreamRowIdGen { row_id_index: 10 }
@@ -652,11 +652,11 @@
     ├── materialized table: 4294967294
     └── StreamAppendOnlyHashJoin { type: Inner, predicate: id = seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: all } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├──  StreamExchange Hash([0, 2, 3]) from 1
-        └── StreamAppendOnlyDedup { dedup_cols: [0, 1, 2] } { state table: 6 }
+        └── StreamAppendOnlyDedup { dedup_cols: [seller, $expr3, $expr4] } { state table: 6 }
             └──  StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 1
-    StreamAppendOnlyDedup { dedup_cols: [0, 1, 2, 3] } { state table: 4 }
+    StreamAppendOnlyDedup { dedup_cols: [id, name, $expr1, $expr2] } { state table: 4 }
     └──  StreamExchange Hash([0, 1, 2, 3]) from 2
 
     Fragment 2

@@ -279,7 +279,7 @@
       └─StreamProject { exprs: [p_partkey, min(ps_supplycost)] }
         └─StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] }
           └─StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] }
-            ├─StreamAppendOnlyDedup { dedup_cols: [0] }
+            ├─StreamAppendOnlyDedup { dedup_cols: [p_partkey] }
             | └─StreamExchange { dist: HashShard(p_partkey) }
             |   └─StreamProject { exprs: [p_partkey] }
             |     └─StreamShare { id = 26 }
@@ -349,7 +349,7 @@
         └── StreamProject { exprs: [p_partkey, min(ps_supplycost)] }
             └── StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] } { result table: 26, state tables: [ 25 ], distinct tables: [] }
                 └── StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] } { left table: 27, right table: 29, left degree table: 28, right degree table: 30 }
-                    ├── StreamAppendOnlyDedup { dedup_cols: [0] } { state table: 31 }
+                    ├── StreamAppendOnlyDedup { dedup_cols: [p_partkey] } { state table: 31 }
                     │   └──  StreamExchange Hash([0]) from 15
                     └──  StreamExchange Hash([0]) from 16
 

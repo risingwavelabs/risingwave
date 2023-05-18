@@ -59,6 +59,45 @@ pub fn atan2_f64(input_x: F64, input_y: F64) -> F64 {
     input_x.0.atan2(input_y.0).into()
 }
 
+#[function("sinh(float64) -> float64")]
+pub fn sinh_f64(input: F64) -> F64 {
+    f64::sinh(input.0).into()
+}
+
+#[function("cosh(float64) -> float64")]
+pub fn cosh_f64(input: F64) -> F64 {
+    f64::cosh(input.0).into()
+}
+
+#[function("tanh(float64) -> float64")]
+pub fn tanh_f64(input: F64) -> F64 {
+    f64::tanh(input.0).into()
+}
+
+#[function("coth(float64) -> float64")]
+pub fn coth_f64(input: F64) -> F64 {
+    if input.0 == 0.0 {
+        return f64::NAN.into();
+    }
+    // https://en.wikipedia.org/wiki/Hyperbolic_functions#Exponential_definitions
+    (f64::cosh(input.0) / f64::sinh(input.0)).into()
+}
+
+#[function("asinh(float64) -> float64")]
+pub fn asinh_f64(input: F64) -> F64 {
+    f64::asinh(input.0).into()
+}
+
+#[function("acosh(float64) -> float64")]
+pub fn acosh_f64(input: F64) -> F64 {
+    f64::acosh(input.0).into()
+}
+
+#[function("atanh(float64) -> float64")]
+pub fn atanh_f64(input: F64) -> F64 {
+    f64::atanh(input.0).into()
+}
+
 // Constants we use to get more accurate results.
 // Depend on the machine and have to be evaluated at runtime
 // See PSQL: https://github.com/postgres/postgres/blob/78ec02d612a9b69039ec2610740f738968fe144d/src/backend/utils/adt/float.c#L2024
@@ -419,7 +458,13 @@ mod tests {
             return;
         }
         let x = (lhs.0 - rhs.0).abs() <= precision();
-        assert!(x, "{:?} != {:?}", lhs.0, rhs.0);
+        assert!(
+            x,
+            "{:?} != {:?}. Required precision is {:?}",
+            lhs.0,
+            rhs.0,
+            precision()
+        );
     }
 
     #[test]
@@ -589,5 +634,39 @@ mod tests {
         let zero = F64::from(0);
         assert_similar(degrees_f64(zero), zero);
         assert_similar(radians_f64(zero), zero);
+    }
+
+    #[test]
+    fn test_hyperbolic_trigonometric_funcs() {
+        let two = F64::from(2);
+        let one = F64::from(1);
+        let x = F64::from(5);
+        let y = F64::from(3);
+        // https://en.wikipedia.org/wiki/Hyperbolic_functions#Sums_of_arguments
+        assert_similar(
+            sinh_f64(x + y),
+            sinh_f64(x) * cosh_f64(y) + cosh_f64(x) * sinh_f64(y),
+        );
+        assert_similar(
+            cosh_f64(x + y),
+            cosh_f64(x) * cosh_f64(y) + sinh_f64(x) * sinh_f64(y),
+        );
+        assert_similar(
+            tanh_f64(x + y),
+            (tanh_f64(x) + tanh_f64(y)) / (one + tanh_f64(x) * tanh_f64(y)),
+        );
+        // https://en.wikipedia.org/wiki/Hyperbolic_functions#Useful_relations
+        assert_similar(coth_f64(-x), -coth_f64(x));
+        assert_similar(tanh_f64(-x), -tanh_f64(x));
+        // https://en.wikipedia.org/wiki/Inverse_hyperbolic_functions#Other_identities
+        assert_similar(two * acosh_f64(x), acosh_f64(two * x.powi(2) - one)); // for x >= 1
+        assert_similar(two * asinh_f64(x), acosh_f64(two * x.powi(2) + one)); // for x >= 0
+
+        let x = x.powi(2).0;
+
+        assert_similar(
+            asinh_f64(F64::from(x.powi(2) - 1.0) / (two * x)),
+            atanh_f64(F64::from(x.powi(2) - 1.0) / F64::from(x.powi(2) + 1.0)),
+        );
     }
 }
