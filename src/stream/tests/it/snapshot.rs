@@ -36,6 +36,8 @@ use risingwave_stream::executor::{BoxedMessageStream, Message};
 /// check_until_pending(&mut executor, expect![[""]]).await;
 /// ```
 ///
+/// Alternatively, you can use `expect_file!` if the inline result doesn't look good.
+///
 /// Then just run the tests with env var `UPDATE_EXPECT=1`.
 ///
 /// ```sh
