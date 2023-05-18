@@ -6,6 +6,11 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Inline Now and ProcTime:
+
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -58,7 +63,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 10026,
+            "plan_node_id": 10029,
             "plan_node_type": "BatchValues",
             "schema": [
               {
@@ -99,6 +104,13 @@
     explain (logical, trace) select * from t1 join t2 on v1=v2;
   explain_output: |+
     Begin:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Inline Now and ProcTime:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
