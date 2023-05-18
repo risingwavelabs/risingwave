@@ -76,6 +76,10 @@ impl ArrayBuilder for JsonbArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> Self::ArrayType {
         Self::ArrayType {
             bitmap: self.bitmap.finish(),

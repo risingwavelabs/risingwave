@@ -57,7 +57,7 @@ pub use expr_visitor::ExprVisitor;
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
-pub use now::Now;
+pub use now::{InlineNowProcTime, Now};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;

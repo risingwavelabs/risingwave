@@ -414,9 +414,7 @@ impl PlanRoot {
         .into();
 
         // Add generated columns.
-        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
-        )?;
+        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
             stream_plan = StreamProject::new(logical_project).into();
@@ -592,7 +590,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table())
+            .map(|node| !node.logical().is_sys_table)
             .unwrap_or(false)
     }
 
@@ -625,7 +623,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table())
+            .map(|node| !node.logical().is_sys_table)
             .unwrap_or(false)
     }
 

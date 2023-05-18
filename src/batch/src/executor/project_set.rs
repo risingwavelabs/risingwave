@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::{for_both, Either};
+use either::Either;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Array, ArrayBuilder, DataChunk, I64ArrayBuilder};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -53,89 +54,71 @@ impl Executor for ProjectSetExecutor {
 impl ProjectSetExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let data_types = self
-            .select_list
-            .iter()
-            .map(|i| i.return_type())
-            .collect_vec();
         assert!(!self.select_list.is_empty());
 
-        #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+        // First column will be `projected_row_id`, which represents the index in the
+        // output table
+        let mut builder = DataChunkBuilder::new(
+            std::iter::once(DataType::Int64)
+                .chain(self.select_list.iter().map(|i| i.return_type()))
+                .collect(),
+            self.chunk_size,
+        );
+        // a temporary row buffer
+        let mut row = vec![None as DatumRef<'_>; builder.num_columns()];
 
-            // First column will be `projected_row_id`, which represents the index in the
-            // output table
-            let mut projected_row_id_builder = I64ArrayBuilder::new(self.chunk_size);
-            let mut builders = data_types
-                .iter()
-                .map(|ty| ty.create_array_builder(self.chunk_size))
-                .collect_vec();
+        #[for_await]
+        for input in self.child.execute() {
+            let input = input?;
 
             let mut results = Vec::with_capacity(self.select_list.len());
-
             for select_item in &self.select_list {
-                let result = select_item.eval(&data_chunk).await?;
+                let result = select_item.eval(&input).await?;
                 results.push(result);
             }
 
-            let mut lens = results
-                .iter()
-                .map(|result| for_both!(result, r=>r.len()))
-                .dedup();
-            let cardinality = lens.next().unwrap();
-            assert!(
-                lens.next().is_none(),
-                "ProjectSet has mismatched output cardinalities among select list."
-            );
-
-            // each iteration corresponds to the outputs of one input row
-            for row_idx in 0..cardinality {
-                let items = results
-                    .iter()
-                    .map(|result| match result {
-                        Either::Left(arrays) => Either::Left(arrays[row_idx].clone()),
-                        Either::Right(array) => Either::Right(array.value_at(row_idx)),
-                    })
-                    .collect_vec();
-                // The maximum length of the results of table functions will be the output length.
-                let max_tf_len = items
-                    .iter()
-                    .map(|i| i.as_ref().map_left(|arr| arr.len()).left_or(0))
-                    .max()
-                    .unwrap();
-
-                for i in 0..max_tf_len {
-                    projected_row_id_builder.append(Some(i as i64));
-                }
-
-                for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
-                    match item {
-                        Either::Left(array_ref) => {
-                            builder.append_array(&array_ref);
-                            for _ in 0..(max_tf_len - array_ref.len()) {
-                                builder.append_null();
+            // for each input row
+            for row_idx in 0..input.capacity() {
+                // for each output row
+                for projected_row_id in 0i64.. {
+                    // SAFETY:
+                    // We use `row` as a buffer and don't read elements from the previous loop.
+                    // The `transmute` is used for bypassing the borrow checker.
+                    let row: &mut [DatumRef<'_>] =
+                        unsafe { std::mem::transmute(row.as_mut_slice()) };
+                    row[0] = Some(projected_row_id.into());
+                    // if any of the set columns has a value
+                    let mut valid = false;
+                    // for each column
+                    for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
+                        *value = match item {
+                            Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
+                                valid = true;
+                                value
+                            } else {
+                                None
                             }
-                        }
-                        Either::Right(datum_ref) => {
-                            for _ in 0..max_tf_len {
-                                builder.append_datum(datum_ref);
-                            }
+                            Either::Right(array) => array.value_at(row_idx),
+                        };
+                    }
+                    if !valid {
+                        // no more output rows for the input row
+                        break;
+                    }
+                    if let Some(chunk) = builder.append_one_row(&*row) {
+                        yield chunk;
+                    }
+                    // move to the next row
+                    for item in &mut results {
+                        if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
+                            state.next().await?;
                         }
                     }
                 }
             }
-            let mut columns = Vec::with_capacity(self.select_list.len() + 1);
-            let projected_row_id = projected_row_id_builder.finish().into_ref();
-            let cardinality = projected_row_id.len();
-            columns.push(projected_row_id);
-            for builder in builders {
-                columns.push(builder.finish().into())
+            if let Some(chunk) = builder.consume_all() {
+                yield chunk;
             }
-
-            let chunk = DataChunk::new(columns, cardinality);
-
-            yield chunk;
         }
     }
 }
@@ -189,7 +172,7 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
-    use risingwave_expr::table_function::repeat_tf;
+    use risingwave_expr::table_function::repeat;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -210,11 +193,11 @@ mod tests {
         );
 
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
-        let expr2 = repeat_tf(
+        let expr2 = repeat(
             LiteralExpression::new(DataType::Int32, Some(1_i32.into())).boxed(),
             2,
         );
-        let expr3 = repeat_tf(
+        let expr3 = repeat(
             LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
             3,
         );
@@ -271,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn test_project_set_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        let tf = repeat_tf(
+        let tf = repeat(
             LiteralExpression::new(DataType::Int32, Some(2_i32.into())).boxed(),
             2,
         );

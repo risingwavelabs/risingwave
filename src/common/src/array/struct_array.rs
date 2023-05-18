@@ -23,12 +23,13 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
-use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultPartialOrd, Scalar, StructType, ToDatumRef,
+    ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -135,13 +136,17 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> StructArray {
         let children = self
             .children_array
             .into_iter()
             .map(|b| Arc::new(b.finish()))
             .collect::<Vec<ArrayRef>>();
-        StructArray::new(self.bitmap.finish(), children, self.type_.clone(), self.len)
+        StructArray::new(self.bitmap.finish(), children, self.type_)
     }
 }
 
@@ -151,17 +156,13 @@ pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayRef>,
     type_: Arc<StructType>,
-    len: usize,
 
     heap_size: usize,
 }
 
 impl StructArrayBuilder {
     pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) {
-        for _ in 0..len {
-            self.bitmap.append(true);
-        }
-        self.len += len;
+        self.bitmap.append_n(len, true);
         for (a, r) in self.children_array.iter_mut().zip_eq_fast(refs.iter()) {
             a.append_array(r);
         }
@@ -178,7 +179,7 @@ impl Array for StructArray {
     }
 
     fn len(&self) -> usize {
-        self.len
+        self.bitmap.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
@@ -214,7 +215,7 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    fn new(bitmap: Bitmap, children: Vec<ArrayRef>, type_: Arc<StructType>, len: usize) -> Self {
+    fn new(bitmap: Bitmap, children: Vec<ArrayRef>, type_: Arc<StructType>) -> Self {
         let heap_size = bitmap.estimated_heap_size()
             + children
                 .iter()
@@ -225,7 +226,6 @@ impl StructArray {
             bitmap,
             children,
             type_,
-            len,
             heap_size,
         }
     }
@@ -250,8 +250,7 @@ impl StructArray {
                 .map(DataType::from)
                 .collect(),
         ));
-        let arr = Self::new(bitmap, children, type_, cardinality);
-        Ok(arr.into())
+        Ok(Self::new(bitmap, children, type_).into())
     }
 
     pub fn children_array_types(&self) -> &[DataType] {
@@ -276,14 +275,12 @@ impl StructArray {
         children: Vec<ArrayImpl>,
         children_type: Vec<DataType>,
     ) -> StructArray {
-        let cardinality = null_bitmap.len();
         let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
         let children = children.into_iter().map(Arc::new).collect();
         Self::new(
             bitmap,
             children,
             Arc::new(StructType::unnamed(children_type)),
-            cardinality,
         )
     }
 
@@ -293,14 +290,13 @@ impl StructArray {
         children_type: Vec<DataType>,
         children_name: Vec<String>,
     ) -> StructArray {
-        let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
+        let bitmap = Bitmap::from_iter(null_bitmap.iter().cloned());
         let children = children.into_iter().map(Arc::new).collect_vec();
         let type_ = Arc::new(StructType {
             fields: children_type,
             field_names: children_name,
         });
-        Self::new(bitmap, children, type_, cardinality)
+        Self::new(bitmap, children, type_)
     }
 
     #[cfg(test)]
@@ -316,6 +312,16 @@ impl StructArray {
 impl EstimateSize for StructArray {
     fn estimated_heap_size(&self) -> usize {
         self.heap_size
+    }
+}
+
+impl From<DataChunk> for StructArray {
+    fn from(chunk: DataChunk) -> Self {
+        Self::new(
+            chunk.vis().to_bitmap(),
+            chunk.columns().to_vec(),
+            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()).into(),
+        )
     }
 }
 
@@ -422,25 +428,14 @@ impl PartialEq for StructRef<'_> {
 
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        iter_fields_ref!(*self, l, {
-            iter_fields_ref!(*other, r, {
-                if l.len() != r.len() {
+        iter_fields_ref!(*self, lhs, {
+            iter_fields_ref!(*other, rhs, {
+                if lhs.len() != rhs.len() {
                     return None;
                 }
-                Some(l.cmp_by(r, |lv, rv| cmp_struct_field(&lv, &rv)))
+                lhs.partial_cmp_by(rhs, |lv, rv| lv.default_partial_cmp(&rv))
             })
         })
-    }
-}
-
-fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
-    match (l, r) {
-        // Comparability check was performed by frontend beforehand.
-        (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
-        // Nulls are larger than everything, (1, null) > (1, 2) for example.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
     }
 }
 
@@ -583,9 +578,9 @@ mod tests {
             StructValue::new(vec![Some(1.into()), Some(1.0.into())]),
         );
         // null > 1
-        assert_eq!(
-            cmp_struct_field(&None, &Some(ScalarRefImpl::Int32(1))),
-            Ordering::Greater
+        assert_gt!(
+            StructValue::new(vec![None]),
+            StructValue::new(vec![Some(1.into())]),
         );
         // (1, null, 3) > (1, 1.0, 2)
         assert_gt!(

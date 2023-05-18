@@ -30,7 +30,6 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
-criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
@@ -43,7 +42,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["nightly"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 itertools = { version = "0.10" }
@@ -86,6 +85,7 @@ serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
+tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }
@@ -114,7 +114,6 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
-criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
 either = { version = "1" }
@@ -127,7 +126,7 @@ futures-io = { version = "0.3" }
 futures-sink = { version = "0.3" }
 futures-task = { version = "0.3", default-features = false, features = ["std"] }
 futures-util = { version = "0.3", features = ["channel", "io", "sink"] }
-hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13", features = ["nightly"] }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hyper = { version = "0.14", features = ["full"] }
 itertools = { version = "0.10" }
@@ -174,6 +173,7 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-trai
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "full", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2", default-features = false, features = ["formatting", "parsing"] }
+tinyvec = { version = "1", features = ["alloc", "grab_spare_slice", "rustc_1_55"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6", features = ["with-chrono-0_4"] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad", features = ["fs", "net"] }

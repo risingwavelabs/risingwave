@@ -6,6 +6,11 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Inline Now and ProcTime:
+
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -31,7 +36,7 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
-    Project Remove:
+    Convert Window Function:
 
     apply TrivialProjectToValuesRule 1 time(s)
 
@@ -105,6 +110,13 @@
       ├─LogicalScan { table: t1, columns: [v1, _row_id] }
       └─LogicalScan { table: t2, columns: [v2, _row_id] }
 
+    Inline Now and ProcTime:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
     Predicate Push Down:
 
     LogicalProject { exprs: [t1.v1, t2.v2] }
@@ -149,7 +161,7 @@
       ├─LogicalScan { table: t1, columns: [v1] }
       └─LogicalScan { table: t2, columns: [v2] }
 
-    Project Remove:
+    Convert Window Function:
 
     apply ProjectEliminateRule 1 time(s)
 

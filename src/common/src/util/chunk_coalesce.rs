@@ -223,6 +223,10 @@ impl DataChunkBuilder {
         self.buffered_count
     }
 
+    pub fn num_columns(&self) -> usize {
+        self.data_types.len()
+    }
+
     pub fn data_types(&self) -> Vec<DataType> {
         self.data_types.clone()
     }

@@ -289,6 +289,7 @@ where
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
+        let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -299,7 +300,9 @@ where
         );
 
         // Make sure data dir is not used by another cluster.
-        if env.cluster_first_launch() {
+        // Skip this check in e2e compaction test, which needs to start a secondary cluster with
+        // same bucket
+        if env.cluster_first_launch() && !deterministic_mode {
             write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
@@ -506,7 +509,10 @@ where
             .compaction_group_manager
             .write()
             .await
-            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .get_or_insert_compaction_group_configs(
+                &all_group_ids.collect_vec(),
+                self.env.meta_store(),
+            )
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
@@ -2162,10 +2168,8 @@ where
                         )
                     };
 
-                    let compaction_group_ids_from_version =
-                        get_compaction_group_ids(&current_version);
-                    for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = &id_to_config[compaction_group_id];
+                    for compaction_group_id in get_compaction_group_ids(&current_version) {
+                        let compaction_group_config = &id_to_config[&compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),

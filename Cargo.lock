@@ -3730,9 +3730,9 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d853845987d5f2b7ebf64789cc45b4108e2e76bab6b860d1aad1cbc39c686e76"
+checksum = "376101dbd964fc502d5902216e180f92b3d003b5cc3d2e40e044eb5470fca677"
 dependencies = [
  "bytes",
  "rust_decimal",
@@ -5589,6 +5589,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "risedev-config"
+version = "1.0.0-alpha"
+dependencies = [
+ "anyhow",
+ "clap 4.2.7",
+ "console",
+ "dialoguer",
+ "enum-iterator",
+ "fs-err",
+ "itertools",
+ "tempfile",
+]
+
+[[package]]
 name = "risingwave_backup"
 version = "1.0.0-alpha"
 dependencies = [
@@ -5633,6 +5647,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hashbrown 0.13.2",
  "hytra",
  "itertools",
  "madsim-tokio",
@@ -5811,6 +5826,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tinyvec",
  "toml 0.7.3",
  "tracing",
  "twox-hash",
@@ -6069,6 +6085,7 @@ dependencies = [
  "ctor",
  "dyn-clone",
  "either",
+ "futures-async-stream",
  "futures-util",
  "hex",
  "itertools",
@@ -6085,6 +6102,8 @@ dependencies = [
  "risingwave_udf",
  "rust_decimal",
  "serde_json",
+ "sha1",
+ "sha2",
  "static_assertions",
  "thiserror",
  "tracing",
@@ -8815,8 +8834,8 @@ name = "workspace-config"
 version = "1.0.0-alpha"
 dependencies = [
  "log",
- "madsim-rdkafka",
- "openssl",
+ "openssl-sys",
+ "sasl2-sys",
  "tracing",
  "zstd-sys",
 ]
@@ -8839,7 +8858,6 @@ dependencies = [
  "clap 4.2.7",
  "clap_builder",
  "combine",
- "criterion",
  "crossbeam-epoch",
  "crossbeam-utils",
  "either",
@@ -8899,6 +8917,7 @@ dependencies = [
  "syn 2.0.15",
  "time 0.3.21",
  "time-macros",
+ "tinyvec",
  "tokio",
  "tokio-postgres",
  "tokio-stream",

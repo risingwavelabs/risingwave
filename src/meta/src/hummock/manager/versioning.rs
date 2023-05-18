@@ -248,7 +248,8 @@ where
             guard.write_limit.clone(),
             &guard.current_version,
         );
-        let all_group_ids = get_compaction_group_ids(&guard.current_version);
+        let all_group_ids: HashSet<_> =
+            HashSet::from_iter(get_compaction_group_ids(&guard.current_version));
         new_write_limits.drain_filter(|group_id, _| !all_group_ids.contains(group_id));
         if new_write_limits == guard.write_limit {
             return false;

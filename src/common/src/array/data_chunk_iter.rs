@@ -151,17 +151,6 @@ impl PartialEq for RowRef<'_> {
 }
 impl Eq for RowRef<'_> {}
 
-impl PartialOrd for RowRef<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.iter().partial_cmp(other.iter())
-    }
-}
-impl Ord for RowRef<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.iter().cmp(other.iter())
-    }
-}
-
 impl Row for RowRef<'_> {
     type Iter<'a> = RowRefIter<'a>
     where

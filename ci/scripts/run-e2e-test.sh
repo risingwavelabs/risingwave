@@ -22,8 +22,8 @@ shift $((OPTIND -1))
 download_and_prepare_rw "$profile" common
 
 echo "--- Download artifacts"
-buildkite-agent artifact download "e2e_test/generated/*" ./
-buildkite-agent artifact download risingwave_e2e_extended_mode_test-"$profile" target/debug/
+download-and-decompress-artifact e2e_test_generated ./
+download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
@@ -76,7 +76,7 @@ cargo make ci-kill
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
-    buildkite-agent artifact download backup-restore-"$profile" target/debug/
+    download-and-decompress-artifact backup-restore-"$profile" target/debug/
     mv target/debug/backup-restore-"$profile" target/debug/backup-restore
     chmod +x ./target/debug/backup-restore
 
@@ -98,7 +98,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     cargo make clean-data
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
     cargo make ci-start ci-delete-range-test
-    buildkite-agent artifact download delete-range-test-"$profile" target/debug/
+    download-and-decompress-artifact delete-range-test-"$profile" target/debug/
     mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
     chmod +x ./target/debug/delete-range-test
 
@@ -126,7 +126,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     delta_log_cnt=0
     while [ $delta_log_cnt -le 90 ]
     do
-        delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
+        delta_log_cnt="$(./target/debug/risingwave risectl hummock list-version --verbose | grep -w '^ *id:' | grep -o '[0-9]\+' | head -n 1)"
         echo "Current version $delta_log_cnt"
         sleep 5
     done
@@ -136,7 +136,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     ./target/debug/risingwave risectl hummock disable-commit-epoch
 
     echo "--- Start to run compaction test"
-    buildkite-agent artifact download compaction-test-"$profile" target/debug/
+    download-and-decompress-artifact compaction-test-"$profile" target/debug/
     mv target/debug/compaction-test-"$profile" target/debug/compaction-test
     chmod +x ./target/debug/compaction-test
     # Use the config of ci-compaction-test for replay.
