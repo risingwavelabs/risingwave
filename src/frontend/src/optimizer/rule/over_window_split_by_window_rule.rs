@@ -19,15 +19,15 @@ use itertools::Itertools;
 use super::Rule;
 use crate::PlanRef;
 
-pub struct OverWindowSplitDiffWindow;
+pub struct OverWindowSplitByWindowRule;
 
-impl OverWindowSplitDiffWindow {
+impl OverWindowSplitByWindowRule {
     pub fn create() -> Box<dyn Rule> {
-        Box::new(OverWindowSplitDiffWindow)
+        Box::new(OverWindowSplitByWindowRule)
     }
 }
 
-impl Rule for OverWindowSplitDiffWindow {
+impl Rule for OverWindowSplitByWindowRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let mut hash_map = HashMap::new();
