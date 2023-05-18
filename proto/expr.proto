@@ -127,7 +127,6 @@ message ExprNode {
     ATANH = 266;
     SINH = 267;
 
-
     // Boolean comparison
     IS_TRUE = 301;
     IS_NOT_TRUE = 302;
