@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::mem;
+
 use super::Row;
 use crate::estimate_size::EstimateSize;
 use crate::types::{
@@ -91,9 +93,8 @@ impl OwnedRow {
 
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        let data_heap_size: usize = self.0.iter().map(|datum| datum.estimated_heap_size()).sum();
+        self.0.capacity() * mem::size_of::<Datum>() + data_heap_size
     }
 }
 

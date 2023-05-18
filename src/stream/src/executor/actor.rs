@@ -40,7 +40,7 @@ pub struct ActorContext {
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
-    streaming_metrics: Arc<StreamingMetrics>,
+    pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
 

@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 
 use futures::FutureExt;
 use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
@@ -31,6 +32,7 @@ pub(super) struct AggregateState {
     agg_call: AggCall,
     arg_data_types: Vec<DataType>,
     buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
+    buffer_heap_size: usize,
 }
 
 impl AggregateState {
@@ -59,12 +61,17 @@ impl AggregateState {
             agg_call,
             arg_data_types,
             buffer: StreamWindowBuffer::new(call.frame.clone()),
+            buffer_heap_size: 0,
         })
     }
 }
 
 impl WindowState for AggregateState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
+        let args_heap_size: usize = args.iter().map(|arg| arg.estimated_heap_size()).sum();
+        self.buffer_heap_size = self
+            .buffer_heap_size
+            .saturating_add(key.estimated_heap_size() + args_heap_size);
         self.buffer.append(key, args);
     }
 
@@ -84,7 +91,17 @@ impl WindowState for AggregateState {
         };
         let return_value =
             wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))?;
-        let removed_keys: BTreeSet<_> = self.buffer.slide().collect();
+        let removed_keys: BTreeSet<_> = self
+            .buffer
+            .slide()
+            .map(|(k, v)| {
+                self.buffer_heap_size = self.buffer_heap_size.saturating_sub(
+                    k.estimated_heap_size()
+                        + v.iter().map(|arg| arg.estimated_heap_size()).sum::<usize>(),
+                );
+                k
+            })
+            .collect();
         Ok(StateOutput {
             return_value,
             evict_hint: if removed_keys.is_empty() {
@@ -98,6 +115,14 @@ impl WindowState for AggregateState {
                 StateEvictHint::CanEvict(removed_keys)
             },
         })
+    }
+}
+
+impl EstimateSize for AggregateState {
+    fn estimated_heap_size(&self) -> usize {
+        // estimate `VecDeque` of `StreamWindowBuffer` internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.arg_data_types.estimated_heap_size() + self.buffer_heap_size
     }
 }
 

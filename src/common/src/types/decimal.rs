@@ -36,14 +36,14 @@ use crate::types::Decimal::Normalized;
     Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
 )]
 pub enum Decimal {
-    #[display("{0}")]
-    Normalized(RustDecimal),
-    #[display("NaN")]
-    NaN,
-    #[display("Infinity")]
-    PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+    #[display("{0}")]
+    Normalized(RustDecimal),
+    #[display("Infinity")]
+    PositiveInf,
+    #[display("NaN")]
+    NaN,
 }
 
 impl ToText for Decimal {
@@ -602,6 +602,7 @@ impl From<RustDecimal> for Decimal {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools as _;
 
     use super::*;
     use crate::util::iter_util::ZipEqFast;
@@ -755,6 +756,21 @@ mod tests {
         assert_eq!(i32::try_from(Decimal::from(1i32)).unwrap(), 1,);
         assert_eq!(u64::try_from(Decimal::from(1u64)).unwrap(), 1,);
         assert_eq!(i64::try_from(Decimal::from(1i64)).unwrap(), 1,);
+    }
+
+    #[test]
+    fn test_order() {
+        let ordered = ["-inf", "-1", "0.00", "0.5", "2", "10", "inf", "nan"]
+            .iter()
+            .map(|s| Decimal::from_str(s).unwrap())
+            .collect_vec();
+        for i in 1..ordered.len() {
+            assert!(ordered[i - 1] < ordered[i]);
+            assert!(
+                memcomparable::Decimal::from(ordered[i - 1])
+                    < memcomparable::Decimal::from(ordered[i])
+            );
+        }
     }
 
     #[test]

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -111,47 +110,16 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // Convert all indexes to rows
     rows.extend(indices.iter().map(|index| {
-        let index_table = index.index_table.clone();
-
-        let index_columns_with_ordering = index_table
-            .pk
-            .iter()
-            .filter(|x| !index_table.columns[x.column_index].is_hidden)
-            .map(|x| {
-                let index_column_name = index_table.columns[x.column_index].name().to_string();
-                format!("{} {}", index_column_name, x.order_type)
-            })
-            .collect_vec();
-
-        let pk_column_index_set = index_table
-            .pk
-            .iter()
-            .map(|x| x.column_index)
-            .collect::<HashSet<_>>();
-
-        let include_columns = index_table
-            .columns
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| !pk_column_index_set.contains(i))
-            .filter(|(_, x)| !x.is_hidden)
-            .map(|(_, x)| x.name().to_string())
-            .collect_vec();
-
-        let distributed_by_columns = index_table
-            .distribution_key
-            .iter()
-            .map(|&x| index_table.columns[x].name().to_string())
-            .collect_vec();
+        let index_display = index.display();
 
         Row::new(vec![
             Some(index.name.clone().into()),
-            if include_columns.is_empty() {
+            if index_display.include_columns.is_empty() {
                 Some(
                     format!(
                         "index({}) distributed by({})",
-                        display_comma_separated(&index_columns_with_ordering),
-                        display_comma_separated(&distributed_by_columns),
+                        display_comma_separated(&index_display.index_columns_with_ordering),
+                        display_comma_separated(&index_display.distributed_by_columns),
                     )
                     .into(),
                 )
@@ -159,9 +127,9 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 Some(
                     format!(
                         "index({}) include({}) distributed by({})",
-                        display_comma_separated(&index_columns_with_ordering),
-                        display_comma_separated(&include_columns),
-                        display_comma_separated(&distributed_by_columns),
+                        display_comma_separated(&index_display.index_columns_with_ordering),
+                        display_comma_separated(&index_display.include_columns),
+                        display_comma_separated(&index_display.distributed_by_columns),
                     )
                     .into(),
                 )

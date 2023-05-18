@@ -12,24 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
-mod utils;
-use utils::*;
+use risingwave_common::types::DataType;
 
-mod top_n_cache;
-mod top_n_state;
-use top_n_cache::{TopNCache, TopNCacheTrait};
-mod topn_cache_state;
-use top_n_state::ManagedTopNState;
-use topn_cache_state::CacheKey;
+use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-// `TopN` variants
-mod group_top_n;
-mod group_top_n_appendonly;
-mod top_n_appendonly;
-mod top_n_plain;
-
-pub use group_top_n::GroupTopNExecutor;
-pub use group_top_n_appendonly::AppendOnlyGroupTopNExecutor;
-pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use top_n_plain::TopNExecutor;
+/// The view `pg_indexes` provides access to useful information about each index in the database.
+/// Ref: [`https://www.postgresql.org/docs/current/view-pg-indexes.html`]
+pub const PG_INDEXES_TABLE_NAME: &str = "pg_indexes";
+pub const PG_INDEXES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
+    (DataType::Varchar, "schemaname"),
+    (DataType::Varchar, "tablename"),
+    (DataType::Varchar, "indexname"),
+    (DataType::Varchar, "tablespace"),
+    (DataType::Varchar, "indexdef"),
+];
