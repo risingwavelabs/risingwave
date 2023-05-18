@@ -266,17 +266,18 @@ generate() {
 
 extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
-  pushd failed > /dev/null
-  for QUERY_ID in *
+  for QUERY_FOLDER in failed/*
   do
-    QUERY_FILE="${QUERY_ID}/queries.sql"
-    if [[ $(cargo run --bin sqlsmith-reducer -- --input-file "$QUERY_FILE" --output-file "$QUERY_ID") -eq 0 ]]; then
-      echo "[INFO] REDUCED QUERY: $QUERY_FILE. WROTE TO DIR: failed/$QUERY_ID"
+    QUERY_FILE="$QUERY_FOLDER/queries.sql"
+    cargo build --bin sqlsmith-reducer
+    REDUCER=$RW_HOME/target/debug/sqlsmith-reducer
+    if [[ $($REDUCER --input-file "$QUERY_FILE" --output-file "$QUERY_FOLDER") -eq 0 ]]; then
+      echo "[INFO] REDUCED QUERY: $PWD/$QUERY_FILE"
+      echo "[INFO] WROTE TO DIR: $PWD/$QUERY_FOLDER"
     else
       echo "[INFO] FAILED TO REDUCE QUERY: $QUERY_FILE"
     fi
   done
-  popd > /dev/null
 }
 
 main() {
@@ -296,6 +297,11 @@ main() {
  DESCRIPTION
     This script can extract sqlsmith queries from failing logs.
     It can also generate sqlsmith queries and store them in \$SNAPSHOT_DIR.
+
+    You should be in \`risingwave/src/tests/sqlsmith/scripts\`
+    when executing this script.
+
+    (@kwannoel: Although eventually this should be integrated into risedev)
 
  COMMANDS
     generate                      Expects \$SNAPSHOT_DIR to be set.
