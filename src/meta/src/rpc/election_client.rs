@@ -146,7 +146,7 @@ impl ElectionClient for EtcdElectionClient {
             // timeout controller, when keep alive fails for more than a certain period of time
             // before it is considered a complete failure
             let keep_alive_timeout_duration = Duration::from_secs_f64(ttl as f64 / 2.0);
-            let mut timeout = time::interval(keep_alive_timeout_duration.clone());
+            let mut timeout = time::interval(keep_alive_timeout_duration);
             timeout.reset();
 
             let mut keep_alive_sending = false;
@@ -187,7 +187,7 @@ impl ElectionClient for EtcdElectionClient {
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
                                 // TODO: should we introduce retry with backoff here?
-                                match time::timeout(keep_alive_timeout_duration.clone(), lease_client.keep_alive(lease_id)).await {
+                                match time::timeout(keep_alive_timeout_duration, lease_client.keep_alive(lease_id)).await {
                                     Ok(Ok((keeper_, resp_stream_))) => {
                                         keeper = keeper_;
                                         resp_stream = resp_stream_;
