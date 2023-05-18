@@ -67,7 +67,6 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
                 ", mapping: [{}]",
                 self.column_indices
                     .iter()
-                    .cloned()
                     .enumerate()
                     .map(|(k, v)| format!("{}:{}", k, v))
                     .join(", ")
@@ -77,7 +76,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
                     f,
                     ", default: [{}]",
                     self.default_columns
-                        .into_iter()
+                        .iter()
                         .map(|(k, v)| format!("{}<-{:?}", k, v))
                         .join(", ")
                 )?;
