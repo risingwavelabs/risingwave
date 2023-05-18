@@ -257,7 +257,6 @@ pub async fn compute_node_serve(
     sub_tasks.push(MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-        Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
         extra_info_sources,
     ));
 

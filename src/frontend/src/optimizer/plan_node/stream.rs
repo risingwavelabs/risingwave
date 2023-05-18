@@ -468,12 +468,12 @@ pub fn to_stream_prost_body(
                 .predicate()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto());
-            let left_table = infer_left_internal_table_catalog(base, me.left_index)
+            let left_table = infer_left_internal_table_catalog(base, me.left_index())
                 .with_id(state.gen_table_id_wrapped());
-            let right_table = infer_right_internal_table_catalog(&me.right.0)
+            let right_table = infer_right_internal_table_catalog(&me.right().0)
                 .with_id(state.gen_table_id_wrapped());
             PbNodeBody::DynamicFilter(DynamicFilterNode {
-                left_key: me.left_index as u32,
+                left_key: me.left_index() as u32,
                 condition,
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),

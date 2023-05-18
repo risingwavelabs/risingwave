@@ -29,9 +29,9 @@ use super::{
     DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
-use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
+use crate::hummock::sstable::FilterBuilder;
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
+use crate::hummock::{HummockResult, Xor16FilterBuilder};
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
@@ -133,12 +133,12 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     epoch_set: BTreeSet<u64>,
 }
 
-impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
+impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
     pub fn for_test(sstable_id: u64, writer: W, options: SstableBuilderOptions) -> Self {
         Self::new(
             sstable_id,
             writer,
-            XorFilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             Arc::new(FilterKeyExtractorImpl::FullKey(
                 FullKeyFilterKeyExtractor::default(),
@@ -542,10 +542,10 @@ pub(super) mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_default_test_sstable, mock_sst_writer, test_key_of,
+        default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer, test_key_of,
         test_value_of, TEST_KEYS_COUNT,
     };
-    use crate::hummock::Sstable;
+    use crate::hummock::{CachePolicy, Sstable, Xor16FilterBuilder, Xor8FilterBuilder};
 
     #[tokio::test]
     async fn test_empty() {
@@ -622,7 +622,7 @@ pub(super) mod tests {
         assert_eq!(meta2, meta);
     }
 
-    async fn test_with_bloom_filter(with_blooms: bool) {
+    async fn test_with_bloom_filter<F: FilterBuilder>(with_blooms: bool) {
         let key_count = 1000;
 
         let opts = SstableBuilderOptions {
@@ -635,7 +635,15 @@ pub(super) mod tests {
 
         // build remote table
         let sstable_store = mock_sstable_store();
-        let table = gen_default_test_sstable(opts, 0, sstable_store).await;
+        let (table, _) = gen_test_sstable_impl::<Vec<u8>, F>(
+            opts,
+            0,
+            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+            vec![],
+            sstable_store,
+            CachePolicy::NotFill,
+        )
+        .await;
 
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
@@ -649,7 +657,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn test_bloom_filter() {
-        test_with_bloom_filter(false).await;
-        test_with_bloom_filter(true).await;
+        test_with_bloom_filter::<Xor16FilterBuilder>(false).await;
+        test_with_bloom_filter::<Xor16FilterBuilder>(true).await;
+        test_with_bloom_filter::<Xor8FilterBuilder>(true).await;
     }
 }

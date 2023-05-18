@@ -14,7 +14,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -26,7 +25,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -35,7 +34,7 @@ use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::state::{create_window_state, WindowState};
+use super::state::{create_window_state, EstimatedVecDeque, WindowState};
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
@@ -49,7 +48,7 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: Vec<Box<dyn WindowState + Send>>,
-    curr_row_buffer: VecDeque<OwnedRow>,
+    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
 }
 
 impl Partition {
@@ -87,9 +86,11 @@ impl Partition {
 
 impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        let mut total_size = self.curr_row_buffer.estimated_heap_size();
+        for state in &self.states {
+            total_size += state.estimated_heap_size();
+        }
+        total_size
     }
 }
 
@@ -255,7 +256,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -330,7 +331,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -386,7 +387,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
                         let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key)))
+                            .chain(row::once(Some(key.order_key.into_inner())))
                             .chain(pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
@@ -455,7 +456,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .expect("order key must not be NULL");
 
                         if vars.last_watermark.is_none()
-                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                            || vars
+                                .last_watermark
+                                .as_ref()
+                                .unwrap()
+                                .default_cmp(&first_order_key)
+                                .is_lt()
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(
