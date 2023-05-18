@@ -18,10 +18,11 @@ popd
 
 echo "--- Extract data for SqlSmith"
 pushd ./src/tests/sqlsmith/tests
-git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
-pushd sqlsmith-query-snapshots
-git checkout stage
-popd
+# FIXME(kwannoel): Uncomment this to stage changes. Should have a better approach.
+# git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
+# pushd sqlsmith-query-snapshots
+# git checkout stage
+# popd
 popd
 
 export RUST_LOG=info
