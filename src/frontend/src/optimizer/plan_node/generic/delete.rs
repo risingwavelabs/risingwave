@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::fmt;
+use std::hash::Hash;
 
+use educe::Educe;
 use risingwave_common::catalog::{Schema, TableVersionId};
 
 use super::GenericPlanRef;
 use crate::catalog::TableId;
 use crate::OptimizerContextRef;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Delete<PlanRef> {
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub struct Delete<PlanRef: Eq + Hash> {
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
@@ -38,7 +43,7 @@ impl<PlanRef: GenericPlanRef> Delete<PlanRef> {
     }
 }
 
-impl<PlanRef> Delete<PlanRef> {
+impl<PlanRef: Eq + Hash> Delete<PlanRef> {
     pub fn new(
         input: PlanRef,
         table_name: String,

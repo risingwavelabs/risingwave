@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
@@ -56,8 +58,10 @@ mod update;
 pub use update::*;
 mod delete;
 pub use delete::*;
+mod insert;
+pub use insert::*;
 
-pub trait GenericPlanRef {
+pub trait GenericPlanRef : Eq + Hash {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn functional_dependency(&self) -> &FunctionalDependencySet;
