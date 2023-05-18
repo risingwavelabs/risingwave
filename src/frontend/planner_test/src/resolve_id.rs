@@ -17,12 +17,12 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 
-use crate::{TestCase, TestCaseV2};
+use crate::{TestCaseV2, TestInput};
 
 pub fn resolve_testcase_id(testcases: Vec<TestCaseV2>) -> Result<Vec<TestCaseV2>> {
     let mut testcases_with_ids = HashMap::new();
     for testcase in &testcases {
-        if let Some(id) = &testcase.id {
+        if let Some(id) = &testcase.input.id {
             testcases_with_ids.insert(id.clone(), testcase.clone());
         }
     }
@@ -30,14 +30,14 @@ pub fn resolve_testcase_id(testcases: Vec<TestCaseV2>) -> Result<Vec<TestCaseV2>
     testcases
         .into_iter()
         .map(|testcase| {
-            let before_statements = if let Some(before) = &testcase.before {
+            let before_statements = if let Some(before) = &testcase.input.before {
                 Some(
                     before
                         .iter()
                         .map(|id| {
                             testcases_with_ids
                                 .get(id)
-                                .map(|case| case.sql.clone())
+                                .map(|case| case.sql().clone())
                                 .ok_or_else(|| anyhow!("failed to resolve {}: not found", id))
                         })
                         .try_collect()?,
@@ -47,7 +47,10 @@ pub fn resolve_testcase_id(testcases: Vec<TestCaseV2>) -> Result<Vec<TestCaseV2>
             };
 
             Ok(TestCaseV2 {
-                before_statements,
+                input: TestInput {
+                    before_statements,
+                    ..testcase.input
+                },
                 ..testcase
             })
         })

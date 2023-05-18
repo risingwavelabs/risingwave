@@ -3,6 +3,7 @@
     select v1, min(v2), count(distinct v3) as agg from t group by v1;
   output_fields:
   - stream_plan
+  - eowc_stream_error
 - sql: |
     create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') ROW FORMAT JSON;
     select v1, min(v2), count(distinct v3) as agg from t group by v1;

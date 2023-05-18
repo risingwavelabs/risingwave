@@ -6,7 +6,6 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
@@ -45,13 +44,8 @@ workspace-hack = { path = "../../workspace-hack" }
 libtest-mimic = "0.6"
 tempfile = "3"
 
-[build-dependencies]
-anyhow = "1"
-walkdir = "2"
-
-[[bin]]
-name = "planner-test-apply"
-path = "src/bin/apply.rs"
+[lib]
+test = false
 
 [[test]]
 name = "planner_test_runner"

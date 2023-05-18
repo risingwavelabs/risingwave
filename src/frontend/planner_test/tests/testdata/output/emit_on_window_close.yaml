@@ -8,6 +8,9 @@
       └─StreamHashAgg { group_key: [t.v1], aggs: [min(t.v2), count(distinct t.v3), count] }
         └─StreamExchange { dist: HashShard(t.v1) }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+  eowc_stream_error: |-
+    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
+    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
 - sql: |
     create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') ROW FORMAT JSON;
     select v1, min(v2), count(distinct v3) as agg from t group by v1;

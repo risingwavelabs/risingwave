@@ -32,6 +32,7 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q3
   before:
   - create_sources
@@ -46,6 +47,7 @@
   - stream_plan
   - stream_dist_plan
   - batch_plan
+  - eowc_stream_error
 - id: nexmark_q4
   before:
   - create_sources
@@ -64,6 +66,7 @@
   - stream_dist_plan
   - stream_plan
   - batch_plan
+  - eowc_stream_error
 - id: nexmark_q5
   before:
   - create_sources
@@ -316,6 +319,7 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q16
   before:
   - create_sources
@@ -342,6 +346,7 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q17
   before:
   - create_sources
@@ -363,6 +368,7 @@
   - batch_plan
   - stream_plan
   - stream_dist_plan
+  - eowc_stream_error
 - id: nexmark_q18
   before:
   - create_sources
@@ -414,6 +420,7 @@
   - batch_plan
   - stream_plan
   - stream_dist_plan
+  - eowc_stream_error
 - id: nexmark_q21
   before:
   - create_sources
@@ -445,6 +452,7 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q101
   before:
   - create_sources
@@ -469,6 +477,7 @@
   - stream_dist_plan
   - batch_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q102
   before:
   - create_sources
@@ -491,6 +500,7 @@
   - stream_dist_plan
   - stream_plan
   - batch_plan
+  - eowc_stream_error
 - id: nexmark_q103
   before:
   - create_sources
@@ -511,6 +521,7 @@
   - batch_plan
   - stream_dist_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q104
   before:
   - create_sources
@@ -531,6 +542,7 @@
   - batch_plan
   - stream_dist_plan
   - stream_plan
+  - eowc_stream_error
 - id: nexmark_q105
   before:
   - create_sources
@@ -551,6 +563,7 @@
   - stream_plan
   - batch_plan
   - stream_dist_plan
+  - eowc_stream_error
 - id: nexmark_q106
   before:
   - create_sources
@@ -578,3 +591,4 @@
   - stream_plan
   - stream_dist_plan
   - batch_plan
+  - eowc_stream_error
