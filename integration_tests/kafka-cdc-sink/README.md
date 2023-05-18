@@ -2,15 +2,20 @@
 
 1. Install cargo make.
 2. Install docker.
-3. Install psql.
 
 
 # Commands
 
-1. Clean all states: `cargo make clean-all`
-2. Setup pipeline: `cargo make setup`
-3. Check results in postgresql: `PGPASSWORD=123456 psql -h localhost -p 5432 -U myuser mydb`
+1. Setup pipeline: `cargo make setup`
+2. Check results:
+    1. Flink Posgresql: `docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from counts"'`
+    2. Postgresql: `docker exec postgres2 bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from counts"'`
+    3. MySQL: `docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD mydb -e "select * from counts"'`
+    4. Or use `cargo make check-db`
 
 # Pipeline
+There are two pipelines in this test:
 
-Risingwave -(Debezisum Json)-> Kafka -(Debezisum Json)-> Flink SQL --> Postgresql
+Risingwave -(Debezium Json)-> Kafka -(Debezisum Json)-> Flink SQL --> Postgresql
+
+Risingwave -(Debezium Json)-> Kafka -(Debezium Json)-> JDBC connector -> MySQL and Postgresql
