@@ -20,7 +20,7 @@ use anyhow::{anyhow, Context, Result};
 use backtrace::Backtrace;
 use console::style;
 use futures::StreamExt;
-use risingwave_planner_test::{check, resolve_testcase_id, test_data_dir, v1_to_v2, TestCase, TestCaseV2};
+use risingwave_planner_test::{check, resolve_testcase_id, test_data_dir, TestCase, TestCaseV2};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         std::process::abort();
     }));
 
-    let dir = test_data_dir().join("input_v2");
+    let dir = test_data_dir().join("input");
     println!("Using test cases from {:?}", dir);
 
     let mut futures = vec![];
