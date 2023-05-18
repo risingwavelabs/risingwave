@@ -28,7 +28,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
-use crate::types::{DataType, StructType, ToOwnedDatum, ToText};
+use crate::types::{DataType, DatumRef, StructType, ToOwnedDatum, ToText};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{
@@ -388,6 +388,34 @@ impl DataChunk {
             table.add_row(cells);
         }
         table.to_string()
+    }
+
+    /// Keep the specified columns and set the rest elements to null.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// i i i                            i i i
+    /// 1 2 3  --> keep_columns([1]) --> . 2 .
+    /// 4 5 6                            . 5 .
+    /// ```
+    pub fn keep_columns(&self, column_indices: &[usize]) -> Self {
+        let capacity: usize = self.capacity();
+        let columns = (self.columns.iter().enumerate())
+            .map(|(i, column)| {
+                if column_indices.contains(&i) {
+                    column.clone()
+                } else {
+                    let mut builder = column.create_builder(capacity);
+                    builder.append_datum_n(capacity, None as DatumRef<'_>);
+                    builder.finish().into()
+                }
+            })
+            .collect();
+        DataChunk {
+            columns,
+            vis2: self.vis2.clone(),
+        }
     }
 
     /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and

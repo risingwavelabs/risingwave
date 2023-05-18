@@ -16,9 +16,9 @@ use std::fmt::Debug;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayError, ArrayRef, I64Array};
+use risingwave_common::array::{Array, I64Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, DatumRef};
+use risingwave_common::types::DataType;
 
 use super::error::StreamExecutorError;
 use super::*;
@@ -54,57 +54,23 @@ impl ExpandExecutor {
     async fn execute_inner(self) {
         #[for_await]
         for msg in self.input.execute() {
-            match msg? {
-                Message::Chunk(chunk) => {
-                    let chunk = chunk.compact();
-                    let (data_chunk, ops) = chunk.into_parts();
-                    assert!(
-                        data_chunk.dimension() > 0,
-                        "The input data chunk of expand can't be dummy chunk."
-                    );
-                    let cardinality = data_chunk.cardinality();
-                    let (columns, _) = data_chunk.into_parts();
-
-                    #[for_await]
-                    for new_columns in
-                        expand_columns(cardinality, columns, self.column_subsets.to_owned())
-                    {
-                        let stream_chunk = StreamChunk::new(ops.clone(), new_columns?, None);
-                        yield Message::Chunk(stream_chunk)
-                    }
+            let input = match msg? {
+                Message::Chunk(c) => c,
+                m => {
+                    yield m;
+                    continue;
                 }
-                m => yield m,
+            };
+            for (i, subsets) in self.column_subsets.iter().enumerate() {
+                let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(input.capacity()))
+                    .into_ref();
+                let (mut columns, vis) = input.data_chunk().keep_columns(subsets).into_parts();
+                columns.extend(input.columns().iter().cloned());
+                columns.push(flags);
+                let chunk = StreamChunk::new(input.ops().into(), columns, vis.into_visibility());
+                yield Message::Chunk(chunk);
             }
         }
-    }
-}
-
-/// Expand the `columns` according to `column_subsets`.
-///
-/// This is a helper function for Expand operator.
-#[try_stream(boxed, ok = Vec<ArrayRef>, error = ArrayError)]
-async fn expand_columns(
-    cardinality: usize,
-    columns: Vec<ArrayRef>,
-    column_subsets: Vec<Vec<usize>>,
-) {
-    let null_columns: Vec<_> = columns
-        .iter()
-        .map(|column| {
-            let mut builder = column.create_builder(cardinality);
-            builder.append_datum_n(cardinality, None as DatumRef<'_>);
-            builder.finish().into()
-        })
-        .collect();
-    for (i, subset) in column_subsets.into_iter().enumerate() {
-        let mut new_columns = null_columns.clone();
-        for key in subset {
-            new_columns[key] = columns[key].clone();
-        }
-        new_columns.extend(columns.iter().cloned());
-        let flags = I64Array::from_iter(std::iter::repeat(i as i64).take(cardinality)).into_ref();
-        new_columns.push(flags);
-        yield new_columns;
     }
 }
 
@@ -177,6 +143,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I I I I
                 + 1 4 . 1 4 1 0
+                + 5 2 . 5 2 2 0 D
                 + 6 6 . 6 6 3 0
                 - 7 5 . 7 5 4 0"
             )
@@ -188,6 +155,7 @@ mod tests {
             StreamChunk::from_pretty(
                 " I I I I I I I
                 + . 4 1 1 4 1 1
+                + . 2 2 5 2 2 1 D
                 + . 6 3 6 6 3 1
                 - . 5 4 7 5 4 1"
             )
