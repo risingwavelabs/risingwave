@@ -83,14 +83,14 @@ impl ToBatchPb for BatchInsert {
             .map(|&i| i as u32)
             .collect();
 
-        let default_columns = self.logical.default_columns;
+        let default_columns = &self.logical.default_columns;
         let has_default_columns = !default_columns.is_empty();
         let default_columns = DefaultColumns {
             default_columns: default_columns
-                .into_iter()
+                .iter()
                 .map(|(i, expr)| IndexAndExpr {
-                    index: i as u32,
-                    expr: Some(expr.to_expr_proto()),
+                    index: *i as u32,
+                    expr: Some(expr.clone().to_expr_proto()),
                 })
                 .collect_vec(),
         };
