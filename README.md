@@ -1,5 +1,3 @@
-
-
 <picture>
   <source srcset="https://github.com/risingwavelabs/risingwave/assets/100549427/00b1c319-293a-4025-aadd-8436977075d6" width="300px" media="(prefers-color-scheme: dark)">
   <img src="https://github.com/risingwavelabs/risingwave/assets/100549427/f4ed97a1-804c-4f5c-b548-1b82cf0e7063" width="250px">
