@@ -124,7 +124,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             var pkFields = new HashSet<String>();
             while (res.next()) {
                 var name = res.getString(1);
-                pkFields.add(name);
+                // RisingWave always use lower case for column name
+                pkFields.add(name.toLowerCase());
             }
 
             if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
