@@ -270,11 +270,10 @@ extract() {
   for QUERY_ID in *
   do
     QUERY_FILE="${QUERY_ID}/queries.sql"
-    OUTFILE="${QUERY_ID}/queries-reduced.sql"
-    if [[ $(cargo run --bin sqlsmith-reducer -- --input-file "$QUERY_FILE" --output-file "$OUTFILE") ]]; then
-      echo "[INFO] REDUCED QUERY: $QUERY_FILE. WROTE TO $OUTFILE"
+    if [[ $(cargo run --bin sqlsmith-reducer -- --input-file "$QUERY_FILE" --output-file "$QUERY_ID") -eq 0 ]]; then
+      echo "[INFO] REDUCED QUERY: $QUERY_FILE. WROTE TO DIR: failed/$QUERY_ID"
     else
-      echo "[INFO] FAILED TO REDUCE QUERY: $QUERY_FILE."
+      echo "[INFO] FAILED TO REDUCE QUERY: $QUERY_FILE"
     fi
   done
   popd > /dev/null
