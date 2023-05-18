@@ -183,6 +183,7 @@ mod tests {
             SourceColumnDesc::simple("o_timestampz_0", DataType::Timestamptz, ColumnId::from(7)),
             SourceColumnDesc::simple("o_timestampz_6", DataType::Timestamptz, ColumnId::from(8)),
             SourceColumnDesc::simple("o_interval", DataType::Interval, ColumnId::from(9)),
+            SourceColumnDesc::simple("o_date", DataType::Date, ColumnId::from(10)),
         ]
     }
 
@@ -680,11 +681,11 @@ mod tests {
             //     o_timestampz_0 timestamp(0) with time zone,
             //     o_timestampz_6 timestamp(6) with time zone,
             //     o_interval interval,
+            //     o_date date,
             //     PRIMARY KEY (o_key)
             // );
             // this test covers an insert event on the table above
-            let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P0Y0M0DT1H0M0S"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684308877859,"snapshot":"last","db":"test","sequence":"[null,\"26504912\"]","schema":"public","table":"orders","txId":729,"lsn":26504912,"xmin":null},"op":"r","ts_ms":1684308878023,"transaction":null}}"#;
-            let columns = get_temporal_test_columns();
+            let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P0Y0M0DT1H0M0S","o_date":"1999-09-09"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684399608962,"snapshot":"last","db":"test","sequence":"[null,\"26505352\"]","schema":"public","table":"orders","txId":729,"lsn":26505352,"xmin":null},"op":"r","ts_ms":1684399609105,"transaction":null}}"#;            let columns = get_temporal_test_columns();
             let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
@@ -717,6 +718,9 @@ mod tests {
                     3_600_000_000
                 ))))
             );
+            assert!(row[10].eq(&Some(ScalarImpl::Date(Date::new(
+                NaiveDate::from_ymd_opt(1999, 9, 9).unwrap()
+            )))));
         }
     }
 }

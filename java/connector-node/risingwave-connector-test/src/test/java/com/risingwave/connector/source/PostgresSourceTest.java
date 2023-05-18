@@ -301,10 +301,11 @@ public class PostgresSourceTest {
                         + "o_timestampz_0 timestamp(0) with time zone, "
                         + "o_timestampz_6 timestamp(6) with time zone, "
                         + "o_interval interval, "
+                        + "o_date date, "
                         + "PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connection, query);
         query =
-                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', '01:00:00')";
+                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', '01:00:00', '1999-09-09')";
         SourceTestClient.performQuery(connection, query);
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
