@@ -1,1 +1,1 @@
-orders,product_count
+orders_rw,product_count,lineitem_count
