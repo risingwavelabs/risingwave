@@ -1,7 +1,0 @@
-- sql: |
-    select 1 as k, 2 as v;
-  output_fields:
-  - batch_plan
-- sql: select 'abc', 1, 1.4 as k from (select 1 as k, 2 from (select 1, 2 union all select 3, 4) union all select * from (select 3, 4) union all select 100, 200 from (select now(), now() - interval '1 hour'));
-  output_fields:
-  - batch_plan
