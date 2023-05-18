@@ -69,12 +69,10 @@ docker run --network host \
 """
 description = "Show produces kafka json logs"
 
-
 [tasks.check-pg]
 script = '''
 docker exec postgres2 bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from counts"'
 '''
-
 
 [tasks.check-mysql]
 script = '''
