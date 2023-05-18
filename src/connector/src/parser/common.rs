@@ -18,8 +18,8 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
-    str_with_time_zone_to_timestamptz,
+    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_interval, str_to_time,
+    str_to_timestamp, str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time,
@@ -95,12 +95,7 @@ fn do_parse_simd_json_value(
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
             BorrowedValue::String(s) => str_to_time(s).map_err(|e| anyhow!(e))?.into(),
-            BorrowedValue::Static(_) => Time::with_milli(
-                ensure_i64!(v, i64)
-                    .try_into()
-                    .map_err(|_| anyhow!("cannot cast i64 to time, value out of range"))?,
-            )?
-            .into(),
+            BorrowedValue::Static(_) => Time::with_micro(ensure_i64!(v, i64))?.into(),
             _ => anyhow::bail!("expect time, but found {v}"),
         },
         DataType::Timestamp => match v {
@@ -159,7 +154,10 @@ fn do_parse_simd_json_value(
                 return Err(anyhow!(err_msg));
             }
         }
-        DataType::Interval => unimplemented!(),
+        DataType::Interval => {
+            let s = ensure_str!(v, "varchar");
+            ScalarImpl::Interval(str_to_interval(s).unwrap())
+        }
     };
     Ok(v)
 }

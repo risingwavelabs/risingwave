@@ -258,10 +258,16 @@ impl Time {
         Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 
+    pub fn with_micro(micro: i64) -> Result<Self> {
+        let secs = (micro / 1_000_000) as u32;
+        let nano = ((micro % 1_000_000) * 1_000) as u32;
+        Self::with_secs_nano(secs, nano).map_err(Into::into)
+    }
+
     pub fn with_milli(milli: u32) -> Result<Self> {
         let secs = milli / 1_000;
         let nano = (milli % 1_000) * 1_000_000;
-        Self::with_secs_nano(secs, nano)
+        Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 
     pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {

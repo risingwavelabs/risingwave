@@ -270,7 +270,7 @@ public class PostgresSourceTest {
                                 List<ConnectorServiceProto.CdcMessage> messages =
                                         eventStream.next().getEventsList();
                                 for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    LOG.info("{}", msg.getPayload());
+                                    System.out.printf("%s\n", msg.getPayload());
                                 }
                             }
                         });
@@ -281,6 +281,47 @@ public class PostgresSourceTest {
                 "INSERT INTO orders (O_KEY, O_BOOL, O_BITS, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON, O_TEXT_ARR)"
                         + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
         SourceTestClient.performQuery(connection, query);
+        Thread.sleep(1000);
+        connection.close();
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonDateTime() throws InterruptedException, SQLException {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query =
+                "CREATE TABLE orders ("
+                        + "o_key integer, "
+                        + "o_time_0 time(0), "
+                        + "o_time_6 time(6), "
+                        + "o_timez_0 time(0) with time zone, "
+                        + "o_timez_6 time(6) with time zone, "
+                        + "o_timestamp_0 timestamp(0), "
+                        + "o_timestamp_6 timestamp(6), "
+                        + "o_timestampz_0 timestamp(0) with time zone, "
+                        + "o_timestampz_6 timestamp(6) with time zone, "
+                        + "o_interval interval, "
+                        + "PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', '01:00:00')";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStreamStart(
+                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+        Thread t1 =
+                new Thread(
+                        () -> {
+                            while (eventStream.hasNext()) {
+                                List<ConnectorServiceProto.CdcMessage> messages =
+                                        eventStream.next().getEventsList();
+                                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                                    System.out.printf("%s\n", msg.getPayload());
+                                }
+                            }
+                        });
+        Thread.sleep(1000);
+        t1.start();
         Thread.sleep(1000);
         connection.close();
     }

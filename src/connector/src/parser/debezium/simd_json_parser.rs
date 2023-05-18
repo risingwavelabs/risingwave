@@ -164,7 +164,7 @@ mod tests {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, Date, Scalar, ScalarImpl, Time, Timestamp};
+    use risingwave_common::types::{DataType, Date, Interval, Scalar, ScalarImpl, Time, Timestamp};
     use serde_json::Value;
 
     use super::*;
@@ -200,6 +200,22 @@ mod tests {
         ];
 
         descs
+    }
+
+    // temporal type test
+    fn get_temporal_test_columns() -> Vec<SourceColumnDesc> {
+        vec![
+            SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
+            SourceColumnDesc::simple("o_time_0", DataType::Time, ColumnId::from(1)),
+            SourceColumnDesc::simple("o_time_6", DataType::Time, ColumnId::from(2)),
+            SourceColumnDesc::simple("o_timez_0", DataType::Time, ColumnId::from(3)),
+            SourceColumnDesc::simple("o_timez_6", DataType::Time, ColumnId::from(4)),
+            SourceColumnDesc::simple("o_timestamp_0", DataType::Timestamp, ColumnId::from(5)),
+            SourceColumnDesc::simple("o_timestamp_6", DataType::Timestamp, ColumnId::from(6)),
+            SourceColumnDesc::simple("o_timestampz_0", DataType::Timestamptz, ColumnId::from(7)),
+            SourceColumnDesc::simple("o_timestampz_6", DataType::Timestamptz, ColumnId::from(8)),
+            SourceColumnDesc::simple("o_interval", DataType::Interval, ColumnId::from(9)),
+        ]
     }
 
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
@@ -624,5 +640,40 @@ mod tests {
         } else {
             panic!("the test case is expected to be failed");
         }
+    }
+
+    // postgres-specific data-type tests
+    #[tokio::test]
+    async fn test_date_time() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"o_key"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_6"},{"type":"int64","optional":true,"name":"io.debezium.time.Timestamp","version":1,"field":"o_timestamp_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"o_timestamp_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_6"},{"type":"string","optional":true,"name":"io.debezium.time.Interval","version":1,"field":"o_interval"}],"optional":true,"name":"RW_CDC_localhost.test.orders.public.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"o_key"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"o_time_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTime","version":1,"field":"o_timez_6"},{"type":"int64","optional":true,"name":"io.debezium.time.Timestamp","version":1,"field":"o_timestamp_0"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTimestamp","version":1,"field":"o_timestamp_6"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_0"},{"type":"string","optional":true,"name":"io.debezium.time.ZonedTimestamp","version":1,"field":"o_timestampz_6"},{"type":"string","optional":true,"name":"io.debezium.time.Interval","version":1,"field":"o_interval"}],"optional":true,"name":"RW_CDC_localhost.test.orders.public.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":false,"field":"schema"},{"type":"string","optional":false,"field":"table"},{"type":"int64","optional":true,"field":"txId"},{"type":"int64","optional":true,"field":"lsn"},{"type":"int64","optional":true,"field":"xmin"}],"optional":false,"name":"io.debezium.connector.postgresql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_localhost.test.orders.public.orders.Envelope"},"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P0Y0M0DT1H0M0S"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684308877859,"snapshot":"last","db":"test","sequence":"[null,\"26504912\"]","schema":"public","table":"orders","txId":729,"lsn":26504912,"xmin":null},"op":"r","ts_ms":1684308878023,"transaction":null}}"#;
+        let columns = get_temporal_test_columns();
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+            .await
+            .try_into()
+            .unwrap();
+        assert_eq!(op, Op::Insert);
+        assert!(row[0].eq(&Some(ScalarImpl::Int32(0))));
+        assert!(row[1].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
+        assert!(row[2].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 10).unwrap()
+        )))));
+        assert!(row[3].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
+        assert!(row[4].eq(&Some(ScalarImpl::Time(Time::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 10).unwrap()
+        )))));
+        assert!(row[5].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "2011-11-11T11:11:11".parse().unwrap()
+        )))));
+        assert!(row[6].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            "2011-11-11T11:11:11.123456".parse().unwrap()
+        )))));
+        assert!(row[9].eq(&Some(ScalarImpl::Interval(
+            Interval::from_year_month_day_hour_minute_usec(0, 0, 0, 1, 0, 0)
+        ))));
     }
 }
