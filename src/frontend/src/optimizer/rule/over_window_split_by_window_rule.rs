@@ -30,25 +30,12 @@ impl OverWindowSplitByWindowRule {
 impl Rule for OverWindowSplitByWindowRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
-        let mut hash_map = HashMap::new();
-        over_window
+        let groups: HashMap<_, _> = over_window
             .window_functions()
             .iter()
-            .map(|window| (&window.order_by, &window.partition_by))
-            .unique()
             .enumerate()
-            .for_each(|(idx, (order_by, partition_by))| {
-                hash_map.insert((order_by.clone(), partition_by.clone()), idx);
-            });
-        let group_rule = over_window
-            .window_functions()
-            .iter()
-            .map(|window| {
-                *hash_map
-                    .get(&(window.order_by.clone(), window.partition_by.clone()))
-                    .unwrap()
-            })
-            .collect_vec();
-        Some(over_window.split_with_rule(group_rule))
+            .map(|(idx, window)| ((&window.order_by, &window.partition_by), idx))
+            .into_group_map();
+        Some(over_window.split_with_rule(groups.into_values().sorted().collect()))
     }
 }

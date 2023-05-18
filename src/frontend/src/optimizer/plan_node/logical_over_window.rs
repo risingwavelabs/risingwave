@@ -264,8 +264,12 @@ impl LogicalOverWindow {
         Self::new(window_functions, input)
     }
 
-    pub fn split_with_rule(&self, group_rule: Vec<usize>) -> PlanRef {
-        assert!(group_rule.len() == self.window_functions().len());
+    pub fn split_with_rule(&self, groups: Vec<Vec<usize>>) -> PlanRef {
+        assert!(groups.iter().flatten().all_unique());
+        assert!(groups
+            .iter()
+            .flatten()
+            .all(|&idx| idx < self.window_functions().len()));
 
         let mut output_proj_builder = ProjectBuilder::default();
         for (idx, field) in self.input().schema().fields().iter().enumerate() {
@@ -274,44 +278,29 @@ impl LogicalOverWindow {
                 .unwrap();
         }
         let input_len = self.input().schema().len();
-        group_rule
-            .iter()
-            .enumerate()
-            .map(|(idx, &group_id)| (group_id, idx))
-            .sorted()
-            .enumerate()
-            .map(|(input_idx, (_, output_idx))| (output_idx, input_idx))
-            .sorted()
-            .for_each(|(output_idx, input_idx)| {
-                let _ = output_proj_builder
-                    .add_expr(
-                        &InputRef::new(
-                            input_idx + input_len,
-                            self.window_functions()[output_idx].return_type.clone(),
-                        )
-                        .into(),
-                    )
-                    .unwrap();
-            });
-
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
-        group_rule.iter().unique().sorted().for_each(|group_id| {
-            let cur_group = group_rule
-                .iter()
-                .enumerate()
-                .filter(|(_, x)| x == &group_id)
-                .map(|(idx, _)| idx)
-                .collect_vec();
+        let mut cur_win_func_pos = input_len;
+        for func_indices in groups.iter() {
             cur_node = Self::new(
-                cur_group
+                func_indices
                     .iter()
-                    .map(|&idx| self.window_functions()[idx].clone())
+                    .map(|&idx| {
+                        let func = &self.window_functions()[idx];
+                        output_proj_builder
+                            .add_expr(
+                                &InputRef::new(cur_win_func_pos, func.return_type.clone()).into(),
+                            )
+                            .unwrap();
+                        cur_win_func_pos += 1;
+                        func.clone()
+                    })
                     .collect_vec(),
                 cur_input.clone(),
             );
             cur_input = cur_node.clone().into();
-        });
+        }
+
         LogicalProject::with_core(output_proj_builder.build(cur_node.into())).into()
     }
 }
