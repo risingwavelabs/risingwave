@@ -234,6 +234,11 @@ impl LogicalOverWindow {
         assert!(group_rule.len() == self.window_functions().len());
 
         let mut output_proj_builder = ProjectBuilder::default();
+        for (idx, field) in self.input().schema().fields().iter().enumerate() {
+            let _ = output_proj_builder
+                .add_expr(&InputRef::new(idx, field.data_type()).into())
+                .unwrap();
+        }
         group_rule
             .iter()
             .enumerate()
@@ -245,8 +250,11 @@ impl LogicalOverWindow {
             .for_each(|(output_idx, input_idx)| {
                 let _ = output_proj_builder
                     .add_expr(
-                        &InputRef::new(input_idx, self.schema().fields()[output_idx].data_type())
-                            .into(),
+                        &InputRef::new(
+                            input_idx,
+                            self.window_functions()[output_idx].return_type.clone(),
+                        )
+                        .into(),
                     )
                     .unwrap();
             });
