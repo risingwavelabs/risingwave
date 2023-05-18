@@ -250,7 +250,7 @@ cleanup() {
   echo_err "[INFO] Success!"
 }
 
-################### MAIN
+################### ENTRY POINTS
 
 main() {
   setup
@@ -267,5 +267,3 @@ main() {
 extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
 }
-
-# main
