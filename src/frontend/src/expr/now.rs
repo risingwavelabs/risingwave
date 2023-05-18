@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::expr::ExprNode;
 
-use super::Expr;
+use super::{Expr, ExprImpl, FunctionCall};
 
 /// `NOW()` in streaming queries, representing a retractable monotonic timestamp stream and will be
 /// rewritten to `NowNode` for execution.
@@ -30,8 +31,8 @@ impl Expr for Now {
     }
 
     fn to_expr_proto(&self) -> ExprNode {
-        unreachable!(
-            "`Now` should be translated to `Literal` in batch mode or `NowNode` in stream mode"
-        )
+        FunctionCall::new(Type::Now, vec![])
+            .unwrap()
+            .to_expr_proto()
     }
 }

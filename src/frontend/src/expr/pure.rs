@@ -176,7 +176,10 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode | expr_node::Type::Proctime | expr_node::Type::Udf => true,
+            expr_node::Type::Vnode
+            | expr_node::Type::Now
+            | expr_node::Type::Proctime
+            | expr_node::Type::Udf => true,
         }
     }
 }
