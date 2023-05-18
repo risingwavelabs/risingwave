@@ -147,12 +147,12 @@ lazy_static! {
     static ref GENERAL_UNNESTING_PUSH_DOWN_APPLY: OptimizationStage = OptimizationStage::new(
         "General Unnesting(Push Down Apply)",
         vec![
+            ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
