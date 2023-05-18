@@ -145,7 +145,8 @@ impl ElectionClient for EtcdElectionClient {
 
             // timeout controller, when keep alive fails for more than a certain period of time
             // before it is considered a complete failure
-            let mut timeout = time::interval(Duration::from_secs_f64(ttl as f64 / 2.0));
+            let keep_alive_timeout_duration = Duration::from_secs_f64(ttl as f64 / 2.0);
+            let mut timeout = time::interval(keep_alive_timeout_duration.clone());
             timeout.reset();
 
             let mut keep_alive_sending = false;
@@ -182,13 +183,31 @@ impl ElectionClient for EtcdElectionClient {
                                 timeout.reset();
                             },
                             Ok(None) => {
-                                tracing::debug!("lease keeper for lease {} response stream closed unexpected", lease_id);
+                                tracing::warn!("lease keeper for lease {} response stream closed unexpected", lease_id);
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
-                                if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), lease_client.keep_alive(lease_id)).await {
-                                    keeper = keeper_;
-                                    resp_stream = resp_stream_;
+                                // TODO: should we introduce retry with backoff here?
+                                match time::timeout(keep_alive_timeout_duration.clone(), lease_client.keep_alive(lease_id)).await {
+                                    Ok(Ok((keeper_, resp_stream_))) => {
+                                        keeper = keeper_;
+                                        resp_stream = resp_stream_;
+                                    },
+                                    Ok(Err(e)) => {
+                                        tracing::warn!(
+                                            "create lease keeper for {} failed {}",
+                                            lease_id,
+                                            e.to_string()
+                                        );
+                                    },
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            "create lease keeper for {} timeout after {:?}",
+                                            lease_id,
+                                            &keep_alive_timeout_duration,
+                                        );
+                                    },
                                 };
+
 
                                 continue;
                             }
