@@ -12,22 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::function::window::{Frame, FrameBound, FrameBounds};
 use smallvec::SmallVec;
 
-use super::{StateKey, StateOutput, StatePos, WindowState};
+use super::{EstimatedVecDeque, StateKey, StateOutput, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
 use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
+impl EstimateSize for BufferEntry {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size() + self.1.estimated_heap_size()
+    }
+}
+
+#[derive(EstimateSize)]
 pub(super) struct LeadState {
     offset: usize,
-    buffer: VecDeque<BufferEntry>,
+    buffer: EstimatedVecDeque<BufferEntry>,
 }
 
 impl LeadState {

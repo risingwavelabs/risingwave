@@ -28,7 +28,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
@@ -584,7 +584,7 @@ pub struct Watermark {
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.col_idx == other.col_idx {
-            self.val.partial_cmp(&other.val)
+            self.val.default_partial_cmp(&other.val)
         } else {
             None
         }
@@ -593,8 +593,7 @@ impl PartialOrd for Watermark {
 
 impl Ord for Watermark {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+        self.val.default_cmp(&other.val)
     }
 }
 
@@ -624,11 +623,7 @@ impl Watermark {
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row, on_err).await?;
-        Some(Self {
-            col_idx: new_col_idx,
-            data_type,
-            val,
-        })
+        Some(Self::new(new_col_idx, data_type, val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the
@@ -657,19 +652,11 @@ impl Watermark {
         let data_type = DataType::from(col_ref.get_type()?);
         let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
             .expect("watermark value cannot be null");
-        Ok(Watermark {
-            col_idx: col_ref.get_index() as _,
-            data_type,
-            val,
-        })
+        Ok(Self::new(col_ref.get_index() as _, data_type, val))
     }
 
     pub fn with_idx(self, idx: usize) -> Self {
-        Self {
-            col_idx: idx,
-            data_type: self.data_type,
-            val: self.val,
-        }
+        Self::new(idx, self.data_type, self.val)
     }
 }
 
@@ -678,6 +665,12 @@ pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
     Watermark(Watermark),
+}
+
+impl From<StreamChunk> for Message {
+    fn from(chunk: StreamChunk) -> Self {
+        Message::Chunk(chunk)
+    }
 }
 
 impl<'a> TryFrom<&'a Message> for &'a Barrier {

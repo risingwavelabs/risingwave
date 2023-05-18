@@ -371,12 +371,9 @@ impl Binder {
                 0,
                 raw(move |binder, _inputs| {
                     binder.ensure_now_function_allowed()?;
-                    // `now()` in batch query will be convert to the binder time.
-                    Ok(if binder.is_for_batch() {
-                        Literal::new(Some(binder.epoch.as_scalar()), DataType::Timestamptz).into()
-                    } else {
-                        Now.into()
-                    })
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
                 }),
             )
         }

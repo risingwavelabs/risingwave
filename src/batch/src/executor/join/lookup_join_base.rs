@@ -24,13 +24,16 @@ use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
 use risingwave_expr::expr::BoxedExpression;
+use tokio::sync::watch::Receiver;
 
 use crate::executor::join::chunked_data::ChunkedData;
 use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
+use crate::task::ShutdownMsg;
 
 /// Lookup Join Base.
 /// Used by `LocalLookupJoinExecutor` and `DistributedLookupJoinExecutor`.
@@ -50,6 +53,7 @@ pub struct LookupJoinBase<K> {
     pub output_indices: Vec<usize>,
     pub chunk_size: usize,
     pub identity: String,
+    pub shutdown_rx: Option<Receiver<ShutdownMsg>>,
     pub _phantom: PhantomData<K>,
 }
 
@@ -86,7 +90,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                             .collect_vec()
                     })
                 })
-                .sorted()
+                .sorted_by(|a, b| cmp_datum_iter(a, b, std::iter::repeat(OrderType::default())))
                 .dedup()
                 .collect_vec();
 
@@ -153,6 +157,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                 hash_map,
                 next_build_row_with_same_key,
                 self.chunk_size,
+                self.shutdown_rx.clone(),
             );
 
             if let Some(cond) = self.condition.as_ref() {

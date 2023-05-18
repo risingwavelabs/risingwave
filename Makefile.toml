@@ -55,7 +55,7 @@ else
 end
 
 if ${is_not_release} and ${is_dynamic_linking}
-  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link"
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
 else
   set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
 end
@@ -865,7 +865,7 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -881,11 +881,11 @@ if [ $# -gt 0 ]; then
   ARGS=("$@")
 
   echo "Applying clippy --fix for $@ (including dirty and staged files)"
-  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+  cargo clippy ${ARGS[@]/#/--package risingwave_} ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
   echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
-  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+  cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 fi
 """
 
@@ -914,7 +914,7 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 

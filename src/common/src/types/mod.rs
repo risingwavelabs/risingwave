@@ -50,6 +50,7 @@ mod jsonb;
 mod native_type;
 mod num256;
 mod ops;
+mod ordered;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
@@ -67,6 +68,7 @@ pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
@@ -81,6 +83,37 @@ pub type F32 = ordered_float::OrderedFloat<f32>;
 
 /// A 64-bit floating point type with total order.
 pub type F64 = ordered_float::OrderedFloat<f64>;
+
+/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
+/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
+///
+/// This is useful for checking whether a physical type is compatible with a logical type.
+#[macro_export]
+macro_rules! for_all_type_pairs {
+    ($macro:ident) => {
+        $macro! {
+            { Boolean,     Bool },
+            { Int16,       Int16 },
+            { Int32,       Int32 },
+            { Int64,       Int64 },
+            { Int256,      Int256 },
+            { Float32,     Float32 },
+            { Float64,     Float64 },
+            { Varchar,     Utf8 },
+            { Bytea,       Bytea },
+            { Date,        Date },
+            { Time,        Time },
+            { Timestamp,   Timestamp },
+            { Timestamptz, Int64 },
+            { Interval,    Interval },
+            { Decimal,     Decimal },
+            { Jsonb,       Jsonb },
+            { Serial,      Serial },
+            { List,        List },
+            { Struct,      Struct }
+        }
+    };
+}
 
 /// The set of datatypes that are supported in RisingWave.
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
@@ -285,27 +318,20 @@ impl From<DataTypeName> for PbTypeName {
 impl DataType {
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
-        match self {
-            DataType::Boolean => BoolArrayBuilder::new(capacity).into(),
-            DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
-            DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
-            DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
-            DataType::Serial => PrimitiveArrayBuilder::<Serial>::new(capacity).into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<F32>::new(capacity).into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<F64>::new(capacity).into(),
-            DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
-            DataType::Date => DateArrayBuilder::new(capacity).into(),
-            DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
-            DataType::Time => TimeArrayBuilder::new(capacity).into(),
-            DataType::Timestamp => TimestampArrayBuilder::new(capacity).into(),
-            DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
-            DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
-            DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
-            DataType::Int256 => Int256ArrayBuilder::new(capacity).into(),
-            DataType::Struct(_) => StructArrayBuilder::with_type(capacity, self.clone()).into(),
-            DataType::List { .. } => ListArrayBuilder::with_type(capacity, self.clone()).into(),
-            DataType::Bytea => BytesArrayBuilder::new(capacity).into(),
+
+        macro_rules! new_builder {
+            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                match self {
+                    $(
+                        DataType::$DataType { .. } => {
+                            let builder = ArrayBuilder::with_type(capacity, self.clone());
+                            ArrayBuilderImpl::$PhysicalType(builder)
+                        }
+                    )*
+                }
+            }
         }
+        for_all_type_pairs! { new_builder }
     }
 
     pub fn prost_type_name(&self) -> PbTypeName {
@@ -438,21 +464,28 @@ impl From<DataType> for PbDataType {
     }
 }
 
+/// Common trait bounds of scalar and scalar reference types.
+///
+/// NOTE(rc): `Hash` is not in the trait bound list, it's implemented as [`ScalarRef::hash_scalar`].
+pub trait ScalarBounds<Impl> = Debug
+    + Send
+    + Sync
+    + Clone
+    + PartialEq
+    + Eq
+    // in default ascending order
+    + PartialOrd
+    + Ord
+    + TryFrom<Impl, Error = ArrayError>
+    // `ScalarImpl`/`ScalarRefImpl`
+    + Into<Impl>;
+
 /// `Scalar` is a trait over all possible owned types in the evaluation
 /// framework.
 ///
 /// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
 /// reference which has the same lifetime as `self`.
-pub trait Scalar:
-    std::fmt::Debug
-    + Send
-    + Sync
-    + 'static
-    + Clone
-    + std::fmt::Debug
-    + TryFrom<ScalarImpl, Error = ArrayError>
-    + Into<ScalarImpl>
-{
+pub trait Scalar: ScalarBounds<ScalarImpl> + 'static {
     /// Type for reference of `Scalar`
     type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self> + 'a
     where
@@ -476,15 +509,7 @@ pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRe
 ///
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
-pub trait ScalarRef<'a>:
-    Copy
-    + std::fmt::Debug
-    + Send
-    + Sync
-    + 'a
-    + TryFrom<ScalarRefImpl<'a>, Error = ArrayError>
-    + Into<ScalarRefImpl<'a>>
-{
+pub trait ScalarRef<'a>: ScalarBounds<ScalarRefImpl<'a>> + 'a + Copy {
     /// `ScalarType` is the owned type of current `ScalarRef`.
     type ScalarType: Scalar<ScalarRefType<'a> = Self>;
 
@@ -550,44 +575,6 @@ macro_rules! scalar_impl_enum {
 
 for_all_scalar_variants! { scalar_impl_enum }
 
-/// Implement [`PartialOrd`] and [`Ord`] for [`ScalarImpl`] and [`ScalarRefImpl`].
-///
-/// Scalars of different types are not comparable. For this case, `partial_cmp` returns `None` and
-/// `cmp` will panic.
-macro_rules! scalar_impl_partial_ord {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl PartialOrd for ScalarImpl {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarImpl {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-
-        impl PartialOrd for ScalarRefImpl<'_> {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarRefImpl<'_> {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-    };
-}
-
-for_all_scalar_variants! { scalar_impl_partial_ord }
-
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
@@ -604,7 +591,7 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
-pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+pub trait ToDatumRef: PartialEq + Eq + Debug {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }
@@ -1138,37 +1125,6 @@ impl ScalarImpl {
             ),
         }
     }
-}
-
-/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
-/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
-///
-/// This is useful for checking whether a physical type is compatible with a logical type.
-#[macro_export]
-macro_rules! for_all_type_pairs {
-    ($macro:ident) => {
-        $macro! {
-            { Boolean,     Bool },
-            { Int16,       Int16 },
-            { Int32,       Int32 },
-            { Int64,       Int64 },
-            { Int256,      Int256 },
-            { Float32,     Float32 },
-            { Float64,     Float64 },
-            { Varchar,     Utf8 },
-            { Bytea,       Bytea },
-            { Date,        Date },
-            { Time,        Time },
-            { Timestamp,   Timestamp },
-            { Timestamptz, Int64 },
-            { Interval,    Interval },
-            { Decimal,     Decimal },
-            { Jsonb,       Jsonb },
-            { Serial,      Serial },
-            { List,        List },
-            { Struct,      Struct }
-        }
-    };
 }
 
 /// Returns whether the `literal` matches the `data_type`.
