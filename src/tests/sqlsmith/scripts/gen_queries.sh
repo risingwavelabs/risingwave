@@ -37,7 +37,7 @@ echo_err() {
 
 # Get reason for generation crash.
 get_failure_reason() {
-  grep -B 2 "$CRASH_MESSAGE" || true
+  tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
 }
 
 # Extract queries from file $1, write to file $2
@@ -52,7 +52,7 @@ extract_queries() {
 }
 
 extract_ddl() {
-  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' || true
+  grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
 }
 
 extract_dml() {
@@ -68,20 +68,22 @@ extract_global_session() {
 }
 
 extract_failing_query() {
-  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' || true
+  grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' | pg_format || true
 }
 
 # Extract fail info from [`generate-*.log`] in log dir
+# $1 := log file name prefix. E.g. if file is generate-XXX.log, prefix will be "generate"
 extract_fail_info_from_logs() {
-  for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
+  LOGFILE_PREFIX="$1"
+  for LOGFILENAME in $(ls "$LOGDIR" | grep "$LOGFILE_PREFIX")
   do
     LOGFILE="$LOGDIR/$LOGFILENAME"
     REASON=$(get_failure_reason < "$LOGFILE")
     if [[ -n "$REASON" ]]; then
-      echo_err "[INFO] $LOGFILE Encountered bug due to $REASON"
+      echo_err "[INFO] $LOGFILE Encountered bug."
 
       # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
-      SEED=$(echo "$LOGFILENAME" | sed -E 's/generate\-(.*)\.log/\1/')
+      SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
       DDL=$(extract_ddl < "$LOGFILE")
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
       DML=$(extract_dml < "$LOGFILE")
@@ -89,7 +91,7 @@ extract_fail_info_from_logs() {
       QUERY=$(extract_failing_query < "$LOGFILE")
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
+      echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
@@ -196,7 +198,7 @@ validate() {
   echo_err "[CHECK PASSED] Generated queries should be different"
   check_failed_to_generate_queries
   echo_err "[CHECK PASSED] No seeds failed to generate queries"
-  extract_fail_info_from_logs
+  extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
   echo_err "[INFO] Queries were ran"
@@ -262,4 +264,8 @@ main() {
   cleanup
 }
 
-main
+extract() {
+  LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
+}
+
+# main
