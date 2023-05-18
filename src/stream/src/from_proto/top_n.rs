@@ -49,8 +49,6 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        assert_eq!(&params.pk_indices, input.pk_indices());
-
         macro_rules! build {
             ($excutor:ident, $with_ties:literal) => {
                 Ok($excutor::<_, $with_ties>::new(

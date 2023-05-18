@@ -50,6 +50,7 @@ mod jsonb;
 mod native_type;
 mod num256;
 mod ops;
+mod ordered;
 mod ordered_float;
 mod postgres_type;
 mod scalar_impl;
@@ -67,6 +68,7 @@ pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
 pub use self::num256::{Int256, Int256Ref};
 pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered::*;
 pub use self::ordered_float::{FloatExt, IntoOrdered};
 pub use self::scalar_impl::*;
 pub use self::serial::Serial;
@@ -462,21 +464,28 @@ impl From<DataType> for PbDataType {
     }
 }
 
+/// Common trait bounds of scalar and scalar reference types.
+///
+/// NOTE(rc): `Hash` is not in the trait bound list, it's implemented as [`ScalarRef::hash_scalar`].
+pub trait ScalarBounds<Impl> = Debug
+    + Send
+    + Sync
+    + Clone
+    + PartialEq
+    + Eq
+    // in default ascending order
+    + PartialOrd
+    + Ord
+    + TryFrom<Impl, Error = ArrayError>
+    // `ScalarImpl`/`ScalarRefImpl`
+    + Into<Impl>;
+
 /// `Scalar` is a trait over all possible owned types in the evaluation
 /// framework.
 ///
 /// `Scalar` is reciprocal to `ScalarRef`. Use `as_scalar_ref` to get a
 /// reference which has the same lifetime as `self`.
-pub trait Scalar:
-    std::fmt::Debug
-    + Send
-    + Sync
-    + 'static
-    + Clone
-    + std::fmt::Debug
-    + TryFrom<ScalarImpl, Error = ArrayError>
-    + Into<ScalarImpl>
-{
+pub trait Scalar: ScalarBounds<ScalarImpl> + 'static {
     /// Type for reference of `Scalar`
     type ScalarRefType<'a>: ScalarRef<'a, ScalarType = Self> + 'a
     where
@@ -500,15 +509,7 @@ pub fn option_as_scalar_ref<S: Scalar>(scalar: &Option<S>) -> Option<S::ScalarRe
 ///
 /// `ScalarRef` is reciprocal to `Scalar`. Use `to_owned_scalar` to get an
 /// owned scalar.
-pub trait ScalarRef<'a>:
-    Copy
-    + std::fmt::Debug
-    + Send
-    + Sync
-    + 'a
-    + TryFrom<ScalarRefImpl<'a>, Error = ArrayError>
-    + Into<ScalarRefImpl<'a>>
-{
+pub trait ScalarRef<'a>: ScalarBounds<ScalarRefImpl<'a>> + 'a + Copy {
     /// `ScalarType` is the owned type of current `ScalarRef`.
     type ScalarType: Scalar<ScalarRefType<'a> = Self>;
 
@@ -574,44 +575,6 @@ macro_rules! scalar_impl_enum {
 
 for_all_scalar_variants! { scalar_impl_enum }
 
-/// Implement [`PartialOrd`] and [`Ord`] for [`ScalarImpl`] and [`ScalarRefImpl`].
-///
-/// Scalars of different types are not comparable. For this case, `partial_cmp` returns `None` and
-/// `cmp` will panic.
-macro_rules! scalar_impl_partial_ord {
-    ($( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        impl PartialOrd for ScalarImpl {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarImpl {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-
-        impl PartialOrd for ScalarRefImpl<'_> {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                match (self, other) {
-                    $( (Self::$variant_name(lhs), Self::$variant_name(rhs)) => Some(lhs.cmp(rhs)), )*
-                    _ => None,
-                }
-            }
-        }
-        impl Ord for ScalarRefImpl<'_> {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.partial_cmp(other).unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
-            }
-        }
-    };
-}
-
-for_all_scalar_variants! { scalar_impl_partial_ord }
-
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
@@ -628,7 +591,7 @@ impl ToOwnedDatum for DatumRef<'_> {
     }
 }
 
-pub trait ToDatumRef: PartialEq + Eq + std::fmt::Debug {
+pub trait ToDatumRef: PartialEq + Eq + Debug {
     /// Convert the datum to [`DatumRef`].
     fn to_datum_ref(&self) -> DatumRef<'_>;
 }

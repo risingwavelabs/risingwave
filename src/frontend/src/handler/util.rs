@@ -33,7 +33,9 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
+use risingwave_sqlparser::ast::display_comma_separated;
 
+use crate::catalog::IndexCatalog;
 use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
 
@@ -185,6 +187,40 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     Row::new(vec![Some(c.name.into()), Some(type_name.into())])
                 })
                 .collect_vec()
+        })
+        .collect_vec()
+}
+
+pub fn indexes_to_rows(indexes: Vec<Arc<IndexCatalog>>) -> Vec<Row> {
+    indexes
+        .iter()
+        .map(|index| {
+            let index_display = index.display();
+            Row::new(vec![
+                Some(index.name.clone().into()),
+                Some(index.primary_table.name.clone().into()),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.index_columns_with_ordering)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.include_columns)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.distributed_by_columns)
+                    )
+                    .into(),
+                ),
+            ])
         })
         .collect_vec()
 }

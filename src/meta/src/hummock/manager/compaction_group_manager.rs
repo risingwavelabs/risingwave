@@ -636,10 +636,19 @@ impl<S: MetaStore> HummockManager<S> {
 
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let versioning_guard = read_lock!(self, versioning).await;
-        versioning_guard
-            .current_version
-            .calculate_compaction_group_statistic()
+        let mut infos = {
+            let versioning_guard = read_lock!(self, versioning).await;
+            versioning_guard
+                .current_version
+                .calculate_compaction_group_statistic()
+        };
+        let manager = self.compaction_group_manager.read().await;
+        for info in &mut infos {
+            if let Some(group) = manager.compaction_groups.get(&info.group_id) {
+                info.split_by_table = group.compaction_config.split_by_state_table;
+            }
+        }
+        infos
     }
 }
 

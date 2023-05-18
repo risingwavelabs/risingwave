@@ -361,9 +361,10 @@
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v3 ASC, t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v3 ASC, t.v1 ASC] }
+        └─BatchGroupTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -376,9 +377,10 @@
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v1 ASC, t.v3 ASC] }
+        └─BatchGroupTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int);
@@ -399,10 +401,11 @@
   batch_plan: |
     BatchProject { exprs: [$expr1] }
     └─BatchExchange { order: [t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
-            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v1 ASC] }
+        └─BatchGroupTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
+            └─BatchProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
+              └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: arguments out-of-order
   sql: |
     create table t(v1 int, v2 int, v3 int);

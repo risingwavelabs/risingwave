@@ -18,7 +18,7 @@ CREATE TABLE pg_counts (
 ) WITH (
     'connector' = 'jdbc',
     'url' = 'jdbc:postgresql://postgres:5432/mydb?user=myuser&password=123456',
-    'table-name' = 'counts'
+    'table-name' = 'flinkcounts'
 );
 
 INSERT INTO pg_counts
