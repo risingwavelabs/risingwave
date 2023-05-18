@@ -706,10 +706,11 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, auction, bidder, price, date_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
-              └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id, auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+                └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[price DESC, date_time ASC]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalJoin { type: Inner, on: (id = auction) AND (date_time >= date_time) AND (date_time <= expires), output: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time] }
@@ -1116,7 +1117,8 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
@@ -1171,7 +1173,8 @@
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, rank] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[date_time DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
@@ -1229,7 +1232,8 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+            └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:
   - create_sources
