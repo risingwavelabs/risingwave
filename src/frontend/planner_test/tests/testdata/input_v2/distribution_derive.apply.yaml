@@ -1,0 +1,241 @@
+- id: create_tables
+  sql: |
+    set rw_streaming_enable_delta_join = true;
+    create table A      (k1 int, k2 int, k3 int, v int);
+    create index Ak1   on A(k1) include(k1,k2,k3,v);
+    create index Ak1k2 on A(k1,k2) include(k1,k2,k3,v);
+    create table B      (k1 int, k2 int, k3 int, v int);
+    create index Bk1   on B(k1) include(k1,k2,k3,v);
+  output_fields: []
+- id: A_join_B_onk1
+  before:
+  - create_tables
+  sql: select A.v, B.v as Bv from A join B using(k1);
+  output_fields:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: Ak1_join_B_onk1
+  before:
+  - create_tables
+  sql: select A.v, B.v as Bv from Ak1 as A join B using(k1)
+  output_fields:
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
+- id: A_join_Bk1_onk1
+  before:
+  - create_tables
+  sql: select A.v, B.v as Bv from A join Bk1 as B using(k1)
+  output_fields:
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
+- id: Ak1_join_Bk1_onk1
+  before:
+  - create_tables
+  sql: select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
+  output_fields:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: aggk1_from_A
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from A
+    group by k1;
+  output_fields:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: aggk1_from_Ak1
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from Ak1 as A
+    group by k1;
+  output_fields:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: aggk1_from_Ak1k2
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from Ak1k2 as A
+    group by k1;
+  output_fields:
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
+- id: aggk2_from_Ak1k2
+  before:
+  - create_tables
+  sql: |
+    select max(v) as max_v
+    from Ak1k2 as A
+    group by k2;
+  output_fields:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: aggk1k2_from_Ak1k2
+  before:
+  - create_tables
+  sql: |
+    select sum(v) as sum_v
+    from Ak1k2 as A
+    group by k1, k2;
+  output_fields:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: aggk1k2_from_Ak1
+  before:
+  - create_tables
+  sql: |
+    select sum(v) as sum_v
+    from Ak1 as A
+    group by k1, k2;
+  output_fields:
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
+- id: aggk1_from_aggk1
+  before:
+  - create_tables
+  sql: |
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    )
+    group by k1;
+  output_fields:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: aggk1_from_aggk1k2
+  before:
+  - create_tables
+  sql: |
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, k1
+      from A
+      group by k1, k2
+    )
+    group by k1;
+  output_fields:
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
+  - logical_plan
+- id: aggk2_from_aggk1k2
+  before:
+  - create_tables
+  sql: |
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, k2
+      from A
+      group by k1, k2
+    )
+    group by k2;
+  output_fields:
+  - stream_dist_plan
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
+- id: aggk1k2_from_aggk1k2
+  before:
+  - create_tables
+  sql: |
+    select
+      max(num) as max_num
+    from (
+      select
+        count(*) as num, k1, k2
+      from A
+      group by k1, k2
+    )
+    group by k1, k2;
+  output_fields:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+- id: Ak1_join_aggk1_onk1
+  before:
+  - create_tables
+  sql: |
+    with B as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    )
+    select A.v, B.num as Bv from Ak1 as A join B using(k1)
+  output_fields:
+  - stream_plan
+  - logical_plan
+  - stream_dist_plan
+  - batch_plan
+- id: aggk1_join_Ak1_onk1
+  before:
+  - create_tables
+  sql: |
+    with B as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    )
+    select A.v, B.num as Bv from B join Ak1 as A using(k1)
+  output_fields:
+  - logical_plan
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: aggk1_join_aggk1_onk1
+  before:
+  - create_tables
+  sql: |
+    with A as (
+      select
+        count(*) as num, k1
+      from A
+      group by k1
+    ), B as (
+      select
+        count(*) as num, k1
+      from B
+      group by k1
+    )
+    select A.num, B.num as Bv from A join B using(k1)
+  output_fields:
+  - batch_plan
+  - stream_plan
+  - logical_plan
+  - stream_dist_plan
+- sql: |
+    create table t1 (row_id int, uid int, v int, created_at timestamp);
+    select * from hop(t1, created_at, interval '15' minute, interval '30' minute);
+  output_fields:
+  - stream_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - logical_plan
+  - stream_dist_plan

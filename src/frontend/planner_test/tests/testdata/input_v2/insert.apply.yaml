@@ -1,0 +1,259 @@
+- name: insert values on matching types
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t values (22, 33), (44, 55);
+  output_fields:
+  - batch_plan
+- name: insert values on assign-castable types
+  sql: |
+    create table t (v1 real, v2 int);
+    insert into t values (22.33, '33'), (44, 55.0);
+  output_fields:
+  - batch_plan
+- name: prohibit inserting different number of nulls per row
+  sql: |
+    create table t (v1 real, v2 int, v3 varchar);
+    insert into t values (1, 2), (3, 4, 5);
+  output_fields:
+  - binder_error
+- name: insert values with implicit null (single row)
+  sql: |
+    create table t (v1 real, v2 int, v3 varchar);
+    insert into t values (1, 2);
+  output_fields:
+  - batch_plan
+- name: insert values with implicit null (multiple rows)
+  sql: |
+    create table t (v1 real, v2 int, v3 varchar);
+    insert into t values (1, 2), (3, 4);
+  output_fields:
+  - batch_plan
+- name: implicit null user defined columns 1
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1) values (5);
+  output_fields:
+  - batch_plan
+- name: implicit null user defined columns 2
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v2) values (6);
+  output_fields:
+  - batch_plan
+- name: implicit null user defined columns 3
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v3) values (6);
+  output_fields:
+  - batch_plan
+- name: implicit null user defined columns 4
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v1) values (6);
+  output_fields:
+  - batch_plan
+- name: implicit null user defined columns 5
+  sql: |
+    create table t (v1 int, v2 int, v3 int);
+    insert into t (v2) values (6);
+  output_fields:
+  - batch_plan
+- name: insert values on non-assign-castable types
+  sql: |
+    create table t (v1 real, v2 int);
+    insert into t values (22.33, true);
+  output_fields:
+  - binder_error
+- name: simple insert
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t values (1, 2);
+  output_fields:
+  - batch_plan
+- name: Invalid column name
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v3) values (1, 2);
+  output_fields:
+  - binder_error
+- name: Invalid column name 2
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v3, v1) values (1, 2);
+  output_fields:
+  - binder_error
+- name: Duplicate column
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v1) values (1, 2);
+  output_fields:
+  - binder_error
+- name: To many target columns
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v2) values (5);
+  output_fields:
+  - binder_error
+- name: Not enough target columns
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1) values (5, 6);
+  output_fields:
+  - binder_error
+- name: insert literal null
+  sql: |
+    create table t(v1 int);
+    insert into t values(NULL);
+  output_fields:
+  - batch_plan
+- name: insert values cast each expr rather than whole `VALUES` (compare with below)
+  sql: |
+    create table t (v1 time);
+    insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+  output_fields:
+  - batch_plan
+- name: a `VALUES` without insert context may be invalid on its own (compare with above)
+  sql: |
+    create table t (v1 time);
+    values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
+  output_fields:
+  - binder_error
+- name: a `VALUES` with `limit` loses insert context (compare with 2 cases above)
+  sql: |
+    create table t (v1 time);
+    insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
+  output_fields:
+  - binder_error
+- name: null in first row without insert context
+  sql: |
+    values (null), (1);
+  output_fields:
+  - batch_plan
+- name: null in later rows without insert context
+  sql: |
+    values (1), (null), (2.3);
+  output_fields:
+  - batch_plan
+- name: rows of different number of columns
+  sql: |
+    values (1), (2, 3);
+  output_fields:
+  - binder_error
+- name: insert into select without cast
+  sql: |
+    create table t (v1 time);
+    insert into t select v1 from t;
+  output_fields:
+  - batch_plan
+- name: insert into select with cast
+  sql: |
+    create table t (v1 time, v2 int, v3 real);
+    insert into t select timestamp '2020-01-01 01:02:03', 11, 4.5 from t;
+  output_fields:
+  - batch_plan
+- name: insert into select with cast error
+  sql: |
+    create table t (v1 timestamp, v2 real);
+    insert into t select time '01:02:03', 4.5 from t;
+  output_fields:
+  - binder_error
+- name: insert into select mismatch columns length
+  sql: |
+    create table t (v1 int, v2 real);
+    insert into t select 2, 3, 4.5 from t;
+  output_fields:
+  - binder_error
+- name: insert with join
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    create table t3 (e int, f int);
+    insert into t1 select c, e from t2 join t3 on t2.d = t3.f
+  output_fields:
+  - batch_plan
+- name: basic insert with returning
+  sql: |
+    create table t (a int, b int);
+    insert into t values (0,1), (1,2) returning *, a, a+b;
+  output_fields:
+  - logical_plan
+  - batch_plan
+- name: insert with returning constant, should keep `Insert`
+  sql: |
+    create table t (v int);
+    insert into t values (114) returning 514;
+  output_fields:
+  - logical_plan
+  - batch_plan
+- name: insert with select and returning
+  sql: |
+    create table t (a int, b int);
+    insert into t select distinct * from t returning *, a, a+b;
+  output_fields:
+  - logical_plan
+  - batch_plan
+- name: insert with returning agg functions, should not run
+  sql: |
+    create table t (a int, b int);
+    insert into t values (0,1), (1,2) returning sum(a);
+  output_fields:
+  - binder_error
+- name: insert and specify all columns with values
+  sql: |
+    create table t (a int, b int);
+    insert into t (b, a) values (1, 2);
+  output_fields:
+  - logical_plan
+  - batch_plan
+- name: insert and specify all columns with query
+  sql: |
+    create table t (a int, b int);
+    explain (verbose true) insert into t (b, a) select * from t;
+  output_fields:
+  - explain_output
+- name: insert and specify some columns with values
+  sql: |
+    create table t (a int, b int);
+    explain (verbose true) insert into t (a) values (1), (2);
+  output_fields:
+  - explain_output
+- name: insert and specify some columns with query
+  sql: |
+    create table t (a int, b int);
+    insert into t (a) select b from t;
+  output_fields:
+  - logical_plan
+  - batch_plan
+- name: insert with less source columns from values
+  sql: |
+    create table t (a int, b int);
+    insert into t values (1);
+  output_fields:
+  - batch_plan
+  - logical_plan
+- name: insert with less source columns from query
+  sql: |
+    create table t (a int, b int);
+    insert into t select a from t;
+  output_fields:
+  - batch_plan
+  - logical_plan
+- name: insert with more source columns, reject
+  sql: |
+    create table t (a int, b int);
+    insert into t values (1, 2, 3);
+  output_fields:
+  - binder_error
+- name: insert with more source columns than target, reject
+  sql: |
+    create table t (a int, b int);
+    insert into t (a) select * from t;
+  output_fields:
+  - binder_error
+- name: insert to a table with default columns
+  sql: |
+    create table t (a int, b int default 2+3);
+    insert into t values (1);
+  output_fields:
+  - batch_plan
+  - logical_plan

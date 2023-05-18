@@ -1,0 +1,27 @@
+- sql: explain (distsql, trace, verbose) select 1;
+  output_fields:
+  - explain_output
+- sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical) select * from t1 join t2 on v1=v2;
+  output_fields:
+  - explain_output
+- sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical, trace) select * from t1 join t2 on v1=v2;
+  output_fields:
+  - explain_output
+- sql: |
+    explain (logical) create table t1(v1 int);
+  output_fields:
+  - explain_output
+- sql: |
+    explain create table t (v1 int, v2 varchar);
+  output_fields:
+  - explain_output
+- sql: |
+    explain create table t (v1 int, v2 varchar) with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) row format json;
+  output_fields:
+  - explain_output

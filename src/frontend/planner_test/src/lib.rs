@@ -19,7 +19,7 @@
 
 mod resolve_id;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -38,6 +38,95 @@ use risingwave_frontend::{
 use risingwave_sqlparser::ast::{EmitMode, ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub enum OutputField {
+    /// The result of an `EXPLAIN` statement.
+    ///
+    /// This field is used when `sql` is an `EXPLAIN` statement.
+    /// In this case, all other fields are invalid.
+    ExplainOutput,
+
+    /// The original logical plan
+    LogicalPlan,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
+    OptimizedLogicalPlanForBatch,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
+    OptimizedLogicalPlanForStream,
+
+    /// Distributed batch plan `.gen_batch_query_plan()`
+    BatchPlan,
+    /// Proto JSON of generated batch plan
+    BatchPlanProto,
+    /// Batch plan for local execution `.gen_batch_local_plan()`
+    BatchLocalPlan,
+
+    /// Create MV plan `.gen_create_mv_plan()`
+    StreamPlan,
+    /// Create MV fragments plan
+    StreamDistPlan,
+    /// Create MV plan with EOWC semantics `.gen_create_mv_plan(.., EmitMode::OnWindowClose)`
+    EowcStreamPlan,
+    /// Create MV fragments plan with EOWC semantics
+    EowcStreamDistPlan,
+
+    /// Create sink plan (assumes blackhole sink)
+    /// TODO: Other sinks
+    SinkPlan,
+
+    BinderError,
+    PlannerError,
+    OptimizerError,
+    BatchError,
+    BatchLocalError,
+    StreamError,
+}
+
+pub fn v1_to_v2(test_case: TestCase) -> TestCaseV2 {
+    let mut test_case_v2 = TestCaseV2::default();
+    test_case_v2.id = test_case.id;
+    test_case_v2.name = test_case.name;
+    test_case_v2.before = test_case.before;
+    test_case_v2.before_statements = test_case.before_statements;
+    test_case_v2.sql = test_case.sql;
+    test_case_v2.create_source = test_case.create_source;
+    test_case_v2.create_table_with_connector = test_case.create_table_with_connector;
+    test_case_v2.with_config_map = test_case.with_config_map;
+    test_case_v2.output_fields = HashSet::new();
+
+    // e.g., explain_output -> OutputField::ExplainOutput
+    macro_rules! convert {
+        ($field:ident) => {
+            paste::paste! {
+                if let Some([<$field:snake>]) = &test_case.[<$field:snake>] {
+                    test_case_v2.output_fields.insert(OutputField::$field);
+                }
+            }
+        };
+    }
+    convert!(ExplainOutput);
+    convert!(LogicalPlan);
+    convert!(OptimizedLogicalPlanForBatch);
+    convert!(OptimizedLogicalPlanForStream);
+    convert!(BatchPlan);
+    convert!(BatchPlanProto);
+    convert!(BatchLocalPlan);
+    convert!(SinkPlan);
+    convert!(StreamPlan);
+    convert!(StreamDistPlan);
+    convert!(EowcStreamPlan);
+    convert!(EowcStreamDistPlan);
+    convert!(BinderError);
+    convert!(PlannerError);
+    convert!(OptimizerError);
+    convert!(BatchError);
+    convert!(BatchLocalError);
+    convert!(StreamError);
+    convert!(EowcStreamPlan);
+    convert!(EowcStreamDistPlan);
+    test_case_v2
+}
 
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -131,6 +220,33 @@ pub struct TestCase {
 
     /// Provide config map to frontend
     pub with_config_map: Option<BTreeMap<String, String>>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct TestCaseV2 {
+    /// Id of the test case, used in before.
+    pub id: Option<String>,
+    /// A brief description of the test case.
+    pub name: Option<String>,
+    /// Before running the SQL statements, the test runner will execute the specified test cases
+    pub before: Option<Vec<String>>,
+    /// The resolved statements of the before ids
+    #[serde(skip_serializing)]
+    before_statements: Option<Vec<String>>,
+    /// The SQL statements
+    pub sql: String,
+
+    /// Support using file content or file location to create source.
+    pub create_source: Option<CreateConnector>,
+    /// Support using file content or file location to create table with connector.
+    pub create_table_with_connector: Option<CreateConnector>,
+    /// Provide config map to frontend
+    pub with_config_map: Option<BTreeMap<String, String>>,
+
+    /// Specify what output fields to check
+    pub output_fields: HashSet<OutputField>,
 }
 
 #[serde_with::skip_serializing_none]

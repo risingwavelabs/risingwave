@@ -1,0 +1,32 @@
+- sql: |
+    select current_schema();
+  output_fields:
+  - batch_plan
+- sql: |
+    select current_schema;
+  output_fields:
+  - batch_plan
+- sql: |
+    select session_user;
+  output_fields:
+  - batch_plan
+- sql: |
+    select current_schemas(true);
+  output_fields:
+  - batch_plan
+- sql: |
+    select current_schemas(false);
+  output_fields:
+  - batch_plan
+- sql: |
+    select current_schemas(null);
+  output_fields:
+  - batch_plan
+- sql: |
+    select current_schemas(true and false);
+  output_fields:
+  - binder_error
+- sql: |
+    select current_timestamp > now() - interval '10 minutes';
+  output_fields:
+  - batch_plan

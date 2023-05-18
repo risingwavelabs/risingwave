@@ -1,0 +1,29 @@
+- sql: |
+    create table t (v1 int, v2 int, v3 int);
+    select v1, min(v2), count(distinct v3) as agg from t group by v1;
+  output_fields:
+  - stream_plan
+- sql: |
+    create source t (v1 int, v2 int, v3 int, watermark for v1 as v1 - 10) with (connector = 'kinesis') ROW FORMAT JSON;
+    select v1, min(v2), count(distinct v3) as agg from t group by v1;
+  output_fields:
+  - stream_plan
+  - eowc_stream_dist_plan
+  - eowc_stream_plan
+- sql: |
+    CREATE TABLE t (a TIMESTAMP, b INT, WATERMARK FOR a AS a - INTERVAL '5 minutes') APPEND ONLY;
+    SELECT
+        window_start, max(b)
+    FROM tumble(t, a, INTERVAL '1 hour')
+    GROUP BY window_start;
+  output_fields:
+  - eowc_stream_dist_plan
+  - eowc_stream_plan
+  - stream_plan
+- sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') ROW FORMAT JSON;
+    select lag(a, 2) over (partition by b order by tm) from t;
+  output_fields:
+  - eowc_stream_dist_plan
+  - stream_error
+  - eowc_stream_plan

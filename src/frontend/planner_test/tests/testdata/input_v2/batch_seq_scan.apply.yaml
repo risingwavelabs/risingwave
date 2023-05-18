@@ -1,0 +1,10 @@
+- id: batch_seq_scan_local
+  name: Test that BatchSeqScan pushed to compute node in local mode
+  sql: |
+    create table t (id int);
+    create materialized view v as select count(*) cnt from t;
+    SET QUERY_MODE TO distributed;
+    select * from v cross join (select count(*) from t) T;
+  output_fields:
+  - batch_plan
+  - batch_local_plan

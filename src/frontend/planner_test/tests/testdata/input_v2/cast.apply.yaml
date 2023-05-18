@@ -1,0 +1,66 @@
+- name: implicit cast boolean (HAVING NULL)
+  sql: |
+    select 1 having NULL;
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (WHERE NULL)
+  sql: |
+    select 1 where NULL;
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (CASE NULL)
+  sql: |
+    select case when NULL then 1 end;
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (JOIN ON NULL)
+  sql: |
+    create table t1(v1 int);
+    create table t2(v1 int);
+    select t1.v1 from t1 join t2 on NULL;
+  output_fields:
+  - batch_plan
+- name: current_schemas (current_schemas(NULL))
+  sql: |
+    select current_schemas(NULL);
+  output_fields:
+  - batch_plan
+- name: FILTER (FILTER NULL)
+  sql: |
+    create table t(v1 int);
+    select count(*) FILTER(WHERE null) from t;
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (HAVING with literal 'y' of unknown type)
+  sql: |
+    select 1 having 'y';
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (WHERE with literal 'y' of unknown type)
+  sql: |
+    select 1 where 'y';
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (CASE with literal 'y' of unknown type)
+  sql: |
+    select case when 'y' then 1 end;
+  output_fields:
+  - batch_plan
+- name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
+  sql: |
+    create table t1(v1 int);
+    create table t2(v1 int);
+    select t1.v1 from t1 join t2 on 'y';
+  output_fields:
+  - batch_plan
+- name: current_schemas (CURRENT_SCHEMAS with literal 'y' of unknown type)
+  sql: |
+    select current_schemas('y');
+  output_fields:
+  - batch_plan
+- name: FILTER (FILTER with literal 'y' of unknown type)
+  sql: |
+    create table t(v1 int);
+    select count(*) FILTER(WHERE 'y') from t;
+  output_fields:
+  - batch_plan

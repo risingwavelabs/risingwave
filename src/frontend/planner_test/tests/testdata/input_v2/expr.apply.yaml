@@ -1,0 +1,425 @@
+- name: bind typed literal - int
+  sql: |
+    select int '1';
+  output_fields:
+  - logical_plan
+- name: bind typed literal - bool
+  sql: |
+    SELECT bool 't'
+  output_fields:
+  - logical_plan
+- sql: |
+    values(must_be_unimplemented_func(1));
+  output_fields:
+  - binder_error
+- sql: |
+    values(cast(1 as bigint));
+  output_fields:
+  - batch_plan
+- sql: |
+    values(not true);
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t ();
+    select (((((false is not true) is true) is not false) is false) is not null) is null from t;
+  output_fields:
+  - batch_plan
+- name: bind between
+  sql: |
+    SELECT 1 between 2 and 3
+  output_fields:
+  - logical_plan
+- name: null eq null
+  sql: |
+    SELECT null = null;
+  output_fields:
+  - logical_plan
+- name: null lt null
+  sql: |
+    SELECT null < null;
+  output_fields:
+  - logical_plan
+- name: bind is distinct from
+  sql: |
+    SELECT 1 IS DISTINCT FROM 2
+  output_fields:
+  - logical_plan
+- name: bind is not distinct from
+  sql: |
+    SELECT 1 IS NOT DISTINCT FROM 2
+  output_fields:
+  - logical_plan
+- name: in-list with aligned types
+  sql: |
+    SELECT 1::real in (3, 1.0, 2);
+  output_fields:
+  - batch_plan
+- name: not in-list with aligned types
+  sql: |
+    SELECT 1::real not in (3, 1.0, 2);
+  output_fields:
+  - batch_plan
+- name: in-list with misaligned types
+  sql: |
+    SELECT true in (3, 1.0, 2);
+  output_fields:
+  - binder_error
+- name: in-list with non-const - agg
+  sql: |
+    create table t (v1 int);
+    SELECT 1 in (3, 0.5*2, min(v1)) from t;
+  output_fields:
+  - batch_plan
+- name: in-list with non-const - scalar subquery
+  sql: |
+    create table t (v1 int);
+    create table b (b1 int, b2 int);
+    SELECT b2 from b where 1 in (3, 1.0, (select min(v1) from t));
+  output_fields:
+  - batch_plan
+- name: in-list with non-const - correlated ref
+  sql: |
+    create table t (v1 int);
+    create table b (b1 int, b2 int);
+    SELECT b2 from b where exists (select 2 from t where v1 in (3, 1.0, b1));
+  output_fields:
+  - logical_plan
+  - batch_plan
+- sql: |
+    select +1.0, -2.0;
+  output_fields:
+  - batch_plan
+- sql: |
+    values(round(42.4382, 2));
+  output_fields:
+  - batch_plan
+- sql: |
+    values(round(42.4382));
+  output_fields:
+  - batch_plan
+- sql: |
+    values(round(42));
+  output_fields:
+  - batch_plan
+- sql: |
+    values(round(42, 2));
+  output_fields:
+  - batch_plan
+- sql: |
+    values(round(true));
+  output_fields:
+  - binder_error
+- sql: |
+    -- Single quoted literal can be treated as number without error.
+    values(round('123'));
+  output_fields:
+  - batch_plan
+- sql: |
+    -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now. #4235
+    values(round('abc'));
+  output_fields: []
+- sql: |
+    values(extract(hour from timestamp '2001-02-16 20:38:40'));
+  output_fields:
+  - batch_plan
+- sql: |
+    values('Postgres' not like 'Post%');
+  output_fields:
+  - batch_plan
+- sql: |
+    values(1 not like 1.23);
+  output_fields:
+  - binder_error
+- sql: |
+    select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
+  output_fields:
+  - batch_plan
+- sql: |
+    select position('123' in replace('1','1','2')) where '12' like '%1';
+  output_fields:
+  - batch_plan
+- name: case searched form with else
+  sql: |
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) as expr from t;
+  output_fields:
+  - stream_plan
+  - batch_plan
+- name: case searched form without else
+  sql: |
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2.1 end) from t;
+  output_fields:
+  - batch_plan
+- name: case simple form
+  sql: |
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when 2.0 then 2 else 0.0 end) from t;
+  output_fields:
+  - batch_plan
+- name: case misaligned result types
+  sql: |
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else true end) from t;
+  output_fields:
+  - binder_error
+- name: case misaligned value types
+  sql: |
+    create table t (v1 int);
+    select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 int);
+    select nullif(v1, 1) as expr from t;
+  output_fields:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t (v1 int);
+    select nullif(v1, 1, 2) from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 int);
+    select nullif(v1, true) from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 int);
+    select coalesce(v1, 1) as expr from t;
+  output_fields:
+  - stream_plan
+  - batch_plan
+- sql: |
+    create table t (v1 int);
+    select coalesce(v1, 1.2) from t;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (v1 int);
+    select coalesce() from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 int);
+    select coalesce(1,true) from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 varchar);
+    select concat_ws(v1, 1) as expr from t;
+  output_fields:
+  - stream_plan
+  - batch_plan
+- sql: |
+    create table t (v1 varchar);
+    select concat_ws(v1, 1.2) from t;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (v1 int);
+    select concat_ws(v1, 1.2) from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 int);
+    select concat_ws() from t;
+  output_fields:
+  - binder_error
+- sql: |
+    create table t (v1 varchar, v2 int, v3 float);
+    select concat(v1, v2, v3, 1) as expr from t;
+  output_fields:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t (v1 float);
+    select concat(v1) from t;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (v1 int);
+    select concat() from t;
+  output_fields:
+  - binder_error
+- sql: |
+    select concat(':', true);
+  output_fields:
+  - batch_plan
+- sql: |
+    select ':' || true;
+  output_fields:
+  - batch_plan
+- sql: |
+    select substr('hello', NULL);
+  output_fields:
+  - batch_plan
+- sql: |
+    select substr(NULL, 1);
+  output_fields:
+  - batch_plan
+- sql: |
+    select pg_typeof('123');
+  output_fields:
+  - batch_plan
+- sql: |
+    select pg_typeof(round(null));
+  output_fields:
+  - batch_plan
+- sql: |
+    select pg_typeof(row(true, 1, 'hello'));
+  output_fields:
+  - batch_plan
+- sql: |
+    select pg_typeof(array[1, 2]);
+  output_fields:
+  - batch_plan
+- sql: |
+    select pg_typeof(array[array[1, 2], array[3, 4]]);
+  output_fields:
+  - batch_plan
+- sql: |
+    select 1 = SOME(1);
+  output_fields:
+  - binder_error
+- sql: |
+    select 1 < SOME(null);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < ANY(null);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < ALL(null);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < ALL('{2,3}');
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < SOME(null::integer[]);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < SOME(null::varchar[]);
+  output_fields:
+  - binder_error
+- sql: |
+    select 1 < SOME(null::date);
+  output_fields:
+  - binder_error
+- name: array/struct on left not supported yet 5808
+  sql: |
+    select array[1] < SOME(null);
+  output_fields:
+  - binder_error
+- name: array of array/struct on right not supported yet 5808
+  sql: |
+    select null < SOME(array[array[1]]);
+  output_fields:
+  - binder_error
+- sql: |
+    select 1 < SOME(array[null]::integer[]);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < SOME(array[1, 2]);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < SOME((select array[1]) || array[2]);
+  output_fields:
+  - batch_plan
+  - logical_plan
+- sql: |
+    select 1 < ALL(array[null]::integer[]);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < ALL(array[1, 2]);
+  output_fields:
+  - logical_plan
+- sql: |
+    select 1 < ALL((select array[1]) || array[2]);
+  output_fields:
+  - batch_plan
+  - logical_plan
+- name: now expression
+  sql: |
+    create table t (v1 timestamp with time zone);
+    select * from t where v1 >= now();
+  output_fields:
+  - stream_plan
+  - logical_plan
+- name: now expression with proj
+  sql: |
+    create table t (v1 timestamp with time zone);
+    select * from t where v1 >= now() - INTERVAL '2' SECOND;
+  output_fields:
+  - logical_plan
+  - stream_plan
+- name: and of two now expression condition
+  sql: |
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
+    select * from t where v1 >= now() and v2 >= now();
+  output_fields:
+  - stream_plan
+- name: or of two now expression condition
+  sql: |
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
+    select * from t where v1 >= now() or v2 >= now();
+  output_fields:
+  - stream_error
+- name: now inside HAVING clause
+  sql: |
+    create table t (v1 timestamp with time zone, v2 int);
+    select max(v1) as max_time from t group by v2 having max(v1) >= now();
+  output_fields:
+  - stream_plan
+- name: forbid now in group by for stream
+  sql: |
+    create table t (v1 timestamp with time zone, v2 int);
+    select sum(v2) as sum_v2 from t group by v1 >= now();
+  output_fields:
+  - stream_error
+- name: forbid now in select for stream
+  sql: |
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
+    select now() as n, * from t where v1 >= now();
+  output_fields:
+  - stream_error
+- name: forbid now in agg filter for stream
+  sql: |
+    create table t (v1 timestamp with time zone, v2 int);
+    select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
+  output_fields:
+  - stream_error
+- name: typo pg_teminate_backend
+  sql: |
+    select pg_teminate_backend(1);
+  output_fields:
+  - binder_error
+- name: regression (#7571) - literal debug display for array with NULL values
+  sql: |
+    select ARRAY[1, null] t;
+  output_fields:
+  - logical_plan
+- name: regression (#7641) -fuzzing test failed at Bind error,types Boolean and Varchar cannot be matched
+  sql: |
+    select false >= 'LN1O0QP1yi' NOT IN (md5('4SeUPZhUbH'))
+  output_fields:
+  - batch_plan
+- name: const_eval of const expr
+  sql: |
+    create table t(v1 int);
+    select 1 + 2 + v1 from t;
+  output_fields:
+  - batch_plan
+- name: const_eval of division by 0 error
+  sql: select 1 / 0 t1;
+  output_fields:
+  - batch_error

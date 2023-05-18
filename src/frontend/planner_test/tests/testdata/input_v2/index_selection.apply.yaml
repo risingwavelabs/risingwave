@@ -1,0 +1,420 @@
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a = 1
+  output_fields:
+  - batch_plan
+- sql: |
+    /* Use index if it provides required order */
+    create table t1 (a int, b int, c int);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 order by a, b
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a = 1 or a = 2
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a in (1,2,3)
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a between 1 and 8
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select * from t1 where a = 1 and b = 1
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    create index idx2 on t1(b, a) include(c);
+    select * from t1 where b = 1
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(a, b);
+    create index idx2 on t1(b, a) include(a, b);
+    /* non-covering */
+    select * from t1 where b = 1
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    create index idx2 on t1(b, a) include(c);
+    /* non-covering */
+    select * from t1 where c = 1
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    select a,b from t1 where a in (1,2) and b in (2,3)
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a, b) include(c);
+    create index idx2 on t1(a) include(a);
+    select count(1) from t1;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where c = 1 and a < 10;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where a = 1;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where a = 1 and b = 2;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include (b, c);
+    create index idx2 on t1(b, a) include(c);
+    create index idx3 on t1(c) include (a, b);
+    select * from t1 where b = 2;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    select * from t1 where c = 1 and a < 10;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    select * from t1 where a = 1;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    select * from t1 where a = 1 and b = 2;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    select * from t1 where b = 2;
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    delete from t1 where b = 2;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    update t1 set c = 3 where a = 1 and b = 2;
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create materialized view v as select count(*) as cnt, p from t1 group by p;
+    create index idx1 on v(cnt) include(cnt);
+    select * from v where cnt = 1 or p = 2;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where a = 1 or c = 1
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    select * from t1 where c = 1 or (a = 2 and b = 3)
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where p = 1 or (a = 2 and b = 3 and c = 4)
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where a = 1 or b = 2 or c = 3 or p = 4 or a = 5
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where (a = 1 or (b = 2 and a = 5)) and (c = 3 or p = 4)
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where p != 1 and (c = 3 or (c != 4 and (a = 2 or b = 3)))
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    /* we think merging two TwoSideBound range indexes is better than primary scan */
+    select * from t1 where (a > 1 and a < 8) or c between 8 and 9
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c);
+    create index idx4 on t1(p);
+    select * from t1 where (a > 1 and a < 8) or c = 8
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c, a);
+    /* we think primary scan is better than merging three OneSideBound range indexes */
+    select * from t1 where a > 1 or c > 1 or b > 1
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a);
+    create index idx2 on t1(b, a);
+    create index idx3 on t1(c, a);
+    /* we think primary scan is better than merging three TwoSideBound range indexes */
+    select * from t1 where a between 1 and 8 or b between 1 and 8 or c between 1 and 8;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a) include(a);
+    create index idx2 on t1(b, a) include(a, b);
+    create index idx3 on t1(c) include(c);
+    /* we think primary scan is better than merging two OneSideBound range indexes */
+    select * from t1 where a > 1 and b > 1
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    CREATE TABLE lineitem (
+            l_orderkey BIGINT,
+            l_partkey INTEGER,
+            l_suppkey INTEGER,
+            l_linenumber INTEGER,
+            l_quantity NUMERIC,
+            l_extendedprice NUMERIC,
+            l_discount NUMERIC,
+            l_tax NUMERIC,
+            l_returnflag VARCHAR,
+            l_linestatus VARCHAR,
+            l_shipdate DATE,
+            l_commitdate DATE,
+            l_receiptdate DATE,
+            l_shipinstruct VARCHAR,
+            l_shipmode VARCHAR,
+            l_comment VARCHAR
+    );
+    create index non_covered_index on lineitem(l_orderkey) include(l_orderkey);
+    create index covered_index on lineitem(l_orderkey) include(l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment);
+    /* it should choose covered_index */
+    select * from lineitem where l_orderkey = 1
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, p int);
+    create index idx1 on t1(a) include(a);
+    /* test large in number */
+    select * from t1 where a in (  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,100);
+  output_fields:
+  - batch_local_plan
+  - batch_plan
+- sql: |
+    create table t1 (a int, b int, c int, d int);
+    create index d on t1(a) include(a);
+    select count(*) from t1 where a = 1 and d > 9;
+  output_fields:
+  - batch_plan
+  - batch_local_plan
+- name: create index to include all columns by default
+  sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create index idx1 on t1(a);
+    select * from t1 where a = 1
+  output_fields:
+  - batch_plan
+- name: topn on index
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a);
+    select * from t1 order by a limit 1
+  output_fields:
+  - batch_plan
+- name: topn on primary key
+  sql: |
+    create table t1 (a int primary key, b int);
+    create index idx1 on t1(a);
+    select * from t1 order by a limit 1
+  output_fields:
+  - batch_plan
+- name: topn on index with descending ordering
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a desc);
+    select * from t1 order by a desc limit 1
+  output_fields:
+  - batch_plan
+- name: topn on pk streaming case, should NOT optimized
+  sql: |
+    create table t1 (a int primary key);
+    select * from t1 order by a limit 1;
+  output_fields:
+  - stream_plan
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC%'
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC%E'
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC_E'
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (a varchar, b int, c int, d int);
+    create index idx on t1(a);
+    select * from t1 where a like 'ABC'
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (k1 int primary key, v1 int);
+    create table t2 (k2 int primary key, v2 int);
+    select v1 +1 , v2_p1 from t1, (select v2+2 as v2_p1, k2 from t2) where k1 = k2;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t1 (c1 varchar,c2 int,c3 timestamp);
+    create table t2 (d1 int,d2 varchar);
+    create index idx_t1 on t1(c2) include (c1, c2, c3);
+    select * from t2 inner join tumble(t1,  c3, interval '10 minute')  on t2.d1 = t1.c2;
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1');
+    select * from t where j->>'k1' = 'abc';
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1') include(v1);
+    select * from t where j->>'k1' = 'abc';
+  output_fields:
+  - batch_plan
+- sql: |
+    create table t (j jsonb, v1 int, v2 int);
+    create index idx1 on t(j->>'k1') include(v1);
+    create index idx2 on t(j->>'k2') include(v2);
+    select * from t where j->>'k1' = 'abc' or j->>'k2' = 'ABC';
+  output_fields:
+  - batch_plan
+- sql: |
+    create table people (first_name varchar, last_name varchar, info varchar);
+    create index people_names ON people ((first_name || ' ' || last_name));
+    select * from people where (first_name || ' ' || last_name) = 'John Smith';
+  output_fields:
+  - batch_plan
+- name: test distributed by columns for functional indexes
+  sql: |
+    create table people (first_name varchar, last_name varchar, info varchar);
+    create index people_names ON people ((first_name || ' ' || last_name), info) distributed by ((first_name || ' ' || last_name));
+    select * from people where (first_name || ' ' || last_name) = 'John Smith';
+  output_fields:
+  - batch_plan

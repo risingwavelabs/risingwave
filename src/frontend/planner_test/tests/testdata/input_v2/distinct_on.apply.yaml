@@ -1,0 +1,10 @@
+- sql: |
+    create table t1 (k int, v int) append only;
+    select distinct on (k) k + v as sum from t1;
+  output_fields:
+  - stream_plan
+- sql: |
+    create table t2 (k int, v int);
+    select distinct on (k) k + v as sum from t2;
+  output_fields:
+  - stream_plan
