@@ -1045,14 +1045,6 @@ set -e
 cargo run --bin risedev-docslt -- "$@"
 '''
 
-[tasks.snapt]
-category = "RiseDev - Snapshot Testing"
-description = "Run and review snapshot tests"
-install_crate = { min_version = "1.29.0", crate_name = "cargo-insta", binary = "cargo", test_arg = ["insta", "--version"], install_command = "binstall" }
-script = '''
-cargo insta test -p risingwave_stream
-'''
-
 [tasks.compose]
 category = "RiseDev - Compose"
 description = "Compose a docker-compose.yaml file"

@@ -71,12 +71,6 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 
-# temporary added for snapshot testing. move to dev-dependencies later
-expect-test = "1.4.1"
-insta = "1.29"
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
@@ -86,9 +80,13 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
+
+expect-test = "1.4.1"
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 tracing-test = "0.2"
 
 [[bench]]

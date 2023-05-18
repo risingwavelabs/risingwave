@@ -648,7 +648,6 @@ pub mod tests {
     use risingwave_storage::StateStore;
 
     use crate::executor::test_utils::agg_executor::new_boxed_hash_agg_executor;
-    use crate::executor::test_utils::snapshot::check_until_pending;
     use crate::executor::test_utils::*;
     use crate::executor::{Message, PkIndices, Watermark};
 
@@ -1149,67 +1148,66 @@ pub mod tests {
             tx.push_int64_watermark(input_window_col, 3); // windows < 3 are closed
             tx.push_barrier(get_epoch(), false);
 
-            // 1 row for group (1,)
-            check_until_pending(
-                &mut hash_agg,
-                expect_test::expect![[r#"
-                - !chunk |-
-                  +---+---+---+
-                  | + | 1 | 1 |
-                  +---+---+---+
-                - !watermark
-                  col_idx: 0
-                  val: 3
-                - !barrier 3
-            "#]],
-            )
-            .await;
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 1 1" // 1 row for group (1,)
+                )
+                .sort_rows()
+            );
+
+            let wtmk = hash_agg.expect_watermark().await;
+            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 3i64.into()));
+
+            hash_agg.expect_barrier().await;
         }
 
         {
             tx.push_int64_watermark(input_window_col, 4); // windows < 4 are closed
             tx.push_barrier(get_epoch(), false);
 
-            // 1 rows for group (3,)
-            check_until_pending(&mut hash_agg, expect_test::expect![[r#"
-                - !chunk |-
-                  +---+---+---+
-                  | + | 3 | 1 |
-                  +---+---+---+
-                - !watermark
-                  col_idx: 0
-                  val: 4
-                - !barrier 4
-            "#]]).await;
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 3 1" // 1 rows for group (3,)
+                )
+                .sort_rows()
+            );
+
+            let wtmk = hash_agg.expect_watermark().await;
+            assert_eq!(wtmk, Watermark::new(0, DataType::Int64, 4i64.into()));
+
+            hash_agg.expect_barrier().await;
         }
 
         {
             tx.push_int64_watermark(input_window_col, 10); // windows < 10 are closed
             tx.push_barrier(get_epoch(), false);
 
-            // 1 rows for group (4,)
-            check_until_pending(&mut hash_agg, expect_test::expect![[r#"
-                - !chunk |-
-                  +---+---+---+
-                  | + | 4 | 1 |
-                  +---+---+---+
-                - !watermark
-                  col_idx: 0
-                  val: 10
-                - !barrier 5
-            "#]]).await;
+            let chunk = hash_agg.expect_chunk().await;
+            assert_eq!(
+                chunk.sort_rows(),
+                StreamChunk::from_pretty(
+                    " I I
+                    + 4 1" // 1 rows for group (4,)
+                )
+                .sort_rows()
+            );
+
+            hash_agg.expect_watermark().await;
+            hash_agg.expect_barrier().await;
         }
 
         {
             tx.push_int64_watermark(input_window_col, 20); // windows < 20 are closed
             tx.push_barrier(get_epoch(), false);
 
-            check_until_pending(&mut hash_agg, expect_test::expect![[r#"
-                - !watermark
-                  col_idx: 0
-                  val: 20
-                - !barrier 6
-            "#]]).await;
+            hash_agg.expect_watermark().await;
+            hash_agg.expect_barrier().await;
         }
     }
 }
