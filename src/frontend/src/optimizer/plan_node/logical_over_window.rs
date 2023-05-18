@@ -269,7 +269,7 @@ impl LogicalOverWindow {
 
         let mut output_proj_builder = ProjectBuilder::default();
         for (idx, field) in self.input().schema().fields().iter().enumerate() {
-            let _ = output_proj_builder
+            output_proj_builder
                 .add_expr(&InputRef::new(idx, field.data_type()).into())
                 .unwrap();
         }
