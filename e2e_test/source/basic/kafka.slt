@@ -371,8 +371,9 @@ select count(*) from s5
 ----
 100
 
+# we only support at-least-once semantic, count distinct to make result deterministic in recovery test
 query I
-select count(*) from s7
+select count(distinct (v1,v2)) from s7
 ----
 100
 
