@@ -54,14 +54,13 @@ impl LogicalOverWindow {
         mut select_exprs: Vec<ExprImpl>,
     ) -> Result<(PlanRef, Vec<ExprImpl>)> {
         let mut input_proj_builder = ProjectBuilder::default();
-        let _: Vec<_> = input
-            .schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(idx, x)| input_proj_builder.add_expr(&InputRef::new(idx, x.data_type()).into()))
-            .try_collect()
-            .map_err(|err| ErrorCode::NotImplemented(format!("{err} inside input"), None.into()))?;
+        for (idx, field) in input.schema().fields().iter().enumerate() {
+            input_proj_builder
+                .add_expr(&InputRef::new(idx, field.data_type()).into())
+                .map_err(|err| {
+                    ErrorCode::NotImplemented(format!("{err} inside input"), None.into())
+                })?;
+        }
         let mut input_len = input.schema().len();
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
