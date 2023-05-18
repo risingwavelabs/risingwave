@@ -11,16 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::fmt;
+
 use std::hash::Hash;
 
 use educe::Educe;
-use risingwave_common::catalog::{Schema, TableVersionId};
+use risingwave_common::catalog::TableVersionId;
 
-use super::GenericPlanRef;
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

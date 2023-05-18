@@ -61,7 +61,7 @@ pub use delete::*;
 mod insert;
 pub use insert::*;
 
-pub trait GenericPlanRef : Eq + Hash {
+pub trait GenericPlanRef: Eq + Hash {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn functional_dependency(&self) -> &FunctionalDependencySet;
