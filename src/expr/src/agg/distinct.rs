@@ -18,7 +18,7 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::DataType;
 
 use super::{Aggregator, BoxedAggState};
 use crate::Result;
@@ -28,6 +28,7 @@ use crate::Result;
 pub struct Distinct {
     inner: BoxedAggState,
     exists: HashSet<OwnedRow>, // TODO: optimize for small rows
+    exists_estimated_size: usize,
 }
 
 impl Distinct {
@@ -35,6 +36,7 @@ impl Distinct {
         Self {
             inner,
             exists: Default::default(),
+            exists_estimated_size: 0,
         }
     }
 }
@@ -55,7 +57,12 @@ impl Aggregator for Distinct {
         bitmap_builder.append_bitmap(&input.vis().to_bitmap());
         for row_id in start_row_id..end_row_id {
             let (row_ref, vis) = input.row_at(row_id);
-            let b = vis && self.exists.insert(row_ref.to_owned_row());
+            let row = row_ref.to_owned_row();
+            let row_size = row.estimated_size();
+            let b = vis && self.exists.insert(row);
+            if b {
+                self.exists_estimated_size += row_size;
+            }
             bitmap_builder.set(row_id, b);
         }
         let mut input = input.clone();
@@ -73,14 +80,6 @@ impl Aggregator for Distinct {
 
 impl EstimateSize for Distinct {
     fn estimated_heap_size(&self) -> usize {
-        let set_size = match self.exists.is_empty() {
-            true => 0,
-            false => {
-                self.exists.capacity()
-                    * self.exists.iter().next().unwrap().len()
-                    * std::mem::size_of::<Datum>()
-            }
-        };
-        self.inner.estimated_heap_size() + set_size
+        self.inner.estimated_heap_size() + self.exists_estimated_size
     }
 }
