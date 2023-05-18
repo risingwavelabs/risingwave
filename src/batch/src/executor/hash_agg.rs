@@ -212,35 +212,29 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
         );
 
         // consume all chunks to compute the agg result
-        let mut states_memory_usage = 0;
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = chunk?.compact();
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
+            let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let states: &mut Vec<BoxedAggState> = groups
-                    .entry(key)
-                    .or_insert_with(|| self.agg_init_states.clone());
+                let mut new_group = false;
+                let states = groups.entry(key).or_insert_with(|| {
+                    new_group = true;
+                    self.agg_init_states.clone()
+                });
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
-                    state.update_single(&chunk, row_id).await?
+                    if !new_group {
+                        memory_usage_diff -= state.estimated_size() as i64;
+                    }
+                    state.update_single(&chunk, row_id).await?;
+                    memory_usage_diff += state.estimated_size() as i64;
                 }
             }
-
             // update memory usage
-            self.mem_context.add(-(states_memory_usage as i64));
-            states_memory_usage = if groups.is_empty() {
-                0
-            } else {
-                // sample at most 4 groups to estimate the total memory usage
-                let sample_size = groups.len().min(4);
-                let sum = (groups.values().take(sample_size).flatten())
-                    .map(|s| s.estimated_size())
-                    .sum::<usize>();
-                sum * groups.len() / sample_size
-            };
-            self.mem_context.add(states_memory_usage as i64);
+            self.mem_context.add(memory_usage_diff);
         }
 
         // generate output data chunks
