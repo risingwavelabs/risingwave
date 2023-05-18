@@ -245,7 +245,7 @@
     StreamMaterialize { columns: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id(hidden), _row_id#1(hidden), r_regionkey(hidden), _row_id#2(hidden), _row_id#3(hidden), _row_id#4(hidden), ps_suppkey(hidden), n_nationkey(hidden), ps_supplycost(hidden), p_partkey#1(hidden)], stream_key: [_row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, p_partkey, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost], pk_columns: [s_acctbal, n_name, s_name, p_partkey, _row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, _row_id#4, ps_suppkey, n_nationkey, p_partkey#1, ps_supplycost], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: p_partkey IS NOT DISTINCT FROM p_partkey AND ps_supplycost = min(ps_supplycost), output: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, _row_id, r_regionkey, _row_id, _row_id, _row_id, ps_suppkey, n_nationkey, ps_supplycost, p_partkey] }
       ├─StreamExchange { dist: HashShard(p_partkey) }
-      | └─StreamShare { id = 24 }
+      | └─StreamShare { id = 26 }
       |   └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
       |     ├─StreamExchange { dist: HashShard(n_nationkey) }
       |     | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
@@ -267,10 +267,12 @@
       |         |   | └─StreamRowIdGen { row_id_index: 9 }
       |         |   |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
       |         |   └─StreamExchange { dist: HashShard(ps_partkey) }
-      |         |     └─StreamRowIdGen { row_id_index: 5 }
-      |         |       └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
+      |         |     └─StreamShare { id = 15 }
+      |         |       └─StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
+      |         |         └─StreamRowIdGen { row_id_index: 5 }
+      |         |           └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
       |         └─StreamExchange { dist: HashShard(s_suppkey) }
-      |           └─StreamShare { id = 19 }
+      |           └─StreamShare { id = 21 }
       |             └─StreamProject { exprs: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
       |               └─StreamRowIdGen { row_id_index: 7 }
       |                 └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
@@ -280,7 +282,7 @@
             ├─StreamAppendOnlyDedup { dedup_cols: [0] }
             | └─StreamExchange { dist: HashShard(p_partkey) }
             |   └─StreamProject { exprs: [p_partkey] }
-            |     └─StreamShare { id = 24 }
+            |     └─StreamShare { id = 26 }
             |       └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
             |         ├─StreamExchange { dist: HashShard(n_nationkey) }
             |         | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
@@ -302,10 +304,12 @@
             |             |   | └─StreamRowIdGen { row_id_index: 9 }
             |             |   |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
             |             |   └─StreamExchange { dist: HashShard(ps_partkey) }
-            |             |     └─StreamRowIdGen { row_id_index: 5 }
-            |             |       └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
+            |             |     └─StreamShare { id = 15 }
+            |             |       └─StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
+            |             |         └─StreamRowIdGen { row_id_index: 5 }
+            |             |           └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
             |             └─StreamExchange { dist: HashShard(s_suppkey) }
-            |               └─StreamShare { id = 19 }
+            |               └─StreamShare { id = 21 }
             |                 └─StreamProject { exprs: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
             |                   └─StreamRowIdGen { row_id_index: 7 }
             |                     └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
@@ -315,10 +319,12 @@
                 | └─StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] }
                 |   ├─StreamExchange { dist: HashShard(ps_suppkey) }
                 |   | └─StreamFilter { predicate: IsNotNull(ps_partkey) }
-                |   |   └─StreamRowIdGen { row_id_index: 5 }
-                |   |     └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
+                |   |   └─StreamShare { id = 15 }
+                |   |     └─StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
+                |   |       └─StreamRowIdGen { row_id_index: 5 }
+                |   |         └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
                 |   └─StreamExchange { dist: HashShard(s_suppkey) }
-                |     └─StreamShare { id = 19 }
+                |     └─StreamShare { id = 21 }
                 |       └─StreamProject { exprs: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
                 |         └─StreamRowIdGen { row_id_index: 7 }
                 |           └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
@@ -344,8 +350,8 @@
             └── StreamHashAgg { group_key: [p_partkey], aggs: [min(ps_supplycost), count] } { result table: 26, state tables: [ 25 ], distinct tables: [] }
                 └── StreamHashJoin { type: LeftOuter, predicate: p_partkey IS NOT DISTINCT FROM ps_partkey, output: [p_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, _row_id, _row_id, r_regionkey, s_nationkey] } { left table: 27, right table: 29, left degree table: 28, right degree table: 30 }
                     ├── StreamAppendOnlyDedup { dedup_cols: [0] } { state table: 31 }
-                    │   └──  StreamExchange Hash([0]) from 14
-                    └──  StreamExchange Hash([0]) from 15
+                    │   └──  StreamExchange Hash([0]) from 15
+                    └──  StreamExchange Hash([0]) from 16
 
     Fragment 1
     StreamNoOp
@@ -382,7 +388,7 @@
     Fragment 8
     StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] } { left table: 14, right table: 16, left degree table: 15, right degree table: 17 }
     ├──  StreamExchange Hash([2]) from 9
-    └──  StreamExchange Hash([0]) from 12
+    └──  StreamExchange Hash([0]) from 13
 
     Fragment 9
     StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] } { left table: 18, right table: 20, left degree table: 19, right degree table: 21 }
@@ -394,51 +400,55 @@
     └──  StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] } { source state table: 22 }
 
     Fragment 11
-    StreamRowIdGen { row_id_index: 5 }
-    └──  StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] } { source state table: 23 }
+    StreamNoOp
+    └──  StreamExchange NoShuffle from 12
 
     Fragment 12
-    StreamNoOp
-    └──  StreamExchange NoShuffle from 13
+    StreamProject { exprs: [ps_partkey, ps_suppkey, ps_supplycost, _row_id] }
+    └── StreamRowIdGen { row_id_index: 5 }
+        └──  StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] } { source state table: 23 }
 
     Fragment 13
+    StreamNoOp
+    └──  StreamExchange NoShuffle from 14
+
+    Fragment 14
     StreamProject { exprs: [s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id] }
     └── StreamRowIdGen { row_id_index: 7 }
         └──  StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] } { source state table: 24 }
 
-    Fragment 14
+    Fragment 15
     StreamProject { exprs: [p_partkey] }
     └──  StreamExchange NoShuffle from 2
 
-    Fragment 15
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] } { left table: 32, right table: 34, left degree table: 33, right degree table: 35 }
-    ├──  StreamExchange Hash([2]) from 16
-    └──  StreamExchange Hash([0]) from 19
-
     Fragment 16
-    StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] } { left table: 36, right table: 38, left degree table: 37, right degree table: 39 }
-    ├──  StreamExchange Hash([1]) from 17
-    └──  StreamExchange Hash([0]) from 18
+    StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] } { left table: 32, right table: 34, left degree table: 33, right degree table: 35 }
+    ├──  StreamExchange Hash([2]) from 17
+    └──  StreamExchange Hash([0]) from 20
 
     Fragment 17
-    StreamFilter { predicate: IsNotNull(ps_partkey) }
-    └── StreamRowIdGen { row_id_index: 5 }
-        └──  StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] } { source state table: 40 }
+    StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] } { left table: 36, right table: 38, left degree table: 37, right degree table: 39 }
+    ├──  StreamExchange Hash([1]) from 18
+    └──  StreamExchange Hash([0]) from 19
 
     Fragment 18
-    StreamNoOp
-    └──  StreamExchange NoShuffle from 13
+    StreamFilter { predicate: IsNotNull(ps_partkey) }
+    └──  StreamExchange NoShuffle from 12
 
     Fragment 19
-    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 41, right table: 43, left degree table: 42, right degree table: 44 }
-    ├──  StreamExchange Hash([0]) from 20
-    └──  StreamExchange Hash([2]) from 21
+    StreamNoOp
+    └──  StreamExchange NoShuffle from 14
 
     Fragment 20
+    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 40, right table: 42, left degree table: 41, right degree table: 43 }
+    ├──  StreamExchange Hash([0]) from 21
+    └──  StreamExchange Hash([2]) from 22
+
+    Fragment 21
     StreamNoOp
     └──  StreamExchange NoShuffle from 5
 
-    Fragment 21
+    Fragment 22
     StreamNoOp
     └──  StreamExchange NoShuffle from 7
 
@@ -482,7 +492,7 @@
 
     Table 19 { columns: [ p_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 20 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id ], primary key: [ $0 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 20 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 21 { columns: [ ps_partkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -514,7 +524,7 @@
 
     Table 35 { columns: [ n_nationkey, _row_id, _row_id_0, r_regionkey, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 36 { columns: [ ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment, _row_id ], primary key: [ $1 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 36 { columns: [ ps_partkey, ps_suppkey, ps_supplycost, _row_id ], primary key: [ $1 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 37 { columns: [ ps_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -522,15 +532,13 @@
 
     Table 39 { columns: [ s_suppkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 40 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 40 { columns: [ r_regionkey, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 41 { columns: [ r_regionkey, _row_id ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 41 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 42 { columns: [ r_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 42 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
 
-    Table 43 { columns: [ n_nationkey, n_name, n_regionkey, _row_id ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
-
-    Table 44 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 43 { columns: [ n_regionkey, _row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, _row_id#1, r_regionkey, _row_id#2, _row_id#3, _row_id#4, ps_suppkey, n_nationkey, ps_supplycost, p_partkey#1 ], primary key: [ $0 DESC, $2 ASC, $1 ASC, $3 ASC, $8 ASC, $9 ASC, $10 ASC, $11 ASC, $12 ASC, $13 ASC, $14 ASC, $15 ASC, $17 ASC, $16 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17 ], distribution key: [ 3 ], read pk prefix len hint: 11 }
 
