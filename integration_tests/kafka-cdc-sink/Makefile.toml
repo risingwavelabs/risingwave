@@ -5,7 +5,7 @@ dependencies = ["clean-all"]
 [tasks.start-cluster]
 script = """
 docker compose up -d;
-sleep 10
+sleep 20
 """
 dependencies = ["build-image"]
 
@@ -30,9 +30,17 @@ dependencies = ["setup-kafka"]
 
 [tasks.setup-flink]
 script = """
-docker compose run -v `pwd`:/tmp flink-sql-client /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
+docker compose run flink-sql-client /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
 """
 dependencies = ["setup-kafka", "setup-pg"]
+
+[tasks.setup-connect]
+script = '''
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/pg-sink.json
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/mysql-sink.json
+sleep 1
+'''
+dependencies = ["setup-flink"]
 
 [tasks.setup]
 dependencies = [
@@ -42,7 +50,8 @@ dependencies = [
     "setup-pg",
     "setup-kafka",
     "setup-risingwave",
-    "setup-flink"
+    "setup-flink",
+    "setup-connect"
 ]
 
 [tasks.clean-all]
@@ -59,3 +68,25 @@ docker run --network host \
     --topic counts --from-beginning
 """
 description = "Show produces kafka json logs"
+
+[tasks.check-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from counts"'
+'''
+
+[tasks.check-mysql]
+script = '''
+docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD mydb -e "select * from counts"'
+'''
+
+[tasks.check-flink-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from flinkcounts"'
+'''
+
+[tasks.check-db]
+dependencies = [
+    "check-pg",
+    "check-mysql",
+    "check-flink-pg"
+]
