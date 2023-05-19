@@ -223,7 +223,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
         let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
         let slow_query_log_path = PathBuf::from(slow_query_log_path);
-        
+
         std::fs::create_dir_all(slow_query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
                 "failed to create directory '{}' for slow query log: {e}",
