@@ -5,6 +5,7 @@
 [meta]
 # a relatively small number to make it easier to timeout
 max_heartbeat_interval_secs = 15
+meta_leader_lease_secs = 10
 
 [system]
 barrier_interval_ms = 250
