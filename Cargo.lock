@@ -5956,6 +5956,7 @@ dependencies = [
  "bk-tree",
  "bytes",
  "clap 4.1.11",
+ "criterion",
  "downcast-rs",
  "dyn-clone",
  "easy-ext",

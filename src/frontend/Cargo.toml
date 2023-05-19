@@ -85,4 +85,9 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+criterion = { version = "0.4", features = ["async_futures"] }
 tempfile = "3"
+
+[[bench]]
+name = "bench_map_vnode_for_serving"
+harness = false

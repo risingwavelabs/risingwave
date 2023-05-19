@@ -48,7 +48,7 @@ pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-mod scheduler;
+pub mod scheduler;
 pub mod session;
 mod stream_fragmenter;
 use risingwave_common_proc_macro::OverrideConfig;

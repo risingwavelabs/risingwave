@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, LinkedList, VecDeque};
+use std::collections::{HashMap, HashSet, LinkedList};
+use std::num::Wrapping;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use num_integer::Integer;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::worker_util::get_pu_to_worker_mapping;
 use risingwave_pb::common::{ParallelUnit, WorkerNode, WorkerType};
@@ -218,7 +218,7 @@ impl WorkerNodeManager {
         if let Some(pu_mapping) = guard.get_serving_fragment_mapping(fragment_id) {
             return Ok(pu_mapping);
         }
-        let pu_mapping = guard.reschedule_serving(fragment_id)?;
+        let pu_mapping = guard.map_vnode_for_serving(fragment_id)?;
         Ok(pu_mapping)
     }
 
@@ -252,20 +252,11 @@ impl WorkerNodeManagerInner {
 
     /// Calculates serving vnode mappings for `fragment_id`.
     /// The `serving_parallelism` is set to min(`all_serving_pus`, `streaming_parallelism`).
-    fn reschedule_serving(
+    fn map_vnode_for_serving(
         &mut self,
         fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let all_serving_pus: BTreeMap<u32, Vec<ParallelUnit>> = self
-            .worker_nodes
-            .iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .map(|w| (w.id, w.parallel_units.clone()))
-            .collect();
-        let serving_pus_total_num = all_serving_pus.values().map(|p| p.len()).sum::<usize>();
-        if serving_pus_total_num == 0 {
-            return Err(SchedulerError::EmptyWorkerNodes);
-        }
+        // Use streaming parallelism as a hint
         let streaming_vnode_mapping = self
             .streaming_fragment_vnode_mapping
             .get(&fragment_id)
@@ -275,34 +266,17 @@ impl WorkerNodeManagerInner {
                     fragment_id
                 )
             })?;
-        let serving_parallelism = std::cmp::min(
-            serving_pus_total_num,
-            // Follow streaming vnode mapping is not a must.
-            streaming_vnode_mapping.iter_unique().count(),
-        );
-        assert!(serving_parallelism > 0);
-        // round-robin similar to `Scheduler` in meta node.
-        let mut parallel_units: LinkedList<_> = all_serving_pus
-            .into_values()
-            .map(|v| v.into_iter().sorted_by_key(|p| p.id))
-            .collect();
-        let mut round_robin = Vec::new();
-        while !parallel_units.is_empty() {
-            parallel_units.drain_filter(|ps| {
-                if let Some(p) = ps.next() {
-                    round_robin.push(p);
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        round_robin.truncate(serving_parallelism);
-        round_robin.sort_unstable_by_key(|p| p.id);
-        let selected_serving_pus = ParallelUnitMapping::build(&round_robin);
+        let mapping = map_vnode_for_serving(
+            &round_robin_parallel_units(
+                &self.worker_nodes,
+                streaming_vnode_mapping.iter_unique().count(),
+            ),
+            fragment_id,
+        )
+        .ok_or_else(|| SchedulerError::EmptyWorkerNodes)?;
         self.serving_fragment_vnode_mapping
-            .insert(fragment_id, selected_serving_pus.clone());
-        Ok(selected_serving_pus)
+            .insert(fragment_id, mapping.clone());
+        Ok(mapping)
     }
 }
 
@@ -361,8 +335,10 @@ impl WorkerNodeSelector {
                 return Ok(origin);
             }
             let new_workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
-            let masked_mapping =
-                rebalance_serving_vnode(&origin, &new_workers, origin.iter_unique().count());
+            let masked_mapping = map_vnode_for_serving(
+                &round_robin_parallel_units(&new_workers, origin.iter_unique().count()),
+                fragment_id,
+            );
             masked_mapping.ok_or_else(|| SchedulerError::EmptyWorkerNodes)
         }
     }
@@ -388,148 +364,125 @@ impl WorkerNodeSelector {
     }
 }
 
-/// Calculate a new vnode mapping, keeping locality and balance on a best effort basis.
-/// The strategy is similar to `rebalance_actor_vnode` used in meta node, but is modified to meet
-/// new constraints accordingly.
-fn rebalance_serving_vnode(
-    old_pu_mapping: &ParallelUnitMapping,
-    new_workers: &[WorkerNode],
+/// Selects at most `max_parallelism` parallel units from `worker_nodes` in a round-robin fashion.
+fn round_robin_parallel_units(
+    worker_nodes: &[WorkerNode],
     max_parallelism: usize,
-) -> Option<ParallelUnitMapping> {
-    let get_pu_map = |worker_nodes: &[WorkerNode]| {
-        worker_nodes
-            .iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .map(|w| (w.id, w.parallel_units.clone()))
-            .collect::<BTreeMap<u32, Vec<ParallelUnit>>>()
-    };
-    let mut new_pus: LinkedList<_> = get_pu_map(new_workers)
-        .into_values()
-        .map(|pus| pus.into_iter().sorted_by_key(|p| p.id))
+) -> Vec<ParallelUnit> {
+    let mut parallel_units: LinkedList<_> = worker_nodes
+        .iter()
+        .sorted_by_key(|w| w.id)
+        .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+        .map(|w| w.parallel_units.iter().cloned().sorted_by_key(|p| p.id))
         .collect();
-    let serving_parallelism = std::cmp::min(
-        new_pus.iter().map(|pus| pus.len()).sum(),
-        std::cmp::min(max_parallelism, VirtualNode::COUNT),
-    );
-    let mut selected_pu_ids = Vec::new();
-    while !new_pus.is_empty() {
-        new_pus.drain_filter(|ps| {
+    let mut round_robin = Vec::new();
+    while !parallel_units.is_empty() {
+        parallel_units.drain_filter(|ps| {
             if let Some(p) = ps.next() {
-                selected_pu_ids.push(p.id);
+                round_robin.push(p);
                 false
             } else {
                 true
             }
         });
     }
-    // According to `reschedule_serving`, we know that inside a worker, parallel unit with smaller
-    // id must have been used before one with larger id. So here we also prefer parallel units
-    // with smaller id, to avoid unnecessary vnode reassignment.
-    selected_pu_ids.drain(serving_parallelism..);
-    let selected_pu_id_set: HashSet<ParallelUnitId> = selected_pu_ids.iter().cloned().collect();
-    if selected_pu_id_set.is_empty() {
+    round_robin.truncate(max_parallelism);
+    round_robin
+}
+
+/// Hash function used to calculate score in `map_vnode_for_serving`.
+///
+/// <https://github.com/ceph/libcrush/blob/de2e859acd5e52b6db3cf8cde08834e09b8d4ead/crush/hash.c#L48>
+fn hash32_rjenkins1_3(a: u32, b: u32, c: u32) -> u32 {
+    let hashmix = |mut a: Wrapping<u32>, mut b: Wrapping<u32>, mut c: Wrapping<u32>| {
+        a -= b;
+        a -= c;
+        a ^= c >> 13;
+        b -= c;
+        b -= a;
+        b ^= a << 8;
+        c -= a;
+        c -= b;
+        c ^= b >> 13;
+        a -= b;
+        a -= c;
+        a ^= c >> 12;
+        b -= c;
+        b -= a;
+        b ^= a << 16;
+        c -= a;
+        c -= b;
+        c ^= b >> 5;
+        a -= b;
+        a -= c;
+        a ^= c >> 3;
+        b -= c;
+        b -= a;
+        b ^= a << 10;
+        c -= a;
+        c -= b;
+        c ^= b >> 15;
+        c
+    };
+    let a = Wrapping(a);
+    let b = Wrapping(b);
+    let c = Wrapping(c);
+    let hash_seed = Wrapping(1315423911);
+    let mut hash = hash_seed ^ a ^ b ^ c;
+    let x = Wrapping(231232);
+    let y = Wrapping(1232);
+    hash = hashmix(a, b, hash);
+    hash = hashmix(c, x, hash);
+    hash = hashmix(y, a, hash);
+    hash = hashmix(b, x, hash);
+    hash = hashmix(y, c, hash);
+    hash.0
+}
+
+/// Maps all virtual nodes to `parallel_units` deterministically, through a process analogous to
+/// a draw of straws. It leads to a probabilistically balanced distribution. It minimizes data
+/// migration to restore a balanced distribution after addition or removal of parallel units.
+///
+/// It's a simplified version of CRUSH's Straw Buckets in Ceph.
+pub fn map_vnode_for_serving(
+    parallel_units: &[ParallelUnit],
+    extra_seed: u32,
+) -> Option<ParallelUnitMapping> {
+    if parallel_units.is_empty() {
         return None;
     }
-
-    #[derive(Debug)]
-    struct Balance {
-        pu_id: ParallelUnitId,
-        balance: i32,
-        builder: BitmapBuilder,
-        is_temp: bool,
-    }
-    let (expected, mut remain) = VirtualNode::COUNT.div_rem(&selected_pu_ids.len());
-    assert!(expected <= i32::MAX as usize);
-    let mut balances: HashMap<ParallelUnitId, Balance> = HashMap::default();
-    for pu_id in &selected_pu_ids {
-        let mut balance = Balance {
-            pu_id: *pu_id,
-            balance: -(expected as i32),
-            builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
-            is_temp: false,
-        };
-        if remain > 0 {
-            balance.balance -= 1;
-            remain -= 1;
+    let mut pu_vnodes: HashMap<ParallelUnitId, BitmapBuilder> = HashMap::new();
+    for vnode in VirtualNode::all() {
+        let mut select = 0;
+        let mut high_score = 0;
+        for (i, pu) in parallel_units.iter().enumerate() {
+            let score = hash32_rjenkins1_3(pu.id, vnode.to_index() as u32, extra_seed);
+            if i == 0 || score > high_score {
+                high_score = score;
+                select = i;
+            }
         }
-        balances.insert(*pu_id, balance);
+        pu_vnodes
+            .entry(parallel_units[select].id)
+            .or_insert(BitmapBuilder::zeroed(VirtualNode::COUNT))
+            .set(vnode.to_index(), true);
     }
-
-    // Assign pending vnodes to `temp_pu` temporarily. These vnodes will be reassigned later.
-    let mut temp_pu = Balance {
-        pu_id: 0,
-        balance: 0,
-        builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
-        is_temp: true,
-    };
-    for (vnode, pu_id) in old_pu_mapping.iter_with_vnode() {
-        let b = if selected_pu_id_set.contains(&pu_id) {
-            balances.get_mut(&pu_id).unwrap()
-        } else {
-            &mut temp_pu
-        };
-        b.balance += 1;
-        b.builder.set(vnode.to_index(), true);
-    }
-    let mut balances: VecDeque<_> = balances
-        .into_values()
-        .chain(std::iter::once(temp_pu))
-        .sorted_by_key(|b| b.balance)
-        .rev()
+    let pu_vnodes = pu_vnodes
+        .into_iter()
+        .map(|(pu_id, builder)| (pu_id, builder.finish()))
         .collect();
-    let mut results: HashMap<ParallelUnitId, Bitmap> = HashMap::default();
-    while !balances.is_empty() {
-        if balances.len() == 1 {
-            let single = balances.pop_front().unwrap();
-            assert_eq!(single.balance, 0);
-            if !single.is_temp {
-                results.insert(single.pu_id, single.builder.finish());
-            }
-            break;
-        }
-        let mut src = balances.pop_front().unwrap();
-        let mut dst = balances.pop_back().unwrap();
-        let n = std::cmp::min(src.balance.abs(), dst.balance.abs());
-        let mut moved = 0;
-        for idx in 0..VirtualNode::COUNT {
-            if moved >= n {
-                break;
-            }
-            if src.builder.is_set(idx) {
-                src.builder.set(idx, false);
-                assert!(!dst.builder.is_set(idx));
-                dst.builder.set(idx, true);
-                moved += 1;
-            }
-        }
-        src.balance -= n;
-        dst.balance += n;
-        if src.balance != 0 {
-            balances.push_front(src);
-        } else if !src.is_temp {
-            results.insert(src.pu_id, src.builder.finish());
-        }
-
-        if dst.balance != 0 {
-            balances.push_back(dst);
-        } else if !dst.is_temp {
-            results.insert(dst.pu_id, dst.builder.finish());
-        }
-    }
-
-    Some(ParallelUnitMapping::from_bitmaps(&results))
+    Some(ParallelUnitMapping::from_bitmaps(&pu_vnodes))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
+    use itertools::Itertools;
+    use risingwave_common::hash::ParallelUnitId;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{worker_node, ParallelUnit, WorkerNode};
 
-    use crate::scheduler::worker_node_manager::rebalance_serving_vnode;
+    use crate::scheduler::worker_node_manager::round_robin_parallel_units;
 
     #[test]
     fn test_worker_node_manager() {
@@ -581,120 +534,78 @@ mod tests {
     }
 
     #[test]
-    fn test_rebalance_serving_vnode() {
-        assert_eq!(VirtualNode::COUNT, 256);
-        let mut pu_id_counter: ParallelUnitId = 0;
-        let mut pu_to_worker: HashMap<ParallelUnitId, u32> = Default::default();
+    fn test_round_robin_parallel_units() {
         let serving_property = Property {
             is_streaming: false,
             is_serving: true,
         };
-        let mut gen_pus_for_worker =
-            |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {
-                let mut results = vec![];
-                for i in 0..number {
-                    results.push(ParallelUnit {
-                        id: pu_id_counter + i,
-                        worker_node_id,
-                    })
-                }
-                pu_id_counter += number;
-                for pu in &results {
-                    pu_to_worker.insert(pu.id, pu.worker_node_id);
-                }
-                results
-            };
-        let count_same_vnode_mapping = |pm1: &ParallelUnitMapping, pm2: &ParallelUnitMapping| {
-            assert_eq!(pm1.len(), 256);
-            assert_eq!(pm2.len(), 256);
-            let mut count: usize = 0;
-            for idx in 0..VirtualNode::COUNT {
-                let vnode = VirtualNode::from_index(idx);
-                if pm1.get(vnode) == pm2.get(vnode) {
-                    count += 1;
-                }
+        let mut pu_id_counter: ParallelUnitId = 1;
+        let mut gen_pus_for_worker = |worker_node_id: u32, number: u32| {
+            let mut results = vec![];
+            for i in 0..number {
+                results.push(ParallelUnit {
+                    id: pu_id_counter + i,
+                    worker_node_id,
+                })
             }
-            count
+            pu_id_counter += number;
+            results
         };
-        let worker_1 = WorkerNode {
-            id: 1,
-            parallel_units: gen_pus_for_worker(1, 1, &mut pu_to_worker),
-            property: Some(serving_property.clone()),
-            ..Default::default()
-        };
-        let pu_mapping = ParallelUnitMapping::build(&worker_1.parallel_units);
-        assert!(
-            rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 0).is_none(),
-            "max_parallelism should >= 0"
+        let worker_nodes = vec![
+            WorkerNode {
+                id: 1,
+                parallel_units: gen_pus_for_worker(1, 3),
+                property: Some(serving_property.clone()),
+                ..Default::default()
+            },
+            WorkerNode {
+                id: 2,
+                parallel_units: gen_pus_for_worker(2, 2),
+                property: Some(serving_property.clone()),
+                ..Default::default()
+            },
+            WorkerNode {
+                id: 3,
+                parallel_units: gen_pus_for_worker(3, 1),
+                property: Some(serving_property),
+                ..Default::default()
+            },
+        ];
+        assert!(round_robin_parallel_units(&worker_nodes, 0).is_empty());
+        assert_eq!(
+            round_robin_parallel_units(&worker_nodes, 1)
+                .into_iter()
+                .map(|pu| pu.id)
+                .collect_vec(),
+            vec![1]
         );
-        let re_pu_mapping =
-            rebalance_serving_vnode(&pu_mapping, &[worker_1.clone()], 10000).unwrap();
-        assert_eq!(re_pu_mapping, pu_mapping);
-        assert_eq!(re_pu_mapping.iter_unique().count(), 1);
-        let worker_2 = WorkerNode {
-            id: 2,
-            parallel_units: gen_pus_for_worker(2, 50, &mut pu_to_worker),
-            property: Some(serving_property.clone()),
-            ..Default::default()
-        };
-        let re_pu_mapping =
-            rebalance_serving_vnode(&re_pu_mapping, &[worker_1.clone(), worker_2.clone()], 10000)
-                .unwrap();
-        assert_ne!(re_pu_mapping, pu_mapping);
-        assert_eq!(re_pu_mapping.iter_unique().count(), 51);
-        // 1 * 256 + 0 -> 51 * 5 + 1
-        let score = count_same_vnode_mapping(&pu_mapping, &re_pu_mapping);
-        assert!(score >= 5);
-
-        let worker_3 = WorkerNode {
-            id: 3,
-            parallel_units: gen_pus_for_worker(3, 60, &mut pu_to_worker),
-            property: Some(serving_property),
-            ..Default::default()
-        };
-        let re_pu_mapping_2 = rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            10000,
-        )
-        .unwrap();
-        // limited by total pu number
-        assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
-        // 51 * 5 + 1 -> 111 * 2 + 34
-        let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
-        assert!(score >= (2 + 50 * 2));
-        let re_pu_mapping = rebalance_serving_vnode(
-            &re_pu_mapping_2,
-            &[worker_1.clone(), worker_2.clone(), worker_3.clone()],
-            50,
-        )
-        .unwrap();
-        // limited by max_parallelism
-        assert_eq!(re_pu_mapping.iter_unique().count(), 50);
-        // 111 * 2 + 34 -> 50 * 5 + 6
-        let score = count_same_vnode_mapping(&re_pu_mapping, &re_pu_mapping_2);
-        assert!(score >= 50 * 2);
-        let re_pu_mapping_2 = rebalance_serving_vnode(
-            &re_pu_mapping,
-            &[worker_1.clone(), worker_2, worker_3.clone()],
-            10000,
-        )
-        .unwrap();
-        assert_eq!(re_pu_mapping_2.iter_unique().count(), 111);
-        // 50 * 5 + 6 -> 111 * 2 + 34
-        let score = count_same_vnode_mapping(&re_pu_mapping_2, &re_pu_mapping);
-        assert!(score >= 50 * 2);
-        let re_pu_mapping =
-            rebalance_serving_vnode(&re_pu_mapping_2, &[worker_1, worker_3.clone()], 10000)
-                .unwrap();
-        // limited by total pu number
-        assert_eq!(re_pu_mapping.iter_unique().count(), 61);
-        // 111 * 2 + 34 -> 61 * 4 + 12
-        let score = count_same_vnode_mapping(&re_pu_mapping, &re_pu_mapping_2);
-        assert!(score >= 61 * 2);
-        assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
-        let re_pu_mapping = rebalance_serving_vnode(&re_pu_mapping, &[worker_3], 10000).unwrap();
-        assert_eq!(re_pu_mapping.iter_unique().count(), 60);
-        assert!(rebalance_serving_vnode(&re_pu_mapping, &[], 10000).is_none());
+        assert_eq!(
+            round_robin_parallel_units(&worker_nodes, 2)
+                .into_iter()
+                .map(|pu| pu.id)
+                .collect_vec(),
+            vec![1, 4]
+        );
+        assert_eq!(
+            round_robin_parallel_units(&worker_nodes, 3)
+                .into_iter()
+                .map(|pu| pu.id)
+                .collect_vec(),
+            vec![1, 4, 6]
+        );
+        assert_eq!(
+            round_robin_parallel_units(&worker_nodes, 4)
+                .into_iter()
+                .map(|pu| pu.id)
+                .collect_vec(),
+            vec![1, 4, 6, 2]
+        );
+        assert_eq!(
+            round_robin_parallel_units(&worker_nodes, 1000)
+                .into_iter()
+                .map(|pu| pu.id)
+                .collect_vec(),
+            vec![1, 4, 6, 2, 5, 3]
+        );
     }
 }
