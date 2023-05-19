@@ -212,8 +212,12 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
-            let overlap_files_range =
-                overlap_info.check_multiple_overlap(&target_level.table_infos);
+            let mut overlap_files_range =
+                overlap_info.check_multiple_include(&target_level.table_infos);
+            if overlap_files_range.is_empty() {
+                overlap_files_range =
+                    overlap_info.check_multiple_overlap(&target_level.table_infos);
+            }
             // We allow a layer in the middle without overlap, so we need to continue to
             // the next layer to search for overlap
             let mut pending_compact = false;
@@ -304,8 +308,10 @@ impl NonOverlapSubLevelPicker {
 
             ret.total_file_count += add_files_count;
             ret.total_file_size += add_files_size + current_level_size;
-            ret.sstable_infos[target_index]
-                .extend_from_slice(&target_level.table_infos[overlap_files_range.clone()]);
+            if !overlap_files_range.is_empty() {
+                ret.sstable_infos[target_index]
+                    .extend_from_slice(&target_level.table_infos[overlap_files_range.clone()]);
+            }
             overlap_len_and_begins.push(overlap_files_range);
             for (reverse_index, files) in extra_overlap_levels {
                 ret.sstable_infos[reverse_index].extend(files);

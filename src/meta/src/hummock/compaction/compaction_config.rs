@@ -22,7 +22,7 @@ const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
-const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 8 * 1024 * 1024; // 8MB
+const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
