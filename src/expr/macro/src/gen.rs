@@ -470,6 +470,13 @@ impl FunctionAttr {
             .map(|t| format_ident!("{}", types::array_type(t)));
         let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
 
+        let value = match self.user_fn.return_type {
+            ReturnType::T => quote! { Some(value) },
+            ReturnType::Option => quote! { value },
+            ReturnType::Result => quote! { Some(value?) },
+            ReturnType::ResultOption => quote! { value? },
+        };
+
         Ok(quote! {
             |return_type, chunk_size, children| {
                 use risingwave_common::array::*;
@@ -507,11 +514,11 @@ impl FunctionAttr {
                         let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
                         let mut value_builder = #array_builder::with_type(self.chunk_size, self.return_type.clone());
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter()),*)).zip_eq_fast(input.vis().iter()).enumerate() {
-                            if let (#(Some(#elems)),*) = row && visible {
+                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                            if let (#(Some(#elems),)*) = row && visible {
                                 for value in #fn_name(#(#elems),*) {
                                     index_builder.append(Some(i as i64));
-                                    value_builder.append(Some(value));
+                                    value_builder.append(#value);
 
                                     if index_builder.len() == self.chunk_size {
                                         let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();

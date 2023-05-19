@@ -109,19 +109,45 @@ fn return_type(item: &syn::ItemFn) -> ReturnType {
         ReturnType::ResultOption
     } else if return_value_is(item, "Result") {
         ReturnType::Result
-    } else if return_value_is(item, "Option") {
+    } else if return_value_is(item, "Option") || return_value_is(item, "DatumRef") {
         ReturnType::Option
     } else {
         ReturnType::T
     }
 }
 
-/// Check if the return value is `type_`.
+/// Check if the return value is `type_` or `impl Iterator<Item = type_>`.
 fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
+    let ty = match ty.as_ref() {
+        syn::Type::ImplTrait(_) => match iterator_item(ty) {
+            Some(ty) => ty,
+            None => return false,
+        },
+        ty => ty,
+    };
+    let syn::Type::Path(path) = ty else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == type_
+}
+
+/// Extract item from `impl Iterator<Item = ???>`
+fn iterator_item(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::ImplTrait(impl_trait) = ty else { return None; };
+    let syn::TypeParamBound::Trait(trait_bound) = impl_trait.bounds.first()? else { return None; };
+    let segment = trait_bound.path.segments.last().unwrap();
+    if segment.ident != "Iterator" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(angle_bracketed) = &segment.arguments else {
+        return None;
+    };
+    for arg in &angle_bracketed.args {
+        if let syn::GenericArgument::Binding(b) = arg && b.ident == "Item" {
+            return Some(&b.ty);
+        }
+    }
+    None
 }
 
 /// Check if the return value is `Result<Option<T>>`.

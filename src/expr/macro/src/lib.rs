@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(lint_reasons)]
+#![feature(let_chains)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
