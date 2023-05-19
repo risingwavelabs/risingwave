@@ -226,6 +226,10 @@ impl StreamChunk {
     pub fn to_pretty_string(&self) -> String {
         use comfy_table::{Cell, CellAlignment, Table};
 
+        if self.cardinality() == 0 {
+            return "(empty)".to_owned();
+        }
+
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
         for (op, row_ref) in self.rows() {
