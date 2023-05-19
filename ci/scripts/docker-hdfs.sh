@@ -6,6 +6,7 @@ set -euo pipefail
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
+BUILDKITE_COMMIT="HDFS_$(echo $RANDOM | md5sum | head -c 20;)"
 
 java_home_path=$(uname -m)
 if [ "$arch" = "arm64" ] || [ "$arch" = "aarch64" ]; then
