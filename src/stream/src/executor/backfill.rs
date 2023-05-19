@@ -145,8 +145,7 @@ where
 
         // If the internal persisted state is "finished" for this executor, we are done, no need
         // to_create_mv
-        // FIXME(kwannoel): This is unimplemented.
-
+        // FIXME(kwannoel): This is unimplemented. TODO: Remove the line below once complete.
         let to_create_mv = first_barrier.is_newly_added(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -533,6 +532,12 @@ where
 
     /// For `current_pos` and `old_pos` are just pk of upstream.
     /// They should be strictly increasing.
+    /// FIXME(kwannoel): Currently state table expects a Primary Key.
+    /// For that we use vnode, so we can update position per vnode to support hash-distributed
+    /// backfill.
+    /// However this also means that it computes a new `vnode` partition for each vnode.
+    /// State table interface should be updated, such that it can reuse this `vnode`
+    /// as both `PRIMARY KEY` and `vnode`.
     async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
