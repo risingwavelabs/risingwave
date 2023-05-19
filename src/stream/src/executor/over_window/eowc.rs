@@ -370,7 +370,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 }
 
                 // Evict unneeded rows from state table.

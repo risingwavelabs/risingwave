@@ -501,6 +501,10 @@ for_all_variants! { array_builder_impl_enum }
 macro_rules! impl_array_builder {
     ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
+            pub fn with_type(capacity: usize, ty: DataType) -> Self {
+                ty.create_array_builder(capacity)
+            }
+
             pub fn append_array(&mut self, other: &ArrayImpl) {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
@@ -515,7 +519,7 @@ macro_rules! impl_array_builder {
 
             /// Append a [`Datum`] or [`DatumRef`] multiple times,
             /// panicking if the datum's type does not match the array builder's type.
-            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
+            pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {
                         $( Self::$variant_name(inner) => inner.append_n(n, None), )*
@@ -532,8 +536,8 @@ macro_rules! impl_array_builder {
             }
 
             /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
-                self.append_datum_n(1, datum);
+            pub fn append(&mut self, datum: impl ToDatumRef) {
+                self.append_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
@@ -709,13 +713,6 @@ for_all_variants! { impl_array_estimate_size }
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
-    }
-}
-
-impl ArrayBuilderImpl {
-    /// Create an array builder from given type.
-    pub fn from_type(datatype: &DataType, capacity: usize) -> Self {
-        datatype.create_array_builder(capacity)
     }
 }
 

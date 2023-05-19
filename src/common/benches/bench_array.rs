@@ -24,7 +24,7 @@ pub fn bench_bigint(c: &mut Criterion) {
                 for _i in 0..black_box(100) {
                     let datum: i64 = black_box(3);
                     let datum: Datum = Some(datum.into());
-                    builder.append_datum_n(10, datum);
+                    builder.append_n(10, datum);
                     black_box(());
                 }
             },

@@ -1198,7 +1198,7 @@ mod tests {
             let mut builder = data_type.create_array_builder(6);
             for _ in 0..3 {
                 builder.append_null();
-                builder.append_datum(&datum);
+                builder.append(&datum);
             }
             let array = builder.finish();
 

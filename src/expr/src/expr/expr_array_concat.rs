@@ -327,7 +327,7 @@ impl Expression for ArrayConcatExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append(&self.evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))
