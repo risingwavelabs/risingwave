@@ -322,7 +322,9 @@ where
                                 // Buffer the upstream chunk.
                                 upstream_chunk_buffer.push(chunk.compact());
                             }
-                            Message::Watermark(_) => {
+                            Message::Watermark(watermark) => {
+                                self.state_table
+                                    .update_watermark(watermark.val.clone(), false);
                                 // Ignore watermark during backfill.
                             }
                         }
@@ -394,7 +396,14 @@ where
                 }
 
                 // If it's not a barrier, just forward
-                Message::Chunk(_) | Message::Watermark(_) => {
+                Message::Watermark(watermark) => {
+                    self.state_table
+                        .update_watermark(watermark.val.clone(), false);
+                    if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                        yield msg;
+                    }
+                }
+                Message::Chunk(_) => {
                     if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
                         yield msg;
                     }
