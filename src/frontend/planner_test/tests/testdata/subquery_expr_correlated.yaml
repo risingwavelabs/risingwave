@@ -381,14 +381,11 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
       ├─LogicalScan { table: a, columns: [a.a1] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
-        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   | └─LogicalScan { table: a, columns: [a.a1] }
-        |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     | └─LogicalScan { table: a, columns: [a.a1] }
-        |     └─LogicalScan { table: b, columns: [] }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        | ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | | └─LogicalScan { table: a, columns: [a.a1] }
+        | └─LogicalAgg { aggs: [] }
+        |   └─LogicalScan { table: b, columns: [] }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           | └─LogicalScan { table: a, columns: [a.a1] }
@@ -663,7 +660,7 @@
     └─LogicalJoin { type: LeftSemi, on: (t2.y = $expr1) AND IsNotDistinctFrom(t2.y, t2.y) AND IsNotDistinctFrom(t2.x, t3.x), output: [t2.x] }
       ├─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.x) }
       └─LogicalProject { exprs: [t3.x, t2.y, (t3.y + t2.y) as $expr1] }
-        └─LogicalJoin { type: Inner, on: true, output: all }
+        └─LogicalJoin { type: Inner, on: true, output: [t3.x, t2.y, t3.y] }
           ├─LogicalAgg { group_key: [t2.y], aggs: [] }
           | └─LogicalScan { table: t2, columns: [t2.y] }
           └─LogicalScan { table: t3, columns: [t3.x, t3.y], predicate: IsNotNull(t3.x) }
