@@ -151,7 +151,7 @@ where
         let key: &[Datum] = &[Some((arbitrary_vnode as i16).into())];
         let row = self.state_table.get_row(key).await?;
         let is_finished = if let Some(row) = row
-            && let Some(is_finished) = row.datum_at(state_len -1)
+            && let Some(is_finished) = row.datum_at(state_len + 1)
         {
             println!("is_finished? {:?}", is_finished);
             is_finished.into_bool()
