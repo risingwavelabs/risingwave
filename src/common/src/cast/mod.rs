@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use regex::Regex;
-use rust_decimal::prelude::Decimal;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
-use crate::types::{Date, Interval, Time, Timestamp};
+use crate::types::{Date, Time, Timestamp};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -55,17 +53,7 @@ pub fn parse_naive_date(s: &str) -> Result<NaiveDate> {
 
 #[inline]
 pub fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    // if the last character is `Z`, remove it
-    let last_char = s
-        .chars()
-        .last()
-        .ok_or(PARSE_ERROR_STR_TO_TIME.to_string())?;
-    let mut s_without_zone = s;
-    if last_char == 'Z' {
-        s_without_zone = s
-            .get(..s.len() - 1)
-            .ok_or(PARSE_ERROR_STR_TO_TIME.to_string())?;
-    }
+    let s_without_zone = s.trim_end_matches('Z');
     let res =
         SpeedTime::parse_str(s_without_zone).map_err(|_| PARSE_ERROR_STR_TO_TIME.to_string())?;
     Ok(Time::from_hms_micro_uncheck(
@@ -173,40 +161,6 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
     Ok(Timestamp::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
-    ))
-}
-
-/// Converts str to interval for postgres debezium cdc json
-///
-/// The input str must have the following format:
-/// P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
-///
-/// Example
-/// - P1Y2M3DT4H5M6.78S
-#[inline]
-pub fn str_to_interval(s: &str) -> Result<Interval> {
-    let re = Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
-        .unwrap();
-    let caps = re
-        .captures(s)
-        .ok_or(PARSE_ERROR_STR_TO_INTERVAL.to_string())?;
-    // safe to unwrap, since capture group is `Some`
-    let years: i32 = caps.get(1).unwrap().as_str().parse().unwrap();
-    let months: i32 = caps.get(2).unwrap().as_str().parse().unwrap();
-    let days = caps.get(3).unwrap().as_str().parse().unwrap();
-    let hours: i64 = caps.get(4).unwrap().as_str().parse().unwrap();
-    let minutes: i64 = caps.get(5).unwrap().as_str().parse().unwrap();
-    // usecs = sec * 1000000, use decimal to be exact
-    let usecs: i64 = (Decimal::from_str_exact(caps.get(5).unwrap().as_str())
-        .map_err(|_| PARSE_ERROR_STR_TO_INTERVAL.to_string())?
-        * Decimal::from_str_exact("1000000").unwrap())
-    .to_string()
-    .parse()
-    .unwrap();
-    Ok(Interval::from_month_day_usec(
-        years * 12 + months,
-        days,
-        (hours * 3_600 + minutes * 60) * 1_000_000 + usecs,
     ))
 }
 

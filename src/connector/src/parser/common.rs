@@ -18,11 +18,11 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_interval, str_to_time,
-    str_to_timestamp, str_with_time_zone_to_timestamptz,
+    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Int256, JsonbVal, ScalarImpl, Time,
+    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::value::StaticNode;
@@ -99,7 +99,10 @@ fn do_parse_simd_json_value(
                     match format {
                         SourceFormat::DebeziumJson => {
                             // debezium converts time to i64 for mysql and postgres in microseconds
-                            Time::with_micro(ensure_i64!(v, i64))?.into()
+                            Time::with_micro(ensure_i64!(v, i64).try_into().map_err(|_| {
+                                anyhow!("cannot cast i64 to time, value out of range")
+                            })?)?
+                            .into()
                         }
                         _ => Time::with_milli(ensure_i64!(v, i64).try_into().map_err(|_| {
                             anyhow!("cannot cast i64 to time, value out of range")
@@ -137,7 +140,7 @@ fn do_parse_simd_json_value(
             }
         }
         DataType::Struct(struct_type_info) => {
-            let fields = struct_type_info
+            let fields: Vec<Option<ScalarImpl>> = struct_type_info
                 .field_names
                 .iter()
                 .zip_eq_fast(struct_type_info.fields.iter())
@@ -168,7 +171,7 @@ fn do_parse_simd_json_value(
         }
         DataType::Interval => match format {
             SourceFormat::DebeziumJson => {
-                ScalarImpl::Interval(str_to_interval(ensure_str!(v, "interval")).unwrap())
+                ScalarImpl::Interval(Interval::from_iso_8601(ensure_str!(v, "interval"))?)
             }
             _ => unimplemented!(),
         },

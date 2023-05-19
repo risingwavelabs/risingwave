@@ -258,7 +258,7 @@ impl Time {
         Self::with_secs_nano(secs, nano).map_err(Into::into)
     }
 
-    pub fn with_micro(micro: i64) -> Result<Self> {
+    pub fn with_micro(micro: u64) -> Result<Self> {
         let secs = (micro / 1_000_000) as u32;
         let nano = ((micro % 1_000_000) * 1_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)

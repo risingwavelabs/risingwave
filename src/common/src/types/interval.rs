@@ -18,14 +18,17 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
+use std::sync::LazyLock;
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use regex::Regex;
 use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
+use rust_decimal::prelude::Decimal;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -1006,6 +1009,78 @@ impl Interval {
             ""
         };
         format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
+    }
+
+    pub fn from_iso_8601(s: &str) -> Result<Self> {
+        // ISO pattern - PnYnMnDTnHnMnS
+        static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+                .unwrap()
+        });
+        let caps = ISO_8601_REGEX
+            .captures(s)
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        // `caps.get` is safe to unwrap, since `caps` is `Some`
+        let years: i32 = caps
+            .get(1)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        let months: i32 = caps
+            .get(2)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        let days = caps
+            .get(3)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        let hours: i64 = caps
+            .get(4)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        let minutes: i64 = caps
+            .get(5)
+            .unwrap()
+            .as_str()
+            .parse()
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        // usecs = sec * 1000000, use decimal to be exact
+        let usecs: i64 = (Decimal::from_str_exact(caps.get(5).unwrap().as_str())
+            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
+            .checked_mul(Decimal::from_str_exact("1000000").unwrap()))
+        .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
+        .try_into()
+        .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
+        Ok(Interval::from_month_day_usec(
+            // months = years * 12 + months
+            years
+                .checked_mul(12)
+                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
+                .checked_add(months)
+                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?,
+            days,
+            // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
+            (hours
+                .checked_mul(3_600)
+                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
+                .checked_add(minutes.checked_mul(60).ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
+                })?)
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
+                })?)
+            .checked_mul(1_000_000)
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
+            .checked_add(usecs)
+            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?,
+        ))
     }
 }
 
