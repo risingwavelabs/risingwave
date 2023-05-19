@@ -9,14 +9,15 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-# Use a feature flag to control enable or not, otherwise `cargo test` will compile all dependencies.
-rw-static-link = ["openssl", "rdkafka"]
+# some crates opt-in static linking, while some opt-in dynamic linking,
+# so they are two features :)
+rw-static-link = ["openssl-sys", "sasl2-sys"]
 rw-dynamic-link = ["zstd-sys"]
 
 [dependencies]
 log = { version = "0.4", features = ["release_max_level_debug"] }
-openssl = { version = "0.10", optional = true, features = ["vendored"] }
-rdkafka = { workspace = true, optional = true, features = ["cmake-build", "ssl-vendored", "gssapi-vendored"] }
+openssl-sys = { version = "0.9", optional = true, features = ["vendored"] }
+sasl2-sys = { version = "0.1", optional = true, features = ["gssapi-vendored"] }
 tracing = { version = "0.1", features = ["release_max_level_debug"] }
 zstd-sys = { version = "2", optional = true, default-features = false, features = ["pkg-config"] }
 # workspace-hack = { path = "../../workspace-hack" }

@@ -1,23 +1,8 @@
-cargo-cache: &cargo-cache
-  id: cache
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-  paths:
-    - ".cargo/registry/index"
-    - ".cargo/registry/cache"
-    - ".cargo/git/db"
-
 steps:
   - label: "build (dev mode)"
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build-dev"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -28,7 +13,6 @@ steps:
     command: "ci/scripts/build.sh -p ci-release"
     key: "build-release"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -56,7 +40,6 @@ steps:
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -67,7 +50,6 @@ steps:
     command: "ci/scripts/docslt.sh"
     key: "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -80,7 +62,6 @@ steps:
       - "build-dev"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
@@ -100,7 +81,6 @@ steps:
       - "build-release"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
@@ -120,7 +100,6 @@ steps:
       - "build-dev"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
@@ -140,7 +119,6 @@ steps:
       - "build-release"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-sqllogictest-token
@@ -160,7 +138,6 @@ steps:
       - "build-release"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -174,7 +151,6 @@ steps:
       - "build-release"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: source-test-env
           config: ci/docker-compose.yml
@@ -186,7 +162,6 @@ steps:
     command: "ci/scripts/pr-unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
@@ -200,7 +175,6 @@ steps:
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 ci/scripts/deterministic-unit-test.sh"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -211,7 +185,6 @@ steps:
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -222,7 +195,6 @@ steps:
     command: "TEST_NUM=30 ci/scripts/deterministic-it-test.sh recovery::"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -236,7 +208,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -250,7 +221,6 @@ steps:
     command: "TEST_NUM=16 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       # - seek-oss/aws-sm#v2.3.1:
       #     env:
       #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
@@ -270,7 +240,6 @@ steps:
       - "build-release"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: sink-test-env
           config: ci/docker-compose.yml
@@ -284,7 +253,6 @@ steps:
       - "build-release"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -296,7 +264,6 @@ steps:
     command: "ci/scripts/java-binding-test.sh -p ci-release"
     depends_on: "build-release"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -313,7 +280,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: release-env
           config: ci/docker-compose.yml

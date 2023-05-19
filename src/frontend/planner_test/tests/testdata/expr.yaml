@@ -473,7 +473,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -496,7 +496,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -506,7 +506,7 @@
     select * from t where v1 >= now();
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v1 >= '2021-04-01 00:00:00+00:00':Timestamptz) }
+    └─LogicalFilter { predicate: (t.v1 >= Now) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }
@@ -520,7 +520,7 @@
     select * from t where v1 >= now() - INTERVAL '2' SECOND;
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalFilter { predicate: (t.v1 >= ('2021-04-01 00:00:00+00:00':Timestamptz - '00:00:02':Interval)) }
+    └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: "NoCheck", watermark_columns: [v1] }

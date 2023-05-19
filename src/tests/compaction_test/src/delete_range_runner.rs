@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,7 +29,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
 };
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
@@ -416,26 +415,25 @@ impl NormalState {
         right: &[u8],
         ignore_range_tombstone: bool,
     ) -> Vec<(Bytes, Bytes)> {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)),
-                        Bound::Excluded(Bytes::copy_from_slice(right)),
-                    ),
-                    ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone,
-                        retention_seconds: None,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = pin!(self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)),
+                    Bound::Excluded(Bytes::copy_from_slice(right)),
+                ),
+                ReadOptions {
+                    prefix_hint: None,
+                    ignore_range_tombstone,
+                    retention_seconds: None,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                },
+            )
+            .await
+            .unwrap(),);
         let mut ret = vec![];
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();
@@ -563,9 +561,6 @@ fn run_compactor_thread(
         output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
-        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number: 4,
-        })),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

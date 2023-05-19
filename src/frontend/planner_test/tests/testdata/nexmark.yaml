@@ -423,7 +423,7 @@
 
     Fragment 1
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Fragment 2
     StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
@@ -438,7 +438,7 @@
 
     Fragment 4
     StreamNoOp
-    └──  StreamExchange Hash([0, 1]) from 2
+    └──  StreamExchange NoShuffle from 2
 
     Table 0 { columns: [ bid_auction, window_start, count ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
@@ -679,10 +679,11 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.date_time, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY auction.id ORDER BY bid.price DESC, bid.date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
-              └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+          └─LogicalProject { exprs: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+            └─LogicalFilter { predicate: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
+              └─LogicalJoin { type: Inner, on: true, output: all }
+                ├─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
+                └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[bid.price DESC, bid.date_time ASC]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalJoin { type: Inner, on: (auction.id = bid.auction) AND (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires), output: all }
@@ -1086,7 +1087,8 @@
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, group_key: [1, 0] }
@@ -1136,7 +1138,8 @@
     └─LogicalFilter { predicate: (rank <= 1:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, rank] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchGroupTopN { order: "[bid.date_time DESC]", limit: 1, offset: 0, with_ties: true, group_key: [1, 0] }
@@ -1189,7 +1192,8 @@
     └─LogicalFilter { predicate: (row_number <= 10:Int32) }
       └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+          └─LogicalProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
+            └─LogicalScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id] }
 - id: nexmark_q20
   before:
   - create_tables

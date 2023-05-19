@@ -14,7 +14,8 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use itertools::Itertools;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::property::FunctionalDependencySet;
@@ -30,8 +31,15 @@ pub struct Dedup<PlanRef> {
 impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-        builder.field("dedup_cols", &self.dedup_cols);
+        builder.field("dedup_cols", &self.dedup_cols_display());
         builder.finish()
+    }
+
+    fn dedup_cols_display(&self) -> Vec<FieldDisplay<'_>> {
+        self.dedup_cols
+            .iter()
+            .map(|i| FieldDisplay(self.input.schema().fields.get(*i).unwrap()))
+            .collect_vec()
     }
 }
 

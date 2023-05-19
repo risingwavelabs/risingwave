@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::{GenericPlanNode, Limit};
+use super::generic::Limit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
@@ -41,26 +41,15 @@ pub struct LogicalTopN {
     core: generic::TopN<PlanRef>,
 }
 
-impl LogicalTopN {
-    pub fn new(input: PlanRef, limit: u64, offset: u64, with_ties: bool, order: Order) -> Self {
-        if with_ties {
-            assert!(offset == 0, "WITH TIES is not supported with OFFSET");
-        }
-
-        let limit_attr = Limit::new(limit, with_ties);
-        let core = generic::TopN::without_group(input, limit_attr, offset, order);
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = core.input.functional_dependency().clone();
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
-
-        LogicalTopN { base, core }
+impl From<generic::TopN<PlanRef>> for LogicalTopN {
+    fn from(core: generic::TopN<PlanRef>) -> Self {
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
     }
+}
 
-    pub fn with_group(
+impl LogicalTopN {
+    pub fn new(
         input: PlanRef,
         limit: u64,
         offset: u64,
@@ -68,9 +57,9 @@ impl LogicalTopN {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
-        let mut topn = Self::new(input, limit, offset, with_ties, order);
-        topn.core.group_key = group_key;
-        topn
+        let limit_attr = Limit::new(limit, with_ties);
+        let core = generic::TopN::with_group(input, limit_attr, offset, order, group_key);
+        core.into()
     }
 
     pub fn create(
@@ -79,6 +68,7 @@ impl LogicalTopN {
         offset: u64,
         order: Order,
         with_ties: bool,
+        group_key: Vec<usize>,
     ) -> Result<PlanRef> {
         if with_ties && offset > 0 {
             return Err(ErrorCode::NotImplemented(
@@ -87,7 +77,7 @@ impl LogicalTopN {
             )
             .into());
         }
-        Ok(Self::new(input, limit, offset, with_ties, order).into())
+        Ok(Self::new(input, limit, offset, with_ties, order, group_key).into())
     }
 
     pub fn limit_attr(&self) -> Limit {
@@ -196,14 +186,9 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::with_group(
-            input,
-            self.limit_attr().limit(),
-            self.offset(),
-            self.limit_attr().with_ties(),
-            self.topn_order().clone(),
-            self.group_key().to_vec(),
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        core.into()
     }
 
     #[must_use]
@@ -212,22 +197,15 @@ impl PlanTreeNodeUnary for LogicalTopN {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        (
-            Self::with_group(
-                input,
-                self.limit_attr().limit(),
-                self.offset(),
-                self.limit_attr().with_ties(),
-                input_col_change
-                    .rewrite_required_order(self.topn_order())
-                    .unwrap(),
-                self.group_key()
-                    .iter()
-                    .map(|idx| input_col_change.map(*idx))
-                    .collect(),
-            ),
-            input_col_change,
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        core.order = input_col_change
+            .rewrite_required_order(self.topn_order())
+            .unwrap();
+        for key in &mut core.group_key {
+            *key = input_col_change.map(*key)
+        }
+        (core.into(), input_col_change)
     }
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
@@ -280,7 +258,7 @@ impl ColPrunable for LogicalTopN {
             .map(|group_key| mapping.map(*group_key))
             .collect();
         let new_input = self.input().prune_col(&input_required_cols, ctx);
-        let top_n = Self::with_group(
+        let top_n = Self::new(
             new_input,
             self.limit_attr().limit(),
             self.offset(),
@@ -390,8 +368,7 @@ mod tests {
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let input = PlanRef::from(values);
 
-        let original_logical =
-            LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
+        let original_logical = LogicalTopN::new(input, 1, 0, false, Order::default(), vec![1]);
         assert_eq!(original_logical.group_key(), &[1]);
         let original_logical: PlanRef = original_logical.into();
         let pruned_node = original_logical.prune_col(

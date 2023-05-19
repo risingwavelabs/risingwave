@@ -72,6 +72,9 @@ fn create_hash_join_executor(
         cond,
         "HashJoinExecutor".into(),
         CHUNK_SIZE,
+        // TODO: In practice this `shutdown_rx` will be constantly poll in execution, may need to
+        // use it in bench too.
+        None,
     ))
 }
 

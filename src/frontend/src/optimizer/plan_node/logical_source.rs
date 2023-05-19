@@ -19,7 +19,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -50,6 +50,10 @@ pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
+
+    /// Expressions to output. This field presents and will be turned to a `Project` when
+    /// converting to a physical plan, only if there are generated columns.
+    output_exprs: Option<Vec<ExprImpl>>,
 }
 
 impl LogicalSource {
@@ -60,7 +64,7 @@ impl LogicalSource {
         gen_row_id: bool,
         for_table: bool,
         ctx: OptimizerContextRef,
-    ) -> Self {
+    ) -> Result<Self> {
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
         let core = generic::Source {
             catalog: source_catalog,
@@ -74,14 +78,20 @@ impl LogicalSource {
 
         let base = PlanBase::new_logical_with_core(&core);
 
-        LogicalSource { base, core }
+        let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
+
+        Ok(LogicalSource {
+            base,
+            core,
+            output_exprs,
+        })
     }
 
     pub fn with_catalog(
         source_catalog: Rc<SourceCatalog>,
         for_table: bool,
         ctx: OptimizerContextRef,
-    ) -> Self {
+    ) -> Result<Self> {
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
         let gen_row_id = source_catalog.append_only;
@@ -96,49 +106,18 @@ impl LogicalSource {
         )
     }
 
-    pub fn create(
-        source_catalog: Rc<SourceCatalog>,
-        for_table: bool,
-        ctx: OptimizerContextRef,
-    ) -> Result<PlanRef> {
-        let column_catalogs = source_catalog.columns.clone();
-        let column_descs = column_catalogs
-            .iter()
-            .map(|c| &c.column_desc)
-            .cloned()
-            .collect();
-        let row_id_index = source_catalog.row_id_index;
-        let gen_row_id = source_catalog.append_only;
-
-        let source = Self::new(
-            Some(source_catalog),
-            column_catalogs,
-            row_id_index,
-            gen_row_id,
-            for_table,
-            ctx,
-        );
-
-        let exprs = Self::gen_optional_generated_column_project_exprs(column_descs)?;
-        if let Some(exprs) = exprs {
-            Ok(LogicalProject::new(source.into(), exprs).into())
-        } else {
-            Ok(source.into())
-        }
-    }
-
-    pub fn gen_optional_generated_column_project_exprs(
-        column_descs: Vec<ColumnDesc>,
+    pub fn derive_output_exprs_from_generated_columns(
+        columns: &[ColumnCatalog],
     ) -> Result<Option<Vec<ExprImpl>>> {
-        if !column_descs.iter().any(|c| c.is_generated()) {
+        if !columns.iter().any(|c| c.is_generated()) {
             return Ok(None);
         }
 
         let col_mapping = {
-            let mut mapping = vec![None; column_descs.len()];
+            let mut mapping = vec![None; columns.len()];
             let mut cur = 0;
-            for (idx, column_desc) in column_descs.iter().enumerate() {
-                if !column_desc.is_generated() {
+            for (idx, column) in columns.iter().enumerate() {
+                if !column.is_generated() {
                     mapping[idx] = Some(cur);
                     cur += 1;
                 } else {
@@ -149,23 +128,21 @@ impl LogicalSource {
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);
-        let mut exprs = Vec::with_capacity(column_descs.len());
+        let mut exprs = Vec::with_capacity(columns.len());
         let mut cur = 0;
-        for column_desc in column_descs {
+        for column in columns {
+            let column_desc = &column.column_desc;
             let ret_data_type = column_desc.data_type.clone();
-            if column_desc.is_generated() {
-                if let GeneratedOrDefaultColumn::GeneratedColumn(generated_column) =
-                    column_desc.generated_or_default_column.unwrap()
-                {
-                    let GeneratedColumnDesc { expr } = generated_column;
-                    // TODO(yuhao): avoid this `from_expr_proto`.
-                    let proj_expr =
-                        rewriter.rewrite_expr(ExprImpl::from_expr_proto(&expr.unwrap())?);
-                    let casted_expr = proj_expr.cast_assign(column_desc.data_type)?;
-                    exprs.push(casted_expr);
-                } else {
-                    unreachable!()
-                }
+
+            if let Some(GeneratedOrDefaultColumn::GeneratedColumn(generated_column)) =
+                &column_desc.generated_or_default_column
+            {
+                let GeneratedColumnDesc { expr } = generated_column;
+                // TODO(yuhao): avoid this `from_expr_proto`.
+                let proj_expr =
+                    rewriter.rewrite_expr(ExprImpl::from_expr_proto(expr.as_ref().unwrap())?);
+                let casted_expr = proj_expr.cast_assign(ret_data_type)?;
+                exprs.push(casted_expr);
             } else {
                 let input_ref = InputRef {
                     data_type: ret_data_type,
@@ -211,6 +188,7 @@ impl LogicalSource {
         Self {
             base: self.base.clone(),
             core,
+            output_exprs: self.output_exprs.clone(),
         }
     }
 
@@ -235,17 +213,9 @@ impl LogicalSource {
     }
 
     fn wrap_with_optional_generated_columns_stream_proj(&self) -> Result<PlanRef> {
-        let column_catalogs = self.core.column_catalog.clone();
-        let exprs = Self::gen_optional_generated_column_project_exprs(
-            column_catalogs
-                .iter()
-                .map(|c| &c.column_desc)
-                .cloned()
-                .collect_vec(),
-        )?;
-        if let Some(exprs) = exprs {
+        if let Some(exprs) = &self.output_exprs {
             let source = StreamSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs, source.into());
+            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
             Ok(StreamProject::new(logical_project).into())
         } else {
             let source = StreamSource::new(self.core.clone());
@@ -254,17 +224,9 @@ impl LogicalSource {
     }
 
     fn wrap_with_optional_generated_columns_batch_proj(&self) -> Result<PlanRef> {
-        let column_catalogs = self.core.column_catalog.clone();
-        let exprs = Self::gen_optional_generated_column_project_exprs(
-            column_catalogs
-                .iter()
-                .map(|c| &c.column_desc)
-                .cloned()
-                .collect_vec(),
-        )?;
-        if let Some(exprs) = exprs {
+        if let Some(exprs) = &self.output_exprs {
             let source = BatchSource::new(self.rewrite_to_stream_batch_source());
-            let logical_project = generic::Project::new(exprs, source.into());
+            let logical_project = generic::Project::new(exprs.to_vec(), source.into());
             Ok(BatchProject::new(logical_project).into())
         } else {
             let source = BatchSource::new(self.core.clone());
@@ -277,6 +239,7 @@ impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // TODO: show generated columns
         if let Some(catalog) = self.source_catalog() {
             write!(
                 f,
@@ -298,7 +261,25 @@ impl ColPrunable for LogicalSource {
     }
 }
 
-impl ExprRewritable for LogicalSource {}
+impl ExprRewritable for LogicalSource {
+    fn has_rewritable_expr(&self) -> bool {
+        self.output_exprs.is_some()
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut output_exprs = self.output_exprs.clone();
+
+        for expr in output_exprs.iter_mut().flatten() {
+            *expr = r.rewrite_expr(expr.clone());
+        }
+
+        Self {
+            output_exprs,
+            ..self.clone()
+        }
+        .into()
+    }
+}
 
 /// A util function to extract kafka offset timestamp range.
 ///
