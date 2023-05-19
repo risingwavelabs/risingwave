@@ -389,7 +389,6 @@ impl LevelCompactionPicker {
 
             assert!(overlap
                 .check_multiple_overlap(&l0.sub_levels[idx].table_infos)
-                .0
                 .is_empty());
             let mut target_level_idx = idx;
             while target_level_idx > 0 {
@@ -397,7 +396,6 @@ impl LevelCompactionPicker {
                     != LevelType::Nonoverlapping as i32
                     || !overlap
                         .check_multiple_overlap(&l0.sub_levels[target_level_idx - 1].table_infos)
-                        .0
                         .is_empty()
                 {
                     break;

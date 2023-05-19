@@ -143,9 +143,13 @@ impl ManualCompactionPicker {
                 table_infos: l0.sub_levels[idx].table_infos.clone(),
             })
         }
-        let target_input_ssts = info
-            .check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos)
-            .0;
+        let target_input_ssts_range =
+            info.check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos);
+        let target_input_ssts = if target_input_ssts_range.is_empty() {
+            vec![]
+        } else {
+            levels.levels[self.target_level - 1].table_infos[target_input_ssts_range].to_vec()
+        };
         if target_input_ssts
             .iter()
             .any(|table| level_handlers[self.target_level].is_pending_compact(&table.sst_id))
