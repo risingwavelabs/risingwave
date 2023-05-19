@@ -200,11 +200,9 @@ async fn compact_shared_buffer(
         }
         vnodes.sort();
         vnodes.dedup();
-        const MIN_SSTABLE_SIZE: u64 = 1024 * 1024;
+        const MIN_SSTABLE_SIZE: u64 = 8 * 1024 * 1024;
         let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
-        if avg_vnode_size >= MIN_SSTABLE_SIZE {
-            split_weight_by_vnode = VirtualNode::COUNT;
-        } else if vnodes.len() >= VirtualNode::COUNT / 2 {
+        if compact_data_size >= MIN_SSTABLE_SIZE {
             split_weight_by_vnode = VirtualNode::COUNT;
             while avg_vnode_size < MIN_SSTABLE_SIZE && split_weight_by_vnode > 0 {
                 split_weight_by_vnode /= 2;

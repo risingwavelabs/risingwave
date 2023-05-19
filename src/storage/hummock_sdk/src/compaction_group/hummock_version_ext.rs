@@ -496,8 +496,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels,
                     delete_sst_ids_set,
                     insert_sst_level_id,
-                    insert_sub_level_id,
-                    mut insert_table_infos,
+                    insert_table_infos,
                     ..
                 } = summary;
                 assert!(
@@ -510,29 +509,31 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                let mut level_type = LevelType::Overlapping;
-                if levels.member_table_ids.len() == 1 {
-                    insert_table_infos.sort_by(|sst1, sst2| {
+                // The sst may be flushed by spill-to-s3, so we must sort them as epoch
+                // order.
+                for (min_epoch, ssts) in &insert_table_infos
+                    .into_iter()
+                    .sorted_by(|sst1, sst2| sst1.min_epoch.cmp(&sst2.min_epoch))
+                    .group_by(|sst| sst.max_epoch)
+                {
+                    let mut level_type = LevelType::Overlapping;
+                    let mut ssts = ssts.collect_vec();
+                    ssts.sort_by(|sst1, sst2| {
                         let a = sst1.key_range.as_ref().unwrap();
                         let b = sst2.key_range.as_ref().unwrap();
                         a.compare(b)
                     });
-                    if can_concat(&insert_table_infos) {
+                    if can_concat(&ssts) {
                         level_type = LevelType::Nonoverlapping;
-                    } else {
-                        // The sst may be flushed by spill-to-s3, so we must sort them as epoch
-                        // order.
-                        insert_table_infos
-                            .sort_by(|sst1, sst2| sst1.min_epoch.cmp(&sst2.min_epoch));
                     }
+                    insert_new_sub_level(
+                        levels.l0.as_mut().unwrap(),
+                        min_epoch,
+                        level_type,
+                        ssts,
+                        None,
+                    );
                 }
-                insert_new_sub_level(
-                    levels.l0.as_mut().unwrap(),
-                    insert_sub_level_id,
-                    level_type,
-                    insert_table_infos,
-                    None,
-                );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
                 levels.apply_compact_ssts(summary);
