@@ -272,7 +272,8 @@ impl LogicalOverWindow {
             .all(|&idx| idx < self.window_functions().len()));
 
         let input_len = self.input().schema().len();
-        let mut out_fields = (0..input_len + self.window_functions().len()).collect_vec();
+        let original_out_fields = (0..input_len + self.window_functions().len()).collect_vec();
+        let mut out_fields = original_out_fields.clone();
         let mut cur_input = self.input();
         let mut cur_node = self.clone();
         let mut cur_win_func_pos = input_len;
@@ -291,8 +292,11 @@ impl LogicalOverWindow {
             );
             cur_input = cur_node.clone().into();
         }
-
-        LogicalProject::with_out_col_idx(cur_node.into(), out_fields.into_iter()).into()
+        if out_fields == original_out_fields {
+            cur_node.into()
+        } else {
+            LogicalProject::with_out_col_idx(cur_node.into(), out_fields.into_iter()).into()
+        }
     }
 }
 
