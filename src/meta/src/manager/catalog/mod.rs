@@ -778,6 +778,7 @@ where
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -795,6 +796,18 @@ where
                 .map(|(index_id, index)| (*index_id, index.index_table_id))
                 .unzip();
 
+            let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
+            for index_table_id in &index_table_ids {
+                let internal_table_ids = fragment_manager
+                    .select_table_fragments_by_table_id(&(index_table_id.into()))
+                    .await?
+                    .internal_table_ids();
+
+                // Only 1 should be used by table scan.
+                assert_eq!(internal_table_ids.len(), 1);
+                index_internal_table_ids.push(internal_table_ids[0]);
+            }
+
             if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
                 if ref_count > index_ids.len() {
                     return Err(MetaError::permission_denied(format!(
@@ -811,6 +824,14 @@ where
             let index_tables = index_table_ids
                 .iter()
                 .map(|index_table_id| tables.remove(*index_table_id).unwrap())
+                .collect_vec();
+            let index_internal_tables = index_internal_table_ids
+                .iter()
+                .map(|index_internal_table_id| {
+                    tables
+                        .remove(*index_internal_table_id)
+                        .expect("internal index table should exist")
+                })
                 .collect_vec();
             for index_table in &index_tables {
                 if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
@@ -833,6 +854,7 @@ where
             let users_need_update = {
                 let table_to_drop_ids = index_table_ids
                     .iter()
+                    .chain(&index_internal_table_ids)
                     .chain(&internal_table_ids)
                     .chain([&table_id])
                     .collect_vec();
@@ -882,6 +904,7 @@ where
                                 internal_tables
                                     .into_iter()
                                     .chain(index_tables.into_iter())
+                                    .chain(index_internal_tables.into_iter())
                                     .map(|internal_table| Relation {
                                         relation_info: RelationInfo::Table(internal_table).into(),
                                     }),

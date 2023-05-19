@@ -296,7 +296,7 @@ where
         let (version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
-                    .drop_table(table_id, internal_table_ids)
+                    .drop_table(table_id, internal_table_ids, self.fragment_manager.clone())
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
@@ -307,8 +307,13 @@ where
                 (version, vec![sink_id.into()])
             }
             StreamingJobId::Table(source_id, table_id) => {
-                self.drop_table_inner(source_id, table_id, internal_table_ids)
-                    .await?
+                self.drop_table_inner(
+                    source_id,
+                    table_id,
+                    internal_table_ids,
+                    self.fragment_manager.clone(),
+                )
+                .await?
             }
             StreamingJobId::Index(index_id) => {
                 let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
@@ -521,6 +526,7 @@ where
         source_id: Option<SourceId>,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(
         NotificationVersion,
         Vec<risingwave_common::catalog::TableId>,
@@ -539,7 +545,7 @@ where
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
-                .drop_table(table_id, internal_table_ids)
+                .drop_table(table_id, internal_table_ids, fragment_manager)
                 .await
         }
     }
