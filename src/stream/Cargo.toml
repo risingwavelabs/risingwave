@@ -80,7 +80,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
-expect-test = "1.4.1"
+expect-test = "1"
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
