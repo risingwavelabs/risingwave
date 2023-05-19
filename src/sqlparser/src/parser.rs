@@ -3705,6 +3705,15 @@ impl Parser {
                         schema: self.parse_from_and_identifier()?,
                     }));
                 }
+                Keyword::INDEXES => {
+                    if self.parse_keyword(Keyword::FROM) {
+                        return Ok(Statement::ShowObjects(ShowObject::Indexes {
+                            table: self.parse_object_name()?,
+                        }));
+                    } else {
+                        return self.expected("from after indexes", self.peek_token());
+                    }
+                }
                 _ => {}
             }
         }

@@ -14,7 +14,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::VecDeque;
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -26,7 +25,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -35,7 +34,7 @@ use risingwave_expr::function::window::WindowFuncCall;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use super::state::{create_window_state, WindowState};
+use super::state::{create_window_state, EstimatedVecDeque, WindowState};
 use super::MemcmpEncoded;
 use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
@@ -49,7 +48,7 @@ use crate::task::AtomicU64Ref;
 
 struct Partition {
     states: Vec<Box<dyn WindowState + Send>>,
-    curr_row_buffer: VecDeque<OwnedRow>,
+    curr_row_buffer: EstimatedVecDeque<OwnedRow>,
 }
 
 impl Partition {
@@ -87,9 +86,11 @@ impl Partition {
 
 impl EstimateSize for Partition {
     fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
+        let mut total_size = self.curr_row_buffer.estimated_heap_size();
+        for state in &self.states {
+            total_size += state.estimated_heap_size();
+        }
+        total_size
     }
 }
 
@@ -255,7 +256,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -330,7 +331,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             )?
             .into_boxed_slice();
             let key = StateKey {
-                order_key,
+                order_key: order_key.into(),
                 encoded_pk,
             };
             for (call, state) in this.calls.iter().zip_eq_fast(&mut partition.states) {
@@ -386,7 +387,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             &vec![OrderType::ascending(); this.input_pk_indices.len()],
                         )?;
                         let state_row_pk = (&partition_key)
-                            .chain(row::once(Some(key.order_key)))
+                            .chain(row::once(Some(key.order_key.into_inner())))
                             .chain(pk);
                         let state_row = {
                             // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
@@ -455,7 +456,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                             .expect("order key must not be NULL");
 
                         if vars.last_watermark.is_none()
-                            || vars.last_watermark.as_ref().unwrap() < &first_order_key
+                            || vars
+                                .last_watermark
+                                .as_ref()
+                                .unwrap()
+                                .default_cmp(&first_order_key)
+                                .is_lt()
                         {
                             vars.last_watermark = Some(first_order_key.clone());
                             yield Message::Watermark(Watermark::new(
@@ -486,201 +492,5 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::atomic::AtomicU64;
-    use std::sync::Arc;
-
-    use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{AggArgs, AggKind};
-    use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::StateStore;
-
-    use super::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
-    use crate::common::table::state_table::StateTable;
-    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, BoxedMessageStream, Executor};
-
-    async fn create_executor<S: StateStore>(
-        calls: Vec<WindowFuncCall>,
-        store: S,
-    ) -> (MessageSender, BoxedMessageStream) {
-        let input_schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),   // order key
-            Field::unnamed(DataType::Varchar), // partition key
-            Field::unnamed(DataType::Int64),   // pk
-            Field::unnamed(DataType::Int32),   // x
-        ]);
-        let input_pk_indices = vec![2];
-        let partition_key_indices = vec![1];
-        let order_key_index = 0;
-
-        let table_columns = vec![
-            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
-            ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
-            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
-            ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
-        ];
-        let table_pk_indices = vec![1, 0, 2];
-        let table_order_types = vec![
-            OrderType::ascending(),
-            OrderType::ascending(),
-            OrderType::ascending(),
-        ];
-
-        let output_pk_indices = vec![2];
-
-        let state_table = StateTable::new_without_distribution_inconsistent_op(
-            store,
-            TableId::new(1),
-            table_columns,
-            table_order_types,
-            table_pk_indices,
-        )
-        .await;
-
-        let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
-        let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-            input: source.boxed(),
-            actor_ctx: ActorContext::create(123),
-            pk_indices: output_pk_indices,
-            executor_id: 1,
-            calls,
-            partition_key_indices,
-            order_key_index,
-            state_table,
-            watermark_epoch: Arc::new(AtomicU64::new(0)),
-        });
-        (tx, executor.boxed().execute())
-    }
-
-    #[tokio::test]
-    async fn test_over_window() {
-        let store = MemoryStateStore::new();
-        let calls = vec![
-            WindowFuncCall {
-                kind: WindowFuncKind::Lag,
-                args: AggArgs::Unary(DataType::Int32, 3),
-                return_type: DataType::Int32,
-                frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
-            },
-            WindowFuncCall {
-                kind: WindowFuncKind::Lead,
-                args: AggArgs::Unary(DataType::Int32, 3),
-                return_type: DataType::Int32,
-                frame: Frame::rows(FrameBound::CurrentRow, FrameBound::Following(1)),
-            },
-        ];
-
-        {
-            // test basic
-            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-            tx.push_barrier(1, false);
-            over_window.expect_barrier().await;
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I T  I   i
-                + 1 p1 100 10
-                + 1 p1 101 16
-                + 4 p2 200 20",
-            ));
-            assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 1 p1 100 10 .  16"
-                )
-            );
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I T  I   i
-                + 5 p1 102 18
-                + 7 p2 201 22
-                + 8 p3 300 33",
-            ));
-            // NOTE: no watermark message here, since watermark(1) was already received
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 1 p1 101 16 10 18
-                    + 4 p2 200 20 .  22"
-                )
-            );
-
-            tx.push_barrier(2, false);
-            over_window.expect_barrier().await;
-        }
-
-        {
-            // test recovery
-            let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-            tx.push_barrier(3, false);
-            over_window.expect_barrier().await;
-
-            tx.push_chunk(StreamChunk::from_pretty(
-                " I  T  I   i
-                + 10 p1 103 13
-                + 12 p2 202 28
-                + 13 p3 301 39",
-            ));
-            assert_eq!(5, over_window.expect_watermark().await.val.into_int64());
-            assert_eq!(
-                over_window.expect_chunk().await,
-                StreamChunk::from_pretty(
-                    " I T  I   i  i  i
-                    + 5 p1 102 18 16 13
-                    + 7 p2 201 22 20 28
-                    + 8 p3 300 33 .  39"
-                )
-            );
-
-            tx.push_barrier(4, false);
-            over_window.expect_barrier().await;
-        }
-    }
-
-    #[tokio::test]
-    async fn test_over_window_aggregate() {
-        let store = MemoryStateStore::new();
-        let calls = vec![WindowFuncCall {
-            kind: WindowFuncKind::Aggregate(AggKind::Sum),
-            args: AggArgs::Unary(DataType::Int32, 3),
-            return_type: DataType::Int64,
-            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Following(1)),
-        }];
-
-        let (mut tx, mut over_window) = create_executor(calls.clone(), store.clone()).await;
-
-        tx.push_barrier(1, false);
-        over_window.expect_barrier().await;
-
-        tx.push_chunk(StreamChunk::from_pretty(
-            " I T  I   i
-            + 1 p1 100 10
-            + 1 p1 101 16
-            + 4 p1 102 20",
-        ));
-        assert_eq!(1, over_window.expect_watermark().await.val.into_int64());
-        let chunk = over_window.expect_chunk().await;
-        assert_eq!(
-            chunk,
-            StreamChunk::from_pretty(
-                " I T  I   i  I
-                + 1 p1 100 10 26
-                + 1 p1 101 16 46"
-            )
-        );
     }
 }

@@ -8,13 +8,12 @@ cd "$DIR"
 
 cat ../rust-toolchain
 # shellcheck disable=SC2155
-export RUST_TOOLCHAIN=$(cat ../rust-toolchain)
 
 ######################################################
 # !!! CHANGE THIS WHEN YOU WANT TO BUMP CI IMAGE !!! #
 #          AND ALSO docker-compose.yml               #
 ######################################################
-export BUILD_ENV_VERSION=v20230504
+export BUILD_ENV_VERSION=v20230518
 
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
@@ -51,7 +50,7 @@ else
     export DOCKER_BUILD_PROGRESS="--progress=plain"
 fi
 
-docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" .
+docker build -t ${BUILD_TAG} ${DOCKER_BUILD_PROGRESS} --no-cache .
 
 echo "--- Docker push"
 docker push ${BUILD_TAG}
