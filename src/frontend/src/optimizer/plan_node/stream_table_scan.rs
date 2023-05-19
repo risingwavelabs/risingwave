@@ -145,7 +145,7 @@ impl StreamTableScan {
         ));
 
         catalog_builder
-            .build(vec![], 1)
+            .build(vec![0], 1)
             .with_id(state.gen_table_id_wrapped())
     }
 }
