@@ -228,9 +228,9 @@ lazy_static! {
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
         "Convert Window Function",
         vec![
-            OverWindowSplitByWindowRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
             OverWindowToTopNRule::create(),
