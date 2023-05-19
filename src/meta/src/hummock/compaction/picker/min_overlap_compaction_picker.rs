@@ -243,7 +243,7 @@ impl NonOverlapSubLevelPicker {
             // check reverse overlap
             for (reverse_index, old_overlap_range) in (0..target_index)
                 .rev()
-                .zip_eq_fast(overlap_len_and_begins.iter().rev())
+                .zip_eq_fast(overlap_len_and_begins.clone().into_iter().rev())
             {
                 let target_tables = &levels[reverse_index].table_infos;
                 // It has select all files in this sub-level, so it can not overlap with more files.
@@ -252,7 +252,7 @@ impl NonOverlapSubLevelPicker {
                 }
                 let new_overlap_range = overlap_info.check_multiple_overlap(target_tables);
                 let mut extra_overlap_sst = Vec::with_capacity(new_overlap_range.len());
-                for new_overlap_index in new_overlap_range {
+                for new_overlap_index in new_overlap_range.clone() {
                     if old_overlap_range.contains(&new_overlap_index) {
                         // Since some of the files have already been selected when selecting
                         // upwards, we filter here to avoid adding sst repeatedly
@@ -277,6 +277,7 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 extra_overlap_levels.push((reverse_index, extra_overlap_sst));
+                overlap_len_and_begins[reverse_index] = new_overlap_range;
             }
 
             // check reverse overlap
@@ -589,7 +590,7 @@ pub mod tests {
             let picker = NonOverlapSubLevelPicker::new(
                 0,
                 10000,
-                usize::MAX,
+                1,
                 10000,
                 Arc::new(RangeOverlapStrategy::default()),
             );

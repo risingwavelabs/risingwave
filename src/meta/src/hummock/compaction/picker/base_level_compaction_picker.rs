@@ -731,6 +731,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
                 .sub_level_max_compaction_bytes(50000)
+                .max_bytes_for_level_base(500000)
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
@@ -765,13 +766,13 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
         assert_eq!(
-            2,
+            3,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
         );
         assert_eq!(
-            3,
+            4,
             ret.input_levels
                 .iter()
                 .filter(|l| l.level_idx == 0)
