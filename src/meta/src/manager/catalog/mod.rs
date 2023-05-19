@@ -1560,6 +1560,7 @@ where
         source_id: SourceId,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
+        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         trace!(%source_id, %table_id, ?internal_table_ids, "drop table with source");
         let core = &mut *self.core.lock().await;
@@ -1592,6 +1593,20 @@ where
                     .filter(|(_, index)| index.primary_table_id == table_id)
                     .map(|(index_id, index)| (*index_id, index.index_table_id))
                     .unzip();
+
+                let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
+
+                for index_table_id in &index_table_ids {
+                    let internal_table_ids = fragment_manager
+                        .select_table_fragments_by_table_id(&(index_table_id.into()))
+                        .await?
+                        .internal_table_ids();
+
+                    // Only 1 should be used by table scan.
+                    assert_eq!(internal_table_ids.len(), 1);
+                    index_internal_table_ids.push(internal_table_ids[0]);
+                }
+
                 if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
                     // Indexes are dependent on table. We can drop table only if its `ref_count` is
                     // strictly equal to number of indexes.
@@ -1617,6 +1632,14 @@ where
                     .iter()
                     .map(|index_table_id| tables.remove(*index_table_id).unwrap())
                     .collect_vec();
+                let index_internal_tables = index_internal_table_ids
+                    .iter()
+                    .map(|index_internal_table_id| {
+                        tables
+                            .remove(*index_internal_table_id)
+                            .expect("internal index table should exist")
+                    })
+                    .collect_vec();
                 for index_table in &index_tables {
                     if let Some(ref_count) = database_core.relation_ref_count.get(&index_table.id) {
                         return Err(MetaError::permission_denied(format!(
@@ -1636,6 +1659,11 @@ where
                     .into_iter()
                     .chain(internal_table_ids.iter().map(|id| Object::TableId(*id)))
                     .chain(index_table_ids.iter().map(|id| Object::TableId(*id)))
+                    .chain(
+                        index_internal_table_ids
+                            .iter()
+                            .map(|id| Object::TableId(*id)),
+                    )
                     .collect_vec();
 
                 let users_need_update = Self::update_user_privileges(&mut users, &objects);
@@ -1678,6 +1706,7 @@ where
                                     internal_tables
                                         .into_iter()
                                         .chain(index_tables.into_iter())
+                                        .chain(index_internal_tables.into_iter())
                                         .map(|internal_table| Relation {
                                             relation_info: RelationInfo::Table(internal_table)
                                                 .into(),
