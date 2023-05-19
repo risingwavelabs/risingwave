@@ -585,7 +585,6 @@ mod tests {
                             ],
                             type_name: ".test.Country".to_string(),
                             generated_or_default_column: None,
-                            is_from_key: false,
                         },
                         is_hidden: false
                     }

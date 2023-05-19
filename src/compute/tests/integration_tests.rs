@@ -152,7 +152,6 @@ async fn test_table_materialize() -> StreamResult<()> {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
-            is_from_key: false,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();

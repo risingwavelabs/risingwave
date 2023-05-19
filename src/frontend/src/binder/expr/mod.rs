@@ -516,7 +516,6 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     field_descs: vec![],
                     type_name: "".to_string(),
                     generated_or_default_column: None,
-                    is_from_key: false,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -530,7 +529,6 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         field_descs,
         type_name: "".to_string(),
         generated_or_default_column: None,
-        is_from_key: false,
     })
 }
 

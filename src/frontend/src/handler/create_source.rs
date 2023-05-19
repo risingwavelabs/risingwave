@@ -385,7 +385,6 @@ pub(crate) async fn resolve_source_schema(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
-                        is_from_key: false,
                     },
                     is_hidden: false,
                 });
@@ -397,7 +396,6 @@ pub(crate) async fn resolve_source_schema(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
-                        is_from_key: false,
                     },
                     is_hidden: false,
                 });
@@ -565,7 +563,6 @@ fn check_and_add_timestamp_column(
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
-            is_from_key: false,
         };
         column_descs.push(kafka_timestamp_column);
     }

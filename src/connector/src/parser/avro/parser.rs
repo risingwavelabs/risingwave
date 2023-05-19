@@ -127,20 +127,14 @@ impl AvroParserConfig {
                 let mut index = 0;
                 let fields = fields
                     .iter()
-                    .map(|field| {
-                        avro_field_to_column_desc(&field.name, &field.schema, &mut index, false)
-                    })
+                    .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                     .collect::<Result<Vec<_>>>()?;
                 Ok(fields)
             }
             (Some(schema), true) => {
                 let mut index = 0;
-                let fields = avro_field_to_column_desc(
-                    AVRO_DEFAULT_KEY_COLUMN_NAME,
-                    schema,
-                    &mut index,
-                    true,
-                )?;
+                let fields =
+                    avro_field_to_column_desc(AVRO_DEFAULT_KEY_COLUMN_NAME, schema, &mut index)?;
                 Ok(vec![fields])
             }
             (schema, key_as_column) => Err(RwError::from(InternalError(format!(
@@ -161,15 +155,12 @@ impl AvroParserConfig {
                     AVRO_DEFAULT_KEY_COLUMN_NAME,
                     self.key_schema.as_ref().unwrap(),
                     &mut index,
-                    true,
                 )?);
             }
 
             let mut fields = fields
                 .iter()
-                .map(|field| {
-                    avro_field_to_column_desc(&field.name, &field.schema, &mut index, false)
-                })
+                .map(|field| avro_field_to_column_desc(&field.name, &field.schema, &mut index))
                 .collect::<Result<Vec<_>>>()?;
             if let Some(pk_column_desc) = pk_column_desc {
                 // if key.as.column is set, pk will always be the last column

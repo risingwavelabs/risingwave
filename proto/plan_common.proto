@@ -37,7 +37,6 @@ message ColumnDesc {
     GeneratedColumnDesc generated_column = 6;
     DefaultColumnDesc default_column = 7;
   }
-  bool is_from_key = 8;
 }
 
 message ColumnCatalog {
