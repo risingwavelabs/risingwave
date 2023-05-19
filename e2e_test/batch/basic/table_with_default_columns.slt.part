@@ -38,7 +38,7 @@ statement ok
 insert into t2 values (1), (2);
 
 query II
-select * from t2;
+select * from t2 order by v1;
 ----
 1 2
 2 2
