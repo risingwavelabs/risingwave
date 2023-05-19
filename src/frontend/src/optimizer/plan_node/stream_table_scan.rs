@@ -27,7 +27,6 @@ use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -115,58 +114,6 @@ impl StreamTableScan {
         self.chain_type
     }
 
-    /// Compute upstream distribution key. We will use it to compute vnode.
-    // TODO(kwannoel): Should we use project executor instead?
-    pub fn compute_upstream_distribution_key(&self) -> Vec<u32> {
-        // Construct output distribution key for the backfill executor to compute vnode of upstream
-        let output_distribution_key = match self.base.distribution() {
-            // For sharded distribution, we need to remap dist_key.
-            // Suppose we had Order Key (Primary Key) of Upstream table: [0, 4],
-            // and Distribution Key [4].
-            // Output schema will be:
-            // [0, 4]
-            // So the new distribution key indices will be: [1]
-            // ---
-            // Q: Why distribution key is needed?
-            // A: We need distribution key so we can compute vnode.
-            //
-            // Q: Why do we need vnode?
-            // A: We need to partition state by it,
-            // since there can be parallel table scans. Without it when we recover,
-            // we don't know what is the backfill progress of each backfill executor,
-            // since they all override the same row (no key prefix).
-            // If we use vnode as prefix key, that will partition their states.
-            // The upstream pk will still serve as the value.
-            //
-            // Q: Why don't we actually use this distribution key for state table itself?
-            // A: State Table interface expects that distribution key
-            // is a subset of primary key.
-            // Here we don't have primary key for state table. We only partition it by vnode.
-            Distribution::UpstreamHashShard(_, _) => {
-                let distribution_key = self
-                    .logical()
-                    .table_desc
-                    .distribution_key
-                    .iter()
-                    .map(|i| {
-                        self.logical
-                            .primary_key()
-                            .iter()
-                            .position(|j| *i == j.column_index)
-                            .map(|k| k as u32)
-                            .unwrap()
-                    })
-                    .collect_vec();
-                distribution_key
-            }
-            Distribution::SomeShard | Distribution::Single => {
-                vec![]
-            }
-            Distribution::HashShard(_) | Distribution::Broadcast => unreachable!(),
-        };
-        output_distribution_key
-    }
-
     /// Build catalog for backfill state
     ///
     /// Schema
@@ -252,8 +199,6 @@ impl StreamTableScan {
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
-        let dist_key_in_pk = self.compute_upstream_distribution_key();
-
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
             // For backfill, we additionally need the primary key columns.
@@ -333,7 +278,6 @@ impl StreamTableScan {
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc.to_protobuf()),
                 state_table: Some(catalog),
-                dist_key_in_pk,
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,
