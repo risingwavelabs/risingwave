@@ -32,6 +32,7 @@ use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
@@ -108,9 +109,17 @@ async fn do_handle_explain(
                         query,
                         name,
                         columns,
+                        emit_mode,
                         ..
-                    } => gen_create_mv_plan(&session, context.clone(), *query, name, columns)
-                        .map(|x| x.0),
+                    } => gen_create_mv_plan(
+                        &session,
+                        context.clone(),
+                        *query,
+                        name,
+                        columns,
+                        emit_mode,
+                    )
+                    .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
                         gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
@@ -170,8 +179,12 @@ async fn do_handle_explain(
                     match plan.convention() {
                         Convention::Logical => unreachable!(),
                         Convention::Batch => {
-                            batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
+                            let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
+                                !session.config().only_checkpoint_visible(),
+                            );
+                            batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
+                                worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
                                 session.config().get_batch_parallelism(),
                                 plan.clone(),

@@ -76,11 +76,10 @@ fn array_positions<'a, T: ScalarRef<'a>>(
 ) -> Result<Option<ListValue>> {
     match array {
         Some(left) => {
-            let values = left.values_ref();
+            let values = left.iter();
             match TryInto::<i32>::try_into(values.len()) {
                 Ok(_) => Ok(Some(ListValue::new(
                     values
-                        .into_iter()
                         .enumerate()
                         .filter(|(_, item)| item == &element.map(|x| x.into()))
                         .map(|(idx, _)| Some(ScalarImpl::Int32((idx + 1) as _)))

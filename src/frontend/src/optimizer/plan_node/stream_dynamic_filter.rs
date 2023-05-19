@@ -14,21 +14,19 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::FieldDisplay;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
+use super::generic::DynamicFilter;
 use super::utils::IndicesDisplay;
 use super::{generic, ExprRewritable};
 use crate::expr::Expr;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ConditionDisplay;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
@@ -37,44 +35,23 @@ pub struct StreamDynamicFilter {
 }
 
 impl StreamDynamicFilter {
-    pub fn new(left_index: usize, comparator: ExprType, left: PlanRef, right: PlanRef) -> Self {
-        assert_eq!(right.schema().len(), 1);
-
-        let watermark_columns = {
-            let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
-            if right.watermark_columns()[0] {
-                match comparator {
-                    ExprType::Equal | ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                        watermark_columns.set(left_index, true)
-                    }
-                    _ => {}
-                }
-            }
-            watermark_columns
-        };
+    pub fn new(core: DynamicFilter<PlanRef>) -> Self {
+        let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            left.ctx(),
-            left.schema().clone(),
-            left.logical_pk().to_vec(),
-            left.functional_dependency().clone(),
-            left.distribution().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &core,
+            core.left().distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
-        let core = generic::DynamicFilter {
-            comparator,
-            left_index,
-            left,
-            right,
-        };
         Self { base, core }
     }
 
     pub fn left_index(&self) -> usize {
-        self.core.left_index
+        self.core.left_index()
     }
 }
 
@@ -83,20 +60,7 @@ impl fmt::Display for StreamDynamicFilter {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamDynamicFilter");
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-
-        let predicate = self.core.predicate();
-
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition: &predicate,
-                input_schema: &concat_schema,
-            },
-        );
-
+        self.core.fmt_fields_with_builder(&mut builder);
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
@@ -126,15 +90,15 @@ impl fmt::Display for StreamDynamicFilter {
 
 impl PlanTreeNodeBinary for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
-        self.core.left.clone()
+        self.core.left().clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.core.right.clone()
+        self.core.right().clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.core.left_index, self.core.comparator, left, right)
+        Self::new(self.core.clone_with_left_right(left, right))
     }
 }
 
@@ -148,7 +112,7 @@ impl StreamNode for StreamDynamicFilter {
             .predicate()
             .as_expr_unless_true()
             .map(|x| x.to_expr_proto());
-        let left_index = self.core.left_index;
+        let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped());
         let right = self.right();

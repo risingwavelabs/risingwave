@@ -2,7 +2,6 @@
 # Check detailed comments in src/common/src/config.rs
 [server]
 heartbeat_interval_ms = 1000
-max_heartbeat_interval_secs = 600
 connection_pool_size = 16
 metrics_level = 0
 telemetry_enabled = true
@@ -16,14 +15,17 @@ hummock_version_checkpoint_interval_sec = 30
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
-meta_leader_lease_secs = 10
+meta_leader_lease_secs = 30
 enable_compaction_deterministic = false
 enable_committed_sst_sanity_check = false
 node_num_monitor_interval_sec = 10
 backend = "Mem"
 periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
+periodic_split_compact_group_interval_sec = 180
 max_compactor_task_multiplier = 2
+move_table_size_limit = 5368709120
+split_group_size_limit = 21474836480
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -39,7 +41,7 @@ unique_user_stream_errors = 10
 [streaming.developer]
 stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
-stream_unsafe_extreme_cache_size = 1024
+stream_unsafe_extreme_cache_size = 10
 stream_chunk_size = 1024
 stream_exchange_initial_permits = 8192
 stream_exchange_batched_permits = 1024

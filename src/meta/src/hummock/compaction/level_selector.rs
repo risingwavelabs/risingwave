@@ -23,7 +23,7 @@ use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{compact_task, CompactionConfig};
+use risingwave_pb::hummock::{compact_task, CompactionConfig, LevelType};
 
 use super::picker::{
     SpaceReclaimCompactionPicker, SpaceReclaimPickerState, TtlPickerState,
@@ -34,10 +34,10 @@ use super::{
     TierCompactionPicker,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
-use crate::hummock::compaction::{
-    create_overlap_strategy, CompactionPicker, CompactionTask, LocalPickerStatistic,
-    LocalSelectorStatistic, MinOverlappingPicker,
+use crate::hummock::compaction::picker::{
+    CompactionPicker, LocalPickerStatistic, MinOverlappingPicker,
 };
+use crate::hummock::compaction::{create_overlap_strategy, CompactionTask, LocalSelectorStatistic};
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -98,10 +98,7 @@ impl DynamicLevelSelectorCore {
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
-                Box::new(TierCompactionPicker::new(
-                    self.config.clone(),
-                    overlap_strategy,
-                ))
+                Box::new(TierCompactionPicker::new(self.config.clone()))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
@@ -193,24 +190,81 @@ impl DynamicLevelSelectorCore {
             .map(|level| level.table_infos.len())
             .sum::<usize>()
             - handlers[0].get_pending_file_count();
-        let max_l0_score = std::cmp::max(
+
+        let max_l0_overlapping_score = std::cmp::max(
             SCORE_BASE * 2,
-            levels.l0.as_ref().unwrap().sub_levels.len() as u64 * SCORE_BASE
-                / self.config.level0_tier_compact_file_number,
+            levels
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .filter(|sub_level| sub_level.level_type() == LevelType::Overlapping)
+                .count() as u64
+                * SCORE_BASE
+                / self.config.level0_overlapping_sub_level_compact_level_count as u64,
         );
 
-        let total_size = levels.l0.as_ref().unwrap().total_file_size
-            - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
-        let base_level_size = levels.get_level(ctx.base_level).total_file_size;
         if idle_file_count > 0 {
-            // trigger intra-l0 compaction at first when the number of files is too large.
-            let l0_score =
-                idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
+            // trigger l0 compaction when the number of files is too large.
+
+            // The read query at the overlapping level needs to merge all the ssts, so the number of
+            // ssts is the most important factor affecting the read performance, we use file count
+            // to calculate the score
+            let overlapping_file_count = levels
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .filter(|level| level.level_type() == LevelType::Overlapping)
+                .map(|level| level.table_infos.len())
+                .sum::<usize>();
+
+            // FIXME: use overlapping idle file count
+            let l0_overlapping_score =
+                std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
+                    / self.config.level0_tier_compact_file_number;
+
+            // Reduce the level num of l0 overlapping sub_level
+            ctx.score_levels.push((
+                std::cmp::min(l0_overlapping_score, max_l0_overlapping_score),
+                0,
+                0,
+            ));
+
+            // The read query at the non-overlapping level only selects ssts that match the query
+            // range at each level, so the number of levels is the most important factor affecting
+            // the read performance. At the same time, the size factor is also added to the score
+            // calculation rule to avoid unbalanced compact task due to large size.
+            let non_overlapping_score = {
+                let total_size = levels.l0.as_ref().unwrap().total_file_size
+                    - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+                let base_level_size = levels.get_level(ctx.base_level).total_file_size;
+
+                // size limit
+                let non_overlapping_size_score = total_size * SCORE_BASE
+                    / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
+
+                // level count limit
+                let non_overlapping_level_count = levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                    .count();
+
+                let non_overlapping_level_score = non_overlapping_level_count as u64 * SCORE_BASE
+                    / self.config.level0_sub_level_compact_level_count as u64;
+
+                std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
+            };
+
+            // Reduce the level num of l0 non-overlapping sub_level
             ctx.score_levels
-                .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            let score = total_size * SCORE_BASE
-                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-            ctx.score_levels.push((score, 0, ctx.base_level));
+                .push((non_overlapping_score, 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.
@@ -595,12 +649,8 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids: vec![table_prefix as u32],
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
-            min_epoch: 0,
-            max_epoch: 0,
+            ..Default::default()
         }
     }
 
@@ -625,12 +675,10 @@ pub mod tests {
             }),
             file_size: (right - left + 1) as u64,
             table_ids,
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch,
             max_epoch,
+            ..Default::default()
         }
     }
 
@@ -886,11 +934,7 @@ pub mod tests {
                 HashMap::default(),
             )
             .unwrap();
-        // trivial move.
         assert_compaction_task(&compaction, &levels_handlers);
-        assert_eq!(compaction.input.input_levels[0].level_idx, 0);
-        assert!(compaction.input.input_levels[1].table_infos.is_empty());
-        assert_eq!(compaction.input.target_level, 0);
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::with_config(config)

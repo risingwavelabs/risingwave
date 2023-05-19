@@ -538,11 +538,21 @@ pub struct SstableWriterOptions {
     pub policy: CachePolicy,
 }
 
-pub trait SstableWriterFactory: Send + Sync {
+impl Default for SstableWriterOptions {
+    fn default() -> Self {
+        Self {
+            capacity_hint: None,
+            tracker: None,
+            policy: CachePolicy::NotFill,
+        }
+    }
+}
+#[async_trait::async_trait]
+pub trait SstableWriterFactory: Send {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
@@ -558,11 +568,12 @@ impl BatchSstableWriterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriterFactory for BatchSstableWriterFactory {
     type Writer = BatchUploadWriter;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
@@ -764,16 +775,17 @@ impl StreamingSstableWriterFactory {
     }
 }
 
+#[async_trait::async_trait]
 impl SstableWriterFactory for StreamingSstableWriterFactory {
     type Writer = StreamingUploadWriter;
 
-    fn create_sst_writer(
-        &self,
+    async fn create_sst_writer(
+        &mut self,
         object_id: HummockSstableObjectId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         let path = self.sstable_store.get_sst_data_path(object_id);
-        let uploader = self.sstable_store.store.streaming_upload(&path)?;
+        let uploader = self.sstable_store.store.streaming_upload(&path).await?;
         Ok(StreamingUploadWriter::new(
             object_id,
             self.sstable_store.clone(),

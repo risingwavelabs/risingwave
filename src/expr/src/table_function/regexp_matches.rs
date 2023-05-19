@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::array::{Array, DataChunk, ListValue, Utf8Array};
+use risingwave_common::types::{Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
@@ -38,10 +36,8 @@ pub struct RegexpMatches {
 impl RegexpMatches {
     /// Match one row and return the result.
     // TODO: The optimization can be allocated.
-    fn eval_row(&self, text: &str) -> Result<ArrayRef> {
-        let mut builder = self.return_type().create_array_builder(self.chunk_size);
-
-        for capture in self.ctx.0.captures_iter(text) {
+    fn eval_row<'a>(&'a self, text: &'a str) -> impl Iterator<Item = ListValue> + 'a {
+        self.ctx.0.captures_iter(text).map(|capture| {
             // If there are multiple captures, then the first one is the whole match, and should be
             // ignored in PostgreSQL's behavior.
             let skip_flag = self.ctx.0.captures_len() > 1;
@@ -50,71 +46,49 @@ impl RegexpMatches {
                 .skip(if skip_flag { 1 } else { 0 })
                 .map(|mat| mat.map(|m| m.as_str().into()))
                 .collect_vec();
-            let list = ListValue::new(list);
-            builder.append_datum(&Some(list.into()));
-        }
+            ListValue::new(list)
+        })
+    }
 
-        Ok(Arc::new(builder.finish()))
+    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+        let text_arr = self.text.eval_checked(input).await?;
+        let text_arr: &Utf8Array = text_arr.as_ref().into();
+
+        let mut builder =
+            DataChunkBuilder::new(vec![DataType::Int64, self.return_type()], self.chunk_size);
+
+        for (i, (text, visible)) in text_arr.iter().zip_eq_fast(input.vis().iter()).enumerate() {
+            if let Some(text) = text && visible {
+                for value in self.eval_row(text) {
+                    if let Some(chunk) = builder.append_one_row([Some(ScalarRefImpl::Int64(i as i64)), Some(value.as_scalar_ref().into())]) {
+                        yield chunk;
+                    }
+                }
+            }
+        }
+        if let Some(chunk) = builder.consume_all() {
+            yield chunk;
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl TableFunction for RegexpMatches {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let text_arr = self.text.eval_checked(input).await?;
-        let text_arr: &Utf8Array = text_arr.as_ref().into();
-
-        let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
-
-        match bitmap {
-            Some(bitmap) => {
-                for (text, visible) in text_arr.iter().zip_eq_fast(bitmap.iter()) {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let Some(text) = text {
-                        self.eval_row(text)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-            None => {
-                for text in text_arr.iter() {
-                    let array = if let Some(text) = text {
-                        self.eval_row(text)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-        }
-
-        Ok(output_arrays)
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+        self.eval_inner(input)
     }
 }
 
 pub fn new_regexp_matches(
-    prost: &TableFunctionPb,
+    prost: &PbTableFunction,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
-    ensure!(
-        prost.return_type
-            == Some(
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                }
-                .to_protobuf()
-            )
-    );
+    ensure!(prost.return_type == Some(DataType::List(Box::new(DataType::Varchar)).to_protobuf()));
     let mut args = prost.args.iter();
     let Some(text_node) = args.next() else {
         bail!("Expected argument text");

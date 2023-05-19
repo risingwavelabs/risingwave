@@ -24,21 +24,15 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{serial_array, ArrayImpl, JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
-use crate::types::struct_type::StructType;
-use crate::types::{
-    DataType, Date, Datum, Decimal, Interval, ScalarImpl, ScalarRefImpl, Time, Timestamp,
-    ToDatumRef, F32, F64,
-};
+use crate::types::*;
 
 pub mod error;
 use error::ValueEncodingError;
-use serial_array::Serial;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
-use crate::types::num256::Int256;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
@@ -279,28 +273,21 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
 }
 
 fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
-    value
-        .fields_ref()
-        .iter()
-        .map(|field_value| {
-            serialize_datum_into(*field_value, buf);
-        })
-        .collect_vec();
+    value.iter_fields_ref().for_each(|field_value| {
+        serialize_datum_into(field_value, buf);
+    });
 }
 
 fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
     s.estimate_serialize_size_inner()
 }
 fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
-    let values_ref = value.values_ref();
-    buf.put_u32_le(values_ref.len() as u32);
+    let elems = value.iter();
+    buf.put_u32_le(elems.len() as u32);
 
-    values_ref
-        .iter()
-        .map(|field_value| {
-            serialize_datum_into(*field_value, buf);
-        })
-        .collect_vec();
+    elems.for_each(|field_value| {
+        serialize_datum_into(field_value, buf);
+    });
 }
 fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
     4 + list.estimate_serialize_size_inner()
@@ -382,9 +369,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
-        DataType::List {
-            datatype: item_type,
-        } => deserialize_list(item_type, data)?,
+        DataType::List(item_type) => deserialize_list(item_type, data)?,
     })
 }
 
@@ -471,10 +456,11 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 
 #[cfg(test)]
 mod tests {
-    use crate::array::serial_array::Serial;
     use crate::array::{ArrayImpl, ListValue, StructValue};
     use crate::test_utils::rand_chunk;
-    use crate::types::{DataType, Date, Datum, Decimal, Interval, ScalarImpl, Time, Timestamp};
+    use crate::types::{
+        DataType, Date, Datum, Decimal, Interval, ScalarImpl, Serial, Time, Timestamp,
+    };
     use crate::util::value_encoding::{
         estimate_serialize_datum_size, serialize_datum, try_get_exact_serialize_datum_size,
     };

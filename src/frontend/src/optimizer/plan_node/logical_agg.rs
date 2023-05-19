@@ -25,8 +25,8 @@ use risingwave_expr::agg::AggKind;
 use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
-    StreamLocalSimpleAgg, StreamProject, ToBatch, ToStream,
+    PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
+    StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
@@ -34,7 +34,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
-    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
+    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -78,10 +78,10 @@ impl LogicalAgg {
         debug_assert!(self.group_key().is_empty());
         let mut logical = self.core.clone();
         logical.input = stream_input;
-        let local_agg = StreamLocalSimpleAgg::new(logical);
+        let local_agg = StreamStatelessSimpleAgg::new(logical);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-        let global_agg = new_stream_global_simple_agg(Agg::new(
+        let global_agg = new_stream_simple_agg(Agg::new(
             self.agg_calls()
                 .iter()
                 .enumerate()
@@ -147,7 +147,7 @@ impl LogicalAgg {
         if self.group_key().count_ones(..) == 0 {
             let exchange =
                 RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
-            let global_agg = new_stream_global_simple_agg(Agg::new(
+            let global_agg = new_stream_simple_agg(Agg::new(
                 self.agg_calls()
                     .iter()
                     .enumerate()
@@ -187,7 +187,7 @@ impl LogicalAgg {
         let mut logical = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
         logical.input = input;
-        Ok(new_stream_global_simple_agg(logical).into())
+        Ok(new_stream_simple_agg(logical).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -1112,7 +1112,7 @@ impl ToBatch for LogicalAgg {
 }
 
 fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) {
-    // `HashAgg`/`GlobalSimpleAgg` executors require a `count(*)` to correctly build changes, so
+    // `HashAgg`/`SimpleAgg` executors require a `count(*)` to correctly build changes, so
     // append a `count(*)` if not exists.
     let count_star = PlanAggCall::count_star();
     let row_count_idx = if let Some((idx, _)) = logical
@@ -1129,9 +1129,9 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_global_simple_agg(logical: Agg<PlanRef>) -> StreamGlobalSimpleAgg {
+fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
     let (logical, row_count_idx) = find_or_append_row_count(logical);
-    StreamGlobalSimpleAgg::new(logical, row_count_idx)
+    StreamSimpleAgg::new(logical, row_count_idx)
 }
 
 fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
@@ -1141,14 +1141,32 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        let stream_agg = self.gen_dist_stream_agg_plan(self.input().to_stream(ctx)?)?;
+        let stream_input = self.input().to_stream(ctx)?;
+        // Use Dedup operator, if possible.
+        if stream_input.append_only() && self.agg_calls().is_empty() {
+            let input = if self.group_key().count_ones(..) != self.input().schema().len() {
+                let cols = &self.group_key().ones().collect_vec();
+                LogicalProject::with_mapping(
+                    self.input(),
+                    ColIndexMapping::with_remaining_columns(cols, self.input().schema().len()),
+                )
+                .into()
+            } else {
+                self.input()
+            };
+            let input_schema_len = input.schema().len();
+            let logical_dedup = LogicalDedup::new(input, (0..input_schema_len).collect());
+            return logical_dedup.to_stream(ctx);
+        }
 
-        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_global_simple_agg() {
+        let stream_agg = self.gen_dist_stream_agg_plan(stream_input)?;
+
+        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_simple_agg() {
             final_agg.agg_calls()
         } else if let Some(final_agg) = stream_agg.as_stream_hash_agg() {
             final_agg.agg_calls()
         } else {
-            panic!("the root PlanNode must be either StreamHashAgg or StreamGlobalSimpleAgg");
+            panic!("the root PlanNode must be either StreamHashAgg or StreamSimpleAgg");
         };
         if self.agg_calls().len() == final_agg_calls.len() {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`

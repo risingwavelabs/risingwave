@@ -258,7 +258,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 output_indices,
                 chunk_size,
                 identity: source.plan_node().get_identity().clone(),
-                shutdown_rx: source.shutdown_rx.clone(),
+                shutdown_rx: Some(source.shutdown_rx.clone()),
             }
             .dispatch())
         })
@@ -281,7 +281,7 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
-    shutdown_rx: Receiver<ShutdownMsg>,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -305,6 +305,7 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 output_indices: self.output_indices,
                 chunk_size: self.chunk_size,
                 identity: self.identity,
+                shutdown_rx: self.shutdown_rx,
                 _phantom: PhantomData,
             },
         ))

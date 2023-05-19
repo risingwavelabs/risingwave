@@ -5,17 +5,20 @@ with open("README.md", "r") as fh:
 
 setup(
     name="risingwave",
-    version="0.0.4",
+    version="0.0.7",
     author="RisingWave Labs",
     description="RisingWave Python API",
     long_description=long_description,
-    long_description_content_type='text/markdown',
+    long_description_content_type="text/markdown",
     url="https://github.com/risingwavelabs/risingwave",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python",
-        "License :: OSI Approved :: Apache Software License"
+        "License :: OSI Approved :: Apache Software License",
     ],
     python_requires=">=3.8",
     install_requires=['pyarrow'],
+    extras_require={
+        'test': ['pytest']
+    },
 )

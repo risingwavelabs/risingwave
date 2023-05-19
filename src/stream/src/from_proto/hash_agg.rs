@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Global Streaming Hash Aggregators
+//! Streaming Hash Aggregator
 
 use std::sync::Arc;
 
@@ -26,11 +26,11 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
+use crate::executor::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use crate::executor::HashAggExecutor;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
-    args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>,
+    args: AggExecutorArgs<S, HashAggExecutorExtraArgs>,
     group_key_types: Vec<DataType>,
 }
 
@@ -109,12 +109,11 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 result_table,
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
-
-                extra: GroupAggExecutorExtraArgs {
+                metrics: params.executor_stats,
+                extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,
                     emit_on_window_close: false,
-                    metrics: params.executor_stats,
                 },
             },
             group_key_types,

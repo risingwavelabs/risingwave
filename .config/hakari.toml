@@ -24,7 +24,9 @@ platforms = [
 # exact-versions = true
 
 [traversal-excludes]
-workspace-members = ["workspace-config", "risingwave_object_store"]
-third-party = [
-    { name = "opendal" },
+workspace-members = [
+    "workspace-config",
+    "risingwave_object_store",
+    "risingwave_bench",
 ]
+third-party = [{ name = "opendal" }, { name = "criterion" }]

@@ -23,8 +23,7 @@ use risingwave_pb::data::PbArray;
 use crate::array::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
-use crate::types::num256::{Int256, Int256Ref};
-use crate::types::{DataType, Scalar};
+use crate::types::{DataType, Int256, Int256Ref, Scalar};
 
 #[derive(Debug)]
 pub struct Int256ArrayBuilder {
@@ -141,6 +140,10 @@ macro_rules! impl_array_for_num256 {
 
             fn pop(&mut self) -> Option<()> {
                 self.data.pop().map(|_| self.bitmap.pop().unwrap())
+            }
+
+            fn len(&self) -> usize {
+                self.bitmap.len()
             }
 
             fn finish(self) -> Self::ArrayType {

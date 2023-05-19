@@ -747,10 +747,16 @@ impl Parser {
         } else {
             (self.parse_window_frame_bound()?, None)
         };
+        let exclusion = if self.parse_keyword(Keyword::EXCLUDE) {
+            Some(self.parse_window_frame_exclusion()?)
+        } else {
+            None
+        };
         Ok(WindowFrame {
             units,
             start_bound,
             end_bound,
+            exclusion,
         })
     }
 
@@ -771,6 +777,20 @@ impl Parser {
             } else {
                 self.expected("PRECEDING or FOLLOWING", self.peek_token())
             }
+        }
+    }
+
+    pub fn parse_window_frame_exclusion(&mut self) -> Result<WindowFrameExclusion, ParserError> {
+        if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
+            Ok(WindowFrameExclusion::CurrentRow)
+        } else if self.parse_keyword(Keyword::GROUP) {
+            Ok(WindowFrameExclusion::Group)
+        } else if self.parse_keyword(Keyword::TIES) {
+            Ok(WindowFrameExclusion::Ties)
+        } else if self.parse_keywords(&[Keyword::NO, Keyword::OTHERS]) {
+            Ok(WindowFrameExclusion::NoOthers)
+        } else {
+            self.expected("CURRENT ROW, GROUP, TIES, or NO OTHERS", self.peek_token())
         }
     }
 
@@ -2108,7 +2128,7 @@ impl Parser {
 
         let args = if self.consume_token(&Token::LParen) {
             if self.consume_token(&Token::RParen) {
-                None
+                Some(vec![])
             } else {
                 let args = self.parse_comma_separated(Parser::parse_function_arg)?;
                 self.expect_token(&Token::RParen)?;
@@ -2327,7 +2347,7 @@ impl Parser {
         } else if self.parse_keyword(Keyword::NULL) {
             Ok(Some(ColumnOption::Null))
         } else if self.parse_keyword(Keyword::DEFAULT) {
-            Ok(Some(ColumnOption::Default(self.parse_expr()?)))
+            Ok(Some(ColumnOption::DefaultColumns(self.parse_expr()?)))
         } else if self.parse_keywords(&[Keyword::PRIMARY, Keyword::KEY]) {
             Ok(Some(ColumnOption::Unique { is_primary: true }))
         } else if self.parse_keyword(Keyword::UNIQUE) {
@@ -3684,6 +3704,15 @@ impl Parser {
                     return Ok(Statement::ShowObjects(ShowObject::Function {
                         schema: self.parse_from_and_identifier()?,
                     }));
+                }
+                Keyword::INDEXES => {
+                    if self.parse_keyword(Keyword::FROM) {
+                        return Ok(Statement::ShowObjects(ShowObject::Indexes {
+                            table: self.parse_object_name()?,
+                        }));
+                    } else {
+                        return self.expected("from after indexes", self.peek_token());
+                    }
                 }
                 _ => {}
             }

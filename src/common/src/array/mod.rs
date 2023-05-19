@@ -31,7 +31,6 @@ pub mod list_array;
 mod macros;
 mod num256_array;
 mod primitive_array;
-pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod stream_record;
@@ -49,19 +48,17 @@ pub use bytes_array::*;
 pub use chrono_array::{
     DateArray, DateArrayBuilder, TimeArray, TimeArrayBuilder, TimestampArray, TimestampArrayBuilder,
 };
-pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
-pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
+pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 pub use num256_array::*;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{PbArray, PbArrayType};
-pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
@@ -79,12 +76,14 @@ pub type I32Array = PrimitiveArray<i32>;
 pub type I16Array = PrimitiveArray<i16>;
 pub type F64Array = PrimitiveArray<F64>;
 pub type F32Array = PrimitiveArray<F32>;
+pub type SerialArray = PrimitiveArray<Serial>;
 
 pub type I64ArrayBuilder = PrimitiveArrayBuilder<i64>;
 pub type I32ArrayBuilder = PrimitiveArrayBuilder<i32>;
 pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
 pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
+pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
 
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
@@ -120,6 +119,12 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
         self.append_n(1, value);
     }
 
+    /// Append an owned value to builder.
+    fn append_owned(&mut self, value: Option<<Self::ArrayType as Array>::OwnedItem>) {
+        let value = value.as_ref().map(|s| s.as_scalar_ref());
+        self.append(value)
+    }
+
     fn append_null(&mut self) {
         self.append(None)
     }
@@ -137,6 +142,14 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Append an element in another array into builder.
     fn append_array_element(&mut self, other: &Self::ArrayType, idx: usize) {
         self.append(other.value_at(idx));
+    }
+
+    /// Return the number of elements in the builder.
+    fn len(&self) -> usize;
+
+    /// Return `true` if the array has a length of 0.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Finish build and return a new array.
@@ -309,8 +322,9 @@ impl<A: Array> CompactableArray for A {
 /// name, array type, builder type }` tuples. Refer to the following implementations as examples.
 #[macro_export]
 macro_rules! for_all_variants {
-    ($macro:ident) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
+            $($x, )*
             { Int16, int16, I16Array, I16ArrayBuilder },
             { Int32, int32, I32Array, I32ArrayBuilder },
             { Int64, int64, I64Array, I64ArrayBuilder },
@@ -331,6 +345,20 @@ macro_rules! for_all_variants {
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
         }
     };
+}
+
+macro_rules! do_dispatch {
+    ($impl:expr, $type:ident, $inner:ident, $body:tt, $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+        match $impl {
+            $( $type::$variant_name($inner) => $body, )*
+        }
+    };
+}
+
+macro_rules! dispatch_all_variants {
+    ($impl:expr, $type:ident, $scalar:ident, $body:tt) => {{
+        for_all_variants! { do_dispatch, $impl, $type, $scalar, $body }
+    }};
 }
 
 /// Define `ArrayImpl` with macro.
@@ -525,6 +553,16 @@ macro_rules! impl_array_builder {
                     $( Self::$variant_name(_) => stringify!($variant_name), )*
                 }
             }
+
+            pub fn len(&self) -> usize {
+                match self {
+                    $( Self::$variant_name(inner) => inner.len(), )*
+                }
+            }
+
+            pub fn is_empty(&self) -> bool {
+                self.len() == 0
+            }
         }
     }
 }
@@ -633,6 +671,13 @@ macro_rules! impl_array {
             pub fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
                 match self {
                     $( Self::$variant_name(inner) => ArrayBuilderImpl::$variant_name(inner.create_builder(capacity)), )*
+                }
+            }
+
+            /// Returns the `DataType` of this array.
+            pub fn data_type(&self) -> DataType {
+                match self {
+                    $( Self::$variant_name(inner) => inner.data_type(), )*
                 }
             }
         }

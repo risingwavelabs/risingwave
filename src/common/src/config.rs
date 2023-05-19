@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use std::fs;
 
 use clap::ValueEnum;
-use derivative::Derivative;
+use educe::Educe;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -40,8 +40,8 @@ pub const NO_OVERRIDE: Option<NoOverride> = None;
 /// error messages.
 ///
 /// The current implementation will log warnings if there are unrecognized fields.
-#[derive(Derivative)]
-#[derivative(Clone, Default)]
+#[derive(Educe)]
+#[educe(Clone, Default)]
 pub struct Unrecognized<T: 'static> {
     inner: BTreeMap<String, Value>,
     _marker: std::marker::PhantomData<&'static T>,
@@ -120,8 +120,8 @@ impl OverrideConfig for NoOverride {
 
 /// [`RwConfig`] corresponds to the whole config file `risingwave.toml`. Each field corresponds to a
 /// section.
-#[derive(Derivative, Clone, Serialize, Deserialize, Default)]
-#[derivative(Debug)]
+#[derive(Educe, Clone, Serialize, Deserialize, Default)]
+#[educe(Debug)]
 pub struct RwConfig {
     #[serde(default)]
     pub server: ServerConfig,
@@ -139,7 +139,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    #[derivative(Debug = "ignore")]
+    #[educe(Debug(ignore))]
     pub system: SystemConfig,
 
     #[serde(flatten)]
@@ -247,10 +247,6 @@ pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
-
-    /// The maximum allowed heartbeat interval for workers.
-    #[serde(default = "default::server::max_heartbeat_interval_secs")]
-    pub max_heartbeat_interval_secs: u32,
 
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
@@ -585,7 +581,7 @@ mod default {
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10
+            30
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -605,7 +601,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 5mi
+            180 // 3mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {
@@ -625,10 +621,6 @@ mod default {
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
-        }
-
-        pub fn max_heartbeat_interval_secs() -> u32 {
-            600
         }
 
         pub fn connection_pool_size() -> u16 {
@@ -788,7 +780,7 @@ mod default {
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
-            1 << 10
+            10
         }
 
         pub fn stream_chunk_size() -> usize {
@@ -896,5 +888,29 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// This test ensures that `config/example.toml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-example-config` to update it if this
+    /// test fails.
+    #[test]
+    fn test_example_up_to_date() {
+        let actual = {
+            let content = include_str!("../../config/example.toml");
+            toml::from_str::<toml::Value>(content).expect("parse example.toml failed")
+        };
+        let expected =
+            toml::Value::try_from(RwConfig::default()).expect("serialize default config failed");
+
+        // Compare the `Value` representation instead of string for normalization.
+        pretty_assertions::assert_eq!(
+            actual, expected,
+            "\n`config/example.toml` is not up-to-date with the default values specified in `config.rs`.\nPlease run `./risedev generate-example-config` to update it."
+        );
     }
 }

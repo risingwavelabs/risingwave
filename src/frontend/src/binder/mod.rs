@@ -80,7 +80,6 @@ pub struct Binder {
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
-    bind_timestamp_ms: u64,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -197,18 +196,12 @@ impl ParameterTypes {
 
 impl Binder {
     fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
-        let now_ms = session
-            .env()
-            .hummock_snapshot_manager()
-            .latest_snapshot_current_epoch()
-            .as_unix_millis();
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
-            bind_timestamp_ms: now_ms,
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
@@ -253,6 +246,7 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
+    #[expect(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }

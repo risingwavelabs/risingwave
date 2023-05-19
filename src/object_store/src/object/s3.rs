@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use std::cmp;
+use std::iter::{Map, Take};
 use std::sync::Arc;
+use std::time::Duration;
 
 use aws_sdk_s3::client::fluent_builders::GetObject;
+use aws_sdk_s3::error::GetObjectError;
 use aws_sdk_s3::model::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
@@ -23,6 +26,7 @@ use aws_sdk_s3::model::{
 use aws_sdk_s3::output::UploadPartOutput;
 use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
+use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
 use fail::fail_point;
 use futures::future::try_join_all;
@@ -31,6 +35,7 @@ use hyper::Body;
 use itertools::Itertools;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
@@ -56,6 +61,10 @@ const NUM_BUCKET_PREFIXES: u32 = 256;
 /// initiated. (Day is the smallest granularity)
 const S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS: i32 = 1;
 
+/// Retry config for compute node http timeout error.
+const DEFAULT_RETRY_INTERVAL: u64 = 20;
+const DEFAULT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+const DEFAULT_RETRY_MAX_ATTEMPTS: usize = 8;
 /// S3 multipart upload handle. The multipart upload is not initiated until the first part is
 /// available for upload.
 ///
@@ -157,7 +166,7 @@ impl S3StreamingUploader {
                 .content_length(len as i64)
                 .send()
                 .await
-                .map_err(ObjectError::s3);
+                .map_err(Into::into);
             try_update_failure_metric(&metrics, &upload_output_res, operation_type);
             Ok((part_id, upload_output_res?))
         }));
@@ -318,7 +327,7 @@ impl ObjectStore for S3ObjectStore {
         }
     }
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         fail_point!("s3_streaming_upload_err", |_| Err(ObjectError::internal(
             "s3 streaming upload error"
         )));
@@ -346,8 +355,18 @@ impl ObjectStore for S3ObjectStore {
             )
         });
 
-        let req = self.obj_store_request(path, start_pos, end_pos);
-        let resp = req.send().await?;
+        // retry if occurs AWS EC2 HTTP timeout error.
+        let resp = tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                self.obj_store_request(path, start_pos, end_pos)
+                    .send()
+                    .await
+            },
+            Self::should_retry,
+        )
+        .await?;
+
         let val = resp.body.collect().await?.into_bytes();
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
@@ -403,8 +422,13 @@ impl ObjectStore for S3ObjectStore {
             "s3 streaming read error"
         )));
 
-        let req = self.obj_store_request(path, start_pos, None);
-        let resp = req.send().await?;
+        // retry if occurs AWS EC2 HTTP timeout error.
+        let resp = tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async { self.obj_store_request(path, start_pos, None).send().await },
+            Self::should_retry,
+        )
+        .await?;
 
         Ok(Box::new(resp.body.into_async_read()))
     }
@@ -701,6 +725,25 @@ impl S3ObjectStore {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
         }
+    }
+
+    #[inline(always)]
+    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+        ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
+            .max_delay(DEFAULT_RETRY_MAX_DELAY)
+            .take(DEFAULT_RETRY_MAX_ATTEMPTS)
+            .map(jitter)
+    }
+
+    #[inline(always)]
+    fn should_retry(err: &SdkError<GetObjectError>) -> bool {
+        if let SdkError::DispatchFailure(e) = err {
+            if e.is_timeout() {
+                tracing::warn!("{:?} occurs, trying to retry S3 get_object request.", e);
+                return true;
+            }
+        }
+        false
     }
 }
 

@@ -52,6 +52,15 @@ pub struct OptimizerContext {
     next_expr_display_id: RefCell<usize>,
 }
 
+// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
+impl Drop for OptimizerContext {
+    fn drop(&mut self) {
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            self.warn_to_user(warning);
+        };
+    }
+}
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -160,6 +169,10 @@ impl OptimizerContext {
         optimizer_trace.push("\n".to_string());
     }
 
+    pub fn warn_to_user(&self, str: impl Into<String>) {
+        self.session_ctx().notice_to_user(str);
+    }
+
     pub fn store_logical(&self, str: impl Into<String>) {
         *self.logical_explain.borrow_mut() = Some(str.into())
     }
@@ -192,13 +205,6 @@ impl OptimizerContext {
 
     pub fn session_timezone(&self) -> RefMut<'_, SessionTimezone> {
         self.session_timezone.borrow_mut()
-    }
-
-    /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE
-    pub fn append_notice(&self, notice: &mut String) {
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            notice.push_str(&warning);
-        }
     }
 
     pub fn get_session_timezone(&self) -> String {

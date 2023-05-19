@@ -69,9 +69,7 @@ impl AggCall {
 
             // may return list or struct type
             (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-            (AggKind::ArrayAgg, [input]) => List {
-                datatype: Box::new(input.clone()),
-            },
+            (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
             // functions that are rewritten in the frontend and don't exist in the expr crate
             (AggKind::Avg, [input]) => match input {
                 Int16 | Int32 | Int64 | Decimal => Decimal,

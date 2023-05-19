@@ -136,7 +136,7 @@
     └─LogicalFilter { predicate: (Unnest($3) = 30:Int32) }
       └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($3)] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.arr], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-- name: overagg
+- name: over window
   sql: |
     create table t(x int, y int, z int, w int);
     SELECT rank FROM (
@@ -147,12 +147,13 @@
     LogicalProject { exprs: [row_number] }
     └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) AND (row_number <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
-        └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-          └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+          └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [row_number] }
     └─LogicalFilter { predicate: (row_number <= 3:Int32) }
-      └─LogicalOverAgg { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
         └─LogicalScan { table: t, output_columns: [t.x, t.y], required_columns: [t.x, t.y, t.z], predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
 - name: mixed
   sql: |

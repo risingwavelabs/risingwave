@@ -21,6 +21,7 @@ use std::ops::{Add, Neg, Sub};
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_common_proc_macro::EstimateSize;
@@ -33,6 +34,7 @@ use crate::error::{ErrorCode, Result, RwError};
 use crate::estimate_size::EstimateSize;
 
 /// Every interval can be represented by a `Interval`.
+///
 /// Note that the difference between Interval and Instant.
 /// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
 /// with months = 61, days = 25, usecs = (57 + 23 * 3600 + 22 * 60) * 1000000),
@@ -47,9 +49,9 @@ pub struct Interval {
     usecs: i64,
 }
 
-pub const USECS_PER_SEC: i64 = 1_000_000;
-pub const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
-pub const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+const USECS_PER_SEC: i64 = 1_000_000;
+const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl Interval {
     /// Smallest interval value.
@@ -58,6 +60,9 @@ impl Interval {
         days: i32::MIN,
         usecs: i64::MIN,
     };
+    pub const USECS_PER_DAY: i64 = USECS_PER_DAY;
+    pub const USECS_PER_MONTH: i64 = USECS_PER_MONTH;
+    pub const USECS_PER_SEC: i64 = USECS_PER_SEC;
 
     /// Creates a new `Interval` from the given number of months, days, and microseconds.
     pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {
@@ -819,17 +824,18 @@ impl<'de> Deserialize<'de> for Interval {
     }
 }
 
-impl crate::hash::HashKeySerDe<'_> for Interval {
-    type S = [u8; 16];
-
-    fn serialize(self) -> Self::S {
+impl crate::hash::HashKeySer<'_> for Interval {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let cmp_value = IntervalCmpValue::from(self);
-        cmp_value.0.to_ne_bytes()
+        let b = cmp_value.0.to_ne_bytes();
+        buf.put_slice(&b);
     }
+}
 
-    fn deserialize<R: std::io::Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
+impl crate::hash::HashKeyDe for Interval {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let value = buf.get_i128_ne();
+        let cmp_value = IntervalCmpValue(value);
         cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate())
@@ -1691,7 +1697,7 @@ mod tests {
 
         let buf = i128::MIN.to_ne_bytes();
         std::panic::catch_unwind(|| {
-            <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
+            <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();
     }

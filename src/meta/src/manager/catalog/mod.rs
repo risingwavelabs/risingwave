@@ -92,7 +92,8 @@ use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 
 use crate::manager::catalog::utils::{
-    alter_relation_rename, alter_relation_rename_refs, ReplaceTableExprRewriter,
+    alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
+    refcnt_inc_connection, ReplaceTableExprRewriter,
 };
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
@@ -1294,14 +1295,7 @@ where
             database_core.mark_creating(&key);
             user_core.increase_ref(source.owner);
             // We have validate the status of connection before starting the procedure.
-            if let Some(connection_id) = source.connection_id {
-                if let Some(_conn) = database_core.get_connection(connection_id) {
-                    // TODO(weili): wait for yezizp to refactor ref cnt
-                    database_core.increase_ref_count(connection_id);
-                } else {
-                    bail!("connection {} not found.", connection_id);
-                }
-            }
+            refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
         }
     }
@@ -1356,10 +1350,7 @@ where
 
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
-        if let Some(connection_id) = source.connection_id {
-            // TODO(weili): wait for yezizp to refactor ref cnt
-            database_core.decrease_ref_count(connection_id);
-        }
+        refcnt_dec_connection(database_core, source.connection_id);
         Ok(())
     }
 
@@ -1385,10 +1376,7 @@ where
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
-                if let Some(connection_id) = source.connection_id {
-                    // TODO(weili): wait for yezizp to refactor ref cnt
-                    database_core.decrease_ref_count(connection_id);
-                }
+                refcnt_dec_connection(database_core, source.connection_id);
 
                 for user in users_need_update {
                     self.notify_frontend(Operation::Update, Info::User(user))
@@ -1431,6 +1419,9 @@ where
             ensure!(table.dependent_relations.is_empty());
             // source and table
             user_core.increase_ref_count(source.owner, 2);
+
+            // We have validate the status of connection before starting the procedure.
+            refcnt_inc_connection(database_core, source.connection_id)?;
             Ok(())
         }
     }
@@ -1518,6 +1509,7 @@ where
         database_core.unmark_creating(&table_key);
         database_core.unmark_creating_streaming_job(table.id);
         user_core.decrease_ref_count(source.owner, 2); // source and table
+        refcnt_dec_connection(database_core, source.connection_id);
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -1609,6 +1601,8 @@ where
 
                 // Commit point
                 commit_meta!(self, tables, sources, indexes, users)?;
+
+                refcnt_dec_connection(database_core, source.connection_id);
 
                 indexes_removed.iter().for_each(|index| {
                     user_core.decrease_ref_count(index.owner, 2); // index table and index
@@ -1800,14 +1794,7 @@ where
             }
             user_core.increase_ref(sink.owner);
             // We have validate the status of connection before starting the procedure.
-            if let Some(connection_id) = sink.connection_id {
-                if let Some(_conn) = database_core.get_connection(connection_id) {
-                    // TODO(siyuan): wait for yezizp to refactor ref cnt
-                    database_core.increase_ref_count(connection_id);
-                } else {
-                    bail!("connection {} not found.", connection_id);
-                }
-            }
+            refcnt_inc_connection(database_core, sink.connection_id)?;
             Ok(())
         }
     }
@@ -1875,10 +1862,7 @@ where
             database_core.decrease_ref_count(dependent_relation_id);
         }
         user_core.decrease_ref(sink.owner);
-        if let Some(connection_id) = sink.connection_id {
-            // TODO(siyuan): wait for yezizp to refactor ref cnt
-            database_core.decrease_ref_count(connection_id);
-        }
+        refcnt_dec_connection(database_core, sink.connection_id);
     }
 
     pub async fn drop_sink(

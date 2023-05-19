@@ -15,8 +15,7 @@
 use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 
@@ -69,7 +68,7 @@ pub fn infer_some_all(
 ) -> Result<DataType> {
     let element_type = if inputs[1].is_unknown() {
         None
-    } else if let DataType::List { datatype } = inputs[1].return_type() {
+    } else if let DataType::List(datatype) = inputs[1].return_type() {
         Some(DataTypeName::from(*datatype))
     } else {
         return Err(ErrorCode::BindError(
@@ -105,9 +104,9 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         }
-        inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
-            datatype: Box::new(sig.inputs_type[1].into()),
-        })?;
+        inputs[1] = inputs[1]
+            .clone()
+            .cast_implicit(DataType::List(Box::new(sig.inputs_type[1].into())))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -474,23 +473,14 @@ fn infer_type_for_special(
                     }
                 }
             }
-            Ok(Some(DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            }))
+            Ok(Some(DataType::List(Box::new(DataType::Varchar))))
         }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
             let left_type = inputs[0].return_type();
             let right_type = inputs[1].return_type();
             let return_type = match (&left_type, &right_type) {
-                (
-                    DataType::List {
-                        datatype: left_elem_type,
-                    },
-                    DataType::List {
-                        datatype: right_elem_type,
-                    },
-                ) => {
+                (DataType::List(left_elem_type), DataType::List(right_elem_type)) => {
                     if let Ok(res) = align_types(inputs.iter_mut()) {
                         Some(res)
                     } else if **left_elem_type == right_type {
@@ -558,9 +548,7 @@ fn infer_type_for_special(
             ensure_arity!("array_positions", | inputs | == 2);
             let common_type = align_array_and_element(0, 1, inputs);
             match common_type {
-                Ok(_) => Ok(Some(DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                })),
+                Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot get position of {} in {}",
                     inputs[1].return_type(),
@@ -580,11 +568,7 @@ fn infer_type_for_special(
                 .into());
             }
             match ret_type {
-                DataType::List {
-                    datatype: list_elem_type,
-                } => Ok(Some(DataType::List {
-                    datatype: list_elem_type,
-                })),
+                DataType::List(list_elem_type) => Ok(Some(DataType::List(list_elem_type))),
                 _ => Ok(None),
             }
         }
@@ -600,15 +584,11 @@ fn infer_type_for_special(
             }
 
             match return_type {
-                DataType::List {
-                    datatype: _list_elem_type,
-                } => Ok(Some(DataType::Int64)),
+                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
                 _ => Ok(None),
             }
         }
-        ExprType::StringToArray => Ok(Some(DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        })),
+        ExprType::StringToArray => Ok(Some(DataType::List(Box::new(DataType::Varchar)))),
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
@@ -621,9 +601,7 @@ fn infer_type_for_special(
             }
 
             match return_type {
-                DataType::List {
-                    datatype: _list_elem_type,
-                } => Ok(Some(DataType::Int64)),
+                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
                 _ => Ok(None),
             }
         }
@@ -634,17 +612,13 @@ fn infer_type_for_special(
             inputs[1] = owned.cast_implicit(DataType::Int32)?;
 
             match inputs[0].return_type() {
-                DataType::List { datatype: typ } => Ok(Some(DataType::List { datatype: typ })),
+                DataType::List(typ) => Ok(Some(DataType::List(typ))),
                 _ => Ok(None),
             }
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
-        }
-        ExprType::Now => {
-            ensure_arity!("now", | inputs | <= 1);
-            Ok(Some(DataType::Timestamptz))
         }
         ExprType::Proctime => {
             ensure_arity!("proctime", | inputs | == 0);

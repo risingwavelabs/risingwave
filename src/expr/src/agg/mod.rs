@@ -27,7 +27,7 @@ mod approx_count_distinct;
 mod array_agg;
 mod count_star;
 mod general;
-mod general_sorted_grouper;
+mod jsonb_agg;
 mod string_agg;
 
 // wrappers
@@ -40,7 +40,6 @@ mod projection;
 pub use self::def::*;
 use self::distinct::Distinct;
 use self::filter::*;
-pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
 use self::orderby::ProjectionOrderBy;
 use self::projection::Projection;
 

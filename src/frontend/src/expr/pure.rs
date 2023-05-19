@@ -27,6 +27,10 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
         true
     }
 
+    fn visit_now(&mut self, _: &super::Now) -> bool {
+        true
+    }
+
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
         match func_call.get_expr_type() {
             expr_node::Type::Unspecified
@@ -147,12 +151,24 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
-            | expr_node::Type::Pi
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
+            | expr_node::Type::Asind
+            | expr_node::Type::Sinh
+            | expr_node::Type::Cosh
+            | expr_node::Type::Coth
+            | expr_node::Type::Tanh
+            | expr_node::Type::Atanh
+            | expr_node::Type::Asinh
+            | expr_node::Type::Acosh
             | expr_node::Type::Decode
             | expr_node::Type::Encode
+            | expr_node::Type::Sha1
+            | expr_node::Type::Sha224
+            | expr_node::Type::Sha256
+            | expr_node::Type::Sha384
+            | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray =>
@@ -167,10 +183,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode
-            | expr_node::Type::Now
-            | expr_node::Type::Proctime
-            | expr_node::Type::Udf => true,
+            expr_node::Type::Vnode | expr_node::Type::Proctime | expr_node::Type::Udf => true,
         }
     }
 }
@@ -217,7 +230,7 @@ mod tests {
             Type::GreaterThan,
             vec![
                 InputRef::new(0, DataType::Timestamptz).into(),
-                FunctionCall::new(Type::Now, vec![]).unwrap().into(),
+                FunctionCall::new(Type::Proctime, vec![]).unwrap().into(),
             ],
         )
         .unwrap()

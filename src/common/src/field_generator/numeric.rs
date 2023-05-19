@@ -198,6 +198,8 @@ for_all_fields_variants! { gen_sequence_field_alias }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::DefaultOrd;
+
     #[test]
     fn test_sequence_field_generator() {
         let mut i16_field =
@@ -248,7 +250,7 @@ mod tests {
             let res = i32_field.generate_datum(i as u64);
             assert!(res.is_some());
             let res = res.unwrap();
-            assert!(lower <= res && res <= upper);
+            assert!(lower.default_cmp(&res).is_le() && res.default_cmp(&upper).is_le());
         }
     }
 

@@ -22,6 +22,9 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
+echo "--- ghcr login"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
 echo "--- install postgresql"
 sudo yum install -y postgresql
 
@@ -39,3 +42,6 @@ python3 run_demos.py --case ${case} --format ${format}
 
 echo "--- Check if the ingestion is successful"
 python3 check_data.py ${case}
+
+echo "--- Clean Demos"
+python3 clean_demos.py --case ${case}

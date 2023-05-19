@@ -47,11 +47,18 @@ message WorkerNode {
     RUNNING = 2;
     DELETING = 3;
   }
+  // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
+  message Property {
+    bool is_streaming = 1;
+    bool is_serving = 2;
+  }
   uint32 id = 1;
   WorkerType type = 2;
   HostAddress host = 3;
   State state = 4;
+  // TODO #8940 `parallel_units` should be moved into `Property`
   repeated ParallelUnit parallel_units = 5;
+  Property property = 6;
 }
 
 message Buffer {

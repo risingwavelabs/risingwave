@@ -28,7 +28,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, DefaultPartialOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
@@ -66,11 +66,9 @@ mod dynamic_filter;
 mod error;
 mod expand;
 mod filter;
-mod global_simple_agg;
 mod hash_agg;
 pub mod hash_join;
 mod hop_window;
-mod local_simple_agg;
 mod lookup;
 mod lookup_union;
 mod managed_state;
@@ -84,12 +82,12 @@ mod project_set;
 mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
+mod simple_agg;
 mod sink;
 mod sort;
 mod sort_buffer;
-mod sort_buffer_v0;
-mod sort_v0;
 pub mod source;
+mod stateless_simple_agg;
 mod stream_reader;
 pub mod subtask;
 mod temporal_join;
@@ -117,11 +115,9 @@ pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::FilterExecutor;
-pub use global_simple_agg::GlobalSimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
-pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
@@ -134,9 +130,11 @@ pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+pub use simple_agg::SimpleAggExecutor;
 pub use sink::SinkExecutor;
 pub use sort::*;
 pub use source::*;
+pub use stateless_simple_agg::StatelessSimpleAggExecutor;
 pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
@@ -586,7 +584,7 @@ pub struct Watermark {
 impl PartialOrd for Watermark {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.col_idx == other.col_idx {
-            self.val.partial_cmp(&other.val)
+            self.val.default_partial_cmp(&other.val)
         } else {
             None
         }
@@ -595,8 +593,7 @@ impl PartialOrd for Watermark {
 
 impl Ord for Watermark {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+        self.val.default_cmp(&other.val)
     }
 }
 
@@ -626,11 +623,7 @@ impl Watermark {
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row, on_err).await?;
-        Some(Self {
-            col_idx: new_col_idx,
-            data_type,
-            val,
-        })
+        Some(Self::new(new_col_idx, data_type, val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the
@@ -659,19 +652,11 @@ impl Watermark {
         let data_type = DataType::from(col_ref.get_type()?);
         let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
             .expect("watermark value cannot be null");
-        Ok(Watermark {
-            col_idx: col_ref.get_index() as _,
-            data_type,
-            val,
-        })
+        Ok(Self::new(col_ref.get_index() as _, data_type, val))
     }
 
     pub fn with_idx(self, idx: usize) -> Self {
-        Self {
-            col_idx: idx,
-            data_type: self.data_type,
-            val: self.val,
-        }
+        Self::new(idx, self.data_type, self.val)
     }
 }
 
@@ -680,6 +665,12 @@ pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
     Watermark(Watermark),
+}
+
+impl From<StreamChunk> for Message {
+    fn from(chunk: StreamChunk) -> Self {
+        Message::Chunk(chunk)
+    }
 }
 
 impl<'a> TryFrom<&'a Message> for &'a Barrier {

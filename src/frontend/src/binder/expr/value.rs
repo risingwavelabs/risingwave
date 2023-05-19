@@ -111,9 +111,7 @@ impl Binder {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             exprs,
-            DataType::List {
-                datatype: Box::new(element_type),
-            },
+            DataType::List(Box::new(element_type)),
         )
         .into();
         Ok(expr)
@@ -125,14 +123,12 @@ impl Binder {
                 ExprType::Array,
                 vec![],
                 // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                DataType::List(Box::new(DataType::Varchar)),
             )
             .into();
             return lhs.cast_explicit(ty).map_err(Into::into);
         }
-        let inner_type = if let DataType::List { datatype } = &ty {
+        let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
         } else {
             return Err(ErrorCode::BindError(format!(
@@ -154,9 +150,7 @@ impl Binder {
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List {
-                datatype: return_type,
-            } => Ok(FunctionCall::new_unchecked(
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
                 *return_type,
@@ -192,14 +186,10 @@ impl Binder {
                 .cast_implicit(DataType::Int32)?,
         };
         match obj.return_type() {
-            DataType::List {
-                datatype: return_type,
-            } => Ok(FunctionCall::new_unchecked(
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
-                DataType::List {
-                    datatype: return_type,
-                },
+                DataType::List(return_type),
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
@@ -430,15 +420,13 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 assert_eq!(datatype, Box::new(DataType::Int32));
             }
             _ => panic!("unexpected type"),
@@ -450,9 +438,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
 

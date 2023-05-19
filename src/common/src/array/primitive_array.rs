@@ -20,15 +20,11 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayResult};
-use crate::array::serial_array::Serial;
-use crate::array::{ArrayImpl, DataType};
+use super::{Array, ArrayBuilder, ArrayImpl, ArrayResult};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::for_all_native_types;
-use crate::types::decimal::Decimal;
-use crate::types::interval::Interval;
-use crate::types::{Date, NativeType, Scalar, ScalarRef, Time, Timestamp};
+use crate::types::*;
 
 /// Physical type of array items which have fixed size.
 pub trait PrimitiveArrayItemType
@@ -270,6 +266,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 
     fn pop(&mut self) -> Option<()> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn len(&self) -> usize {
+        self.bitmap.len()
     }
 
     fn finish(self) -> PrimitiveArray<T> {

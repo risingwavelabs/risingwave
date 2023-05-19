@@ -14,7 +14,8 @@
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    register_histogram_with_registry, register_int_counter_with_registry, Histogram, Registry,
+    exponential_buckets, histogram_opts, register_histogram_with_registry,
+    register_int_counter_with_registry, Histogram, Registry,
 };
 
 pub struct FrontendMetrics {
@@ -32,12 +33,12 @@ impl FrontendMetrics {
         )
         .unwrap();
 
-        let latency_local_execution = register_histogram_with_registry!(
+        let opts = histogram_opts!(
             "frontend_latency_local_execution",
             "latency of local execution mode",
-            &registry,
-        )
-        .unwrap();
+            exponential_buckets(0.01, 2.0, 23).unwrap()
+        );
+        let latency_local_execution = register_histogram_with_registry!(opts, &registry).unwrap();
 
         Self {
             registry,

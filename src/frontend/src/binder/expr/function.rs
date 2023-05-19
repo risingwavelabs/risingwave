@@ -23,18 +23,21 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
-use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+use risingwave_expr::function::window::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+};
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
 };
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
     TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
@@ -249,7 +252,25 @@ impl Binder {
                 .collect::<Result<_>>()?,
         );
         let frame = if let Some(frame) = window_frame {
-            let frame = match frame.units {
+            let exclusion = if let Some(exclusion) = frame.exclusion {
+                match exclusion {
+                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
+                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!(
+                                "window frame exclusion `{}` is not supported yet",
+                                exclusion
+                            ),
+                            9124.into(),
+                        )
+                        .into());
+                    }
+                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
+                }
+            } else {
+                FrameExclusion::NoOthers
+            };
+            let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
                     let convert_bound = |bound| match bound {
                         WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
@@ -268,23 +289,26 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    Frame::Rows(start, end)
+                    FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window frame in `{}` mode is not supported", frame.units),
+                        format!(
+                            "window frame in `{}` mode is not supported yet",
+                            frame.units
+                        ),
                         9124.into(),
                     )
                     .into());
                 }
             };
-            if !frame.is_valid() {
+            if !bounds.is_valid() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame `{frame}` is not valid",
+                    "window frame bounds `{bounds}` is not valid",
                 ))
                 .into());
             }
-            Some(frame)
+            Some(Frame { bounds, exclusion })
         } else {
             None
         };
@@ -343,17 +367,15 @@ impl Binder {
         }
 
         fn now() -> Handle {
-            Box::new(move |binder, mut inputs| {
-                binder.ensure_now_function_allowed()?;
-                // `now()` in batch query will be convert to the binder time.
-                if binder.is_for_batch() {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                raw_call(ExprType::Now)(binder, inputs)
-            })
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_now_function_allowed()?;
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
+                }),
+            )
         }
 
         fn pi() -> Handle {
@@ -410,6 +432,14 @@ impl Binder {
                 ("cosd", raw_call(ExprType::Cosd)),
                 ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
+                ("sinh", raw_call(ExprType::Sinh)),
+                ("cosh", raw_call(ExprType::Cosh)), 
+                ("tanh", raw_call(ExprType::Tanh)), 
+                ("coth", raw_call(ExprType::Coth)), 
+                ("asinh", raw_call(ExprType::Asinh)), 
+                ("acosh", raw_call(ExprType::Acosh)), 
+                ("atanh", raw_call(ExprType::Atanh)), 
+                ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
@@ -463,6 +493,11 @@ impl Binder {
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
+                ("sha1", raw_call(ExprType::Sha1)),
+                ("sha224", raw_call(ExprType::Sha224)),
+                ("sha256", raw_call(ExprType::Sha256)),
+                ("sha384", raw_call(ExprType::Sha384)),
+                ("sha512", raw_call(ExprType::Sha512)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -533,9 +568,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List {
-                            datatype: Box::new(DataType::Varchar),
-                        }));
+                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
                     };
 
                     let paths = if bool {

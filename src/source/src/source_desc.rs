@@ -106,6 +106,7 @@ impl SourceDescBuilder {
             PbRowFormatType::UpsertJson => SourceFormat::UpsertJson,
             PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             PbRowFormatType::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
+            PbRowFormatType::Csv => SourceFormat::Csv,
             _ => unreachable!(),
         };
 
@@ -193,7 +194,7 @@ pub mod test_utils {
                         name: f.name.clone(),
                         field_descs: vec![],
                         type_name: "".to_string(),
-                        generated_column: None,
+                        generated_or_default_column: None,
                     }
                     .to_protobuf(),
                 ),

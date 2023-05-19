@@ -19,8 +19,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::worker_node::{Property, State};
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::meta::add_worker_node_request::Property as RegisterProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -99,22 +100,32 @@ where
         &self,
         r#type: WorkerType,
         host_address: HostAddress,
-        worker_node_parallelism: usize,
+        property: RegisterProperty,
     ) -> MetaResult<WorkerNode> {
+        let worker_node_parallelism = property.worker_node_parallelism as usize;
+        let property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
             worker.update_ttl(self.max_heartbeat_interval);
+            if property != worker.worker_node.property {
+                tracing::info!(
+                    "worker {} property updated from {:?} to {:?}",
+                    worker.worker_node.id,
+                    worker.worker_node.property,
+                    property
+                );
+                worker.worker_node.property = property;
+                worker.insert(self.env.meta_store()).await?;
+            }
             return Ok(worker.to_protobuf());
         }
-
         // Generate worker id.
         let worker_id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Worker }>()
             .await? as WorkerId;
-
         // Generate parallel units.
         let parallel_units = if r#type == WorkerType::ComputeNode {
             self.generate_cn_parallel_units(worker_node_parallelism, worker_id)
@@ -122,7 +133,6 @@ where
         } else {
             vec![]
         };
-
         // Construct worker.
         let worker_node = WorkerNode {
             id: worker_id,
@@ -130,16 +140,13 @@ where
             host: Some(host_address.clone()),
             state: State::Starting as i32,
             parallel_units,
+            property,
         };
-
         let worker = Worker::from_protobuf(worker_node.clone());
-
         // Persist worker node.
         worker.insert(self.env.meta_store()).await?;
-
         // Update core.
         core.add_worker_node(worker);
-
         Ok(worker_node)
     }
 
@@ -322,15 +329,36 @@ where
         core.list_worker_node(worker_type, worker_state)
     }
 
-    pub async fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
+    /// A convenient method to get all running compute nodes that can be used for streaming.
+    pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_active_parallel_units()
+        core.list_streaming_worker_node(Some(State::Running))
+    }
+
+    pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
+        let core = self.core.read().await;
+        core.list_active_streaming_parallel_units()
     }
 
     /// Get the cluster info used for scheduling a streaming job.
     pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
         core.get_streaming_cluster_info()
+    }
+
+    fn parse_property(
+        &self,
+        worker_type: WorkerType,
+        worker_property: RegisterProperty,
+    ) -> Option<Property> {
+        if worker_type == WorkerType::ComputeNode {
+            Some(Property {
+                is_streaming: worker_property.is_streaming,
+                is_serving: worker_property.is_serving,
+            })
+        } else {
+            None
+        }
     }
 
     /// Generate `parallel_degree` parallel units.
@@ -457,9 +485,16 @@ impl ClusterManagerCore {
             .collect_vec()
     }
 
-    fn list_active_parallel_units(&self) -> Vec<ParallelUnit> {
+    pub fn list_streaming_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
+        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+            .into_iter()
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
+            .collect()
+    }
+
+    fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .list_streaming_worker_node(Some(State::Running))
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -473,7 +508,7 @@ impl ClusterManagerCore {
 
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
-            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .list_streaming_worker_node(Some(State::Running))
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
@@ -532,14 +567,22 @@ mod tests {
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
-        let fake_parallelism = 4;
+        let fake_parallelism: usize = 4;
         for i in 0..worker_count {
             let fake_host_address = HostAddress {
                 host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             let worker_node = cluster_manager
-                .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
+                .add_worker_node(
+                    WorkerType::ComputeNode,
+                    fake_host_address,
+                    RegisterProperty {
+                        worker_node_parallelism: fake_parallelism as _,
+                        is_streaming: true,
+                        is_serving: true,
+                    },
+                )
                 .await
                 .unwrap();
             worker_nodes.push(worker_node);
@@ -584,7 +627,7 @@ mod tests {
         cluster_manager: &ClusterManager<MemStore>,
         parallel_count: usize,
     ) {
-        let parallel_units = cluster_manager.list_active_parallel_units().await;
+        let parallel_units = cluster_manager.list_active_streaming_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
     }
 
@@ -604,7 +647,11 @@ mod tests {
             .add_worker_node(
                 WorkerType::ComputeNode,
                 fake_host_address_2,
-                fake_parallelism,
+                RegisterProperty {
+                    worker_node_parallelism: fake_parallelism as _,
+                    is_streaming: true,
+                    is_serving: true,
+                },
             )
             .await
             .unwrap();

@@ -341,14 +341,11 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
       ├─LogicalScan { table: a, columns: [a.a1] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
-        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   | └─LogicalScan { table: a, columns: [a.a1] }
-        |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     | └─LogicalScan { table: a, columns: [a.a1] }
-        |     └─LogicalScan { table: b, columns: [] }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        | ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | | └─LogicalScan { table: a, columns: [a.a1] }
+        | └─LogicalAgg { aggs: [] }
+        |   └─LogicalScan { table: b, columns: [] }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           | └─LogicalScan { table: a, columns: [a.a1] }
@@ -433,3 +430,29 @@
             ├─LogicalAgg { group_key: [t1.b], aggs: [] }
             | └─LogicalScan { table: t1, columns: [t1.b] }
             └─LogicalScan { table: t1, columns: [t1.a] }
+- name: test subquery on sources
+  sql: |
+    create source a (a1 int, a2 int)  with ( connector ='datagen' );
+    create source b (b1 int, b2 int)  with ( connector ='datagen' );
+    create source c (c1 int, c2 int) with ( connector ='datagen' );
+    select 1 from a where exists ( select 1 from b having exists ( select a1 from c ));
+  optimized_logical_plan_for_stream: |
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: [] }
+      ├─LogicalShare { id = 2 }
+      | └─LogicalProject { exprs: [a1] }
+      |   └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
+      └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        | ├─LogicalAgg { group_key: [a1], aggs: [] }
+        | | └─LogicalShare { id = 2 }
+        | |   └─LogicalProject { exprs: [a1] }
+        | |     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
+        | └─LogicalAgg { aggs: [] }
+        |   └─LogicalSource { source: b, columns: [b1, b2, _row_id], time_range: [(Unbounded, Unbounded)] }
+        └─LogicalJoin { type: Inner, on: true, output: [a1] }
+          ├─LogicalAgg { group_key: [a1], aggs: [] }
+          | └─LogicalShare { id = 2 }
+          |   └─LogicalProject { exprs: [a1] }
+          |     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
+          └─LogicalSource { source: c, columns: [c1, c2, _row_id], time_range: [(Unbounded, Unbounded)] }

@@ -57,6 +57,13 @@ impl PinnedHummockSnapshot {
             },
         }
     }
+
+    pub fn support_barrier_read(&self) -> bool {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(_, checkpoint) => !*checkpoint,
+            PinnedHummockSnapshot::Other(_) => false,
+        }
+    }
 }
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;

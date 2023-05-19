@@ -165,9 +165,15 @@ service StreamManagerService {
 // Below for cluster service.
 
 message AddWorkerNodeRequest {
+  message Property {
+    uint64 worker_node_parallelism = 1;
+    bool is_streaming = 2;
+    bool is_serving = 3;
+  }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
-  uint64 worker_node_parallelism = 3;
+  reserved 3;
+  Property property = 4;
 }
 
 message AddWorkerNodeResponse {

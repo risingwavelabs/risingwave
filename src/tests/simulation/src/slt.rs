@@ -39,17 +39,22 @@ enum SqlCmd {
     Drop,
     Dml,
     Flush,
+    Alter,
     Others,
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete since the atomicity is not guaranteed.
+    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
     // Notice that `create table as` is also not atomic in our system.
+    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+    // remove it until transactional commit of table fragment and catalog is supported.
     fn ignore_kill(&self) -> bool {
         matches!(
             self,
             SqlCmd::Dml
                 | SqlCmd::Flush
+                | SqlCmd::Alter
                 | SqlCmd::Create {
                     is_create_table_as: true
                 }
@@ -71,6 +76,7 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
         "flush" => SqlCmd::Flush,
+        "alter" => SqlCmd::Alter,
         _ => SqlCmd::Others,
     }
 }
@@ -79,8 +85,6 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // We already have visibility_all cases.
-    "visibility_checkpoint.slt",
     // This depends on session config.
     "session_timezone.slt",
 ];

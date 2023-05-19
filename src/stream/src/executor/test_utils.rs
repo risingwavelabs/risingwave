@@ -259,13 +259,13 @@ pub mod agg_executor {
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::agg_common::{
-        AggExecutorArgs, GroupAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
+        AggExecutorArgs, HashAggExecutorExtraArgs, SimpleAggExecutorExtraArgs,
     };
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor,
-        HashAggExecutor, PkIndices,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, HashAggExecutor, PkIndices,
+        SimpleAggExecutor,
     };
 
     /// Create state storage for the given agg call.
@@ -431,12 +431,12 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            metrics: Arc::new(StreamingMetrics::unused()),
 
-            extra: GroupAggExecutorExtraArgs {
+            extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
                 emit_on_window_close,
-                metrics: Arc::new(StreamingMetrics::unused()),
             },
         })
         .unwrap()
@@ -479,7 +479,7 @@ pub mod agg_executor {
         )
         .await;
 
-        GlobalSimpleAggExecutor::new(AggExecutorArgs {
+        SimpleAggExecutor::new(AggExecutorArgs {
             input,
             actor_ctx,
             pk_indices,
@@ -493,7 +493,7 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-
+            metrics: Arc::new(StreamingMetrics::unused()),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()

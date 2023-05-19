@@ -46,6 +46,7 @@ impl StreamSource {
             &logical,
             Distribution::SomeShard,
             logical.catalog.as_ref().map_or(true, |s| s.append_only),
+            false,
             watermark_columns,
         );
         Self { base, logical }
