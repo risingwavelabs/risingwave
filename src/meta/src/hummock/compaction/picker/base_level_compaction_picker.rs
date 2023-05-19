@@ -93,7 +93,7 @@ impl LevelCompactionPicker {
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
-            self.config.max_compaction_bytes,
+            self.config.max_bytes_for_level_base,
             self.config.level0_sub_level_compact_level_count as usize,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,

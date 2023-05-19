@@ -114,12 +114,10 @@ impl OverlapInfo for RangeOverlapInfo {
             Some(key_range) => {
                 let mut tables = vec![];
                 let overlap_begin = others.partition_point(|table_status| {
-                    KeyComparator::compare_encoded_full_key(&table_status
-                        .key_range
-                        .as_ref()
-                        .unwrap()
-                        .left, &key_range.left)
-                        == cmp::Ordering::Less
+                    KeyComparator::compare_encoded_full_key(
+                        &table_status.key_range.as_ref().unwrap().left,
+                        &key_range.left,
+                    ) == cmp::Ordering::Less
                 });
                 if overlap_begin >= others.len() {
                     return vec![];
@@ -136,7 +134,6 @@ impl OverlapInfo for RangeOverlapInfo {
             }
             None => vec![],
         }
-
     }
 
     fn update(&mut self, table: &SstableInfo) {
