@@ -2,5 +2,5 @@ SELECT
     *
 FROM
     lineitem_count
-        LIMIT
+LIMIT
     10;
