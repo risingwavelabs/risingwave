@@ -15,7 +15,6 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -241,9 +240,8 @@ impl NonOverlapSubLevelPicker {
 
             let mut add_files_size = 0;
             // check reverse overlap
-            for (reverse_index, old_overlap_range) in (0..target_index)
-                .rev()
-                .zip_eq_fast(overlap_len_and_begins.clone().into_iter().rev())
+            for (reverse_index, old_overlap_range) in
+                overlap_len_and_begins.iter_mut().enumerate().rev()
             {
                 let target_tables = &levels[reverse_index].table_infos;
                 // It has select all files in this sub-level, so it can not overlap with more files.
@@ -277,7 +275,7 @@ impl NonOverlapSubLevelPicker {
                 }
 
                 extra_overlap_levels.push((reverse_index, extra_overlap_sst));
-                overlap_len_and_begins[reverse_index] = new_overlap_range;
+                *old_overlap_range = new_overlap_range;
             }
 
             // check reverse overlap
@@ -348,6 +346,11 @@ impl NonOverlapSubLevelPicker {
             }
 
             let ret = self.pick_sub_level(l0, level_handler, sst_index, sst);
+            if ret.sstable_infos.len() < self.min_depth
+                && ret.total_file_size < self.min_compaction_bytes
+            {
+                continue;
+            }
             scores.push(ret);
         }
 
@@ -742,7 +745,7 @@ pub mod tests {
             // limit min_depth
             let min_depth = 3;
             let picker = NonOverlapSubLevelPicker::new(
-                0,
+                1000,
                 10000,
                 min_depth,
                 10000,
@@ -756,7 +759,6 @@ pub mod tests {
                 for sst in &plan.sstable_infos {
                     sst_id_set.insert(sst[0].get_sst_id());
                 }
-
                 assert!(plan.sstable_infos.len() >= min_depth);
             }
         }
