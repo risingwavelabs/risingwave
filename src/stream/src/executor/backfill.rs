@@ -168,7 +168,7 @@ where
         // Whether we still need to backfill
         let to_backfill = !is_finished && !is_snapshot_empty;
 
-        if !to_backfill {
+        if !is_finished && is_snapshot_empty {
             // Directly finish the progress as the snapshot is empty.
             self.progress.finish(first_barrier.epoch.curr);
         }
