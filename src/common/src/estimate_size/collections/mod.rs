@@ -17,7 +17,9 @@ use std::ptr::NonNull;
 
 use super::EstimateSize;
 
+mod heap;
 pub mod lru;
+pub use heap::*;
 
 pub struct MutGuard<'a, V: EstimateSize> {
     inner: &'a mut V,

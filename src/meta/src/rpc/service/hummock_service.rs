@@ -239,11 +239,13 @@ where
         let max_compactor_task_multiplier =
             self.hummock_manager.env.opts.max_compactor_task_multiplier;
 
-        let max_task_num = std::cmp::min(
-            req.max_concurrent_task_number,
+        let rx: tokio::sync::mpsc::Receiver<
+            Result<SubscribeCompactTasksResponse, crate::MetaError>,
+        > = compactor_manager.add_compactor(
+            context_id,
             (req.cpu_core_num * max_compactor_task_multiplier) as u64,
+            req.cpu_core_num,
         );
-        let rx = compactor_manager.add_compactor(context_id, max_task_num, req.cpu_core_num);
 
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
@@ -473,17 +475,6 @@ where
             .init_metadata_for_version_replay(tables, compaction_groups)
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
-    }
-
-    async fn set_compactor_runtime_config(
-        &self,
-        request: Request<SetCompactorRuntimeConfigRequest>,
-    ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
-        let request = request.into_inner();
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
-
-        compactor_manager.set_compactor_config(request.context_id, request.config.unwrap().into());
-        Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
 
     async fn pin_version(

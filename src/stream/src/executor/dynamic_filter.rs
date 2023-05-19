@@ -23,7 +23,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{build, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
@@ -211,7 +211,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 (range, is_lower, is_insert)
             }
             (Some(c), Some(p)) => {
-                if c < p {
+                if c.default_cmp(&p).is_lt() {
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(c), Included(p)),
                         GreaterThanOrEqual | LessThan => (Included(c), Excluded(p)),

@@ -100,7 +100,7 @@ fn array_to_string(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.iter_elems_ref().flatten() {
+    for element in array.iter().flatten() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {
@@ -143,7 +143,7 @@ fn array_to_string_with_null(
     mut writer: &mut dyn Write,
 ) {
     let mut first = true;
-    for element in array.iter_elems_ref() {
+    for element in array.iter() {
         if !first {
             write!(writer, "{}", delimiter).unwrap();
         } else {

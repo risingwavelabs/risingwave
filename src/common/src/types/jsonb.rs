@@ -29,6 +29,7 @@ pub struct JsonbRef<'a>(pub(crate) &'a Value);
 
 impl EstimateSize for JsonbVal {
     fn estimated_heap_size(&self) -> usize {
+        // https://github.com/risingwavelabs/risingwave/issues/8957
         // FIXME: correctly handle jsonb size
         0
     }
