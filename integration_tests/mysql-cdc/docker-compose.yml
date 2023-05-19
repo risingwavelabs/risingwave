@@ -52,12 +52,13 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: connector-node
-  datagen:
+  # Generate lineitem table data
+  datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on: 
       - mysql
-    command: tpch prepare --sf 1 -H mysql -U root -p '123456' -D mydb -P 3306
-    container_name: datagen
+    command: tpch prepare --sf 1 --threads 4 -H mysql -U root -p '123456' -D mydb -P 3306
+    container_name: datagen_tpch
     restart: on-failure
 volumes:
   compute-node-0:

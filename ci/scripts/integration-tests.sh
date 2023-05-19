@@ -41,7 +41,9 @@ echo "--- Run Demos"
 python3 run_demos.py --case ${case} --format ${format}
 
 echo "--- Check if the ingestion is successful"
-python3 check_data.py ${case}
+# extract the type of upstream source,e.g. mysql,postgres,etc
+upstream=$(echo ${case} | cut -d'-' -f 1)
+python3 check_data.py ${case} ${upstream}
 
 echo "--- Clean Demos"
 python3 clean_demos.py --case ${case}

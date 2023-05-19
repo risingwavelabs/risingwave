@@ -1,1 +1,2 @@
-person,city_population,nexmark_q8
+relations: person,city_population,nexmark_q8,lineitem_count
+cdc-tables: person,lineitem_rw
