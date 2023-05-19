@@ -24,11 +24,10 @@ use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::buffer::{BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum};
+use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
@@ -75,9 +74,6 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Internal state table for persisting state of backfill state.
     state_table: StateTable<S>,
 
-    /// Upstream dist key to compute vnode
-    dist_key_in_pk: Vec<usize>,
-
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
@@ -101,7 +97,6 @@ where
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         state_table: StateTable<S>,
-        dist_key_in_pk: Vec<usize>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -117,7 +112,6 @@ where
             upstream_table,
             upstream,
             state_table,
-            dist_key_in_pk,
             output_indices,
             actor_id: progress.actor_id(),
             progress,
@@ -131,8 +125,6 @@ where
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
-
-        let _dist_key_in_pk = self.dist_key_in_pk;
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
@@ -539,6 +531,7 @@ where
     ) -> StreamExecutorResult<()> {
         let vnodes = table.vnodes().clone();
         if let Some(old_state) = old_state {
+            // There are updates to existing state, persist.
             if *old_state != current_partial_state {
                 vnodes.iter_ones().for_each(|vnode| {
                     let datum = Some((vnode as i16).into());
@@ -550,10 +543,12 @@ where
                     })
                 });
             } else {
+                // If no updates to existing state, we don't need to persist
                 table.commit_no_data_expected(epoch);
                 return Ok(());
             }
         } else {
+            // No existing state, create a new entry.
             vnodes.iter_ones().for_each(|vnode| {
                 let datum = Some((vnode as i16).into());
                 // fill the state
