@@ -539,8 +539,7 @@
             └──  StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
-    Chain { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-    ├── state table: 1
+    Chain { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 1 }
     ├──  Upstream
     └──  BatchPlanNode
 
