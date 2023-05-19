@@ -28,7 +28,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{cmp_datum, OrderType};
@@ -516,14 +516,10 @@ where
         old_state: &mut Option<OwnedRow>,
     ) -> StreamExecutorResult<()> {
         if let Some(current_pos_inner) = current_pos {
-            let current_state = Self::build_new_state(
-                table.vnode_bitmap(),
-                is_finished,
-                current_pos_inner,
-                dist_key_in_pk,
-            );
-            Self::flush_data(table, epoch, old_state, &current_state).await?;
-            *old_state = Some(current_state);
+            // state w/o vnodes.
+            let current_partial_state = Self::build_temporary_state(is_finished, current_pos_inner);
+            Self::flush_data(table, epoch, old_state, current_partial_state).await?;
+            // *old_state = Some(current_state);
         } else {
             table.commit_no_data_expected(epoch);
         }
@@ -542,51 +538,52 @@ where
         table: &mut StateTable<S>,
         epoch: EpochPair,
         old_state: &Option<OwnedRow>,
-        current_state: &OwnedRow,
+        mut current_partial_state: Vec<Datum>,
     ) -> StreamExecutorResult<()> {
+        let vnodes = table.vnodes().clone();
         if let Some(old_state) = old_state {
-            if old_state != current_state {
-                debug_assert_eq!(old_state.len(), current_state.len());
+            vnodes.iter_ones().for_each(|vnode| {
+                let datum = Some((vnode as i16).into());
+                // fill the state
+                current_partial_state[0] = datum;
                 table.write_record(Record::Update {
-                    old_row: old_state,
-                    new_row: current_state,
+                    old_row: old_state.as_inner(),
+                    new_row: &current_partial_state[..],
                 })
-            } else {
-                table.commit_no_data_expected(epoch);
-                return Ok(());
-            }
+            });
         } else {
-            table.write_record(Record::Insert {
-                new_row: current_state,
-            })
+            vnodes.iter_ones().for_each(|vnode| {
+                let datum = Some((vnode as i16).into());
+                // fill the state
+                current_partial_state[0] = datum;
+                table.write_record(Record::Insert {
+                    new_row: &current_partial_state[..],
+                })
+            });
         }
         table.commit(epoch).await
     }
 
-    fn build_new_state(
-        vnodes: &Bitmap,
-        is_finished: bool,
-        current_pos: &OwnedRow,
-        dist_key_in_pk: &[usize],
-    ) -> OwnedRow {
-        let mut state = vec![None; current_pos.len() + 2];
-
-        // vnode
-        let current_vnode = VirtualNode::compute_row(current_pos, dist_key_in_pk).to_scalar();
-        debug_assert!(vnodes.is_set(current_vnode as usize));
-        let current_vnode = Some(current_vnode.into());
-        state[0] = current_vnode;
-
-        // pk
-        for (i, d) in current_pos.iter().enumerate() {
-            state[i + 1] = d.to_owned_datum();
-        }
-
-        // is_finished
-        state[current_pos.len() + 1] = Some(is_finished.into());
-
-        OwnedRow::new(state)
+    // We want to avoid building a row for every vnode.
+    // Instead we can just modify a single row, and dispatch it to state table to write.
+    fn build_temporary_state(is_finished: bool, current_pos: &OwnedRow) -> Vec<Datum> {
+        let mut row_state = vec![None; current_pos.len() + 2];
+        row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+        row_state[current_pos.len() + 1] = Some(is_finished.into());
+        row_state
     }
+
+    // /// Iterator through all vnodes
+    // fn build_new_state<'a>(
+    //     vnodes: &Bitmap,
+    //     temporary_state: &'a mut [Datum],
+    // ) -> impl Iterator<Item = &mut [Datum]> {
+    //     vnodes.iter_ones().map(|vnode| {
+    //         let datum = Some((vnode as i16).into());
+    //         temporary_state[0] = datum;
+    //         temporary_state
+    //     })
+    // }
 
     fn update_pos(chunk: &StreamChunk, pk_in_output_indices: &[usize]) -> Option<OwnedRow> {
         Some(
