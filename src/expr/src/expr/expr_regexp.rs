@@ -42,6 +42,20 @@ impl RegexpContext {
                 .build()?,
         ))
     }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags)
+    }
 }
 
 /// <https://www.postgresql.org/docs/current/functions-matching.html#POSIX-EMBEDDED-OPTIONS-TABLE>

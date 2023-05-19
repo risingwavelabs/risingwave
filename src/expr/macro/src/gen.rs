@@ -460,16 +460,42 @@ impl FunctionAttr {
         let num_args = self.args.len();
         let fn_name = format_ident!("{}", self.user_fn.name);
         let struct_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
-        let elems: Vec<_> = (0..num_args).map(|i| format_ident!("v{i}")).collect();
-        let child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
-        let array_refs: Vec<_> = (0..num_args).map(|i| format_ident!("array{i}")).collect();
-        let arrays: Vec<_> = (0..num_args).map(|i| format_ident!("a{i}")).collect();
+        let ids = (0..num_args)
+            .filter(|i| match &self.prebuild {
+                Some(s) => !s.contains(&format!("${i}")),
+                None => true,
+            })
+            .collect_vec();
+        let const_ids = (0..num_args).filter(|i| match &self.prebuild {
+            Some(s) => s.contains(&format!("${i}")),
+            None => false,
+        });
+        let elems: Vec<_> = ids.iter().map(|i| format_ident!("v{i}")).collect();
+        let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
+        let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
+        let child: Vec<_> = ids.iter().map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = ids.iter().map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = ids.iter().map(|i| format_ident!("a{i}")).collect();
         let arg_arrays = self
             .args
             .iter()
             .map(|t| format_ident!("{}", types::array_type(t)));
         let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
-
+        let const_arg = match &self.prebuild {
+            Some(_) => quote! { &self.const_arg },
+            None => quote! {},
+        };
+        let const_arg_type = match &self.prebuild {
+            Some(s) => s.split("::").next().unwrap().parse().unwrap(),
+            None => quote! { () },
+        };
+        let const_arg_value = match &self.prebuild {
+            Some(s) => s
+                .replace("$", "child")
+                .parse()
+                .expect("invalid prebuild syntax"),
+            None => quote! { () },
+        };
         let value = match self.user_fn.return_type {
             ReturnType::T => quote! { Some(value) },
             ReturnType::Option => quote! { value },
@@ -487,12 +513,15 @@ impl FunctionAttr {
 
                 crate::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
+                #(let #all_child = iter.next().unwrap();)*
+                #(let #const_child = #const_child.eval_const()?;)*
 
                 #[derive(Debug)]
                 struct #struct_name {
                     return_type: DataType,
                     chunk_size: usize,
                     #(#child: BoxedExpression,)*
+                    const_arg: #const_arg_type,
                 }
                 #[async_trait::async_trait]
                 impl crate::table_function::TableFunction for #struct_name {
@@ -516,9 +545,12 @@ impl FunctionAttr {
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#elems),)*) = row && visible {
-                                for value in #fn_name(#(#elems),*) {
+                                for value in #fn_name(#(#elems,)* #const_arg) {
                                     index_builder.append(Some(i as i64));
-                                    value_builder.append(#value);
+                                    match #value {
+                                        Some(v) => value_builder.append(Some(v.as_scalar_ref())),
+                                        None => value_builder.append_null(),
+                                    }
 
                                     if index_builder.len() == self.chunk_size {
                                         let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
@@ -541,7 +573,8 @@ impl FunctionAttr {
                 Ok(Box::new(#struct_name {
                     return_type,
                     chunk_size,
-                    #(#child: iter.next().unwrap(),)*
+                    #(#child,)*
+                    const_arg: #const_arg_value,
                 }))
             }
         })

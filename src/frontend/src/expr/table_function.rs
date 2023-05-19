@@ -42,7 +42,7 @@ pub struct TableFunction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
-    Generate,
+    GenerateSeries,
     Range,
     Unnest,
     RegexpMatches,
@@ -52,7 +52,7 @@ pub enum TableFunctionType {
 impl TableFunctionType {
     fn to_protobuf(self) -> Type {
         match self {
-            TableFunctionType::Generate => Type::Generate,
+            TableFunctionType::GenerateSeries => Type::GenerateSeries,
             TableFunctionType::Range => Type::Range,
             TableFunctionType::Unnest => Type::Unnest,
             TableFunctionType::RegexpMatches => Type::RegexpMatches,
@@ -64,7 +64,7 @@ impl TableFunctionType {
 impl TableFunction {
     pub fn name(&self) -> &str {
         match self.function_type {
-            TableFunctionType::Generate => "generate_series",
+            TableFunctionType::GenerateSeries => "generate_series",
             TableFunctionType::Range => "range",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
@@ -78,7 +78,7 @@ impl FromStr for TableFunctionType {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("generate_series") {
-            Ok(TableFunctionType::Generate)
+            Ok(TableFunctionType::GenerateSeries)
         } else if s.eq_ignore_ascii_case("range") {
             Ok(TableFunctionType::Range)
         } else if s.eq_ignore_ascii_case("unnest") {
@@ -99,7 +99,7 @@ impl TableFunction {
         // Current implementation is copied from legacy code.
 
         match func_type {
-            function_type @ (TableFunctionType::Generate | TableFunctionType::Range) => {
+            function_type @ (TableFunctionType::GenerateSeries | TableFunctionType::Range) => {
                 // generate_series ( start timestamp, stop timestamp, step interval ) or
                 // generate_series ( start i32, stop i32, step i32 )
 

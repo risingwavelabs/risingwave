@@ -153,6 +153,7 @@ struct FunctionAttr {
     batch_fn: Option<String>,
     state: Option<String>,
     init_state: Option<String>,
+    prebuild: Option<String>,
     user_fn: UserFunctionAttr,
 }
 

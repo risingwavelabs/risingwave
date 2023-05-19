@@ -972,6 +972,10 @@ macro_rules! impl_scalar_impl_ref_conversion {
                     ), *
                 }
             }
+
+            pub fn as_scalar_ref(&self) -> Self {
+                *self
+            }
         }
     };
 }

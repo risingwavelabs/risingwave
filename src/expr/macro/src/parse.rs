@@ -54,6 +54,7 @@ impl FunctionAttr {
             batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
             init_state: find_argument(attr, "init_state"),
+            prebuild: find_argument(attr, "prebuild"),
             user_fn,
         })
     }
@@ -67,7 +68,6 @@ impl UserFunctionAttr {
             arg_option: args_are_all_option(item),
             return_type: return_type(item),
             generic: item.sig.generics.params.len(),
-            // prebuild: extract_prebuild_arg(item),
         })
     }
 }
@@ -163,25 +163,6 @@ fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
     let syn::Type::Path(path) = ty else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == "Option"
-}
-
-/// Extract `#[prebuild("function_name")]` from arguments.
-fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
-    for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
-        let syn::FnArg::Typed(arg) = arg else { continue };
-        if let Some(idx) = arg
-            .attrs
-            .iter_mut()
-            .position(|att| att.path.is_ident("prebuild"))
-        {
-            let attr = arg.attrs.remove(idx);
-            // XXX: this is a hack to parse a string literal from token stream
-            let s = attr.tokens.to_string();
-            let s = s.trim_start_matches("(\"").trim_end_matches("\")");
-            return Some((i, s.to_string()));
-        }
-    }
-    None
 }
 
 /// Find argument `#[xxx(.., name = "value")]`.
