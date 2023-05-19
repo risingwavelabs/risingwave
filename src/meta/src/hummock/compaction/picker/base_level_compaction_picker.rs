@@ -866,6 +866,7 @@ pub mod tests {
             CompactionConfigBuilder::new()
                 .max_compaction_bytes(500000)
                 .level0_sub_level_compact_level_count(2)
+                .sub_level_max_compaction_bytes(1000)
                 .build(),
         );
 
