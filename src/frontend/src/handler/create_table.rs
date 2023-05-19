@@ -48,6 +48,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::resolve_connection_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
@@ -257,7 +258,9 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let expr_impl = binder
+                        .bind_expr(expr)?
+                        .cast_assign(column_catalogs[idx].data_type().clone())?;
 
                     check_default_column_constraints(&expr_impl, column_catalogs)?;
 
@@ -550,7 +553,13 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
+
+    // resolve privatelink connection for Table backed by Kafka source
+    let mut with_options = WithOptions::new(properties);
+    let connection_id =
+        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
 
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
@@ -563,12 +572,12 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties,
+        properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
         definition: "".to_string(),
-        connection_id: None,
+        connection_id,
         optional_associated_table_id: Some(OptionalAssociatedTableId::AssociatedTableId(
             TableId::placeholder().table_id,
         )),
@@ -582,7 +591,7 @@ fn gen_table_plan_inner(
         false,
         true,
         context.clone(),
-    )
+    )?
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());
@@ -651,7 +660,7 @@ pub async fn handle_create_table(
         }
     }
 
-    let (graph, source, table, notices) = {
+    let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
@@ -681,15 +690,12 @@ pub async fn handle_create_table(
             )?,
         };
 
-        let context = plan.plan_base().ctx.clone();
-        let notices = context.take_warnings();
-
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
             .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table, notices)
+        (graph, source, table)
     };
 
     tracing::trace!(
@@ -701,10 +707,7 @@ pub async fn handle_create_table(
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result_with_notices(
-        StatementType::CREATE_TABLE,
-        notices,
-    ))
+    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
 pub fn check_create_table_with_source(

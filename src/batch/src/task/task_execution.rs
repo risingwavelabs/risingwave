@@ -264,7 +264,7 @@ impl TaskOutput {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ShutdownMsg {
     /// Used in init, it never occur in receiver later.
     Init,

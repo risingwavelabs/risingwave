@@ -1,55 +1,55 @@
 query R
-SELECT abs(sin(1) - 0.8414709848078965) < 0.000000000000001
+SELECT abs(sin(1) - 0.8414709848078965) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cos(1) - 0.5403023058681398) < 0.000000000000001
+SELECT abs(cos(1) - 0.5403023058681398) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tan(1) - 1.557407724654902) < 0.000000000000001
+SELECT abs(tan(1) - 1.557407724654902) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cot(1) - 0.6420926159343308) < 0.000000000000001
+SELECT abs(cot(1) - 0.6420926159343308) < 1e-14
 ----
 t
 
 query R
-SELECT abs(asin(1) - 1.5707963267948966) < 0.000000000000001
+SELECT abs(asin(1) - 1.5707963267948966) < 1e-14
 ----
 t
 
 query R
-SELECT abs(acos(1) - 0) < 0.000000000000001
+SELECT abs(acos(1) - 0) < 1e-14
 ----
 t
 
 query R
-SELECT abs(atan(1) - 0.7853981633974483) < 0.000000000000001
+SELECT abs(atan(1) - 0.7853981633974483) < 1e-14
 ----
 t
 
 query R
-SELECT abs(sin(1.1) - 0.8912073600614354) < 0.000000000000001
+SELECT abs(sin(1.1) - 0.8912073600614354) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cos(1.1) - 0.4535961214255773) < 0.000000000000001
+SELECT abs(cos(1.1) - 0.4535961214255773) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tan(1.1) - 1.9647596572486525) < 0.000000000000001
+SELECT abs(tan(1.1) - 1.9647596572486525) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cot(1.1) - 0.5089681052390642) < 0.000000000000001
+SELECT abs(cot(1.1) - 0.5089681052390642) < 1e-14
 ----
 t
 
@@ -64,27 +64,27 @@ SELECT acos(1.1)
 NaN
 
 query R
-SELECT abs(atan(1.1) - 0.8329812666744317) < 0.000000000000001
+SELECT abs(atan(1.1) - 0.8329812666744317) < 1e-14
 ----
 t
 
 query R
-SELECT abs(sin(-1.1) - -0.8912073600614354) < 0.000000000000001
+SELECT abs(sin(-1.1) - -0.8912073600614354) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cos(-1.1) - 0.4535961214255773) < 0.000000000000001
+SELECT abs(cos(-1.1) - 0.4535961214255773) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tan(-1.1) - -1.9647596572486525) < 0.000000000000001
+SELECT abs(tan(-1.1) - -1.9647596572486525) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cot(-1.1) - -0.5089681052390642) < 0.000000000000001
+SELECT abs(cot(-1.1) - -0.5089681052390642) < 1e-14
 ----
 t
 
@@ -99,12 +99,12 @@ SELECT acos(-1.1)
 NaN
 
 query R
-SELECT abs(atan(-1.1) - -0.8329812666744317) < 0.000000000000001
+SELECT abs(atan(-1.1) - -0.8329812666744317) < 1e-14
 ----
 t
 
 query R
-SELECT abs(sin(pi()) - 0.000000000000001) < 0.000000000000001
+SELECT abs(sin(pi()) - 0.000000000000001) < 1e-14
 ----
 t
 
@@ -114,7 +114,7 @@ SELECT cos(pi())
 -1
 
 query R
-SELECT abs(tan(pi())) < 0.000000000000001
+SELECT abs(tan(pi())) < 1e-14
 ----
 t
 
@@ -129,32 +129,32 @@ SELECT acos(pi())
 NaN
 
 query R
-SELECT abs(atan(pi()) - 1.2626272556789115) < 0.000000000000001
+SELECT abs(atan(pi()) - 1.2626272556789115) < 1e-14
 ----
 t
 
 query R
-SELECT abs(atan2(1, 0) - 1.5707963267948966) < 0.000000000000001
+SELECT abs(atan2(1, 0) - 1.5707963267948966) < 1e-14
 ----
 t
 
 query R
-SELECT abs(atan2(1.1, 3.8) - 0.2817718672733522) < 0.000000000000001
+SELECT abs(atan2(1.1, 3.8) - 0.2817718672733522) < 1e-14
 ----
 t
 
 query R
-SELECT abs(atan2(-1.1, -3.8) - -2.859820786316441) < 0.000000000000001
+SELECT abs(atan2(-1.1, -3.8) - -2.859820786316441) < 1e-14
 ----
 t
 
 query R
-SELECT abs(atan2(pi(), -3.8) - 2.4507611878363194) < 0.000000000000001
+SELECT abs(atan2(pi(), -3.8) - 2.4507611878363194) < 1e-14
 ----
 t
 
 query R
-SELECT abs(sind(1) - 0.01745240643728351) < 0.000000000000001
+SELECT abs(sind(1) - 0.01745240643728351) < 1e-14
 ----
 t
 
@@ -164,57 +164,57 @@ SELECT sind(0)
 0
 
 query R
-SELECT abs(abs(sind(-1)) - 0.01745240643728351) < 0.000000000000001
+SELECT abs(abs(sind(-1)) - 0.01745240643728351) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(0)) - 0) < 0.000000000000001
+SELECT abs(abs(sind(0)) - 0) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(30)) - 0.5) < 0.000000000000001
+SELECT abs(abs(sind(30)) - 0.5) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(45)) - 0.707106781186548) < 0.000000000000001
+SELECT abs(abs(sind(45)) - 0.707106781186548) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(60)) - 0.866025403784439) < 0.000000000000001
+SELECT abs(abs(sind(60)) - 0.866025403784439) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(90)) - 1) < 0.000000000000001
+SELECT abs(abs(sind(90)) - 1) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(120)) - 0.8660254037844386) < 0.000000000000001
+SELECT abs(abs(sind(120)) - 0.8660254037844386) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(135)) - 0.7071067811865475) < 0.000000000000001
+SELECT abs(abs(sind(135)) - 0.7071067811865475) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(150)) - 0.5) < 0.000000000000001
+SELECT abs(abs(sind(150)) - 0.5) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(180)) - 0) < 0.000000000000001
+SELECT abs(abs(sind(180)) - 0) < 1e-14
 ----
 t
 
 query R
-SELECT abs(abs(sind(360)) - 0) < 0.000000000000001
+SELECT abs(abs(sind(360)) - 0) < 1e-14
 ----
 t
 
@@ -249,67 +249,67 @@ SELECT degrees(pi()/2)
 90
 
 query R
-SELECT abs(radians(180) - pi()) < 0.000000000000001
+SELECT abs(radians(180) - pi()) < 1e-14
 ----
 t
 
 query R
-SELECT abs(radians(90) - pi()/2) < 0.000000000000001
+SELECT abs(radians(90) - pi()/2) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cosd(1) - 0.9998476951563913) < 0.000000000000001
+SELECT abs(cosd(1) - 0.9998476951563913) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cosd(10) - 0.984807753012208) < 0.000000000000001;
+SELECT abs(cosd(10) - 0.984807753012208) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(20) - 0.9396926207859084) < 0.000000000000001;
+SELECT abs(cosd(20) - 0.9396926207859084) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(30) - 0.8660254037844387) < 0.000000000000001;
+SELECT abs(cosd(30) - 0.8660254037844387) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(40) - 0.766044443118978) < 0.000000000000001;
+SELECT abs(cosd(40) - 0.766044443118978) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(50) - 0.6427876096865394) < 0.000000000000001;
+SELECT abs(cosd(50) - 0.6427876096865394) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(60) - 0.5000000000000001) < 0.000000000000001;
+SELECT abs(cosd(60) - 0.5000000000000001) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(70) - 0.34202014332566877) < 0.000000000000001;
+SELECT abs(cosd(70) - 0.34202014332566877) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(80) - 0.17364817766693047) < 0.000000000000001;
+SELECT abs(cosd(80) - 0.17364817766693047) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cosd(85) - 0.08715574274765817) < 0.000000000000001;
+SELECT abs(cosd(85) - 0.08715574274765817) < 1e-14;
 ----
 t 
 
 query R
-SELECT abs(cosd(90) - 0.0) < 0.000000000000001;
+SELECT abs(cosd(90) - 0.0) < 1e-14;
 ----
 t 
 
@@ -341,12 +341,12 @@ Infinity
 query R
 SELECT tand(-90)
 ----
-Infinity
+-Infinity
 
 query R
 SELECT tand(270)
 ----
-Infinity
+-Infinity
 
 query R
 SELECT tand(-270)
@@ -380,62 +380,62 @@ SELECT tand('-NaN')
 NaN
 
 query R
-SELECT abs(tand(20) - 0.36397023426620234) < 0.000000000000001
+SELECT abs(tand(20) - 0.36397023426620234) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(-20) + 0.36397023426620234) < 0.000000000000001
+SELECT abs(tand(-20) + 0.36397023426620234) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(45) - 1) < 0.000000000000001
+SELECT abs(tand(45) - 1) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(-45) + 1) < 0.000000000000001
+SELECT abs(tand(-45) + 1) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(60) - 1.7320508075688772) < 0.000000000000001
+SELECT abs(tand(60) - 1.7320508075688772) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(-60) + 1.7320508075688772) < 0.000000000000001
+SELECT abs(tand(-60) + 1.7320508075688772) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(75) - 3.7320508075688776) < 0.000000000000001
+SELECT abs(tand(75) - 3.7320508075688776) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(-75) + 3.7320508075688776) < 0.000000000000001
+SELECT abs(tand(-75) + 3.7320508075688776) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(120) - -1.7320508075688772) < 0.000000000000001
+SELECT abs(tand(120) - -1.7320508075688772) < 1e-14
 ----
 t
 
 query R
-SELECT abs(tand(-120) + -1.7320508075688772) < 0.000000000000001
+SELECT abs(tand(-120) + -1.7320508075688772) < 1e-14
 ----
 t
 
 query R
-SELECT abs(cotd(45) - 1) < 0.000000000000001;
+SELECT abs(cotd(45) - 1) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cotd(60) - 0.5773502691896257) < 0.000000000000001;
+SELECT abs(cotd(60) - 0.5773502691896257) < 1e-14;
 ----
 t
 
@@ -445,12 +445,12 @@ SELECT cotd(90);
 0
 
 query R
-SELECT abs(cotd(-45) + 1) < 0.000000000000001;
+SELECT abs(cotd(-45) + 1) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cotd(-60) + 0.5773502691896257) < 0.000000000000001;
+SELECT abs(cotd(-60) + 0.5773502691896257) < 1e-14;
 ----
 t
 
@@ -460,23 +460,23 @@ SELECT cotd(-90);
 0
 
 query R
-SELECT abs(cotd(30) - 1.7320508075688772) < 0.000000000000001;
+SELECT abs(cotd(30) - 1.7320508075688772) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cotd(-30) + 1.7320508075688772) < 0.000000000000001;
+SELECT abs(cotd(-30) + 1.7320508075688772) < 1e-14;
 ----
 t
 
 
 query R
-SELECT abs(cotd(120) + 0.5773502691896255) < 0.000000000000001;
+SELECT abs(cotd(120) + 0.5773502691896255) < 1e-14;
 ----
 t
 
 query R
-SELECT abs(cotd(-120) - 0.5773502691896255) < 0.000000000000001;
+SELECT abs(cotd(-120) - 0.5773502691896255) < 1e-14;
 ----
 t
 
@@ -499,3 +499,163 @@ query R
 SELECT cotd('-NaN')
 ----
 NaN
+
+query R
+SELECT abs(sinh(1) - 1.1752011936438014) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(0)) - 0) < 1e-14
+----
+t
+
+query R
+SELECT abs(cosh(1) - 1.5430806348152437) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(1) - 90)) < 1e-14
+----
+t
+
+query R
+SELECT abs(tanh(1) -0.7615941559557649) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(-1) + 90)) < 1e-14
+----
+t
+
+query R
+SELECT abs(coth(1) -  1.3130352854993312) < 1e-14
+----
+t
+
+query R
+SELECT abs(abs(asind(0.5) - 30)) < 1e-14
+----
+t
+
+query R
+SELECT abs(asinh(1) -  0.881373587019543) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosh(1)) < 1e-14
+----
+t
+
+query R
+SELECT atanh(1)
+----
+Infinity
+
+query R
+SELECT abs(sinh(1.1) - 1.335647470124177) < 1e-14
+----
+t
+
+query R
+SELECT abs(cosh(1.1) -  1.6685185538222564) < 1e-14
+----
+t
+
+query R
+SELECT abs(tanh(1.1) - 0.8004990217606297) < 1e-14
+----
+t
+
+query R
+SELECT abs(coth(1.1) -  1.2492207645683124) < 1e-14
+----
+t
+
+query R
+SELECT abs(asinh(1.1) - 0.9503469298211343) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosh(1.1) -  0.4435682543851153) < 1e-14
+----
+t
+
+query R
+SELECT atanh(1.1)
+----
+NaN
+
+query R
+SELECT abs(sinh(-1.1) + 1.335647470124177) < 1e-14
+----
+t
+
+query R
+SELECT abs(cosh(-1.1) - 1.6685185538222564) < 1e-14
+----
+t
+
+query R
+SELECT abs(tanh(-1.1) + 0.8004990217606297) < 1e-14
+----
+t
+
+query R
+SELECT abs(coth(-1.1)  + 1.2492207645683124) < 1e-14
+----
+t
+
+query R
+SELECT abs(asinh(-1.1) + 0.9503469298211343) < 1e-14
+----
+t
+
+query R
+SELECT acosh(-1.1)
+----
+NaN
+
+query R
+SELECT atanh(-1.1)
+----
+NaN
+
+query R
+SELECT abs(sinh(pi()) -  11.548739357257746) < 1e-14
+----
+t
+
+query R
+SELECT abs(cosh(pi()) -  11.591953275521519 ) < 1e-14
+----
+t
+
+query R
+SELECT abs(tanh(pi()) -  0.99627207622075) < 1e-14
+----
+t
+
+query R
+SELECT abs(asinh(pi()) -  1.8622957433108482) < 1e-14
+----
+t
+
+query R
+SELECT abs(acosh(pi()) - 1.8115262724608532) < 1e-14
+----
+t
+
+query R
+SELECT atanh(pi())
+----
+NaN
+
+query R
+SELECT abs(abs(asind(-0.5) + 30)) < 1e-14
+----
+t

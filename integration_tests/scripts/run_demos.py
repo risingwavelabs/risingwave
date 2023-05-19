@@ -19,14 +19,14 @@ def run_sql_file(f: str, dir: str):
         sys.exit(1)
 
 
-def run_demo(demo: str, format: str):
+def run_demo(demo: str, format: str, wait_time = 40):
     file_dir = dirname(abspath(__file__))
     project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
 
     subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
-    sleep(40)
+    sleep(wait_time)
 
     sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
     for fname in sql_files:

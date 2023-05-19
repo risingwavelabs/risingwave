@@ -486,7 +486,7 @@ impl Cluster {
             // has a small chance to restart after a long time
             // so that the node is expired and removed from the cluster
             if rand::thread_rng().gen_bool(0.1) {
-                // max_heartbeat_interval_secs = 60
+                // max_heartbeat_interval_secs = 15
                 t += Duration::from_secs(opts.restart_delay_secs as u64);
             }
             tokio::time::sleep(t).await;
