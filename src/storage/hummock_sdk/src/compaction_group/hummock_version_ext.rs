@@ -511,9 +511,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                 );
                 // The sst may be flushed by spill-to-s3, so we must sort them as epoch
                 // order.
-                for (min_epoch, ssts) in &insert_table_infos
+                for (max_epoch, ssts) in &insert_table_infos
                     .into_iter()
-                    .sorted_by(|sst1, sst2| sst1.min_epoch.cmp(&sst2.min_epoch))
+                    .sorted_by(|sst1, sst2| sst1.max_epoch.cmp(&sst2.max_epoch))
                     .group_by(|sst| sst.max_epoch)
                 {
                     let mut level_type = LevelType::Overlapping;
@@ -528,7 +528,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     }
                     insert_new_sub_level(
                         levels.l0.as_mut().unwrap(),
-                        min_epoch,
+                        max_epoch,
                         level_type,
                         ssts,
                         None,
