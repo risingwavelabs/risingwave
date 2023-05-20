@@ -382,6 +382,9 @@ where
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
                     self.progress.finish(barrier.epoch.curr);
+                    // FIXME(kwannoel): Is it possible for current_pos to not be updated here???
+                    // Set an assertion to check it.
+                    debug_assert_ne!(current_pos, None);
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
