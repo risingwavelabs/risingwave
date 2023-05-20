@@ -417,6 +417,9 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
+                    self.progress.finish(barrier.epoch.curr);
+                }
                 yield msg;
             }
         }
