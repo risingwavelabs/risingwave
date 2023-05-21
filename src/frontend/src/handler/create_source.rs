@@ -314,7 +314,7 @@ pub(crate) async fn resolve_source_schema(
             StreamSourceInfo {
                 row_format: RowFormatType::UpsertJson as i32,
                 ..Default::default()
-            }    
+            }
         }
 
         SourceSchema::Maxwell => {
