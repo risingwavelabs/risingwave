@@ -823,6 +823,12 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 
