@@ -1,0 +1,611 @@
+- id: create_tables
+  sql: |
+    CREATE TABLE person (
+        id BIGINT,
+        name VARCHAR,
+        email_address VARCHAR,
+        credit_card VARCHAR,
+        city VARCHAR,
+        state VARCHAR,
+        date_time TIMESTAMP,
+        PRIMARY KEY (id)
+    );
+
+    CREATE TABLE auction (
+        id BIGINT,
+        "item_name" VARCHAR,
+        "description" VARCHAR,
+        "initial_bid" BIGINT,
+        "reserve" BIGINT,
+        "date_time" TIMESTAMP,
+        "expires" TIMESTAMP,
+        "seller" BIGINT,
+        "category" BIGINT,
+        PRIMARY KEY (id)
+    );
+
+    CREATE TABLE bid (
+        "auction" BIGINT,
+        "bidder" BIGINT,
+        "price" BIGINT,
+        "channel" VARCHAR,
+        "url" VARCHAR,
+        "date_time" TIMESTAMP,
+        "extra" VARCHAR
+    ) append only;
+  expected_outputs: []
+- id: nexmark_q0
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, date_time FROM bid;
+  expected_outputs:
+  - stream_plan
+  - batch_plan
+  - sink_plan
+  - stream_dist_plan
+- id: nexmark_q1
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      auction,
+      bidder,
+      0.908 * price as price,
+      date_time
+    FROM bid;
+  expected_outputs:
+  - stream_dist_plan
+  - sink_plan
+  - stream_plan
+  - batch_plan
+- id: nexmark_q2
+  before:
+  - create_tables
+  sql: SELECT auction, price FROM bid WHERE auction = 1007 OR auction = 1020 OR auction = 2001 OR auction = 2019 OR auction = 2087;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+  - sink_plan
+  - batch_plan
+- id: nexmark_q3
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        P.name, P.city, P.state, A.id
+    FROM
+        auction AS A INNER JOIN person AS P on A.seller = P.id
+    WHERE
+        A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: nexmark_q4
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        Q.category,
+        AVG(Q.final) as avg
+    FROM (
+        SELECT MAX(B.price) AS final, A.category
+        FROM auction A, bid B
+        WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
+        GROUP BY A.id, A.category
+    ) Q
+    GROUP BY Q.category;
+  expected_outputs:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: nexmark_q5
+  before:
+  - create_tables
+  sql: |
+    SELECT AuctionBids.auction, AuctionBids.num FROM (
+      SELECT
+        bid.auction,
+        count(*) AS num,
+        window_start AS starttime
+      FROM
+        HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+      GROUP BY
+        window_start,
+        bid.auction
+    ) AS AuctionBids
+    JOIN (
+      SELECT
+        max(CountBids.num) AS maxn,
+        CountBids.starttime_c
+      FROM (
+        SELECT
+          count(*) AS num,
+          window_start AS starttime_c
+        FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        GROUP BY
+          bid.auction,
+          window_start
+      ) AS CountBids
+      GROUP BY
+        CountBids.starttime_c
+    ) AS MaxBids
+    ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+  expected_outputs:
+  - stream_plan
+  - logical_plan
+  - batch_plan
+  - stream_dist_plan
+- id: nexmark_q6
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        Q.seller,
+        AVG(Q.final) OVER
+            (PARTITION BY Q.seller ORDER BY Q.date_time ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)
+        as avg
+    FROM (
+        SELECT MAX(B.price) AS final, A.seller, B.date_time
+        FROM auction AS A, bid AS B
+        WHERE A.id = B.auction and B.date_time between A.date_time and A.expires
+        GROUP BY A.id, A.seller
+    ) AS Q;
+  expected_outputs:
+  - planner_error
+- id: nexmark_q7
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      B.auction,
+      B.price,
+      B.bidder,
+      B.date_time
+    FROM
+      bid B
+    JOIN (
+      SELECT
+        MAX(price) AS maxprice,
+        window_end as date_time
+      FROM
+        TUMBLE(bid, date_time, INTERVAL '10' SECOND)
+      GROUP BY
+        window_end
+    ) B1 ON B.price = B1.maxprice
+    WHERE
+      B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
+      AND B1.date_time;
+  expected_outputs:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: nexmark_q8
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      P.id,
+      P.name,
+      P.starttime
+    FROM (
+      SELECT
+        id,
+        name,
+        window_start AS starttime,
+        window_end AS endtime
+      FROM
+        TUMBLE(person, date_time, INTERVAL '10' SECOND)
+      GROUP BY
+        id,
+        name,
+        window_start,
+        window_end
+    ) P
+    JOIN (
+      SELECT
+        seller,
+        window_start AS starttime,
+        window_end AS endtime
+      FROM
+        TUMBLE(auction, date_time, INTERVAL '10' SECOND)
+      GROUP BY
+        seller,
+        window_start,
+        window_end
+    ) A ON P.id = A.seller
+      AND P.starttime = A.starttime
+      AND P.endtime = A.endtime;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+  - batch_plan
+- id: nexmark_q9
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      id, item_name, description, initial_bid, reserve, date_time, expires, seller, category,
+      auction, bidder, price, bid_date_time
+    FROM (
+      SELECT A.*, B.auction, B.bidder, B.price, B.date_time AS bid_date_time,
+        ROW_NUMBER() OVER (PARTITION BY A.id ORDER BY B.price DESC, B.date_time ASC) AS rownum
+      FROM auction A, bid B
+      WHERE A.id = B.auction AND B.date_time BETWEEN A.date_time AND A.expires
+    )
+    WHERE rownum <= 1;
+  expected_outputs:
+  - stream_dist_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - logical_plan
+  - stream_plan
+- id: nexmark_q10
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, date_time, TO_CHAR(date_time, 'YYYY-MM-DD') as date, TO_CHAR(date_time, 'HH:MI') as time FROM bid;
+  expected_outputs:
+  - stream_plan
+  - sink_plan
+  - batch_plan
+  - stream_dist_plan
+- id: nexmark_q11
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      B.bidder,
+      count(*) as bid_count,
+      SESSION_START(B.date_time, INTERVAL '10' SECOND) as starttime,
+      SESSION_END(B.date_time, INTERVAL '10' SECOND) as endtime
+    FROM bid B
+    GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
+  expected_outputs:
+  - binder_error
+- id: nexmark_q12
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        B.bidder,
+        count(*) as bid_count,
+        TUMBLE_START(B.p_time, INTERVAL '10' SECOND) as starttime,
+        TUMBLE_END(B.p_time, INTERVAL '10' SECOND) as endtime
+    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
+    GROUP BY B.bidder, TUMBLE(B.p_time, INTERVAL '10' SECOND);
+  expected_outputs:
+  - binder_error
+- id: nexmark_q13
+  before:
+  - create_tables
+  sql: |
+    /* SELECT
+        B.auction,
+        B.bidder,
+        B.price,
+        B.date_time,
+        S.value
+    FROM (SELECT *, PROCTIME() as p_time FROM bid) B
+    JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
+    ON mod(B.auction, 10000) = S.key; */
+    select 1;
+  expected_outputs:
+  - stream_error
+- id: nexmark_q14
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      auction,
+      bidder,
+      0.908 * price as price,
+      CASE
+        WHEN
+          extract(hour from date_time) >= 8 AND
+          extract(hour from date_time) <= 18
+        THEN 'dayTime'
+        WHEN
+          extract(hour from date_time) <= 6 OR
+          extract(hour from date_time) >= 20
+        THEN 'nightTime'
+        ELSE 'otherTime'
+      END AS bidTimeType,
+      date_time,
+      extra
+      -- TODO: count_char is an UDF, add it back when we support similar functionality.
+      -- https://github.com/nexmark/nexmark/blob/master/nexmark-flink/src/main/java/com/github/nexmark/flink/udf/CountChar.java
+      -- count_char(extra, 'c') AS c_counts
+    FROM bid
+    WHERE 0.908 * price > 1000000 AND 0.908 * price < 50000000;
+  expected_outputs:
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
+  - sink_plan
+- id: nexmark_q15
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        TO_CHAR(date_time, 'yyyy-MM-dd') as day,
+        count(*) AS total_bids,
+        count(*) filter (where price < 10000) AS rank1_bids,
+        count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+        count(*) filter (where price >= 1000000) AS rank3_bids,
+        count(distinct bidder) AS total_bidders,
+        count(distinct bidder) filter (where price < 10000) AS rank1_bidders,
+        count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,
+        count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,
+        count(distinct auction) AS total_auctions,
+        count(distinct auction) filter (where price < 10000) AS rank1_auctions,
+        count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
+        count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
+    FROM bid
+    GROUP BY to_char(date_time, 'yyyy-MM-dd');
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: nexmark_q16
+  before:
+  - create_tables
+  sql: |
+    SELECT
+      channel,
+      to_char(date_time, 'yyyy-MM-dd') AS day,
+      max(to_char(date_time, 'HH:mm')) AS minute,
+      count(*) AS total_bids,
+      count(*) filter (where price < 10000) AS rank1_bids,
+      count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+      count(*) filter (where price >= 1000000) AS rank3_bids,
+      count(distinct bidder) AS total_bidders,
+      count(distinct bidder) filter (where price < 10000) AS rank1_bidders,
+      count(distinct bidder) filter (where price >= 10000 and price < 1000000) AS rank2_bidders,
+      count(distinct bidder) filter (where price >= 1000000) AS rank3_bidders,
+      count(distinct auction) AS total_auctions,
+      count(distinct auction) filter (where price < 10000) AS rank1_auctions,
+      count(distinct auction) filter (where price >= 10000 and price < 1000000) AS rank2_auctions,
+      count(distinct auction) filter (where price >= 1000000) AS rank3_auctions
+    FROM bid
+    GROUP BY channel, to_char(date_time, 'yyyy-MM-dd');
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+- id: nexmark_q17
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        auction,
+        to_char(date_time, 'YYYY-MM-DD') AS day,
+        count(*) AS total_bids,
+        count(*) filter (where price < 10000) AS rank1_bids,
+        count(*) filter (where price >= 10000 and price < 1000000) AS rank2_bids,
+        count(*) filter (where price >= 1000000) AS rank3_bids,
+        min(price) AS min_price,
+        max(price) AS max_price,
+        avg(price) AS avg_price,
+        sum(price) AS sum_price
+    FROM bid
+    GROUP BY auction, to_char(date_time, 'YYYY-MM-DD');
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+- id: nexmark_q18
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, channel, url, date_time, extra
+    FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
+          FROM bid)
+    WHERE rank_number <= 1;
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+  - logical_plan
+- id: nexmark_q18_rank
+  before:
+  - create_tables
+  sql: |
+    SELECT auction, bidder, price, channel, url, date_time, extra
+    FROM (SELECT *, RANK() OVER (PARTITION BY bidder, auction ORDER BY date_time DESC) AS rank_number
+          FROM bid)
+    WHERE rank_number <= 1;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+  - logical_plan
+- id: nexmark_q19
+  before:
+  - create_tables
+  sql: |
+    SELECT * FROM
+    (SELECT *, ROW_NUMBER() OVER (PARTITION BY auction ORDER BY price DESC) AS rank_number FROM bid)
+    WHERE rank_number <= 10;
+  expected_outputs:
+  - logical_plan
+- id: nexmark_q20
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        auction, bidder, price, channel, url, B.date_time as date_timeB,
+        item_name, description, initial_bid, reserve, A.date_time as date_timeA, expires, seller, category
+    FROM
+        bid B INNER JOIN auction A on B.auction = A.id
+    WHERE A.category = 10;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: nexmark_q21
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        auction, bidder, price, channel,
+        CASE
+            WHEN lower(channel) = 'apple' THEN '0'
+            WHEN lower(channel) = 'google' THEN '1'
+            WHEN lower(channel) = 'facebook' THEN '2'
+            WHEN lower(channel) = 'baidu' THEN '3'
+            ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
+            END
+        AS channel_id FROM bid
+        where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
+              lower(channel) in ('apple', 'google', 'facebook', 'baidu');
+  expected_outputs:
+  - binder_error
+- id: nexmark_q22
+  before:
+  - create_tables
+  sql: |
+    SELECT
+        auction, bidder, price, channel,
+        SPLIT_PART(url, '/', 4) as dir1,
+        SPLIT_PART(url, '/', 5) as dir2,
+        SPLIT_PART(url, '/', 6) as dir3 FROM bid;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - sink_plan
+  - stream_dist_plan
+- id: nexmark_q101
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers outer join.
+    --
+    -- Monitor ongoing auctions and track the current highest bid for each one in real-time. If
+    -- the auction has no bids, the highest bid will be NULL.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name,
+        b.max_price AS current_highest_bid
+    FROM auction a
+    LEFT OUTER JOIN (
+        SELECT
+            b1.auction,
+            MAX(b1.price) max_price
+        FROM bid b1
+        GROUP BY b1.auction
+    ) b ON a.id = b.auction;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+  - stream_dist_plan
+- id: nexmark_q102
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers dynamic filter.
+    --
+    -- Show the auctions whose count of bids is greater than the overall average count of bids
+    -- per auction.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name,
+        COUNT(b.auction) AS bid_count
+    FROM auction a
+    JOIN bid b ON a.id = b.auction
+    GROUP BY a.id, a.item_name
+    HAVING COUNT(b.auction) >= (
+        SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
+    )
+  expected_outputs:
+  - stream_plan
+  - batch_plan
+  - stream_dist_plan
+- id: nexmark_q103
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers semi join.
+    --
+    -- Show the auctions that have at least 20 bids.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name
+    FROM auction a
+    WHERE a.id IN (
+        SELECT b.auction FROM bid b
+        GROUP BY b.auction
+        HAVING COUNT(*) >= 20
+    );
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
+- id: nexmark_q104
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers anti join.
+    --
+    -- This is the same as q103, which shows the auctions that have at least 20 bids.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name
+    FROM auction a
+    WHERE a.id NOT IN (
+        SELECT b.auction FROM bid b
+        GROUP BY b.auction
+        HAVING COUNT(*) < 20
+    );
+  expected_outputs:
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
+- id: nexmark_q105
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers singleton top-n (and local-phase group top-n).
+    --
+    -- Show the top 1000 auctions by the number of bids.
+    SELECT
+        a.id AS auction_id,
+        a.item_name AS auction_item_name,
+        COUNT(b.auction) AS bid_count
+    FROM auction a
+    JOIN bid b ON a.id = b.auction
+    GROUP BY a.id, a.item_name
+    ORDER BY bid_count DESC
+    LIMIT 1000;
+  expected_outputs:
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
+- id: nexmark_q106
+  before:
+  - create_tables
+  sql: |
+    -- A self-made query that covers two-phase stateful simple aggregation.
+    --
+    -- Show the minimum final price of all auctions.
+    SELECT
+        MIN(final) AS min_final
+    FROM
+        (
+            SELECT
+                auction.id,
+                MAX(price) AS final
+            FROM
+                auction,
+                bid
+            WHERE
+                bid.auction = auction.id
+                AND bid.date_time BETWEEN auction.date_time AND auction.expires
+            GROUP BY
+                auction.id
+        )
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - stream_plan
