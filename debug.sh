@@ -17,6 +17,12 @@ execute_queries() {
   IFS=$IFS_RESET
 }
 
+query_mv() {
+  QUERY="SELECT * FROM m;"
+  echo "[EXECUTING]: $QUERY"
+  echo -n "[RESULT]: "; psql -h localhost -p 4566 -d dev -U root -c "$QUERY"
+}
+
 # TODO(kwannoel): Make this an actual test script.
 echo "--- Clean data"
 ./risedev clean-data >/dev/null 2>&1
@@ -29,9 +35,19 @@ CREATE MATERIALIZED VIEW m as select * from t;"
 
 execute_queries "$QUERIES"
 
-echo "--- KILL ALL NODES EXCEPT META"
+echo "--- KILL ALL COMPUTE NODES"
+pkill compute-node
 
 echo "--- WAIT FOR RECOVERY"
+sleep 30
+
+set +e
+
+while ! query_mv; do
+  sleep 10
+done
+
+set -e
 
 echo "--- KILL"
 ./risedev k >/dev/null 2>&1
