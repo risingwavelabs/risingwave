@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 
 use arrow_schema::{Field, Schema, SchemaRef};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
@@ -33,7 +34,7 @@ pub struct UdfExpression {
     arg_types: Vec<DataType>,
     return_type: DataType,
     arg_schema: SchemaRef,
-    client: ArrowFlightUdfClient,
+    client: Arc<ArrowFlightUdfClient>,
     identifier: String,
 }
 
@@ -111,16 +112,15 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
             bail!("expect UDF");
         };
-        // connect to UDF service
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()
                 .map(|t| Field::new("", DataType::from(t).into(), true))
                 .collect(),
         ));
-        let client = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(&udf.link))
-        })?;
+        // connect to UDF service
+        let client = get_or_create_client(&udf.link)?;
+
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
@@ -129,6 +129,27 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             client,
             identifier: udf.identifier.clone(),
         })
+    }
+}
+
+#[cfg(not(madsim))]
+/// Get or create a client for the given UDF service.
+///
+/// There is a global cache for clients, so that we can reuse the same client for the same service.
+pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
+    static CLIENTS: LazyLock<Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
+        LazyLock::new(Default::default);
+    let mut clients = CLIENTS.lock().unwrap();
+    if let Some(client) = clients.get(link).and_then(|c| c.upgrade()) {
+        // reuse existing client
+        Ok(client)
+    } else {
+        // create new client
+        let client = Arc::new(tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(link))
+        })?);
+        clients.insert(link.into(), Arc::downgrade(&client));
+        Ok(client)
     }
 }
 
