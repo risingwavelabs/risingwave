@@ -242,7 +242,7 @@ impl AvroParser {
 
                 Some(value)
             } else if let Some(key_schema) = self.key_schema.as_ref() {
-                let mut reader = Reader::with_schema(&key_schema, &payload as &[u8])
+                let mut reader = Reader::with_schema(key_schema, &payload as &[u8])
                     .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
                 match reader.next() {
                     Some(Ok(v)) => Some(v),
@@ -271,7 +271,7 @@ impl AvroParser {
                         {
                             return from_avro_value(
                                 avro_key.as_ref().unwrap().clone(),
-                                &self.key_schema.as_ref().unwrap(),
+                                self.key_schema.as_ref().unwrap(),
                             )
                             .map_err(|e| {
                                 tracing::error!(
@@ -289,7 +289,7 @@ impl AvroParser {
                 };
 
                 let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
-                return from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
+                from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
                     tracing::error!(
                         "failed to process value ({}): {}",
                         String::from_utf8_lossy(&payload),
