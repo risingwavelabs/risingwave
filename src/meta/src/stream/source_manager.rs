@@ -192,6 +192,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    connector_properties: ConnectorProperties,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -278,11 +279,15 @@ where
                         })
                         .collect();
 
-                    if let Some(change) = diff_splits(
-                        prev_actor_splits,
-                        &discovered_splits,
-                        SplitDiffOptions::default(),
-                    ) {
+                    let mut options = SplitDiffOptions::default();
+
+                    if handle.connector_properties.enable_split_reduction() {
+                        options.enable_scale_in = true;
+                    }
+
+                    if let Some(change) =
+                        diff_splits(prev_actor_splits, &discovered_splits, options)
+                    {
                         split_assignment.insert(*fragment_id, change);
                     }
                 }
@@ -575,40 +580,41 @@ where
         core.apply_source_change(source_fragments, split_assignment, dropped_actors);
     }
 
+    // After introducing the remove function for split, there may be a very occasional split removal
+    // during scaling, in which case we need to use the old splits for reallocation instead of the
+    // latest splits (which may be missing), so that we can resolve the split removal in the next
+    // command.
     pub async fn reallocate_splits(
         &self,
-        fragment_id: &FragmentId,
-        actor_ids: impl IntoIterator<Item = ActorId>,
+        prev_actor_ids: &[ActorId],
+        curr_actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-        let source_id = core.fragment_sources.get(fragment_id).unwrap();
-        let handle = core.managed_sources.get(source_id).unwrap();
 
-        if handle.splits.lock().await.splits.is_none() {
-            // force refresh source
-            let (tx, rx) = oneshot::channel();
-            handle
-                .sync_call_tx
-                .send(tx)
-                .map_err(|e| anyhow!(e.to_string()))?;
-            rx.await.map_err(|e| anyhow!(e.to_string()))??;
-        }
+        let prev_splits = prev_actor_ids
+            .iter()
+            .flat_map(|actor_id| core.actor_splits.get(actor_id).unwrap())
+            .cloned()
+            .collect_vec();
 
-        let splits = handle.discovered_splits().await.unwrap();
-        if splits.is_empty() {
-            tracing::warn!("no splits detected for source {}", source_id);
-            return Ok(Default::default());
-        }
-
-        let empty_actor_splits = actor_ids
-            .into_iter()
-            .map(|actor_id| (actor_id, vec![]))
+        let empty_actor_splits = curr_actor_ids
+            .iter()
+            .map(|actor_id| (*actor_id, vec![]))
             .collect();
 
-        Ok(
-            diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
-                .unwrap_or_default(),
+        let prev_splits = prev_splits
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let diff = diff_splits(
+            empty_actor_splits,
+            &prev_splits,
+            SplitDiffOptions::default(),
         )
+        .unwrap_or_default();
+
+        Ok(diff)
     }
 
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
@@ -708,6 +714,8 @@ where
             worker.tick().await?;
         }
 
+        let connector_properties = worker.connector_properties.clone();
+
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
@@ -718,6 +726,7 @@ where
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                connector_properties,
             },
         );
 

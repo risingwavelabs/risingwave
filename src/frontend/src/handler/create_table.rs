@@ -258,7 +258,9 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let expr_impl = binder
+                        .bind_expr(expr)?
+                        .cast_assign(column_catalogs[idx].data_type().clone())?;
 
                     check_default_column_constraints(&expr_impl, column_catalogs)?;
 
@@ -589,7 +591,7 @@ fn gen_table_plan_inner(
         false,
         true,
         context.clone(),
-    )
+    )?
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());

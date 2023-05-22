@@ -17,11 +17,28 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use tokio::sync::watch::Receiver;
 
 use crate::executor::{BoxedDataChunkStream, Executor};
+use crate::task::ShutdownMsg;
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
+
+pub fn check_shutdown(shutdown_rx: &Option<Receiver<ShutdownMsg>>) -> Result<()> {
+    if let Some(rx) = shutdown_rx.as_ref() {
+        if rx
+            .has_changed()
+            .map_err(|_| ErrorCode::BatchError("Shutdown rx has been closed".into()))?
+        {
+            Err(ErrorCode::BatchError("Receive shutdown msg".into()).into())
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    }
+}
 
 /// Read at least `rows` rows.
 #[try_stream(boxed, ok = Vec<DataChunk>, error = RwError)]

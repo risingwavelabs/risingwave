@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::column::Column;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -24,7 +23,7 @@ pub(crate) trait SourceChunkBuilder {
         column_descs: &[SourceColumnDesc],
         rows: impl IntoIterator<Item = &'a Vec<Datum>>,
         chunk_size: usize,
-    ) -> Result<Vec<Column>> {
+    ) -> Result<Vec<ArrayRef>> {
         let mut builders: Vec<_> = column_descs
             .iter()
             .map(|k| k.data_type.create_array_builder(chunk_size))

@@ -283,6 +283,7 @@ mod tests {
 
             scan_startup_mode: None,
             seq_offset: None,
+            enable_split_reduction: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(

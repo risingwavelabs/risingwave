@@ -11,10 +11,15 @@ with open(expected_output_file) as file:
         # debezium sink sends k/v pair
         kv = line.split()
         key = json.loads(kv[0])
-        value = json.loads(kv[1])
-        # The `ts_ms` field may vary, so we delete it from the json object 
-        # and assert the remaining fields equal.
-        del value["payload"]["ts_ms"]
+        # kafka consumer outputs string "null" for null payload
+        if kv[1] == "null":
+            value = kv[1]
+        else:
+            value = json.loads(kv[1])
+            value = json.loads(kv[1])
+            # The `ts_ms` field may vary, so we delete it from the json object
+            # and assert the remaining fields equal.
+            del value["payload"]["ts_ms"]
         expected_data.append(key)
         expected_data.append(value)
 
@@ -25,10 +30,13 @@ with open(test_output_file) as file:
             print(line)
         assert(len(kv) == 2)
         key = json.loads(kv[0])
-        value = json.loads(kv[1])
-        # Assert `ts_ms` is an integer here.
-        assert isinstance(value["payload"]["ts_ms"], int)
-        del value["payload"]["ts_ms"]
+        if kv[1] == "null":
+            value = kv[1]
+        else:
+            value = json.loads(kv[1])
+            # Assert `ts_ms` is an integer here.
+            assert isinstance(value["payload"]["ts_ms"], int)
+            del value["payload"]["ts_ms"]
         test_data.append(key)
         test_data.append(value)
 

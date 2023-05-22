@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::array::column::Column;
 use crate::array::{
     BoolArray, DataChunk, DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array,
     I64Array, Int256Array, IntervalArray, SerialArray, TimeArray, TimestampArray, Utf8Array,
@@ -25,7 +24,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
     let mut columns = vec![];
 
     for d in data_types {
-        columns.push(Column::new(match d {
+        columns.push(match d {
             DataType::Boolean => seed_rand_array_ref::<BoolArray>(size, seed, null_ratio),
             DataType::Int16 => seed_rand_array_ref::<I16Array>(size, seed, null_ratio),
             DataType::Int32 => seed_rand_array_ref::<I32Array>(size, seed, null_ratio),
@@ -47,7 +46,7 @@ pub fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f6
             DataType::List(_) => {
                 todo!()
             }
-        }));
+        });
     }
     schema_check::schema_check(data_types, &columns).unwrap();
     DataChunk::new(columns, size)

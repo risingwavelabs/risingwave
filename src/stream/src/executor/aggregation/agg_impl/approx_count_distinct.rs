@@ -222,7 +222,6 @@ impl<const DENSE_BITS: usize> EstimateSize for UpdatableStreamingApproxCountDist
 mod tests {
     use assert_matches::assert_matches;
     use risingwave_common::array::*;
-    use risingwave_common::array_nonnull;
 
     use super::*;
     use crate::executor::aggregation::agg_impl::StreamingAggImpl;
@@ -242,7 +241,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 3]).into()],
+            &[&I64Array::from_iter([1, 2, 3]).into()],
         )
         .unwrap();
         assert_matches!(agg.get_output().unwrap(), Some(_));
@@ -250,7 +249,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Insert],
             Some(&(vec![true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 3, 1]).into()],
         )
         .unwrap();
         assert_matches!(agg.get_output().unwrap(), Some(_));
@@ -258,7 +257,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![true, true, true, true]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 3, 1, 2]).into()],
+            &[&I64Array::from_iter([3, 3, 1, 2]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().into_int64(), 0);
@@ -286,7 +285,7 @@ mod tests {
             agg.apply_batch(
                 &[Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&array_nonnull!(I64Array, [i, i, i]).into()],
+                &[&I64Array::from_iter([i, i, i]).into()],
             )
             .unwrap();
         }
