@@ -40,8 +40,10 @@ def check_cdc_table(rel: str, upstream: str):
         rows = run_psql(mv_count_sql)
         rows = int(rows.decode('utf8').strip())
 
-    print("Materialized view stop update, check row count with upstream")
-    count_sql = "SELECT COUNT(*) FROM {}".format(rel)
+    # remove the '_rw' suffix to get the upstream table name
+    upstream_table = rel.strip("_rw")
+    print("Materialized view stop update, check row count {} in upstream".format(upstream_table))
+    count_sql = "SELECT COUNT(*) FROM {}".format(upstream_table)
     if upstream == "mysql":
         rows = run_mysql_upstream(count_sql)
         rows = int(rows.decode('utf8').strip())
@@ -60,19 +62,19 @@ def check_cdc_table(rel: str, upstream: str):
 
 
 def run_mysql_upstream(sql):
-    print("Running SQL: {}".format(sql))
+    print("Running SQL: {} on upstream MySQL".format(sql))
     return subprocess.check_output(["mysql", "-h", "localhost", "-P", "8306", "-D", "mydb", "--protocol=tcp",
                                     "-u", "root", "-p", "123456", "-Ne", sql, "-B"])
 
 
 def run_psql_upstream(sql):
-    print("Running SQL: {}".format(sql))
+    print("Running SQL: {} on upstream PG".format(sql))
     return subprocess.check_output(["psql", "-h", "localhost", "-p", "8432",
                                     "-d", "mydb", "-U", "myuser", "--tuples-only", "-c", sql])
 
 
 def run_psql(sql):
-    print("Running SQL: {}".format(sql))
+    print("Running SQL: {} on RisingWave".format(sql))
     return subprocess.check_output(["psql", "-h", "localhost", "-p", "4566",
                                     "-d", "dev", "-U", "root", "--tuples-only", "-c", sql])
 
