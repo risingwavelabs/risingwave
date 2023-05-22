@@ -3588,9 +3588,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.20"
+version = "0.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99d983cdf1cd40f94b64cbf89e17f9113a77846a19afaec77d6c9a16ad487a50"
+checksum = "6ad4d69f43b9dc6463eca29edd83ac0dba36308c0e7b88ea83b87aff43649a1a"
 dependencies = [
  "etcd-client",
  "futures-util",
