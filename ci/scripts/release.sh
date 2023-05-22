@@ -18,7 +18,8 @@ export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+rustup show
 source "$HOME/.cargo/env"
 source ci/scripts/common.sh
 
