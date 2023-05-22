@@ -5675,6 +5675,7 @@ dependencies = [
  "prometheus",
  "rand",
  "risingwave_common",
+ "risingwave_common_proc_macro",
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_hummock_sdk",

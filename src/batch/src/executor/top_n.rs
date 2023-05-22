@@ -22,9 +22,12 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -180,11 +183,10 @@ impl TopNHeap {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, EstimateSize)]
 pub struct HeapElem {
-    pub encoded_row: Vec<u8>,
-    pub chunk: Arc<DataChunk>,
-    pub row_id: usize,
+    encoded_row: Vec<u8>,
+    row: OwnedRow,
 }
 
 impl PartialEq for HeapElem {
@@ -207,6 +209,23 @@ impl Ord for HeapElem {
     }
 }
 
+impl HeapElem {
+    pub fn new(encoded_row: Vec<u8>, row: impl Row) -> Self {
+        Self {
+            encoded_row,
+            row: row.into_owned_row(),
+        }
+    }
+
+    pub fn encoded_row(&self) -> &[u8] {
+        &self.encoded_row
+    }
+
+    pub fn row(&self) -> impl Row + '_ {
+        &self.row
+    }
+}
+
 impl TopNExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
@@ -224,16 +243,14 @@ impl TopNExecutor {
             {
                 heap.push(HeapElem {
                     encoded_row,
-                    chunk: chunk.clone(),
-                    row_id,
+                    row: chunk.row_at(row_id).0.to_owned_row(),
                 });
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for HeapElem { chunk, row_id, .. } in heap.dump() {
-            if let Some(spilled) = chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
-            {
+        for HeapElem { row, .. } in heap.dump() {
+            if let Some(spilled) = chunk_builder.append_one_row(row) {
                 yield spilled
             }
         }
