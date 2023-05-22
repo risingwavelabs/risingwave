@@ -661,6 +661,10 @@ where
         Some(OwnedRow::new(vec![None; pos_len]))
     }
 
+    /// All vnodes should be persisted with status finished.
+    /// TODO: In the future we will support partial backfill recovery.
+    /// When that is done, this logic may need to be rewritten to handle
+    /// partially complete states per vnode.
     async fn check_all_vnode_finished(
         state_table: &StateTable<S>,
         state_len: usize,
@@ -672,8 +676,8 @@ where
             let key: &[Datum] = &[Some((vnode as i16).into())];
             let row = state_table.get_row(key).await?;
 
-            // We set value_indices which means first datum (vnode) is excluded
-            // when we deserialize. Only deserialize: | pk | `backfill_finished` |.
+            // original_backfill_datum_pos = (state_len - 1)
+            // value indices are set, so we can -1 for the pk (a single vnode).
             let backfill_datum_pos = state_len - 2;
             let vnode_is_finished = if let Some(row) = row
                 && let Some(vnode_is_finished) = row.datum_at(backfill_datum_pos)

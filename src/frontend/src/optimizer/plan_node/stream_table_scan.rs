@@ -152,6 +152,7 @@ impl StreamTableScan {
             format!("{}_backfill_finished", self.table_name()),
         ));
 
+        // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
 
         let num_of_columns = catalog_builder.columns().len();
