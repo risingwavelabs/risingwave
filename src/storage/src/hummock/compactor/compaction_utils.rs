@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BinaryHeap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::vec;
 
 use itertools::Itertools;
 use minstant::Instant;
@@ -35,7 +36,7 @@ use crate::hummock::compactor::{
 use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
-    CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
+    BlockMeta, CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableObjectIdManagerRef, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
@@ -231,6 +232,91 @@ pub async fn generate_splits(
     Ok(vec![])
 }
 
+pub async fn block_overlap_info(
+    compact_task: &CompactTask,
+    context: Arc<CompactorContext>,
+) -> HummockResult<(usize, usize)> {
+    #[derive(Eq)]
+    struct Item<'a> {
+        arr: &'a Vec<BlockMeta>,
+        idx: usize,
+    }
+
+    impl<'a> PartialEq for Item<'a> {
+        fn eq(&self, other: &Self) -> bool {
+            self.arr[self.idx].smallest_key == other.arr[self.idx].smallest_key
+        }
+    }
+
+    impl<'a> PartialOrd for Item<'a> {
+        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+            self.arr[self.idx]
+                .smallest_key
+                .partial_cmp(&other.arr[self.idx].smallest_key)
+        }
+    }
+
+    impl<'a> Ord for Item<'a> {
+        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+            self.arr[self.idx]
+                .smallest_key
+                .cmp(&other.arr[self.idx].smallest_key)
+        }
+    }
+
+    let mut block_meta_vec = vec![vec![]; compact_task.input_ssts.len()];
+    let mut total_block_count = 0;
+
+    for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
+        for sstable_info in &input_level.table_infos {
+            let block_metas = context
+                .sstable_store
+                .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                .await?
+                .value()
+                .meta
+                .block_metas
+                .clone();
+
+            total_block_count += block_metas.len();
+            block_meta_vec[idx].extend(block_metas);
+        }
+    }
+
+    let mut heap = BinaryHeap::default();
+    use std::cmp::Reverse;
+    for block_meta_list in &block_meta_vec {
+        // let first_item = block_meta_list.cursor_front();
+        let first_item = Item {
+            arr: &block_meta_list,
+            idx: 0,
+        };
+        heap.push(Reverse(first_item));
+    }
+
+    let mut copy_block_count = 0;
+    while !heap.is_empty() {
+        let top_item = heap.pop().unwrap().0;
+        let next_idx = top_item.idx + 1;
+
+        if next_idx < top_item.arr.len() {
+            let next_block = &top_item.arr[next_idx];
+            if let Some(top_block) = heap.peek() {
+                if next_block.smallest_key < top_block.0.arr[top_block.0.idx].smallest_key {
+                    copy_block_count += 0;
+                }
+
+                heap.push(Reverse(Item {
+                    arr: top_item.arr,
+                    idx: next_idx,
+                }))
+            }
+        }
+    }
+
+    Ok((copy_block_count, total_block_count))
+}
+
 pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
     let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
     let total_file_size = task
@@ -246,5 +332,161 @@ pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &Comp
     match task.compression_algorithm {
         0 => std::cmp::min(capacity, total_file_size),
         _ => capacity,
+    }
+}
+
+mod tests {
+    use std::collections::BinaryHeap;
+    use std::vec;
+
+    use crate::hummock::BlockMeta;
+
+    #[tokio::test]
+    async fn test_block_overlap() {
+        #[derive(Eq)]
+        struct Item<'a> {
+            arr: &'a Vec<BlockMeta>,
+            idx: usize,
+        }
+
+        impl<'a> PartialEq for Item<'a> {
+            fn eq(&self, other: &Self) -> bool {
+                self.arr[self.idx].smallest_key == other.arr[self.idx].smallest_key
+            }
+        }
+
+        impl<'a> PartialOrd for Item<'a> {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                self.arr[self.idx]
+                    .smallest_key
+                    .partial_cmp(&other.arr[self.idx].smallest_key)
+            }
+        }
+
+        impl<'a> Ord for Item<'a> {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.arr[self.idx]
+                    .smallest_key
+                    .cmp(&other.arr[self.idx].smallest_key)
+            }
+        }
+
+        let block_meta_test_data = vec![
+            vec![
+                BlockMeta {
+                    smallest_key: "a".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "b".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "c".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "d".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "j".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+            ],
+            vec![
+                BlockMeta {
+                    smallest_key: "i".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "j".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "o".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "p".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+            ],
+            vec![
+                BlockMeta {
+                    smallest_key: "i".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "j".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "k".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "q".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: "r".as_bytes().to_vec(),
+                    ..Default::default()
+                },
+            ],
+        ];
+
+        let mut block_meta_vec = vec![vec![]; block_meta_test_data.len()];
+        let mut total_block_count = 0;
+
+        for (idx, block_metas) in block_meta_test_data.into_iter().enumerate() {
+            total_block_count += block_metas.len();
+            block_meta_vec[idx].extend(block_metas);
+        }
+
+        let mut heap = BinaryHeap::default();
+        use std::cmp::Reverse;
+        for block_meta_list in &block_meta_vec {
+            // let first_item = block_meta_list.cursor_front();
+            let first_item = Item {
+                arr: block_meta_list,
+                idx: 0,
+            };
+            heap.push(Reverse(first_item));
+        }
+
+        println!("heap is_empty {}", heap.is_empty());
+        let mut copy_block_count = 0;
+        while !heap.is_empty() {
+            let top_item = heap.pop().unwrap().0;
+            println!(
+                "top_item {:?} len {}",
+                top_item.arr[top_item.idx],
+                top_item.arr.len()
+            );
+            let next_idx = top_item.idx + 1;
+
+            if next_idx < top_item.arr.len() {
+                let next_block = &top_item.arr[next_idx];
+                println!("next_block {:?}", next_block);
+                if let Some(top_block) = heap.peek() {
+                    println!("peek_block {:?}", top_block.0.arr[top_block.0.idx]);
+
+                    if next_block.smallest_key < top_block.0.arr[top_block.0.idx].smallest_key {
+                        copy_block_count += 1;
+                    }
+
+                    heap.push(Reverse(Item {
+                        arr: top_item.arr,
+                        idx: next_idx,
+                    }))
+                }
+            }
+        }
+
+        println!(
+            "copy_block_count {} total_block_count {}",
+            copy_block_count, total_block_count
+        );
     }
 }

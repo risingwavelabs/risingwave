@@ -60,7 +60,8 @@ use super::value::HummockValue;
 use super::{CompactionDeleteRanges, HummockResult, SstableBuilderOptions, Xor16FilterBuilder};
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_memory_capacity, generate_splits,
+    block_overlap_info, build_multi_compaction_filter, estimate_task_memory_capacity,
+    generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -175,6 +176,16 @@ impl Compactor {
             compact_task.compression_algorithm,
         );
 
+        let (copy_block_count, total_block_count) =
+            block_overlap_info(&compact_task, context.clone())
+                .await
+                .unwrap();
+
+        println!(
+            "TRACE: copy_block_count {} total_block_count {} need_quota {} file_counts {}",
+            copy_block_count, total_block_count, need_quota, file_counts
+        );
+
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let mut compact_table_ids = compact_task
@@ -224,6 +235,7 @@ impl Compactor {
         let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
 
         let mut task_status = TaskStatus::Success;
+
         // skip sst related to non-existent able_id to reduce io
         let sstable_infos = compact_task
             .input_ssts

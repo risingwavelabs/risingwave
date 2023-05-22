@@ -315,7 +315,7 @@ impl Sstable {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
     pub offset: u32,
