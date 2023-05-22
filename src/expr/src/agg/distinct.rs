@@ -28,7 +28,7 @@ use crate::Result;
 pub struct Distinct {
     inner: BoxedAggState,
     exists: HashSet<OwnedRow>, // TODO: optimize for small rows
-    exists_estimated_size: usize,
+    exists_estimated_heap_size: usize,
 }
 
 impl Distinct {
@@ -36,7 +36,7 @@ impl Distinct {
         Self {
             inner,
             exists: Default::default(),
-            exists_estimated_size: 0,
+            exists_estimated_heap_size: 0,
         }
     }
 }
@@ -58,10 +58,10 @@ impl Aggregator for Distinct {
         for row_id in start_row_id..end_row_id {
             let (row_ref, vis) = input.row_at(row_id);
             let row = row_ref.to_owned_row();
-            let row_size = row.estimated_size();
+            let row_size = row.estimated_heap_size();
             let b = vis && self.exists.insert(row);
             if b {
-                self.exists_estimated_size += row_size;
+                self.exists_estimated_heap_size += row_size;
             }
             bitmap_builder.set(row_id, b);
         }
@@ -78,6 +78,9 @@ impl Aggregator for Distinct {
     }
 
     fn estimated_size(&self) -> usize {
-        std::mem::size_of::<Self>() + self.inner.estimated_size() + self.exists_estimated_size
+        std::mem::size_of::<Self>()
+            + self.inner.estimated_size()
+            + self.exists.capacity() * std::mem::size_of::<OwnedRow>()
+            + self.exists_estimated_heap_size
     }
 }
