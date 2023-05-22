@@ -457,7 +457,11 @@ where
         statement_name: String,
         type_ids: Vec<i32>,
     ) -> PsqlResult<()> {
-        if self.prepare_statement_store.contains_key(&statement_name) {
+        if statement_name.is_empty() {
+            // Remove the unnamed prepare statement first, in case the unsupported sql binds wrong a
+            // prepare statement.
+            self.unnamed_prepare_statement.take();
+        } else if self.prepare_statement_store.contains_key(&statement_name) {
             return Err(PsqlError::ParseError("Duplicated statement name".into()));
         }
 
