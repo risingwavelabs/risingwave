@@ -152,8 +152,12 @@ where
             .expect("All executors should have vnode");
         let key: &[Datum] = &[Some((arbitrary_vnode as i16).into())];
         let row = self.state_table.get_row(key).await?;
+
+        // We set value_indices which means first datum (vnode) is excluded
+        // when we deserialize. Only deserialize: | pk | `backfill_finished` |.
+        let backfill_datum_pos = state_len - 2;
         let is_finished = if let Some(row) = row
-            && let Some(is_finished) = row.datum_at(state_len - 1)
+            && let Some(is_finished) = row.datum_at(backfill_datum_pos)
         {
             is_finished.into_bool()
         } else {
@@ -161,11 +165,15 @@ where
         };
 
         // If the snapshot is empty, we don't need to backfill.
+        // We cannot complete progress now, as we want to persist
+        // finished state to state store first.
+        // As such we will wait for next barrier.
         let is_snapshot_empty: bool = {
             let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
+
         // Whether we still need to backfill
         // If not finished -> backfill, but only if snapshot is not empty.
         // If finished -> no need backfill
