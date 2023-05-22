@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::iter::repeat;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
@@ -129,7 +129,7 @@ impl InsertExecutor {
             ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
 
             for (idx, expr) in &self.sorted_default_columns {
-                let column = Column::new(expr.eval(&dummy_chunk).await?);
+                let column = expr.eval(&dummy_chunk).await?;
                 ordered_columns.push((*idx, column));
             }
 
@@ -143,7 +143,7 @@ impl InsertExecutor {
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
                 let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
-                columns.insert(row_id_index, row_id_col.into())
+                columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 
             let stream_chunk =
@@ -182,7 +182,7 @@ impl InsertExecutor {
             array_builder.append(Some(rows_inserted as i64));
 
             let array = array_builder.finish();
-            let ret_chunk = DataChunk::new(vec![array.into()], 1);
+            let ret_chunk = DataChunk::new(vec![Arc::new(array.into())], 1);
 
             yield ret_chunk
         }
@@ -254,7 +254,6 @@ mod tests {
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
@@ -288,18 +287,18 @@ mod tests {
 
         let row_id_index = Some(3);
 
-        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
+        let col1 = Arc::new(I32Array::from_iter([1, 3, 5, 7, 9]).into());
+        let col2 = Arc::new(I32Array::from_iter([2, 4, 6, 8, 10]).into());
         let array = StructArray::from_slices(
             &[true, false, false, false, false],
             vec![
-                array! { I32Array, [Some(1),None,None,None,None] }.into(),
-                array! { I32Array, [Some(2),None,None,None,None] }.into(),
-                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         );
-        let col3 = array.into();
+        let col3 = Arc::new(array.into());
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
@@ -338,12 +337,7 @@ mod tests {
             let result = stream.next().await.unwrap().unwrap();
 
             assert_eq!(
-                result
-                    .column_at(0)
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
                 vec![Some(5)] // inserted rows
             );
         });
@@ -353,7 +347,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[0]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -362,7 +355,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[1]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -372,14 +364,14 @@ mod tests {
         let array: ArrayImpl = StructArray::from_slices(
             &[true, false, false, false, false],
             vec![
-                array! { I32Array, [Some(1),None,None,None,None] }.into(),
-                array! { I32Array, [Some(2),None,None,None,None] }.into(),
-                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .into();
-        assert_eq!(*chunk.chunk.columns()[2].array(), array);
+        assert_eq!(*chunk.chunk.columns()[2], array);
 
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);

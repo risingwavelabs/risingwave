@@ -19,9 +19,8 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -405,7 +404,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             }
         }
 
-        let columns: Vec<Column> = builders.into_iter().map(|b| b.finish().into()).collect();
+        let columns: Vec<ArrayRef> = builders.into_iter().map(|b| b.finish().into()).collect();
         let chunk_size = columns[0].len();
         Ok(if chunk_size > 0 {
             Some(StreamChunk::new(
@@ -451,7 +450,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                     if let Some(chunk) = output_chunk {
                         let first_order_key = chunk.columns()[this.order_key_index]
-                            .array_ref()
                             .datum_at(0)
                             .expect("order key must not be NULL");
 
