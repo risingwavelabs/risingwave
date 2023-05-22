@@ -51,7 +51,7 @@
     Table 2
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -101,7 +101,7 @@
     Table 1
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -151,7 +151,7 @@
     Table 1
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -211,7 +211,7 @@
     Table 2
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -296,7 +296,7 @@
     Table 4
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -348,7 +348,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -405,7 +405,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -457,7 +457,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -514,7 +514,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -566,7 +566,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -630,7 +630,7 @@
     Table 2
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -682,7 +682,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -767,7 +767,7 @@
     Table 4
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -819,7 +819,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -883,7 +883,7 @@
     Table 2
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -935,7 +935,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1006,7 +1006,7 @@
     Table 3
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1058,7 +1058,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1121,7 +1121,7 @@
     Table 2
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1179,7 +1179,7 @@
     Table 2
     ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1241,7 +1241,7 @@
     Table 2
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1291,7 +1291,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1347,7 +1347,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1398,7 +1398,7 @@
     Table 1
     ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1453,7 +1453,7 @@
     Table 1
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1503,7 +1503,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1559,7 +1559,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1610,7 +1610,7 @@
     Table 1
     ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1665,7 +1665,7 @@
     Table 1
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1715,7 +1715,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1781,7 +1781,7 @@
     Table 2
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1842,7 +1842,7 @@
     Table 2
     ├── columns: [ vnode, k, t__row_id, tk_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1908,7 +1908,7 @@
     Table 2
     ├── columns: [ vnode, o, t__row_id, s_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
@@ -1960,7 +1960,7 @@
     Table 1
     ├── columns: [ vnode, _row_id, ao_backfill_finished ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
+    ├── value indices: [ 1, 2 ]
     ├── distribution key: []
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
