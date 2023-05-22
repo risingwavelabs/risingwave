@@ -163,7 +163,7 @@ where
         // Use these to persist state.
         // They contain the backfill position,
         // as well as the progress.
-        // However, they do not contain the vnode mapping at index 0.
+        // However, they do not contain the vnode key at index 0.
         // That is filled in when we flush the state table.
         let mut current_state: Vec<Datum> = vec![None; state_len];
         let mut old_state: Option<Vec<Datum>> = None;
