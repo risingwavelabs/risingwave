@@ -62,6 +62,7 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<Timestam
     // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
 
     // FIXME: We should return `TimestampTz` here.
+    parsed.offset.get_or_insert(0);
     Ok(Timestamp(parsed.to_datetime()?.naive_utc()))
 }
 
