@@ -142,6 +142,8 @@ where
         // partially complete backfill.
         // TODO(kwannoel): For background ddl, we need to consider case where
         // some vnodes are partially complete, and others are finished.
+        // All vnodes should be complete. If there were some partially
+        // complete all persisted state should be discarded.
         let arbitrary_vnode = self
             .state_table
             .vnodes()

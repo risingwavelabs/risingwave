@@ -119,6 +119,14 @@ impl StreamTableScan {
     /// Schema
     /// ------
     /// | vnode | pk | `backfill_finished` |
+    ///
+    /// key: | vnode |
+    /// value: | pk | backfill_finished
+    ///
+    /// When we update the backfill progress,
+    /// we update it for all vnodes.
+    /// "pk" here might be confusing. It refers to the
+    /// upstream pk which we use to track the backfill progress.
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
