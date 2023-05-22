@@ -192,7 +192,6 @@ async fn test_syncpoints_test_local_notification_receiver() {
     .await;
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-    let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
@@ -295,11 +294,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await;
 
     // 1. add sstables
-    let val0 = Bytes::from(b"\0\00"[..].repeat(1 << 10)); // 1024 Byte value
-    let val1 = Bytes::from(b"\0\01"[..].repeat(1 << 10)); // 1024 Byte value
+    let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
+    let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
 
     local.init(100);
-    let mut start_key = b"aaa".to_vec();
+    let mut start_key = b"\0\0aaa".to_vec();
     for _ in 0..10 {
         local
             .insert(
@@ -311,13 +310,13 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         start_key = next_key(&start_key);
     }
     local
-        .insert(Bytes::from(b"ggg".as_slice()), val0.clone(), None)
+        .insert(Bytes::from(b"\0\0ggg".as_slice()), val0.clone(), None)
         .unwrap();
     local
-        .insert(Bytes::from(b"hhh".as_slice()), val0.clone(), None)
+        .insert(Bytes::from(b"\0\0hhh".as_slice()), val0.clone(), None)
         .unwrap();
     local
-        .insert(Bytes::from(b"kkk".as_slice()), val0.clone(), None)
+        .insert(Bytes::from(b"\0\0kkk".as_slice()), val0.clone(), None)
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(101);
@@ -325,15 +324,15 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
     local
-        .insert(Bytes::from(b"aaa".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0aaa".as_slice()), val1.clone(), None)
         .unwrap();
     local
-        .insert(Bytes::from(b"bbb".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0bbb".as_slice()), val1.clone(), None)
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"ggg".as_slice())),
-            Bound::Excluded(Bytes::from(b"hhh".as_slice())),
+            Bound::Included(Bytes::from(b"\0\0ggg".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0hhh".as_slice())),
         )])
         .await
         .unwrap();
@@ -342,15 +341,15 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
     local
-        .insert(Bytes::from(b"hhh".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0hhh".as_slice()), val1.clone(), None)
         .unwrap();
     local
-        .insert(Bytes::from(b"iii".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0iii".as_slice()), val1.clone(), None)
         .unwrap();
     local
         .flush(vec![(
-            Bound::Included(Bytes::from(b"jjj".as_slice())),
-            Bound::Excluded(Bytes::from(b"kkk".as_slice())),
+            Bound::Included(Bytes::from(b"\0\0jjj".as_slice())),
+            Bound::Excluded(Bytes::from(b"\0\0kkk".as_slice())),
         )])
         .await
         .unwrap();
@@ -360,10 +359,10 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(hummock_manager_ref.clone(), compact_ctx.clone()).await;
 
     local
-        .insert(Bytes::from(b"lll".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0lll".as_slice()), val1.clone(), None)
         .unwrap();
     local
-        .insert(Bytes::from(b"mmm".as_slice()), val1.clone(), None)
+        .insert(Bytes::from(b"\0\0mmm".as_slice()), val1.clone(), None)
         .unwrap();
     local.flush(Vec::new()).await.unwrap();
     local.seal_current_epoch(u64::MAX);
@@ -400,22 +399,22 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let get_result = storage
-        .get(Bytes::from("hhh"), 120, read_options.clone())
+        .get(Bytes::from("\0\0hhh"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("ggg"), 120, read_options.clone())
+        .get(Bytes::from("\0\0ggg"), 120, read_options.clone())
         .await
         .unwrap();
     assert!(get_result.is_none());
     let get_result = storage
-        .get(Bytes::from("aaa"), 120, read_options.clone())
+        .get(Bytes::from("\0\0aaa"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(Bytes::from("aab"), 120, read_options.clone())
+        .get(Bytes::from("\0\0aab"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
@@ -428,7 +427,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         }
     });
     let get_result = storage
-        .get(Bytes::from("kkk"), 120, read_options.clone())
+        .get(Bytes::from("\0\0kkk"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);

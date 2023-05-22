@@ -15,7 +15,7 @@
 use core::panic;
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -1602,8 +1602,7 @@ where
             };
             group_deltas.push(group_delta);
         }
-
-        new_hummock_version.apply_version_delta(&new_version_delta.new_value);
+        new_hummock_version.apply_version_delta(new_version_delta.deref());
 
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
