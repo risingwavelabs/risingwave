@@ -149,7 +149,7 @@ where
         };
 
         // Backfill not Finished: Need to Backfill if snapshot is not empty.
-        // Backfill is  Finished: Need to Backfill not needed.
+        // Backfill is  Finished: No Need to Backfill.
         let to_backfill = if !is_finished {
             !is_snapshot_empty
         } else {
@@ -172,7 +172,7 @@ where
         yield Message::Barrier(first_barrier);
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
-        // So we just process the next barrier to finish progress,
+        // So we just update the state + progress to meta at the next barrier to finish progress,
         // and forward other messages.
         //
         // Reason for persisting on second barrier rather than first:
@@ -182,34 +182,25 @@ where
         // expects to have been initialized in previous epoch.
         if !is_finished && !to_backfill {
             while let Some(Ok(msg)) = upstream.next().await {
-                match &msg {
-                    Message::Barrier(barrier) => {
-                        current_pos =
-                            Self::construct_initial_finished_state(pk_in_output_indices.len());
-                        Self::persist_state(
-                            barrier.epoch,
-                            &mut self.state_table,
-                            true,
-                            &current_pos,
-                            &mut old_state,
-                            &mut current_state,
-                        )
-                        .await?;
-                        self.progress.finish(barrier.epoch.curr);
-                        yield msg;
-                        break;
-                    }
-
-                    // If it's not a barrier, just forward
-                    Message::Watermark(watermark) => {
-                        self.state_table
-                            .update_watermark(watermark.val.clone(), false);
-                        if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                    match &msg {
+                        Message::Barrier(barrier) => {
+                            current_pos =
+                                Self::construct_initial_finished_state(pk_in_output_indices.len());
+                            Self::persist_state(
+                                barrier.epoch,
+                                &mut self.state_table,
+                                true,
+                                &current_pos,
+                                &mut old_state,
+                                &mut current_state,
+                            )
+                            .await?;
+                            self.progress.finish(barrier.epoch.curr);
                             yield msg;
+                            break;
                         }
-                    }
-                    Message::Chunk(_) => {
-                        if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                        _ => {
                             yield msg;
                         }
                     }
