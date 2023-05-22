@@ -526,12 +526,11 @@ impl_memcmp_encoding_hash_key_serde!(ListValue);
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use itertools::Itertools;
 
     use super::*;
-    use crate::array;
-    use crate::array::column::Column;
     use crate::array::{
         ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DataChunk, DataChunkTestExt,
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
@@ -550,21 +549,17 @@ mod tests {
         let capacity = 128;
         let seed = 10244021u64;
         let columns = vec![
-            Column::new(seed_rand_array_ref::<BoolArray>(capacity, seed, 0.5)),
-            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed + 1, 0.5)),
-            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed + 2, 0.5)),
-            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed + 3, 0.5)),
-            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed + 4, 0.5)),
-            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5, 0.5)),
-            Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6, 0.5)),
-            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 0.5)),
-            Column::new(seed_rand_array_ref::<DateArray>(capacity, seed + 8, 0.5)),
-            Column::new(seed_rand_array_ref::<TimeArray>(capacity, seed + 9, 0.5)),
-            Column::new(seed_rand_array_ref::<TimestampArray>(
-                capacity,
-                seed + 10,
-                0.5,
-            )),
+            seed_rand_array_ref::<BoolArray>(capacity, seed, 0.5),
+            seed_rand_array_ref::<I16Array>(capacity, seed + 1, 0.5),
+            seed_rand_array_ref::<I32Array>(capacity, seed + 2, 0.5),
+            seed_rand_array_ref::<I64Array>(capacity, seed + 3, 0.5),
+            seed_rand_array_ref::<F32Array>(capacity, seed + 4, 0.5),
+            seed_rand_array_ref::<F64Array>(capacity, seed + 5, 0.5),
+            seed_rand_array_ref::<DecimalArray>(capacity, seed + 6, 0.5),
+            seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 0.5),
+            seed_rand_array_ref::<DateArray>(capacity, seed + 8, 0.5),
+            seed_rand_array_ref::<TimeArray>(capacity, seed + 9, 0.5),
+            seed_rand_array_ref::<TimestampArray>(capacity, seed + 10, 0.5),
         ];
         let types = vec![
             DataType::Boolean,
@@ -618,7 +613,7 @@ mod tests {
                 let row = column_indexes
                     .iter()
                     .map(|col_idx| data.column_at(*col_idx))
-                    .map(|col| col.array_ref().datum_at(row_idx))
+                    .map(|col| col.datum_at(row_idx))
                     .collect::<Vec<Datum>>();
 
                 normal_hash_map.entry(Row(row)).or_default().push(row_idx);
@@ -643,7 +638,7 @@ mod tests {
 
         let mut array_builders = column_indexes
             .iter()
-            .map(|idx| data.columns()[*idx].array_ref().create_builder(1024))
+            .map(|idx| data.columns()[*idx].create_builder(1024))
             .collect::<Vec<ArrayBuilderImpl>>();
         let key_types: Vec<_> = column_indexes
             .iter()
@@ -660,10 +655,7 @@ mod tests {
             .collect::<Vec<ArrayImpl>>();
 
         for (ret_idx, col_idx) in column_indexes.iter().enumerate() {
-            assert_eq!(
-                data.columns()[*col_idx].array_ref(),
-                &result_arrays[ret_idx]
-            );
+            assert_eq!(&*data.columns()[*col_idx], &result_arrays[ret_idx]);
         }
     }
 
@@ -716,14 +708,16 @@ mod tests {
     }
 
     fn generate_decimal_test_data() -> (DataChunk, Vec<DataType>) {
-        let columns = vec![array! { DecimalArray, [
-            Some(Decimal::from_str("1.2").unwrap()),
-            None,
-            Some(Decimal::from_str("1.200").unwrap()),
-            Some(Decimal::from_str("0.00").unwrap()),
-            Some(Decimal::from_str("0.0").unwrap())
-        ]}
-        .into()];
+        let columns = vec![Arc::new(
+            DecimalArray::from_iter([
+                Some(Decimal::from_str("1.2").unwrap()),
+                None,
+                Some(Decimal::from_str("1.200").unwrap()),
+                Some(Decimal::from_str("0.00").unwrap()),
+                Some(Decimal::from_str("0.0").unwrap()),
+            ])
+            .into(),
+        )];
         let types = vec![DataType::Decimal];
 
         (DataChunk::new(columns, 5), types)

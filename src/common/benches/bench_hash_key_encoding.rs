@@ -105,7 +105,7 @@ impl<K: HashKey> HashKeyBenchCase<K> {
                 .input_chunk
                 .columns()
                 .iter()
-                .map(|c| c.array_ref().create_builder(self.input_chunk.capacity()))
+                .map(|c| c.create_builder(self.input_chunk.capacity()))
                 .collect::<Vec<ArrayBuilderImpl>>();
             b.iter(|| {
                 for key in &self.keys {
