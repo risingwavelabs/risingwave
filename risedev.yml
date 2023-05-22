@@ -696,6 +696,68 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-3cn-2fe-3meta-with-recovery:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 2388
+        peer-port: 2389
+        exporter-port: 2379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 12388
+        peer-port: 12389
+        exporter-port: 12379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 22388
+        peer-port: 22389
+        exporter-port: 22379
+
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: meta-node
+        port: 15690
+        dashboard-port: 15691
+        exporter-port: 11250
+      - use: meta-node
+        port: 25690
+        dashboard-port: 25691
+        exporter-port: 21250
+
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+
+      - use: frontend
+        port: 4565
+        exporter-port: 2222
+        health-check-port: 6786
+      - use: frontend
+        port: 4566
+        exporter-port: 2223
+        health-check-port: 6787
+      - use: frontend
+        port: 4567
+        exporter-port: 2224
+        health-check-port: 6788
+
+      - use: compactor
+
   ci-1cn-1fe-with-recovery:
     config-path: src/config/ci-recovery.toml
     steps:
