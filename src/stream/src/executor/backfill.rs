@@ -153,7 +153,6 @@ where
         let is_finished = if let Some(row) = row
             && let Some(is_finished) = row.datum_at(state_len - 1)
         {
-            
             is_finished.into_bool()
         } else {
             false
