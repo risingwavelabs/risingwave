@@ -154,6 +154,7 @@ struct FunctionAttr {
     state: Option<String>,
     init_state: Option<String>,
     prebuild: Option<String>,
+    type_infer: Option<String>,
     user_fn: UserFunctionAttr,
 }
 

@@ -55,6 +55,7 @@ impl FunctionAttr {
             state: find_argument(attr, "state"),
             init_state: find_argument(attr, "init_state"),
             prebuild: find_argument(attr, "prebuild"),
+            type_infer: find_argument(attr, "type_infer"),
             user_fn,
         })
     }

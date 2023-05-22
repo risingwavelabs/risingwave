@@ -250,13 +250,6 @@ impl From<DataTypeName> for DataType {
     }
 }
 
-pub fn unnested_list_type(datatype: DataType) -> DataType {
-    match datatype {
-        DataType::List(datatype) => unnested_list_type(*datatype),
-        _ => datatype,
-    }
-}
-
 impl From<&PbDataType> for DataType {
     fn from(proto: &PbDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
@@ -456,6 +449,26 @@ impl DataType {
                     .collect_vec(),
             )),
             DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+        }
+    }
+
+    /// Return a new type that removes the outer list.
+    ///
+    /// ```
+    /// # use risingwave_common::types::DataType;
+    /// assert_eq!(
+    ///     DataType::List(Box::new(DataType::Int32)).unnest_list(),
+    ///     DataType::Int32
+    /// );
+    /// assert_eq!(
+    ///     DataType::List(DataType::List(Box::new(DataType::Int32))).unnest_list(),
+    ///     DataType::Int32
+    /// );
+    /// ```
+    pub fn unnest_list(&self) -> Self {
+        match self {
+            DataType::List(inner) => inner.unnest_list(),
+            _ => self.clone(),
         }
     }
 }

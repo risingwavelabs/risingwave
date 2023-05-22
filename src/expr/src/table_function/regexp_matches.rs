@@ -21,10 +21,12 @@ use crate::ExprError;
 
 #[table_function(
     "regexp_matches(varchar, varchar) -> list",
+    type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
     prebuild = "RegexpContext::from_pattern_flags($1, None)?"
 )]
 #[table_function(
     "regexp_matches(varchar, varchar, varchar) -> list",
+    type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]
 fn regexp_matches<'a>(

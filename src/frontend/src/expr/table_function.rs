@@ -144,7 +144,7 @@ impl TableFunction {
 
                 let expr = args.into_iter().next().unwrap();
                 if matches!(expr.return_type(), DataType::List(_)) {
-                    let data_type = unnested_list_type(expr.return_type());
+                    let data_type = expr.return_type().unnest_list();
 
                     Ok(TableFunction {
                         args: vec![expr],

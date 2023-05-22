@@ -80,6 +80,8 @@ pub struct FuncSign {
         chunk_size: usize,
         children: Vec<BoxedExpression>,
     ) -> Result<BoxedTableFunction>,
+    /// A function to infer the return type from argument types.
+    pub type_infer: fn(args: &[DataType]) -> Result<DataType>,
 }
 
 impl fmt::Debug for FuncSign {

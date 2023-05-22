@@ -54,9 +54,9 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type(ty));
+            args.push(data_type_name(ty));
         }
-        let ret = data_type(&self.ret);
+        let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
@@ -278,9 +278,9 @@ impl FunctionAttr {
 
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type(ty));
+            args.push(data_type_name(ty));
         }
-        let ret = data_type(&self.ret);
+        let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
@@ -430,9 +430,9 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type(ty));
+            args.push(data_type_name(ty));
         }
-        let ret = data_type(&self.ret);
+        let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
@@ -443,6 +443,18 @@ impl FunctionAttr {
         } else {
             self.generate_build_table_function()?
         };
+        let type_infer_fn = if let Some(func) = &self.type_infer {
+            func.parse().unwrap()
+        } else {
+            if matches!(self.ret.as_str(), "any" | "list" | "struct") {
+                return Err(Error::new(
+                    Span::call_site(),
+                    format!("type inference function is required for {}", self.ret),
+                ));
+            }
+            let ty = data_type(&self.ret);
+            quote! { |_| Ok(#ty) }
+        };
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
@@ -451,6 +463,7 @@ impl FunctionAttr {
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,
+                    type_infer: #type_infer_fn,
                 }) };
             }
         })
@@ -581,7 +594,12 @@ impl FunctionAttr {
     }
 }
 
-fn data_type(ty: &str) -> TokenStream2 {
+fn data_type_name(ty: &str) -> TokenStream2 {
     let variant = format_ident!("{}", types::data_type(ty));
     quote! { risingwave_common::types::DataTypeName::#variant }
+}
+
+fn data_type(ty: &str) -> TokenStream2 {
+    let variant = format_ident!("{}", types::data_type(ty));
+    quote! { risingwave_common::types::DataType::#variant }
 }

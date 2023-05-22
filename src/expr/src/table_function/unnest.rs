@@ -18,7 +18,7 @@ use risingwave_expr_macro::table_function;
 
 use super::*;
 
-#[table_function("unnest(list) -> any")]
+#[table_function("unnest(list) -> any", type_infer = "|args| Ok(args[0].unnest_list())")]
 fn unnest(list: ListRef<'_>) -> impl Iterator<Item = DatumRef<'_>> {
     list.flatten().into_iter()
 }
