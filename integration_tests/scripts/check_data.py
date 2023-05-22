@@ -99,6 +99,6 @@ cdc_check_file = os.path.join(demo_dir, 'cdc_check')
 with open(cdc_check_file) as f:
     print("Check cdc table with upstream {}".format(upstream))
     for line in f.readlines():
-        relations = f.read().strip().split(",")
+        relations = f.read().split(",")
         for rel in relations:
             check_cdc_table(rel, upstream)
