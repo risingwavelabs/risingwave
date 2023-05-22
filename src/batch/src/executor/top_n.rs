@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::estimate_size::collections::MemMonitoredHeap;
 use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
@@ -47,6 +47,7 @@ pub struct TopNExecutor {
     schema: Schema,
     identity: String,
     chunk_size: usize,
+    mem_ctx: MemoryContext,
 }
 
 #[async_trait::async_trait]
@@ -65,14 +66,18 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .iter()
             .map(ColumnOrder::from_protobuf)
             .collect();
+
+        let identity = source.plan_node().get_identity();
+
         Ok(Box::new(Self::new(
             child,
             column_orders,
             top_n_node.get_offset() as usize,
             top_n_node.get_limit() as usize,
             top_n_node.get_with_ties(),
-            source.plan_node().get_identity().clone(),
+            identity.clone(),
             source.context.get_config().developer.chunk_size,
+            source.context().create_executor_mem_context(identity),
         )))
     }
 }
@@ -86,6 +91,7 @@ impl TopNExecutor {
         with_ties: bool,
         identity: String,
         chunk_size: usize,
+        mem_ctx: MemoryContext,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -97,6 +103,7 @@ impl TopNExecutor {
             schema,
             identity,
             chunk_size,
+            mem_ctx,
         }
     }
 }
@@ -119,17 +126,20 @@ pub const MAX_TOPN_INIT_HEAP_CAPACITY: usize = 1024;
 
 /// A max-heap used to find the smallest `limit+offset` items.
 pub struct TopNHeap {
-    heap: BinaryHeap<HeapElem>,
+    heap: MemMonitoredHeap<HeapElem>,
     limit: usize,
     offset: usize,
     with_ties: bool,
 }
 
 impl TopNHeap {
-    pub fn new(limit: usize, offset: usize, with_ties: bool) -> Self {
+    pub fn new(limit: usize, offset: usize, with_ties: bool, mem_ctx: MemoryContext) -> Self {
         assert!(limit > 0);
         Self {
-            heap: BinaryHeap::with_capacity((limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY)),
+            heap: MemMonitoredHeap::with_capacity(
+                (limit + offset).min(MAX_TOPN_INIT_HEAP_CAPACITY),
+                mem_ctx,
+            ),
             limit,
             offset,
             with_ties,
@@ -142,9 +152,11 @@ impl TopNHeap {
         } else {
             // heap is full
             if !self.with_ties {
-                let mut peek = self.heap.peek_mut().unwrap();
-                if elem < *peek {
-                    *peek = elem;
+                let peek = self.heap.pop().unwrap();
+                if elem < peek {
+                    self.heap.push(elem);
+                } else {
+                    self.heap.push(peek);
                 }
             } else {
                 let peek = self.heap.peek().unwrap().clone();
@@ -175,8 +187,7 @@ impl TopNHeap {
     /// Returns the elements in the range `[offset, offset+limit)`.
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
         self.heap
-            .into_iter_sorted()
-            .collect_vec()
+            .into_sorted_vec()
             .into_iter()
             .rev()
             .skip(self.offset)
@@ -232,7 +243,12 @@ impl TopNExecutor {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(self.limit, self.offset, self.with_ties);
+        let mut heap = TopNHeap::new(
+            self.limit,
+            self.offset,
+            self.with_ties,
+            self.mem_ctx.clone(),
+        );
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -310,6 +326,7 @@ mod tests {
             false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
@@ -367,6 +384,7 @@ mod tests {
             false,
             "TopNExecutor".to_string(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ));
         let fields = &top_n_executor.schema().fields;
         assert_eq!(fields[0].data_type, DataType::Int32);
