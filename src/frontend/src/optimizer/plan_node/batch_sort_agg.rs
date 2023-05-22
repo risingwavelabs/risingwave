@@ -38,6 +38,8 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(logical.input_provides_order_on_group_keys());
+
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -55,8 +57,6 @@ impl BatchSortAgg {
                 .cloned()
                 .collect(),
         };
-
-        assert_eq!(input_order.column_orders.len(), logical.group_key.len());
 
         let order = logical
             .i2o_col_mapping()
