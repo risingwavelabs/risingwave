@@ -172,6 +172,9 @@ impl LevelCompactionPicker {
             )
             .unwrap();
         let min_write_amp_meet = min_write_amp_input.total_file_size >= *target_level_size;
+        input_levels.sort_by(|(_, _, target_files1), (_, _, target_files2)| {
+            target_files1.len().cmp(&target_files2.len())
+        });
         for (input, target_file_size, target_level_files) in input_levels {
             if min_write_amp_meet && input.total_file_size < target_file_size {
                 continue;
