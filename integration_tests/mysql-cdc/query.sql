@@ -1,6 +1,6 @@
 SELECT
     *
 FROM
-    orders
+    lineitem_count
 LIMIT
     10;

@@ -135,7 +135,7 @@
     select * from t1 Union select * from t2;
   stream_plan: |
     StreamMaterialize { columns: [ts, v1, v2], stream_key: [ts, v1, v2], pk_columns: [ts, v1, v2], pk_conflict: "NoCheck", watermark_columns: [ts] }
-    └─StreamAppendOnlyDedup { dedup_cols: [0, 1, 2] }
+    └─StreamAppendOnlyDedup { dedup_cols: [t1.ts, t1.v1, t1.v2] }
       └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
         └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2], output_watermarks: [t1.ts] }
           └─StreamUnion { all: true, output_watermarks: [t1.ts] }

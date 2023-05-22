@@ -217,9 +217,9 @@
     SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
   batch_plan: |
     BatchExchange { order: [$expr1 ASC], dist: Single }
-    └─BatchSortAgg { group_key: [$expr1], aggs: [sum(test.a)] }
-      └─BatchExchange { order: [$expr1 ASC], dist: HashShard($expr1) }
-        └─BatchSort { order: [$expr1 ASC] }
+    └─BatchSort { order: [$expr1 ASC] }
+      └─BatchHashAgg { group_key: [$expr1], aggs: [sum(test.a)] }
+        └─BatchExchange { order: [], dist: HashShard($expr1) }
           └─BatchProject { exprs: [(test.b % 2:Int32) as $expr1, test.a] }
             └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
 - name: Orderby with always-false predicate
@@ -239,7 +239,26 @@
     BatchProject { exprs: [1:Int32] }
     └─BatchExchange { order: [t1.v1 ASC], dist: Single }
       └─BatchProject { exprs: [1:Int32, t1.v1] }
-        └─BatchSortAgg { group_key: [t1.v1], aggs: [] }
-          └─BatchExchange { order: [t1.v1 ASC], dist: HashShard(t1.v1) }
-            └─BatchSort { order: [t1.v1 ASC] }
+        └─BatchSort { order: [t1.v1 ASC] }
+          └─BatchHashAgg { group_key: [t1.v1], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(t1.v1) }
               └─BatchValues { rows: [] }
+- name: distinct on order by
+  sql: |
+    create table t (x int, y int);
+    select distinct on(x) x,y from t order by x,y;
+  batch_plan: |
+    BatchExchange { order: [t.x ASC, t.y ASC], dist: Single }
+    └─BatchSort { order: [t.x ASC, t.y ASC] }
+      └─BatchGroupTopN { order: "[t.x ASC, t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+        └─BatchExchange { order: [], dist: HashShard(t.x) }
+          └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+- name: distinct on order by in cte
+  sql: |
+    create table t (x int, y int);
+    with cte as (select distinct on(x) x,y from t order by x,y) select * from cte;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchGroupTopN { order: "[t.x ASC, t.y ASC]", limit: 1, offset: 0, group_key: [0] }
+      └─BatchExchange { order: [], dist: HashShard(t.x) }
+        └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }

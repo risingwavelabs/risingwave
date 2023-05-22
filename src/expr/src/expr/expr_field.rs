@@ -102,8 +102,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::array;
-    use risingwave_common::array::{DataChunk, F32Array, I32Array, StructArray};
+    use risingwave_common::array::{Array, DataChunk, F32Array, I32Array, StructArray};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
 
@@ -123,13 +122,13 @@ mod tests {
         let array = StructArray::from_slices(
             &[true],
             vec![
-                array! { I32Array, [Some(1),Some(2),Some(3),Some(4),Some(5)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into(),
+                F32Array::from_iter([2.0]).into(),
             ],
             vec![DataType::Int32, DataType::Float32],
         );
 
-        let data_chunk = DataChunk::new(vec![array.into()], 1);
+        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
         let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
@@ -153,8 +152,8 @@ mod tests {
         let struct_array = StructArray::from_slices(
             &[true],
             vec![
-                array! { I32Array, [Some(1),Some(2),Some(3),Some(4),Some(5)] }.into(),
-                array! { F32Array, [Some(1.0),Some(2.0),Some(3.0),Some(4.0),Some(5.0)] }.into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into(),
+                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into(),
             ],
             vec![DataType::Int32, DataType::Float32],
         );
@@ -162,12 +161,12 @@ mod tests {
             &[true],
             vec![
                 struct_array.into(),
-                array! { F32Array, [Some(2.0),Some(2.0),Some(2.0),Some(2.0),Some(2.0)] }.into(),
+                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into(),
             ],
             vec![DataType::Int32, DataType::Float32],
         );
 
-        let data_chunk = DataChunk::new(vec![array.into()], 1);
+        let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
         let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));

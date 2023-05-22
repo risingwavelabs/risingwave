@@ -16,7 +16,7 @@ use super::*;
 
 /// Repeat an expression n times.
 ///
-/// Used for tests.
+/// Should only be used for tests now.
 pub fn repeat(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
     RepeatN { expr, n }.boxed()
 }

@@ -29,7 +29,7 @@ RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/rust-toolchain") \
+  && rustup show \
   && rustup component add rustfmt
 
 RUN cargo fetch

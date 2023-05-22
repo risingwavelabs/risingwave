@@ -87,8 +87,8 @@ mod tests {
             }
         }
 
-        let col1 = I32Array::from_iter(&lhs).into();
-        let col2 = I32Array::from_iter(&rhs).into();
+        let col1 = I32Array::from_iter(&lhs).into_ref();
+        let col2 = I32Array::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = build(
             kind,
@@ -145,8 +145,8 @@ mod tests {
             }
         }
 
-        let col1 = DateArray::from_iter(&lhs).into();
-        let col2 = IntervalArray::from_iter(&rhs).into();
+        let col1 = DateArray::from_iter(&lhs).into_ref();
+        let col2 = IntervalArray::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date $1:interval)"));
         let res = expr.eval(&data_chunk).await.unwrap();
@@ -197,8 +197,8 @@ mod tests {
             }
         }
 
-        let col1 = DecimalArray::from_iter(&lhs).into();
-        let col2 = DecimalArray::from_iter(&rhs).into();
+        let col1 = DecimalArray::from_iter(&lhs).into_ref();
+        let col2 = DecimalArray::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = build(
             kind,
