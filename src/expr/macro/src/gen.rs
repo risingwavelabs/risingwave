@@ -51,6 +51,9 @@ impl FunctionAttr {
     ///
     /// The types of arguments and return value should not contain wildcard.
     pub fn generate_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+        if self.is_table_function {
+            return self.generate_table_function_descriptor(build_fn);
+        }
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
@@ -426,7 +429,7 @@ impl FunctionAttr {
     /// Generate a descriptor of the table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    pub fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+    fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {

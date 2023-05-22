@@ -40,6 +40,10 @@ impl FunctionAttr {
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
+        let (is_table_function, ret) = match ret.trim_start().strip_prefix("setof") {
+            Some(s) => (true, s),
+            None => (false, ret),
+        };
 
         let user_fn = UserFunctionAttr::parse(item)?;
 
@@ -51,6 +55,7 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
+            is_table_function,
             batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
             init_state: find_argument(attr, "init_state"),

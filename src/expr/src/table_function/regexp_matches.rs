@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use risingwave_common::array::ListValue;
-use risingwave_expr_macro::table_function;
+use risingwave_expr_macro::function;
 
 use super::*;
 use crate::expr::expr_regexp::RegexpContext;
 use crate::ExprError;
 
-#[table_function(
-    "regexp_matches(varchar, varchar) -> list",
+#[function(
+    "regexp_matches(varchar, varchar) -> setof list",
     type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
     prebuild = "RegexpContext::from_pattern_flags($1, None)?"
 )]
-#[table_function(
-    "regexp_matches(varchar, varchar, varchar) -> list",
+#[function(
+    "regexp_matches(varchar, varchar, varchar) -> setof list",
     type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]

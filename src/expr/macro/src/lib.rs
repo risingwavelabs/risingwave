@@ -66,46 +66,6 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn table_function(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
-
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
-        for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_table_function_descriptor(false)?);
-        }
-        Ok(tokens)
-    }
-    match inner(attr, item) {
-        Ok(tokens) => tokens.into(),
-        Err(e) => e.to_compile_error().into(),
-    }
-}
-
-#[proc_macro_attribute]
-pub fn build_table_function(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as syn::AttributeArgs);
-    let item = parse_macro_input!(item as syn::ItemFn);
-
-    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
-
-        let mut tokens = item.into_token_stream();
-        for attr in fn_attr.expand() {
-            tokens.extend(attr.generate_table_function_descriptor(true)?);
-        }
-        Ok(tokens)
-    }
-    match inner(attr, item) {
-        Ok(tokens) => tokens.into(),
-        Err(e) => e.to_compile_error().into(),
-    }
-}
-
-#[proc_macro_attribute]
 pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as syn::AttributeArgs);
     let item = parse_macro_input!(item as syn::ItemFn);
@@ -150,6 +110,7 @@ struct FunctionAttr {
     name: String,
     args: Vec<String>,
     ret: String,
+    is_table_function: bool,
     batch_fn: Option<String>,
     state: Option<String>,
     init_state: Option<String>,

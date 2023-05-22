@@ -14,13 +14,13 @@
 
 use num_traits::One;
 use risingwave_common::types::{CheckedAdd, IsNegative};
-use risingwave_expr_macro::table_function;
+use risingwave_expr_macro::function;
 
 use super::*;
 
-#[table_function("generate_series(int32, int32) -> int32")]
-#[table_function("generate_series(int64, int64) -> int64")]
-#[table_function("generate_series(decimal, decimal) -> decimal")]
+#[function("generate_series(int32, int32) -> setof int32")]
+#[function("generate_series(int64, int64) -> setof int64")]
+#[function("generate_series(decimal, decimal) -> setof decimal")]
 fn generate_series<T>(start: T, stop: T) -> impl Iterator<Item = T>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
@@ -28,10 +28,10 @@ where
     range_generic::<_, _, true>(start, stop, T::one())
 }
 
-#[table_function("generate_series(int32, int32, int32) -> int32")]
-#[table_function("generate_series(int64, int64, int64) -> int64")]
-#[table_function("generate_series(decimal, decimal, decimal) -> decimal")]
-#[table_function("generate_series(timestamp, timestamp, interval) -> timestamp")]
+#[function("generate_series(int32, int32, int32) -> setof int32")]
+#[function("generate_series(int64, int64, int64) -> setof int64")]
+#[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
+#[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
 fn generate_series_step<T, S>(start: T, stop: T, step: S) -> impl Iterator<Item = T>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
@@ -40,9 +40,9 @@ where
     range_generic::<_, _, true>(start, stop, step)
 }
 
-#[table_function("range(int32, int32) -> int32")]
-#[table_function("range(int64, int64) -> int64")]
-#[table_function("range(decimal, decimal) -> decimal")]
+#[function("range(int32, int32) -> setof int32")]
+#[function("range(int64, int64) -> setof int64")]
+#[function("range(decimal, decimal) -> setof decimal")]
 fn range<T>(start: T, stop: T) -> impl Iterator<Item = T>
 where
     T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
@@ -50,10 +50,10 @@ where
     range_generic::<_, _, false>(start, stop, T::one())
 }
 
-#[table_function("range(int32, int32, int32) -> int32")]
-#[table_function("range(int64, int64, int64) -> int64")]
-#[table_function("range(decimal, decimal, decimal) -> decimal")]
-#[table_function("range(timestamp, timestamp, interval) -> timestamp")]
+#[function("range(int32, int32, int32) -> setof int32")]
+#[function("range(int64, int64, int64) -> setof int64")]
+#[function("range(decimal, decimal, decimal) -> setof decimal")]
+#[function("range(timestamp, timestamp, interval) -> setof timestamp")]
 fn range_step<T, S>(start: T, stop: T, step: S) -> impl Iterator<Item = T>
 where
     T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
