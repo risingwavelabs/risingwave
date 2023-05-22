@@ -20,6 +20,7 @@ use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 use std::sync::LazyLock;
 
+use anyhow::Context;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Timelike;
@@ -1011,76 +1012,57 @@ impl Interval {
         format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
     }
 
+    /// Converts str to interval
+    ///
+    /// The input str must have the following format:
+    /// P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
+    ///
+    /// Example
+    /// - P1Y2M3DT4H5M6.78S
     pub fn from_iso_8601(s: &str) -> Result<Self> {
         // ISO pattern - PnYnMnDTnHnMnS
         static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
             Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
                 .unwrap()
         });
-        let caps = ISO_8601_REGEX
-            .captures(s)
-            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        // `caps.get` is safe to unwrap, since `caps` is `Some`
-        let years: i32 = caps
-            .get(1)
-            .unwrap()
-            .as_str()
-            .parse()
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        let months: i32 = caps
-            .get(2)
-            .unwrap()
-            .as_str()
-            .parse()
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        let days = caps
-            .get(3)
-            .unwrap()
-            .as_str()
-            .parse()
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        let hours: i64 = caps
-            .get(4)
-            .unwrap()
-            .as_str()
-            .parse()
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        let minutes: i64 = caps
-            .get(5)
-            .unwrap()
-            .as_str()
-            .parse()
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        // usecs = sec * 1000000, use decimal to be exact
-        let usecs: i64 = (Decimal::from_str_exact(caps.get(5).unwrap().as_str())
-            .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
-            .checked_mul(Decimal::from_str_exact("1000000").unwrap()))
-        .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
-        .try_into()
-        .map_err(|_| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?;
-        Ok(Interval::from_month_day_usec(
-            // months = years * 12 + months
-            years
-                .checked_mul(12)
-                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
-                .checked_add(months)
-                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?,
-            days,
-            // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
-            (hours
-                .checked_mul(3_600)
-                .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
-                .checked_add(minutes.checked_mul(60).ok_or_else(|| {
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
-                })?)
-                .ok_or_else(|| {
-                    ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
-                })?)
-            .checked_mul(1_000_000)
-            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?
-            .checked_add(usecs)
-            .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s)))?,
-        ))
+        // wrap into a closure to simplify error handling
+        let f = || {
+            let caps = ISO_8601_REGEX
+                .captures(s)
+                .context("regex capture failure")?;
+            let years: i32 = caps[1].parse()?;
+            let months: i32 = caps[2].parse()?;
+            let days = caps[3].parse()?;
+            let hours: i64 = caps[4].parse()?;
+            let minutes: i64 = caps[5].parse()?;
+            // usecs = sec * 1000000, use decimal to be exact
+            let usecs: i64 = (Decimal::from_str_exact(&caps[6])?
+                .checked_mul(Decimal::from_str_exact("1000000").unwrap()))
+            .context("check_mul failure")?
+            .try_into()?;
+            Ok(Interval::from_month_day_usec(
+                // months = years * 12 + months
+                years
+                    .checked_mul(12)
+                    .context("check_mul failure")?
+                    .checked_add(months)
+                    .context("check_add failure")?,
+                days,
+                // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
+                (hours
+                    .checked_mul(3_600)
+                    .context("check_mul failure")?
+                    .checked_add(minutes.checked_mul(60).ok_or_else(|| {
+                        ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
+                    })?)
+                    .context("check_mul failure")?)
+                .checked_mul(USECS_PER_SEC)
+                .context("check_mul failure")?
+                .checked_add(usecs)
+                .context("check_mul failure")?,
+            ))
+        };
+        f().map_err(|_: Box<dyn Error>| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
     }
 }
 

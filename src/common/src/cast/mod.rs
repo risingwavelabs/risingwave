@@ -28,8 +28,6 @@ pub const PARSE_ERROR_STR_TO_TIME: &str =
     "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}][Z] or HH:MM)";
 pub const PARSE_ERROR_STR_TO_DATE: &str =
     "Can't cast string to date (expected format is YYYY-MM-DD)";
-pub const PARSE_ERROR_STR_TO_INTERVAL: &str =
-    "Can't cast string to interval (expected format is P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S, for example, P1Y2M3DT4H5M6.78S)";
 
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
 

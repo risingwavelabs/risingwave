@@ -708,7 +708,7 @@ mod tests {
             //     PRIMARY KEY (o_key)
             // );
             // this test covers an insert event on the table above
-            let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P0Y0M0DT1H0M0S","o_date":"1999-09-09"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684399608962,"snapshot":"last","db":"test","sequence":"[null,\"26505352\"]","schema":"public","table":"orders","txId":729,"lsn":26505352,"xmin":null},"op":"r","ts_ms":1684399609105,"transaction":null}}"#;
+            let data = br#"{"payload":{"before":null,"after":{"o_key":0,"o_time_0":40271000000,"o_time_6":40271000010,"o_timez_0":"11:11:11Z","o_timez_6":"11:11:11.00001Z","o_timestamp_0":1321009871000,"o_timestamp_6":1321009871123456,"o_timestampz_0":"2011-11-11T03:11:11Z","o_timestampz_6":"2011-11-11T03:11:11.123456Z","o_interval":"P1Y2M3DT4H5M6.78S","o_date":"1999-09-09"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684733351963,"snapshot":"last","db":"test","sequence":"[null,\"26505352\"]","schema":"public","table":"orders","txId":729,"lsn":26505352,"xmin":null},"op":"r","ts_ms":1684733352110,"transaction":null}}"#;
             let columns = get_temporal_test_columns();
             let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
             let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
@@ -737,9 +737,9 @@ mod tests {
             )))));
             assert!(
                 row[9].eq(&Some(ScalarImpl::Interval(Interval::from_month_day_usec(
-                    0,
-                    0,
-                    3_600_000_000
+                    14,
+                    3,
+                    14706780000
                 ))))
             );
             assert!(row[10].eq(&Some(ScalarImpl::Date(Date::new(

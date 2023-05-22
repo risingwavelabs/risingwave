@@ -296,7 +296,7 @@ public class PostgresSourceTest {
                         + "PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connection, query);
         query =
-                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', '01:00:00', '1999-09-09')";
+                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', INTERVAL '1 years 2 months 3 days 4 hours 5 minutes 6.78 seconds', '1999-09-09')";
         SourceTestClient.performQuery(connection, query);
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
