@@ -23,12 +23,13 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::compact::append_sstable_info_to_string;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
 use crate::hummock::compactor::compaction_filter::DummyCompactionFilter;
@@ -271,16 +272,18 @@ async fn compact_shared_buffer(
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
 
+        let mut sst_infos_string = String::default();
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
                     .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
+                append_sstable_info_to_string(&mut sst_infos_string, &sst_info.sst_info);
             }
             level0.extend(ssts);
         }
-
+        info!("Compaction Result: \n{}", sst_infos_string);
         Ok(level0)
     } else {
         Err(err.unwrap())
