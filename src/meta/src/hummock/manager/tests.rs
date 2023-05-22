@@ -949,10 +949,14 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
+    let original_tables = generate_test_sstables_with_table_id(
+        epoch,
+        1,
+        get_sst_ids(&hummock_manager, sst_num).await,
+    );
+    register_table_ids_to_compaction_group(
         &hummock_manager,
-        &original_tables,
+        &[1],
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
@@ -1076,10 +1080,14 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
+    let original_tables = generate_test_sstables_with_table_id(
+        epoch,
+        1,
+        get_sst_ids(&hummock_manager, sst_num).await,
+    );
+    register_table_ids_to_compaction_group(
         &hummock_manager,
-        &original_tables,
+        &[1],
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
