@@ -53,7 +53,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -102,7 +103,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -151,7 +153,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -210,7 +213,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -294,7 +298,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -345,7 +350,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -401,7 +407,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -452,7 +459,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -508,7 +516,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -559,7 +568,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -622,7 +632,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -673,7 +684,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1 ]
@@ -757,7 +769,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -808,7 +821,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -871,7 +885,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -922,7 +937,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -992,7 +1008,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -1043,7 +1060,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, a2 ]
@@ -1105,7 +1123,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, t.k ]
@@ -1162,7 +1181,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, tk.k ]
@@ -1223,7 +1243,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, s.k ]
@@ -1272,7 +1293,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, ao.k ]
@@ -1327,7 +1349,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, t.k ]
@@ -1377,7 +1400,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, tk.k ]
@@ -1431,7 +1455,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, s.k ]
@@ -1480,7 +1505,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, ao.k ]
@@ -1535,7 +1561,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, t.k ]
@@ -1585,7 +1612,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, tk.k ]
@@ -1639,7 +1667,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, s.k ]
@@ -1688,7 +1717,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, ao.k ]
@@ -1753,7 +1783,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, t.k ]
@@ -1813,7 +1844,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, tk.k ]
@@ -1878,7 +1910,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, s.k ]
@@ -1929,7 +1962,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a1, ao.k ]

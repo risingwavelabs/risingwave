@@ -53,9 +53,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -105,9 +105,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -157,9 +157,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -209,9 +209,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -270,7 +270,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, a.k1 ]
@@ -329,7 +330,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1.k1 ]
@@ -393,7 +395,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1k2.k1 ]
@@ -457,7 +460,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1k2.k2 ]
@@ -506,7 +510,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ sum_v, ak1k2.k1, ak1k2.k2 ]
@@ -555,7 +560,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ sum_v, ak1.k1, ak1.k2 ]
@@ -638,7 +644,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1 ]
@@ -736,7 +743,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1 ]
@@ -834,7 +842,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k2 ]
@@ -910,7 +919,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1, a.k2 ]
@@ -982,11 +992,11 @@
 
     Table 3 { columns: [ a_k1, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 4 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 5 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ vnode, _row_id, a_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 6 { columns: [ vnode, _row_id, a_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, a.k1 ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 3 ], read pk prefix len hint: 3 }
 
@@ -1058,14 +1068,21 @@
 
     Table 4 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ vnode, _row_id, a_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 5
+    ├── columns: [ vnode, _row_id, a_backfill_finished ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 6
     ├── columns: [ vnode, k1, a__row_id, ak1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ v, bv, a.k1, ak1.a._row_id ]
@@ -1160,7 +1177,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 6 { columns: [ b_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
@@ -1169,7 +1187,8 @@
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
-    └── read pk prefix len hint: 1
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ num, bv, a.k1, b.k1 ]
@@ -1209,7 +1228,7 @@
                 ├──  Upstream
                 └──  BatchPlanNode
 
-    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ row_id, uid, v, created_at, window_start, window_end, t1._row_id ], primary key: [ $6 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 6 ], read pk prefix len hint: 3 }
 
