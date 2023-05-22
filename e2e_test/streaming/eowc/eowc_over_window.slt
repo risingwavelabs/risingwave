@@ -27,6 +27,17 @@ select
 from t;
 
 statement ok
+create materialized view mv_split
+emit on window close
+as
+select
+    tm, foo, bar,
+    lag(foo, 2) over (partition by bar order by tm),
+    max(foo) over (partition by bar*2 order by tm),
+    sum(foo) over (partition by bar order by tm)
+from t;
+
+statement ok
 insert into t values
   ('2023-05-06 16:51:00', 1, 100)
 , ('2023-05-06 16:56:00', 8, 100)
@@ -43,6 +54,10 @@ select * from mv order by tm;
 2023-05-06 16:51:00  1  100  NULL  8  NULL
 2023-05-06 16:56:00  8  100  NULL  8  1
 
+query TI
+select * from mv_split order by tm;
+----
+
 statement ok
 insert into t values
   ('2023-05-06 18:10:00', 7, 100)
@@ -57,8 +72,15 @@ select * from mv order by tm;
 2023-05-06 17:30:00  3  200  NULL  6  NULL
 2023-05-06 17:35:00  5  100  1     8  9
 
+query TI
+select * from mv_split order by tm;
+----
+
 statement ok
 drop materialized view mv;
+
+statement ok
+drop materialized view mv_split;
 
 statement ok
 drop table t;
