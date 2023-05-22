@@ -263,25 +263,16 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    System.out.printf("%s\n", msg.getPayload());
-                                }
-                            }
-                        });
-        // Q1: ordinary insert (read)
-        Thread.sleep(1000);
-        t1.start();
         query =
                 "INSERT INTO orders (O_KEY, O_BOOL, O_BITS, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON, O_TEXT_ARR)"
                         + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
         SourceTestClient.performQuery(connection, query);
-        Thread.sleep(1000);
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
         connection.close();
     }
 
@@ -310,20 +301,12 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    System.out.printf("%s\n", msg.getPayload());
-                                }
-                            }
-                        });
-        Thread.sleep(1000);
-        t1.start();
-        Thread.sleep(1000);
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
         connection.close();
     }
 
@@ -340,20 +323,12 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    System.out.printf("%s\n", msg.getPayload());
-                                }
-                            }
-                        });
-        Thread.sleep(1000);
-        t1.start();
-        Thread.sleep(1000);
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
         connection.close();
     }
 }
