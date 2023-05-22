@@ -296,7 +296,7 @@ impl AvroParser {
                         e
                     );
                     e
-                });
+                })
             };
             match op {
                 Op::Insert => writer.insert(fill),
