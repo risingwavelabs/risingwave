@@ -36,7 +36,7 @@ services:
   mysql:
     image: mysql:8.0
     ports:
-      - "8306:3306"
+      - "3306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=123456
       - MYSQL_USER=mysqluser

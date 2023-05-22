@@ -80,13 +80,13 @@ def check_upstream_table(rel: str, upstream: str):
 
 def run_mysql_upstream(sql):
     print("Running SQL: {} on upstream MySQL".format(sql))
-    return subprocess.check_output(["mysql", "-h", "localhost", "-P", "8306", "-D", "mydb", "--protocol=tcp",
+    return subprocess.check_output(["mysql", "-h", "localhost", "-P", "3306", "-D", "mydb",
                                     "-u", "root", "-p", "123456", "-Ne", sql, "-B"])
 
 
 def run_psql_upstream(sql):
     print("Running SQL: {} on upstream PG".format(sql))
-    return subprocess.check_output(["psql", "-h", "localhost", "-p", "8432",
+    return subprocess.check_output(["psql", "-h", "localhost", "-p", "5432",
                                     "-d", "mydb", "-U", "myuser", "--tuples-only", "-c", sql])
 
 
