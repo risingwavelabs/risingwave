@@ -806,6 +806,6 @@
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t2.d, t1.b), output: all }
     ├─LogicalScan { table: t2, columns: [t2.c, t2.d] }
     └─LogicalProject { exprs: [t1.b] }
-      └─LogicalDedup { dedup_cols: [0, 1] }
+      └─LogicalDedup { dedup_cols: [t1.b, t1.a] }
         └─LogicalProject { exprs: [t1.b, t1.a] }
           └─LogicalScan { table: t1, columns: [t1.a, t1.b], predicate: IsNotNull(t1.b) }
