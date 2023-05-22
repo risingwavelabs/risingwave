@@ -147,9 +147,8 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         .to_kv()
         .into_iter()
         .map(|(k, v)| {
-            let is_mutable_bytes = ScalarRefImpl::Bool(is_mutable(&k).unwrap())
-                .text_format(&DataType::Boolean)
-                .into();
+            let is_mutable_bytes =
+                ScalarRefImpl::Bool(is_mutable(&k).unwrap()).encode_to_text(&DataType::Boolean);
             Row::new(vec![Some(k.into()), Some(v.into()), Some(is_mutable_bytes)])
         })
         .collect_vec();

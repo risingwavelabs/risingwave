@@ -141,7 +141,6 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
-    use risingwave_common::cast::{str_to_date, str_to_timestamp};
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -220,12 +219,12 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(7).to_owned_datum(),
-                (Some(ScalarImpl::Date(str_to_date("2021-01-01").unwrap())))
+                (Some(ScalarImpl::Date("2021-01-01".parse().unwrap())))
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),
                 (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
+                    "2021-01-01 16:06:12.269".parse().unwrap()
                 )))
             );
             assert_eq!(
@@ -367,7 +366,7 @@ mod tests {
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
+                    "2022-07-13 20:48:37.07".parse().unwrap()
                 )),
                 Some(ScalarImpl::Utf8("1732524418112319151".into())),
                 Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".into())),
@@ -375,7 +374,7 @@ mod tests {
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
+                    "2018-01-29 12:19:11.07".parse().unwrap()
                 )),
                 Some(ScalarImpl::Utf8("7772634297".into())),
                 Some(ScalarImpl::Utf8("Lily Frami yet".into())),
