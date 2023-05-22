@@ -25,7 +25,7 @@ pub const PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ: &str = concat!(
 );
 pub const PARSE_ERROR_STR_TO_TIMESTAMP: &str = "Can't cast string to timestamp (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] or YYYY-MM-DD HH:MM or YYYY-MM-DD or ISO 8601 format)";
 pub const PARSE_ERROR_STR_TO_TIME: &str =
-    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}] or HH:MM)";
+    "Can't cast string to time (expected format is HH:MM:SS[.D+{up to 6 digits}][Z] or HH:MM)";
 pub const PARSE_ERROR_STR_TO_DATE: &str =
     "Can't cast string to date (expected format is YYYY-MM-DD)";
 
@@ -51,7 +51,9 @@ pub fn parse_naive_date(s: &str) -> Result<NaiveDate> {
 
 #[inline]
 pub fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    let res = SpeedTime::parse_str(s).map_err(|_| PARSE_ERROR_STR_TO_TIME.to_string())?;
+    let s_without_zone = s.trim_end_matches('Z');
+    let res =
+        SpeedTime::parse_str(s_without_zone).map_err(|_| PARSE_ERROR_STR_TO_TIME.to_string())?;
     Ok(Time::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
