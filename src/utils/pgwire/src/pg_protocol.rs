@@ -30,7 +30,6 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::log::trace;
 use tracing::{error, warn};
 
 use crate::error::{PsqlError, PsqlResult};
@@ -49,7 +48,7 @@ use crate::types::Format;
 pub struct PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
@@ -76,6 +75,8 @@ where
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
 }
+
+const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
 /// Configures TLS encryption for connections.
 #[derive(Debug, Clone)]
@@ -105,7 +106,7 @@ impl TlsConfig {
 impl<S, SM, VS, PS, PO> Drop for PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
@@ -138,7 +139,7 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
 impl<S, SM, VS, PS, PO> PgProtocol<S, SM, VS, PS, PO>
 where
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
@@ -337,24 +338,20 @@ where
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
-        let res = self.inner_process_query_msg(sql, session).await;
-        // Record query run successfully
+        let result = self.inner_process_query_msg(sql, session).await;
+
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        match res {
-            Ok(x) => {
-                tracing::trace!(
-                    target: "pgwire_query_log",
-                    "(simple query) session: {}, status: ok, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
-                Ok(x)
-            }
-            Err(err) => {
-                tracing::trace!(
-                    target: "pgwire_query_log",
-                    "(simple query) session: {}, status: err, time: {}ms,  sql: {}", session_id, mills, truncated_sql);
-                Err(err)
-            }
-        }
+        tracing::info!(
+            target: PGWIRE_QUERY_LOG,
+            "(simple query) session: {}, status: {}, time: {}ms, sql: {}",
+            session_id,
+            if result.is_ok() { "ok" } else { "err" },
+            mills,
+            truncated_sql
+        );
+
+        result
     }
 
     async fn inner_process_query_msg(
@@ -435,13 +432,31 @@ where
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
-        tracing::trace!(
-            "(extended query) session: {}, parse query: {}, statement name: {}",
+        let start = Instant::now();
+
+        let result = self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids);
+
+        let mills = start.elapsed().as_millis();
+        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+        tracing::info!(
+            target: PGWIRE_QUERY_LOG,
+            "(extended query parse) session: {}, status: {}, time: {}ms, sql: {}",
             session_id,
-            sql,
-            statement_name
+            if result.is_ok() { "ok" } else { "err" },
+            mills,
+            truncated_sql
         );
 
+        result
+    }
+
+    fn inner_process_parse_msg(
+        &mut self,
+        session: Arc<SM::Session>,
+        sql: &str,
+        statement_name: String,
+        type_ids: Vec<i32>,
+    ) -> PsqlResult<()> {
         if self.prepare_statement_store.contains_key(&statement_name) {
             return Err(PsqlError::ParseError("Duplicated statement name".into()));
         }
@@ -467,8 +482,7 @@ where
             stmts.into_iter().next().unwrap()
         };
 
-        let param_types = msg
-            .type_ids
+        let param_types = type_ids
             .iter()
             .map(|&id| DataType::from_oid(id))
             .try_collect()
@@ -498,12 +512,6 @@ where
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let session = self.session.clone().unwrap();
-        let session_id = session.id().0;
-        trace!(
-            target: "pgwire_query_log",
-            "(extended query) session: {}, bind: statement name: {}, portal name: {}",
-            session_id, &statement_name, &portal_name
-        );
 
         if self.portal_store.contains_key(&portal_name) {
             return Err(PsqlError::Internal("Duplicated portal name".into()));
@@ -551,7 +559,6 @@ where
         let row_max = msg.max_rows as usize;
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
-        tracing::trace!(target: "pgwire_query_log", "(extended query) session: {}, execute portal name: {}", session_id, portal_name);
 
         if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
             assert!(self.portal_store.contains_key(&portal_name));
@@ -562,13 +569,27 @@ where
                 self.result_cache.insert(portal_name, result_cache);
             }
         } else {
+            let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
+            let sql = format!("{}", portal);
+            let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
 
-            let pg_response = session
-                .execute(portal)
-                .await
-                .map_err(PsqlError::ExecuteError)?;
+            let result = session.execute(portal).await;
 
+            let mills = start.elapsed().as_millis();
+            tracing::info!(
+                target: PGWIRE_QUERY_LOG,
+                "(extended query execute) session: {}, status: {}, time: {}ms, sql: {}",
+                session_id,
+                if result.is_ok() { "ok" } else { "err" },
+                mills,
+                truncated_sql
+            );
+
+            let pg_response = match result {
+                Ok(pg_response) => pg_response,
+                Err(err) => return Err(PsqlError::ExecuteError(err)),
+            };
             let mut result_cache = ResultCache::new(pg_response);
             let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
             if !is_consume_completed {
@@ -582,15 +603,8 @@ where
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
         let name = cstr_to_str(&msg.name).unwrap().to_string();
         let session = self.session.clone().unwrap();
-        let session_id = session.id().0;
         //  b'S' => Statement
         //  b'P' => Portal
-        tracing::trace!(
-            target: "pgwire_query_log",
-            "(extended query) session: {}, describe name: {}",
-            session_id,
-            name,
-        );
 
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {

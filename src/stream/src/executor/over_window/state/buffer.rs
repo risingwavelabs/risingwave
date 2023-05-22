@@ -196,7 +196,7 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
 
     /// Slide the current window forward.
     /// Returns the keys that are removed from the buffer.
-    pub fn slide(&mut self) -> impl Iterator<Item = K> + '_ {
+    pub fn slide(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
         self.curr_idx += 1;
         self.recalculate_left_right();
         let min_needed_idx = std::cmp::min(self.left_idx, self.curr_idx);
@@ -205,7 +205,7 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
         self.right_excl_idx -= min_needed_idx;
         self.buffer
             .drain(0..min_needed_idx)
-            .map(|Entry { key, .. }| key)
+            .map(|Entry { key, value }| (key, value))
     }
 }
 
@@ -275,7 +275,7 @@ mod tests {
             vec!["hello"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty()); // unbouded preceding, nothing can ever be removed
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -312,7 +312,7 @@ mod tests {
         assert!(!window.preceding_saturated);
         assert!(window.following_saturated);
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -323,7 +323,7 @@ mod tests {
         buffer.append(3, "!");
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
     }
 
@@ -341,7 +341,7 @@ mod tests {
         assert!(window.following_saturated);
         assert!(buffer.curr_window_values().collect_vec().is_empty());
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         assert_eq!(buffer.smallest_key(), Some(&1));
 
@@ -355,7 +355,7 @@ mod tests {
             vec!["RisingWave"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         assert_eq!(buffer.smallest_key(), Some(&1));
 
@@ -369,7 +369,7 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         assert_eq!(buffer.smallest_key(), Some(&2));
     }
@@ -401,7 +401,7 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         assert_eq!(buffer.smallest_key(), Some(&2));
         let window = buffer.curr_window();
@@ -451,7 +451,7 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -497,7 +497,7 @@ mod tests {
             vec!["is the best", "streaming platform"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));

@@ -424,7 +424,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         } else {
             None
         };
-        let order_by = if self.flip_coin() && !distinct {
+
+        // Only can generate ORDER BY if distinct_allowed is banned globally in the generator.
+        // This avoids ORDER BY + Distinct aggregate from being generated.
+        // See https://github.com/risingwavelabs/risingwave/issues/9860.
+        let order_by = if self.flip_coin() && !distinct && !self.is_distinct_allowed {
             self.gen_order_by()
         } else {
             vec![]
@@ -604,10 +608,16 @@ fn make_agg_func(
     filter: Option<Box<Expr>>,
     order_by: Vec<OrderByExpr>,
 ) -> Function {
-    let args = exprs
-        .iter()
-        .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
-        .collect();
+    let args = if exprs.is_empty() {
+        // The only agg without args is `count`.
+        // `select proname from pg_proc where array_length(proargtypes, 1) = 0 and prokind = 'a';`
+        vec![FunctionArg::Unnamed(FunctionArgExpr::Wildcard)]
+    } else {
+        exprs
+            .iter()
+            .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
+            .collect()
+    };
 
     Function {
         name: ObjectName(vec![Ident::new_unchecked(func_name)]),

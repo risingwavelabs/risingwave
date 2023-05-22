@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -47,6 +49,19 @@ pub struct PreparedResult {
 pub enum Portal {
     Portal(PortalResult),
     PureStatement(Statement),
+}
+
+impl std::fmt::Display for Portal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self {
+            Portal::Portal(portal) => write!(
+                f,
+                "{}, params = {:?}",
+                portal.statement, portal.bound_result.parsed_params
+            ),
+            Portal::PureStatement(stmt) => write!(f, "{}", stmt),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -125,13 +140,15 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                ..
             } = bound_result;
 
-            let new_bound = bound.bind_parameter(params, param_formats)?;
+            let (new_bound, parsed_params) = bound.bind_parameter(params, param_formats)?;
             let new_bound_result = BoundResult {
                 stmt_type,
                 must_dist,
                 param_types,
+                parsed_params: Some(parsed_params),
                 dependent_relations,
                 bound: new_bound,
             };
@@ -142,10 +159,7 @@ pub fn handle_bind(
             }))
         }
         PrepareStatement::PureStatement(stmt) => {
-            assert!(
-                params.is_empty(),
-                "params should be empty for pure statement"
-            );
+            // Jdbc might send set statements in a prepare statement, so params could be not empty.
             Ok(Portal::PureStatement(stmt))
         }
     }

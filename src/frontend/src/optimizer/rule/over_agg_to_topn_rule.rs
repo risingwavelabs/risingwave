@@ -95,7 +95,7 @@ impl Rule for OverWindowToTopNRule {
         if let Some(project) = project {
             let referred_cols = collect_input_refs(output_len, project.exprs());
             if !referred_cols.contains(window_func_pos) {
-                let topn: PlanRef = LogicalTopN::with_group(
+                let topn: PlanRef = LogicalTopN::new(
                     over_window.input(),
                     limit,
                     offset,

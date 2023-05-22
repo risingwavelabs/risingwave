@@ -2146,6 +2146,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dissimilar"
+version = "1.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "210ec60ae7d710bed8683e333e9d2855a8a56a3e9892b38bad3bb0d4d29b0d5e"
+
+[[package]]
 name = "dlv-list"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2337,6 +2343,16 @@ name = "event-listener"
 version = "2.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
+
+[[package]]
+name = "expect-test"
+version = "1.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30d9eafeadd538e68fb28016364c9732d78e420b9ff8853fa5e4058861e9f8d3"
+dependencies = [
+ "dissimilar",
+ "once_cell",
+]
 
 [[package]]
 name = "fail"
@@ -3730,9 +3746,9 @@ checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
 name = "memcomparable"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d853845987d5f2b7ebf64789cc45b4108e2e76bab6b860d1aad1cbc39c686e76"
+checksum = "376101dbd964fc502d5902216e180f92b3d003b5cc3d2e40e044eb5470fca677"
 dependencies = [
  "bytes",
  "rust_decimal",
@@ -5647,6 +5663,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hashbrown 0.13.2",
  "hytra",
  "itertools",
  "madsim-tokio",
@@ -6084,6 +6101,7 @@ dependencies = [
  "ctor",
  "dyn-clone",
  "either",
+ "futures-async-stream",
  "futures-util",
  "hex",
  "itertools",
@@ -6643,6 +6661,7 @@ dependencies = [
  "educe",
  "either",
  "enum-as-inner",
+ "expect-test",
  "fixedbitset",
  "futures",
  "futures-async-stream",
@@ -6674,7 +6693,9 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "serde",
  "serde_json",
+ "serde_yaml",
  "smallvec",
  "static_assertions",
  "task_stats_alloc",

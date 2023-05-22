@@ -44,7 +44,7 @@ pub struct SourceExecutor<S: StateStore> {
 
     pk_indices: PkIndices,
 
-    /// Streaming source  for external
+    /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
 
     /// Metrics for monitor.
@@ -373,6 +373,11 @@ impl<S: StateStore> SourceExecutor<S> {
                         // we can guarantee the source is not paused since it received stream
                         // chunks.
                         self_paused = true;
+                        tracing::warn!(
+                            "source {} paused, wait barrier for {:?}",
+                            self.identity,
+                            last_barrier_time.elapsed()
+                        );
                         stream.pause_stream();
                     }
                     if let Some(mapping) = split_offset_mapping {

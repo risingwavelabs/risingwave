@@ -23,6 +23,7 @@ pub mod pg_database;
 pub mod pg_description;
 pub mod pg_enum;
 pub mod pg_index;
+pub mod pg_indexes;
 pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
@@ -51,6 +52,7 @@ pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_enum::*;
 pub use pg_index::*;
+pub use pg_indexes::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
@@ -75,6 +77,7 @@ use risingwave_pb::user::UserInfo;
 use serde_json::json;
 
 use super::SysCatalogReaderImpl;
+use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::UserId;
 
@@ -517,6 +520,25 @@ impl SysCatalogReaderImpl {
                         )),
                         // TODO(zehua): may be not same as postgresql's "definition" column.
                         Some(ScalarImpl::Utf8(view.sql.clone().into())),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+
+    pub(super) fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {
+        let catalog_reader = self.catalog_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema: &SchemaCatalog| {
+                schema.iter_index().map(|index| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(index.primary_table.name.clone().into())),
+                        Some(ScalarImpl::Utf8(index.index_table.name.clone().into())),
+                        None,
+                        Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
                     ])
                 })
             })

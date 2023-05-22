@@ -2,6 +2,11 @@ steps:
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
     matrix:
       setup:
         testcase:
@@ -76,6 +81,11 @@ steps:
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
     matrix:
       setup:
         testcase:

@@ -14,12 +14,13 @@
 
 pub mod collections;
 
-use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
 use rust_decimal::Decimal as RustDecimal;
+
+use crate::types::DataType;
 
 /// The trait for estimating the actual memory usage of a struct.
 ///
@@ -80,15 +81,6 @@ impl EstimateSize for Box<str> {
     }
 }
 
-// FIXME: implement a wrapper structure for `HashSet` that impl `EstimateSize`
-impl<T: EstimateSize> EstimateSize for HashSet<T> {
-    fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
-    }
-}
-
 impl<T1: EstimateSize, T2: EstimateSize> EstimateSize for (T1, T2) {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size() + self.1.estimated_heap_size()
@@ -132,3 +124,54 @@ impl<T: ZeroHeapSize, const LEN: usize> EstimateSize for [T; LEN] {
 impl ZeroHeapSize for RustDecimal {}
 
 impl<T> ZeroHeapSize for PhantomData<T> {}
+
+impl ZeroHeapSize for DataType {}
+
+#[derive(Clone)]
+pub struct VecWithKvSize<T: EstimateSize> {
+    inner: Vec<T>,
+    kv_heap_size: usize,
+}
+
+impl<T: EstimateSize> Default for VecWithKvSize<T> {
+    fn default() -> Self {
+        Self {
+            inner: vec![],
+            kv_heap_size: 0,
+        }
+    }
+}
+
+impl<T: EstimateSize> VecWithKvSize<T> {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn get_kv_size(&self) -> usize {
+        self.kv_heap_size
+    }
+
+    pub fn push(&mut self, value: T) {
+        self.kv_heap_size = self
+            .kv_heap_size
+            .saturating_add(value.estimated_heap_size());
+        self.inner.push(value);
+    }
+
+    pub fn into_inner(self) -> Vec<T> {
+        self.inner
+    }
+
+    pub fn inner(&self) -> &Vec<T> {
+        &self.inner
+    }
+}
+
+impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    type Item = T;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}

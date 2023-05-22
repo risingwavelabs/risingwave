@@ -341,14 +341,11 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
       ├─LogicalScan { table: a, columns: [a.a1] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: all }
-        ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a.a1, a.a1), output: [a.a1] }
-        |   ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |   | └─LogicalScan { table: a, columns: [a.a1] }
-        |   └─LogicalJoin { type: Inner, on: true, output: all }
-        |     ├─LogicalAgg { group_key: [a.a1], aggs: [] }
-        |     | └─LogicalScan { table: a, columns: [a.a1] }
-        |     └─LogicalScan { table: b, columns: [] }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        | ├─LogicalAgg { group_key: [a.a1], aggs: [] }
+        | | └─LogicalScan { table: a, columns: [a.a1] }
+        | └─LogicalAgg { aggs: [] }
+        |   └─LogicalScan { table: b, columns: [] }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           | └─LogicalScan { table: a, columns: [a.a1] }
@@ -446,18 +443,13 @@
       | └─LogicalProject { exprs: [a1] }
       |   └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
-        ├─LogicalAgg { group_key: [a1], aggs: [] }
-        | └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(a1, a1), output: [a1] }
-        |   ├─LogicalAgg { group_key: [a1], aggs: [] }
-        |   | └─LogicalShare { id = 2 }
-        |   |   └─LogicalProject { exprs: [a1] }
-        |   |     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
-        |   └─LogicalJoin { type: Inner, on: true, output: [a1] }
-        |     ├─LogicalAgg { group_key: [a1], aggs: [] }
-        |     | └─LogicalShare { id = 2 }
-        |     |   └─LogicalProject { exprs: [a1] }
-        |     |     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
-        |     └─LogicalSource { source: b, columns: [b1, b2, _row_id], time_range: [(Unbounded, Unbounded)] }
+        ├─LogicalJoin { type: Inner, on: true, output: all }
+        | ├─LogicalAgg { group_key: [a1], aggs: [] }
+        | | └─LogicalShare { id = 2 }
+        | |   └─LogicalProject { exprs: [a1] }
+        | |     └─LogicalSource { source: a, columns: [a1, a2, _row_id], time_range: [(Unbounded, Unbounded)] }
+        | └─LogicalAgg { aggs: [] }
+        |   └─LogicalSource { source: b, columns: [b1, b2, _row_id], time_range: [(Unbounded, Unbounded)] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           | └─LogicalShare { id = 2 }
