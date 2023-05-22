@@ -28,7 +28,8 @@ use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use risingwave_meta::hummock::test_utils::{
-    add_ssts, setup_compute_env, setup_compute_env_with_config,
+    add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    setup_compute_env_with_config,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
@@ -183,8 +184,15 @@ async fn test_syncpoints_test_local_notification_receiver() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
 
+    register_table_ids_to_compaction_group(
+        hummock_manager.as_ref(),
+        &[1],
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     // Test cancel compaction task
     let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+    let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
     let mut task = hummock_manager
         .get_compact_task(
             StaticCompactionGroupId::StateDefault.into(),
@@ -287,8 +295,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .await;
 
     // 1. add sstables
-    let val0 = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
-    let val1 = Bytes::from(b"1"[..].repeat(1 << 10)); // 1024 Byte value
+    let val0 = Bytes::from(b"\0\00"[..].repeat(1 << 10)); // 1024 Byte value
+    let val1 = Bytes::from(b"\0\01"[..].repeat(1 << 10)); // 1024 Byte value
 
     local.init(100);
     let mut start_key = b"aaa".to_vec();
