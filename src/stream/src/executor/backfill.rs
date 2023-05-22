@@ -359,9 +359,7 @@ where
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact());
                                 }
-                                Message::Watermark(watermark) => {
-                                    self.state_table
-                                        .update_watermark(watermark.val.clone(), false);
+                                Message::Watermark(_) => {
                                     // Ignore watermark during backfill.
                                 }
                             }
@@ -416,9 +414,8 @@ where
         // Wait for first barrier to come after backfill is finished.
         // So we can update our progress + persist the status.
         while let Some(Ok(msg)) = upstream.next().await {
-            match &msg {
-                // Set persist state to finish on next barrier.
-                Message::Barrier(barrier) => {
+            if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                if let Message::Barrier(barrier) = &msg {
                     // We will update current_pos at least once,
                     // since snapshot read has to be non-empty
                     debug_assert_ne!(current_pos, None);
@@ -435,20 +432,7 @@ where
                     yield msg;
                     break;
                 }
-
-                // If it's not a barrier, just forward
-                Message::Watermark(watermark) => {
-                    self.state_table
-                        .update_watermark(watermark.val.clone(), false);
-                    if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
-                        yield msg;
-                    }
-                }
-                Message::Chunk(_) => {
-                    if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
-                        yield msg;
-                    }
-                }
+                yield msg;
             }
         }
 
