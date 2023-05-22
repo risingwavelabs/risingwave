@@ -1399,9 +1399,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
         build_row_id: usize,
     ) -> Option<DataChunk> {
         chunk_builder.append_one_row_from_array_elements(
-            probe_chunk.columns().iter().map(|c| c.array_ref()),
+            probe_chunk.columns().iter().map(|c| c.as_ref()),
             probe_row_id,
-            build_chunk.columns().iter().map(|c| c.array_ref()),
+            build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
     }
@@ -1412,7 +1412,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_id: usize,
     ) -> Option<DataChunk> {
         chunk_builder.append_one_row_from_array_elements(
-            probe_chunk.columns().iter().map(|c| c.array_ref()),
+            probe_chunk.columns().iter().map(|c| c.as_ref()),
             probe_row_id,
             empty(),
             0,
@@ -1427,7 +1427,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         chunk_builder.append_one_row_from_array_elements(
             empty(),
             0,
-            build_chunk.columns().iter().map(|c| c.array_ref()),
+            build_chunk.columns().iter().map(|c| c.as_ref()),
             build_row_id,
         )
     }
@@ -1463,7 +1463,7 @@ impl DataChunkMutator {
 
         for build_column in columns.split_off(probe_column_count) {
             // Is it really safe to use Arc::try_unwrap here?
-            let mut array = Arc::try_unwrap(build_column.into_inner()).unwrap();
+            let mut array = Arc::try_unwrap(build_column).unwrap();
             array.set_bitmap(filter.clone());
             columns.push(array.into());
         }
@@ -1871,7 +1871,7 @@ mod tests {
         fn append(&mut self, data_chunk: &DataChunk) -> Result<()> {
             ensure!(self.array_builders.len() == data_chunk.dimension());
             for idx in 0..self.array_builders.len() {
-                self.array_builders[idx].append_array(data_chunk.column_at(idx).array_ref());
+                self.array_builders[idx].append_array(data_chunk.column_at(idx));
             }
             self.array_len += data_chunk.capacity();
 

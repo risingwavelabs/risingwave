@@ -217,9 +217,9 @@
     SELECT b % 2 AS f, SUM(a) FROM test GROUP BY b % 2 ORDER BY f;
   batch_plan: |
     BatchExchange { order: [$expr1 ASC], dist: Single }
-    └─BatchSortAgg { group_key: [$expr1], aggs: [sum(test.a)] }
-      └─BatchExchange { order: [$expr1 ASC], dist: HashShard($expr1) }
-        └─BatchSort { order: [$expr1 ASC] }
+    └─BatchSort { order: [$expr1 ASC] }
+      └─BatchHashAgg { group_key: [$expr1], aggs: [sum(test.a)] }
+        └─BatchExchange { order: [], dist: HashShard($expr1) }
           └─BatchProject { exprs: [(test.b % 2:Int32) as $expr1, test.a] }
             └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
 - name: Orderby with always-false predicate
@@ -239,9 +239,9 @@
     BatchProject { exprs: [1:Int32] }
     └─BatchExchange { order: [t1.v1 ASC], dist: Single }
       └─BatchProject { exprs: [1:Int32, t1.v1] }
-        └─BatchSortAgg { group_key: [t1.v1], aggs: [] }
-          └─BatchExchange { order: [t1.v1 ASC], dist: HashShard(t1.v1) }
-            └─BatchSort { order: [t1.v1 ASC] }
+        └─BatchSort { order: [t1.v1 ASC] }
+          └─BatchHashAgg { group_key: [t1.v1], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(t1.v1) }
               └─BatchValues { rows: [] }
 - name: distinct on order by
   sql: |
