@@ -458,7 +458,7 @@ where
         type_ids: Vec<i32>,
     ) -> PsqlResult<()> {
         if statement_name.is_empty() {
-            // Remove the unnamed prepare statement first, in case the unsupported sql binds wrong a
+            // Remove the unnamed prepare statement first, in case the unsupported sql binds a wrong
             // prepare statement.
             self.unnamed_prepare_statement.take();
         } else if self.prepare_statement_store.contains_key(&statement_name) {
