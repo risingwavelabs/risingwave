@@ -148,9 +148,8 @@ where
             snapshot.try_next().await?.unwrap().is_none()
         };
 
-        // Check if need to backfill
-        // Backfill not Finished -> backfill if snapshot is not empty.
-        // Backfill is Finished  -> no need backfill
+        // Backfill not Finished: Need to Backfill if snapshot is not empty.
+        // Backfill is  Finished: Need to Backfill not needed.
         let to_backfill = if !is_finished {
             !is_snapshot_empty
         } else {
@@ -172,17 +171,69 @@ where
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
-        // if !to_backfill {
-        //     #[for_await]
-        //     for message in upstream {
-        //         // Then forward messages directly to the downstream.
-        //         if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
-        //             yield message;
-        //         }
-        //     }
+        // If no need backfill, but state was still "unfinished" we need to finish it.
+        // So we just process the next barrier to finish progress,
+        // and forward other messages.
         //
-        //     return Ok(());
-        // }
+        // Reason for persisting on second barrier rather than first:
+        // We can't update meta with progress as finished until state_table
+        // has been updated.
+        // We also can't update state_table in first epoch, since state_table
+        // expects to have been initialized in previous epoch.
+        if !is_finished && !to_backfill {
+            while let Some(Ok(msg)) = upstream.next().await {
+                match &msg {
+                    Message::Barrier(barrier) => {
+                        current_pos =
+                            Self::construct_initial_finished_state(pk_in_output_indices.len());
+                        Self::persist_state(
+                            barrier.epoch,
+                            &mut self.state_table,
+                            true,
+                            &current_pos,
+                            &mut old_state,
+                            &mut current_state,
+                        )
+                        .await?;
+                        self.progress.finish(barrier.epoch.curr);
+                        yield msg;
+                        break;
+                    }
+
+                    // If it's not a barrier, just forward
+                    Message::Watermark(watermark) => {
+                        self.state_table
+                            .update_watermark(watermark.val.clone(), false);
+                        if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                            yield msg;
+                        }
+                    }
+                    Message::Chunk(_) => {
+                        if let Some(msg) = Self::mapping_message(msg, &self.output_indices) {
+                            yield msg;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Short circuit here if no need backfill
+        if !to_backfill {
+            #[for_await]
+            for message in upstream {
+                // Then forward messages directly to the downstream.
+                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
+                    if let Message::Barrier(barrier) = &message {
+                        self.state_table.commit_no_data_expected(barrier.epoch);
+                    }
+                    yield message;
+                }
+            }
+
+            return Ok(());
+        }
+
+        // ========== Backfill is needed
 
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
@@ -368,25 +419,19 @@ where
             match &msg {
                 // Set persist state to finish on next barrier.
                 Message::Barrier(barrier) => {
-                    if current_pos.is_none() {
-                        current_pos =
-                            Self::construct_initial_finished_state(pk_in_output_indices.len());
-                    }
+                    // We will update current_pos at least once,
+                    // since snapshot read has to be non-empty
                     debug_assert_ne!(current_pos, None);
-                    if !is_finished {
-                        Self::persist_state(
-                            barrier.epoch,
-                            &mut self.state_table,
-                            true,
-                            &current_pos,
-                            &mut old_state,
-                            &mut current_state,
-                        )
-                        .await?;
-                        self.progress.finish(barrier.epoch.curr);
-                    } else {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
-                    }
+                    Self::persist_state(
+                        barrier.epoch,
+                        &mut self.state_table,
+                        true,
+                        &current_pos,
+                        &mut old_state,
+                        &mut current_state,
+                    )
+                    .await?;
+                    self.progress.finish(barrier.epoch.curr);
                     yield msg;
                     break;
                 }
@@ -550,14 +595,7 @@ where
         Ok(())
     }
 
-    /// For `current_pos` and `old_pos` are just pk of upstream.
-    /// They should be strictly increasing.
-    // FIXME(kwannoel): Currently state table expects a Primary Key.
-    // For that we use vnode, so we can update position per vnode to support hash-distributed
-    // backfill.
-    // However this also means that it computes a new `vnode` partition for each vnode.
-    // State table interface should be updated, such that it can reuse this `vnode`
-    // as both `PRIMARY KEY` and `vnode`.
+    /// Flush the data
     async fn flush_data(
         table: &mut StateTable<S>,
         epoch: EpochPair,
@@ -566,11 +604,12 @@ where
     ) -> StreamExecutorResult<()> {
         let vnodes = table.vnodes().clone();
         if let Some(old_state) = old_state {
-            // There are updates to existing state, persist.
-            if old_state[1..] != current_partial_state[1..] {
+            if old_state[1..] == current_partial_state[1..] {
+                table.commit_no_data_expected(epoch);
+                return Ok(());
+            } else {
                 vnodes.iter_ones().for_each(|vnode| {
                     let datum = Some((vnode as i16).into());
-                    // fill the state
                     current_partial_state[0] = datum.clone();
                     old_state[0] = datum;
                     table.write_record(Record::Update {
@@ -578,10 +617,6 @@ where
                         new_row: &(*current_partial_state),
                     })
                 });
-            } else {
-                // If no updates to existing state, we don't need to persist
-                table.commit_no_data_expected(epoch);
-                return Ok(());
             }
         } else {
             // No existing state, create a new entry.
@@ -616,6 +651,12 @@ where
         )
     }
 
+    // TODO(kwannoel): I'm not sure if ["None" ..] encoding is appropriate
+    // for the case where upstream snapshot is empty, and we want to persist
+    // backfill state as "finished".
+    // Could it be confused with another case where pk position was indeed empty?
+    // I don't think it will because they both record that backfill is finished.
+    // We can revisit in future if necessary.
     fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
         Some(OwnedRow::new(vec![None; pos_len]))
     }
