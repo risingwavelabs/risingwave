@@ -148,9 +148,9 @@ where
             snapshot.try_next().await?.unwrap().is_none()
         };
 
-        // Whether we still need to backfill
-        // If not finished -> backfill, but only if snapshot is not empty.
-        // If finished -> no need backfill
+        // Check if need to backfill
+        // Backfill not Finished -> backfill if snapshot is not empty.
+        // Backfill is Finished  -> no need backfill
         let to_backfill = if !is_finished {
             !is_snapshot_empty
         } else {
@@ -168,25 +168,6 @@ where
         // That is filled in when we flush the state table.
         let mut current_state: Vec<Datum> = vec![None; state_len];
         let mut old_state: Option<Vec<Datum>> = None;
-
-        // If state is not finished and snapshot is empty,
-        // It means that this is the first time we are initializing.
-        // Because if state is finished and snapshot is empty,
-        // it should have finished previously.
-        //
-        // However, we cannot indicate progress is finished yet.
-        // That is because the first barrier is used to initialize all state tables.
-        // The epoch
-        // if !is_finished && is_snapshot_empty {
-        //     // Immediately persist finished state.
-        //     let current_pos =
-        // &Self::construct_initial_finished_state(pk_in_output_indices.len());
-        //     Self::persist_state(first_barrier.epoch, &mut self.state_table, true, current_pos,
-        // &mut old_state, &mut current_state).await?;
-        //
-        //     // Directly finish the progress as the snapshot is empty.
-        //     self.progress.finish(first_barrier.epoch.curr);
-        // }
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
@@ -310,7 +291,6 @@ where
 
                                     // Persist state on barrier
                                     Self::persist_state(
-                                        self.actor_id,
                                         barrier.epoch,
                                         &mut self.state_table,
                                         false,
@@ -395,7 +375,6 @@ where
                     debug_assert_ne!(current_pos, None);
                     if !is_finished {
                         Self::persist_state(
-                            self.actor_id,
                             barrier.epoch,
                             &mut self.state_table,
                             true,
@@ -553,7 +532,6 @@ where
     /// For `current_pos` and `old_pos` are just pk of upstream.
     /// They should be strictly increasing.
     async fn persist_state(
-        _actor_id: ActorId,
         epoch: EpochPair,
         table: &mut StateTable<S>,
         is_finished: bool,
@@ -564,7 +542,7 @@ where
         if let Some(current_pos_inner) = current_pos {
             // state w/o vnodes.
             Self::build_temporary_state(current_state, is_finished, current_pos_inner);
-            Self::flush_data(_actor_id, table, epoch, old_state, current_state).await?;
+            Self::flush_data(table, epoch, old_state, current_state).await?;
             *old_state = Some(current_state.into());
         } else {
             table.commit_no_data_expected(epoch);
@@ -581,7 +559,6 @@ where
     // State table interface should be updated, such that it can reuse this `vnode`
     // as both `PRIMARY KEY` and `vnode`.
     async fn flush_data(
-        _actor_id: ActorId,
         table: &mut StateTable<S>,
         epoch: EpochPair,
         old_state: &mut Option<Vec<Datum>>,
