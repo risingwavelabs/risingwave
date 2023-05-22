@@ -30,7 +30,7 @@ use crate::table_function::BoxedTableFunction;
 pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
     let mut map = FuncSigMap::default();
     tracing::info!(
-        "{} set returning function signatures loaded.",
+        "{} table function signatures loaded.",
         FUNC_SIG_MAP_INIT.len()
     );
     for desc in FUNC_SIG_MAP_INIT.drain(..) {
@@ -101,7 +101,7 @@ impl fmt::Debug for FuncSign {
 ///
 /// This function must be called sequentially.
 ///
-/// It is designed to be used by `#[function]` macro.
+/// It is designed to be used by `#[table_function]` macro.
 /// Users SHOULD NOT call this function.
 #[doc(hidden)]
 pub unsafe fn _register(desc: FuncSign) {
@@ -110,7 +110,7 @@ pub unsafe fn _register(desc: FuncSign) {
 
 /// The global registry of function signatures on initialization.
 ///
-/// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
+/// `#[table_function]` macro will generate a `#[ctor]` function to register the signature into this
 /// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
 /// `FUNC_SIG_MAP` on the first access of `FUNC_SIG_MAP`.
 static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();
