@@ -11,7 +11,7 @@ with open(expected_output_file) as file:
         # debezium sink sends k/v pair
         kv = line.split()
         key = json.loads(kv[0])
-        # delete payload is null
+        # kafka consumer outputs string "null" for null payload
         if kv[1] == "null":
             value = kv[1]
         else:
