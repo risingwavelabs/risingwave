@@ -136,33 +136,7 @@ where
         let init_epoch = first_barrier.epoch.prev;
         self.state_table.init_epoch(first_barrier.epoch);
 
-        // If the internal persisted state is "finished" for this executor,
-        // we are done, no need to_create_mv
-        // We can just check 1 vnode, since we currently don't permit
-        // partially complete backfill.
-        // TODO(kwannoel): For background ddl, we need to consider case where
-        // some vnodes are partially complete, and others are finished.
-        // All vnodes should be complete. If there were some partially
-        // complete all persisted state should be discarded.
-        let arbitrary_vnode = self
-            .state_table
-            .vnodes()
-            .iter_ones()
-            .next()
-            .expect("All executors should have vnode");
-        let key: &[Datum] = &[Some((arbitrary_vnode as i16).into())];
-        let row = self.state_table.get_row(key).await?;
-
-        // We set value_indices which means first datum (vnode) is excluded
-        // when we deserialize. Only deserialize: | pk | `backfill_finished` |.
-        let backfill_datum_pos = state_len - 2;
-        let is_finished = if let Some(row) = row
-            && let Some(is_finished) = row.datum_at(backfill_datum_pos)
-        {
-            is_finished.into_bool()
-        } else {
-            false
-        };
+        let is_finished = Self::check_all_vnode_finished(&self.state_table, state_len).await?;
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -667,6 +641,35 @@ where
 
     fn construct_initial_finished_state(pos_len: usize) -> Option<OwnedRow> {
         Some(OwnedRow::new(vec![None; pos_len]))
+    }
+
+    async fn check_all_vnode_finished(
+        state_table: &StateTable<S>,
+        state_len: usize,
+    ) -> StreamExecutorResult<bool> {
+        debug_assert!(!state_table.vnode_bitmap().is_empty());
+        let vnodes = state_table.vnodes().iter_ones();
+        let mut is_finished = true;
+        for vnode in vnodes {
+            let key: &[Datum] = &[Some((vnode as i16).into())];
+            let row = state_table.get_row(key).await?;
+
+            // We set value_indices which means first datum (vnode) is excluded
+            // when we deserialize. Only deserialize: | pk | `backfill_finished` |.
+            let backfill_datum_pos = state_len - 2;
+            let vnode_is_finished = if let Some(row) = row
+                && let Some(vnode_is_finished) = row.datum_at(backfill_datum_pos)
+            {
+                vnode_is_finished.into_bool()
+            } else {
+                false
+            };
+            if !vnode_is_finished {
+                is_finished = false;
+                break;
+            }
+        }
+        Ok(is_finished)
     }
 }
 

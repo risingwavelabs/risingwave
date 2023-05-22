@@ -121,7 +121,7 @@ impl StreamTableScan {
     /// | vnode | pk | `backfill_finished` |
     ///
     /// key: | vnode |
-    /// value: | pk | backfill_finished
+    /// value: | pk | `backfill_finished`
     ///
     /// When we update the backfill progress,
     /// we update it for all vnodes.
