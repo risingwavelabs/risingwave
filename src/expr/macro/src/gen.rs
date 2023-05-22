@@ -319,7 +319,7 @@ impl FunctionAttr {
             let array = format_ident!("a{i}");
             let variant: TokenStream2 = types::variant(arg).parse().unwrap();
             quote! {
-                let ArrayImpl::#variant(#array) = input.column_at(#i).array_ref() else {
+                let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
                     bail!("input type mismatch. expect: {}", stringify!(#variant));
                 };
             }
