@@ -25,7 +25,7 @@ def run_demo(demo: str, format: str):
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
 
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(40)
 
     sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
