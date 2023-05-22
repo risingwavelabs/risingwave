@@ -28,8 +28,11 @@ use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock};
 
 use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
-use jni::objects::{AutoArray, GlobalRef, JClass, JMethodID, JObject, JString, ReleaseMode};
-use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
+use jni::objects::{
+    AutoArray, GlobalRef, JClass, JMethodID, JObject, JStaticMethodID, JString, JValue, ReleaseMode,
+};
+use jni::signature::ReturnType;
+use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort, jvalue};
 use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
@@ -230,6 +233,9 @@ pub enum JavaBindingRowInner {
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
+
+    date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
+    time_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
 }
 
 pub struct JavaBindingRow {
@@ -491,6 +497,41 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
     })
 }
 
+// TODO(Siyuan): It seems we cannot just use the string representation of the interval and jsonb
+// type to work with JDBC. These two types are postgres specific types. #[no_mangle]
+// pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetIntervalValue<'a>(
+//     env: EnvParam<'a>,
+//     pointer: Pointer<'a, JavaBindingRow>,
+//     idx: jint,
+// ) -> JString<'a> {
+//     execute_and_catch(env, move || {
+//         let interval = pointer
+//             .as_ref()
+//             .datum_at(idx as usize)
+//             .unwrap()
+//             .into_interval()
+//             .to_string();
+//         Ok(env.new_string(interval)?)
+//     })
+// }
+//
+// #[no_mangle]
+// pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetJsonbValue<'a>(
+//     env: EnvParam<'a>,
+//     pointer: Pointer<'a, JavaBindingRow>,
+//     idx: jint,
+// ) -> JString<'a> {
+//     execute_and_catch(env, move || {
+//         let jsonb = pointer
+//             .as_ref()
+//             .datum_at(idx as usize)
+//             .unwrap()
+//             .into_jsonb()
+//             .to_string();
+//         Ok(env.new_string(jsonb)?)
+//     })
+// }
+
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampValue<'a>(
     env: EnvParam<'a>,
@@ -548,6 +589,90 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalVal
         let date_obj =
             env.new_object_unchecked(decimal_class, *constructor, &[string_value.into()])?;
 
+        Ok(date_obj)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDateValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_date()
+            .0
+            .to_string();
+
+        let string_value = env.new_string(value)?;
+        let (class_ref, constructor) =
+            pointer.as_ref().class_cache.date_ctor.get_or_try_init(|| {
+                let cls = env.find_class("java/sql/Date")?;
+                let init_method = env.get_static_method_id(
+                    cls,
+                    "valueOf",
+                    "(Ljava/lang/String;)Ljava/sql/Date;",
+                )?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let class = JClass::from(class_ref.as_obj());
+        let JValue::Object(date_obj) = env.call_static_method_unchecked(
+            class,
+            *constructor,
+            ReturnType::Object,
+            &[jvalue::from(JValue::from(string_value))],
+        )? else {
+            return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                name: "valueOf".to_string(),
+                sig: "(Ljava/lang/String;)Ljava/sql/Date;".into(),
+            }));
+        };
+        Ok(date_obj)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimeValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let value = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_time()
+            .0
+            .to_string();
+
+        let string_value = env.new_string(value)?;
+        let (class_ref, constructor) =
+            pointer.as_ref().class_cache.time_ctor.get_or_try_init(|| {
+                let cls = env.find_class("java/sql/Time")?;
+                let init_method = env.get_static_method_id(
+                    cls,
+                    "valueOf",
+                    "(Ljava/lang/String;)Ljava/sql/Time;",
+                )?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let class = JClass::from(class_ref.as_obj());
+        let JValue::Object(date_obj) = env.call_static_method_unchecked(
+            class,
+            *constructor,
+            ReturnType::Object,
+            &[jvalue::from(JValue::from(string_value))],
+        )? else {
+            return Err(BindingError::from(jni::errors::Error::MethodNotFound {
+                name: "valueOf".to_string(),
+                sig: "(Ljava/lang/String;)Ljava/sql/Time;".into(),
+            }));
+        };
         Ok(date_obj)
     })
 }

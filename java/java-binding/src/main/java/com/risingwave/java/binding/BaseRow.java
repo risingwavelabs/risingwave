@@ -59,8 +59,16 @@ public class BaseRow implements AutoCloseable {
         return Binding.rowGetTimestampValue(pointer, index);
     }
 
+    public java.sql.Time getTime(int index) {
+        return Binding.rowGetTimeValue(pointer, index);
+    }
+
     public java.math.BigDecimal getDecimal(int index) {
         return Binding.rowGetDecimalValue(pointer, index);
+    }
+
+    public java.sql.Date getDate(int index) {
+        return Binding.rowGetDateValue(pointer, index);
     }
 
     @Override

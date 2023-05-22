@@ -22,6 +22,7 @@ public class StreamChunkRow extends BaseRow {
     }
 
     public Data.Op getOp() {
+
         return Data.Op.forNumber(Binding.rowGetOp(pointer));
     }
 }

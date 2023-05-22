@@ -57,6 +57,10 @@ public class Binding {
 
     static native java.math.BigDecimal rowGetDecimalValue(long pointer, int index);
 
+    static native java.sql.Time rowGetTimeValue(long pointer, int index);
+
+    static native java.sql.Date rowGetDateValue(long pointer, int index);
+
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the row to release the row instance pointed by the pointer.
     static native void rowClose(long pointer);
