@@ -88,7 +88,7 @@ project_dir = dirname(file_dir)
 demo_dir = os.path.join(project_dir, demo)
 data_check_file = os.path.join(demo_dir, 'data_check')
 with open(data_check_file) as f:
-    relations = f.read().split(",")
+    relations = f.read().strip().split(",")
     for rel in relations:
         create_mv(rel)
     time.sleep(20)
@@ -96,9 +96,12 @@ with open(data_check_file) as f:
         check_mv(rel)
 
 cdc_check_file = os.path.join(demo_dir, 'cdc_check')
+if not os.path.exists(cdc_check_file):
+    print("Skip cdc check for {}".format(demo))
+    sys.exit(0)
+
 with open(cdc_check_file) as f:
     print("Check cdc table with upstream {}".format(upstream))
-    for line in f.readlines():
-        relations = f.read().split(",")
-        for rel in relations:
-            check_cdc_table(rel, upstream)
+    relations = f.read().strip().split(",")
+    for rel in relations:
+        check_cdc_table(rel, upstream)
