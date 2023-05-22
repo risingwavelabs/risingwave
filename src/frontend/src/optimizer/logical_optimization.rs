@@ -230,6 +230,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
             OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
