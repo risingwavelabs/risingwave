@@ -60,6 +60,23 @@ def check_cdc_table(rel: str, upstream: str):
     print("Expect {} rows, actual {} rows".format(expect_rows, actual_rows))
     assert expect_rows == actual_rows
 
+def check_upstream_table(rel: str, upstream: str):
+    # remove the '_rw' suffix to get the upstream table name
+    upstream_table = rel.strip("_rw")
+    print("Check row count {} in upstream".format(upstream_table))
+    count_sql = "SELECT COUNT(*) FROM {}".format(upstream_table)
+    if upstream == "mysql":
+        rows = run_mysql_upstream(count_sql)
+        rows = int(rows.decode('utf8').strip())
+        upstream_rows = rows
+    elif upstream == "postgres":
+        rows = run_psql_upstream(count_sql)
+        rows = int(rows.decode('utf8').strip())
+        upstream_rows = rows
+    else:
+        raise Exception("Unsupported upstream: {}".format(upstream))
+    print("Row count in {}: {}".format(upstream_table, upstream_rows))
+
 
 def run_mysql_upstream(sql):
     print("Running SQL: {} on upstream MySQL".format(sql))
@@ -106,4 +123,5 @@ with open(cdc_check_file) as f:
     print("Check cdc table with upstream {}".format(upstream))
     relations = f.read().strip().split(",")
     for rel in relations:
+        check_upstream_table(rel, upstream)
         check_cdc_table(rel, upstream)
