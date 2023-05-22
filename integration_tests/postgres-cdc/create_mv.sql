@@ -28,7 +28,7 @@ FROM
             window_end
     ) A ON P.id = A.seller;
 
-CREATE MATERIALIZED VIEW lineitem_count AS
+CREATE MATERIALIZED VIEW lineitem_rw_count AS
 SELECT
     COUNT(*) as cnt
 FROM

@@ -27,18 +27,34 @@ def check_mv(rel: str):
 
 
 # compare the number of rows with upstream
-def check_data_with_upstream(rel: str, upstream: str):
-    # check type of upstream
+def check_cdc_table(rel: str, upstream: str):
+    print("Wait for all upstream data to be available in RisingWave")
+    mv_count_sql = "SELECT * FROM {}_count".format(rel)
+    mv_rows = 0
+    rows = run_psql(mv_count_sql)
+    rows = int(rows.decode('utf8').strip())
+    while rows > mv_rows:
+        print("Current row count: {}".format(rows))
+        mv_rows = rows
+        time.sleep(30)
+        rows = run_psql(mv_count_sql)
+        rows = int(rows.decode('utf8').strip())
+
+    print("Materialized view stop update, check row count with upstream")
     count_sql = "SELECT COUNT(*) FROM {}".format(rel)
     if upstream == "mysql":
-        upstream_rows = run_mysql_upstream(count_sql)
+        rows = run_mysql_upstream(count_sql)
+        rows = int(rows.decode('utf8').strip())
+        upstream_rows = rows
     elif upstream == "postgres":
-        upstream_rows = run_psql_upstream(count_sql)
+        rows = run_psql_upstream(count_sql)
+        rows = int(rows.decode('utf8').strip())
+        upstream_rows = rows
     else:
         raise Exception("Unsupported upstream: {}".format(upstream))
-    expect_rows = int(upstream_rows.decode('utf8').strip())
-    actual_rows = int(run_psql(count_sql).decode('utf8').strip())
 
+    expect_rows = upstream_rows
+    actual_rows = mv_rows
     print("Expect {} rows, actual {} rows".format(expect_rows, actual_rows))
     assert expect_rows == actual_rows
 
@@ -71,19 +87,18 @@ file_dir = dirname(abspath(__file__))
 project_dir = dirname(file_dir)
 demo_dir = os.path.join(project_dir, demo)
 data_check_file = os.path.join(demo_dir, 'data_check')
-
 with open(data_check_file) as f:
+    relations = f.read().split(",")
+    for rel in relations:
+        create_mv(rel)
+    time.sleep(20)
+    for rel in relations:
+        check_mv(rel)
+
+cdc_check_file = os.path.join(demo_dir, 'cdc_check')
+with open(cdc_check_file) as f:
+    print("Check cdc table with upstream {}".format(upstream))
     for line in f.readlines():
-        if line.startswith('relations:'):
-            start = line.index(' ')
-            relations = line[start:].strip().split(",")
-            for rel in relations:
-                create_mv(rel)
-            time.sleep(20)
-            for rel in relations:
-                check_mv(rel)
-        elif line.startswith('cdc-tables:'):
-            start = line.index(' ')
-            relations = line[start:].strip().split(",")
-            for rel in relations:
-                check_data_with_upstream(rel, upstream)
+        relations = f.read().strip().split(",")
+        for rel in relations:
+            check_cdc_table(rel, upstream)
