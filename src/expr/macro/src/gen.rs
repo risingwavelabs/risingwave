@@ -491,7 +491,7 @@ impl FunctionAttr {
         };
         let const_arg_value = match &self.prebuild {
             Some(s) => s
-                .replace("$", "child")
+                .replace('$', "child")
                 .parse()
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
@@ -555,7 +555,7 @@ impl FunctionAttr {
                                     if index_builder.len() == self.chunk_size {
                                         let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
                                         let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
-                                        yield DataChunk::new(vec![index_array.into(), value_array.into()], self.chunk_size);
+                                        yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], self.chunk_size);
                                     }
                                 }
                             }
@@ -565,7 +565,7 @@ impl FunctionAttr {
                             let len = index_builder.len();
                             let index_array = index_builder.finish();
                             let value_array = value_builder.finish();
-                            yield DataChunk::new(vec![index_array.into(), value_array.into()], len);
+                            yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], len);
                         }
                     }
                 }

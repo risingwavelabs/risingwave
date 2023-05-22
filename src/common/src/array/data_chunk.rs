@@ -412,7 +412,7 @@ impl DataChunk {
                     column.clone()
                 } else {
                     let mut builder = column.create_builder(capacity);
-                    builder.append_datum_n(capacity, None as DatumRef<'_>);
+                    builder.append_n(capacity, None as DatumRef<'_>);
                     builder.finish().into()
                 }
             })

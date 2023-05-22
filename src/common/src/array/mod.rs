@@ -690,6 +690,10 @@ macro_rules! impl_array {
                     $( Self::$variant_name(inner) => inner.data_type(), )*
                 }
             }
+
+            pub fn into_ref(self) -> ArrayRef {
+                Arc::new(self)
+            }
         }
     }
 }

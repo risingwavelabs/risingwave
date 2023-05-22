@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, Datum};
 pub fn bench_bigint(c: &mut Criterion) {
     c.bench_function("bench_bigint", |b| {
         b.iter_batched(
-            || ArrayBuilderImpl::from_type(&black_box(DataType::Int64), 1024),
+            || ArrayBuilderImpl::with_type(1024, black_box(DataType::Int64)),
             |mut builder| {
                 for _i in 0..black_box(100) {
                     let datum: i64 = black_box(3);
