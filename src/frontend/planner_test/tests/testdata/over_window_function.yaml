@@ -56,11 +56,12 @@
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
-    Feature is not yet implemented: Batch over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Feature is not yet implemented: batch query doesn't support share operator for now
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
   stream_error: |-
-    Feature is not yet implemented: General version of streaming over window is not implemented yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
@@ -323,6 +324,16 @@
   optimized_logical_plan_for_batch: |
     LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 3, group_key: [1] }
     └─LogicalScan { table: t, columns: [t.x, t.y] }
+- sql: |
+    create table t(x int, y int, z int, w int);
+    select x, y, sum(x) over(partition by y), max(x) over(partition by y), min(w) over(partition by y) from t;
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: Inner, on: (t.y = t.y), output: [t.x, t.y, sum(t.x), max(t.x), min(t.w)] }
+    ├─LogicalShare { id = 1 }
+    | └─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
+    └─LogicalAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w)] }
+      └─LogicalShare { id = 1 }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
 - sql: |
     create table t(x int, y int);
     select x, y from
