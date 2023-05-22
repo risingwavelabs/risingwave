@@ -6022,6 +6022,7 @@ dependencies = [
  "rand",
  "reqwest",
  "risingwave_common",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rust_decimal",

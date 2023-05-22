@@ -25,6 +25,7 @@ use risingwave_common::types::{
     DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::vector_op::cast::str_to_bytea;
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
@@ -83,7 +84,7 @@ fn do_parse_simd_json_value(
             .map_err(|_| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
+        DataType::Bytea => ScalarImpl::Bytea(str_to_bytea(ensure_str!(v, "bytea"))?),
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => {

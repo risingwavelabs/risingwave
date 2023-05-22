@@ -70,6 +70,7 @@ rdkafka = { workspace = true, features = [
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
+risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 rust_decimal = "1"
