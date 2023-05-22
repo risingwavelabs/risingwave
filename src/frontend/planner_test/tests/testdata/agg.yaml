@@ -218,9 +218,9 @@
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
-    └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-      └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-        └─BatchSort { order: [t.v1 DESC] }
+    └─BatchSort { order: [t.v1 DESC] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - name: Use BatchSortAgg, when required order satisfies input order
   sql: |
@@ -229,9 +229,9 @@
   batch_plan: |
     BatchExchange { order: [t.k1 ASC], dist: Single }
     └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
-      └─BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
-        └─BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
-          └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+      └─BatchSort { order: [t.k1 ASC] }
+        └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
+          └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
             └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
 - name: Use BatchSortAgg, when output requires order with swapped output
   sql: |
@@ -240,9 +240,9 @@
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
     └─BatchProject { exprs: [max(t.v2), t.v1] }
-      └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-        └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-          └─BatchSort { order: [t.v1 DESC] }
+      └─BatchSort { order: [t.v1 DESC] }
+        └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
             └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - name: Not use BatchSortAgg, when input provides order
   sql: |
@@ -265,8 +265,7 @@
     └─BatchSort { order: [t.v1 DESC] }
       └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchSort { order: [t.v1 DESC] }
-            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - name: Not use BatchSortAgg, when required order satisfies input order
@@ -279,8 +278,7 @@
       └─BatchSort { order: [t.k1 ASC] }
         └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
           └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
-            └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
-              └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
+            └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - name: Not use BatchSortAgg, when output requires order with swapped output
@@ -293,8 +291,7 @@
       └─BatchSort { order: [t.v1 DESC] }
         └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
           └─BatchExchange { order: [], dist: HashShard(t.v1) }
-            └─BatchSort { order: [t.v1 DESC] }
-              └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - sql: |
@@ -1297,9 +1294,11 @@
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a asc;
   batch_plan: |
-    BatchExchange { order: [idx_asc.a ASC], dist: Single }
-    └─BatchSortAgg { group_key: [idx_asc.a], aggs: [count] }
-      └─BatchScan { table: idx_asc, columns: [idx_asc.a], distribution: UpstreamHashShard(idx_asc.a) }
+    BatchExchange { order: [t.a ASC], dist: Single }
+    └─BatchSort { order: [t.a ASC] }
+      └─BatchHashAgg { group_key: [t.a], aggs: [count] }
+        └─BatchExchange { order: [], dist: HashShard(t.a) }
+          └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
 - name: sort agg on a descending index
   sql: |
     create table t (a int, b int);
@@ -1307,6 +1306,8 @@
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a desc;
   batch_plan: |
-    BatchExchange { order: [idx_desc.a DESC], dist: Single }
-    └─BatchSortAgg { group_key: [idx_desc.a], aggs: [count] }
-      └─BatchScan { table: idx_desc, columns: [idx_desc.a], distribution: UpstreamHashShard(idx_desc.a) }
+    BatchExchange { order: [t.a DESC], dist: Single }
+    └─BatchSort { order: [t.a DESC] }
+      └─BatchHashAgg { group_key: [t.a], aggs: [count] }
+        └─BatchExchange { order: [], dist: HashShard(t.a) }
+          └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
