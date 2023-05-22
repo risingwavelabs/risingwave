@@ -1764,4 +1764,17 @@ mod tests {
         let interval = Interval::MIN;
         assert_eq!(interval.estimated_size(), 16);
     }
+
+    #[test]
+    fn test_iso_8601() {
+        let iso_8601_str = "P1Y2M3DT4H5M6.789123S";
+        let lhs = Interval::from_month_day_usec(
+            14,
+            3,
+            14706789123
+        );
+        let rhs = Interval::from_iso_8601(iso_8601_str).unwrap();
+        assert_eq!(rhs.as_iso_8601().as_str(), iso_8601_str);
+        assert_eq!(lhs, rhs);
+    }
 }
