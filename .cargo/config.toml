@@ -1,4 +1,8 @@
 # RisingWave cannot compile without SIMD. #7259
+#
+# For some targets, there's an SIMD feature enabled by default.
+# For other targets, we need to enable the feature manually.
+# See `rustc --print=cfg --target=<triple>` for details.
 
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-Ctarget-feature=+avx2"]
@@ -15,12 +19,14 @@ rustflags = [
 
 [target.x86_64-apple-darwin]
 rustflags = [
-    "-Clink-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld"
+    "-Ctarget-feature=+sse4.2",                             # use a generally available feature, since it's not for production
+    "-Clink-arg=-fuse-ld=/usr/local/opt/llvm/bin/ld64.lld",
 ]
 
 [target.aarch64-apple-darwin]
 rustflags = [
-    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
+    # neon is enabled by default
+    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld",
 ]
 
 # Flags for all targets.
