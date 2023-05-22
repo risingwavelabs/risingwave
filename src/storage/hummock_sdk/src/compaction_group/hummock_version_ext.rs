@@ -948,7 +948,18 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
-    debug_assert!(can_concat(&operand.table_infos));
+
+    #[cfg(debug_assertions)]
+    {
+        let print_sstables = |sstables: &[SstableInfo]| -> Vec<u64> {
+            sstables.iter().map(|sst| sst.sst_id).collect_vec()
+        };
+        debug_assert!(
+            can_concat(&operand.table_infos),
+            "the files [{:?}] are not sorted",
+            print_sstables(&operand.table_infos)
+        );
+    }
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {
