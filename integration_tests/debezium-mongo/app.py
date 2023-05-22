@@ -12,10 +12,8 @@ from faker import Faker
 mongo_host = os.environ["MONGO_HOST"]
 mongo_port = os.environ["MONGO_PORT"]
 mongo_db_name = os.environ["MONGO_DB_NAME"]
-mongo_username = os.environ["MONGO_USERNAME"]
-mongo_password = os.environ["MONGO_PASSWORD"]
 
-url = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}"
+url = f"mongodb://{mongo_host}:{mongo_port}"
 client = pymongo.MongoClient(url)
 db = client[mongo_db_name]
 

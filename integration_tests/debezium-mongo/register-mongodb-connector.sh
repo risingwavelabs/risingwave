@@ -10,6 +10,10 @@ done
 echo 'Kafka Connect started.'
 echo 'Registering MongoDB connector...'
 
+# Add these two fields if the mongodb is authenticated:
+#    "mongodb.user": "admin",
+#    "mongodb.password": "admin123",
+#
 response=$(curl -s -X POST -H 'Content-Type: application/json' --data '{
   "name": "mongodb-connector",
   "config": {
@@ -17,8 +21,6 @@ response=$(curl -s -X POST -H 'Content-Type: application/json' --data '{
     "tasks.max": "1",
     "mongodb.hosts": "mongodb:27017",
     "mongodb.name": "dbserver1",
-    "mongodb.user": "admin",
-    "mongodb.password": "admin123",
     "database.history.kafka.bootstrap.servers": "message_queue:29092"
   }
 }' http://debezium:8083/connectors)
