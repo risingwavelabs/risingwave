@@ -1038,28 +1038,28 @@ impl Interval {
             // usecs = sec * 1000000, use decimal to be exact
             let usecs: i64 = (Decimal::from_str_exact(&caps[6])?
                 .checked_mul(Decimal::from_str_exact("1000000").unwrap()))
-            .context("check_mul failure")?
+            .context("checked_mul failure")?
             .try_into()?;
             Ok(Interval::from_month_day_usec(
                 // months = years * 12 + months
                 years
                     .checked_mul(12)
-                    .context("check_mul failure")?
+                    .context("checked_mul failure")?
                     .checked_add(months)
-                    .context("check_add failure")?,
+                    .context("checked_add failure")?,
                 days,
                 // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
                 (hours
                     .checked_mul(3_600)
-                    .context("check_mul failure")?
+                    .context("checked_mul failure")?
                     .checked_add(minutes.checked_mul(60).ok_or_else(|| {
                         ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
                     })?)
-                    .context("check_mul failure")?)
+                    .context("checked_add failure")?)
                 .checked_mul(USECS_PER_SEC)
-                .context("check_mul failure")?
+                .context("checked_mul failure")?
                 .checked_add(usecs)
-                .context("check_mul failure")?,
+                .context("checked_add failure")?,
             ))
         };
         f().map_err(|_: Box<dyn Error>| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
