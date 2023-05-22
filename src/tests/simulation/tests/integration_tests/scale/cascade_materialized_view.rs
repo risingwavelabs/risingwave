@@ -46,9 +46,11 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     let id = fragment.id();
 
+    println!("Rescheduling fragment");
     cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
     sleep(Duration::from_secs(3)).await;
 
+    println!("Locating cluster fragment");
     let fragment = cluster.locate_fragment_by_id(id).await?;
     assert_eq!(fragment.inner.actors.len(), 1);
 
@@ -61,6 +63,9 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         fragment.inner.actors.len()
     );
 
+    println!("Located cluster fragment");
+
+    println!("Inserting values");
     session
         .run(&format!(
             "insert into t1 values {}",
@@ -68,6 +73,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         ))
         .await?;
 
+    println!("Flush");
     session.run("flush").await?;
 
     // v1 > 5, result is [6, 7, 8, 9, 10]
@@ -76,9 +82,11 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         .await?
         .assert_result_eq("5");
 
+    println!("Rescheduling");
     cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
     sleep(Duration::from_secs(3)).await;
 
+    println!("Locating");
     let fragment = cluster.locate_fragment_by_id(id).await?;
     assert_eq!(fragment.inner.actors.len(), 6);
 

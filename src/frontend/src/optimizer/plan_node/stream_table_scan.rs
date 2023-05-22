@@ -146,7 +146,8 @@ impl StreamTableScan {
 
         catalog_builder.set_vnode_col_idx(0);
 
-        catalog_builder.set_value_indices((1..self.logical.primary_key().len() + 1).collect_vec());
+        // catalog_builder.set_value_indices((1..self.logical.primary_key().len() +
+        // 1).collect_vec());
 
         catalog_builder
             .build(vec![], 1)
