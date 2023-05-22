@@ -144,6 +144,8 @@ impl StreamTableScan {
             format!("{}_backfill_finished", self.table_name()),
         ));
 
+        catalog_builder.set_vnode_col_idx(0);
+
         catalog_builder
             .build(vec![], 1)
             .with_id(state.gen_table_id_wrapped())
