@@ -139,7 +139,7 @@ pub fn build(
         .map(|t| t.return_type().into())
         .collect::<Vec<DataTypeName>>();
     let desc = crate::sig::table_function::FUNC_SIG_MAP
-        .get(func, &args, (&return_type).into())
+        .get(func, &args)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{:?}({}) -> {:?}",

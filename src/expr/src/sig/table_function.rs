@@ -56,11 +56,10 @@ impl FuncSigMap {
             .push(desc)
     }
 
-    /// Returns a function signature with the same type, argument types and return type.
-    pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
+    /// Returns a function signature with the same type and argument types.
+    pub fn get(&self, ty: PbType, args: &[DataTypeName]) -> Option<&FuncSign> {
         let v = self.0.get(&(ty, args.len()))?;
-        v.iter()
-            .find(|d| d.inputs_type == args && d.ret_type == ret)
+        v.iter().find(|d| d.inputs_type == args)
     }
 
     /// Returns all function signatures with the same type and number of arguments.
