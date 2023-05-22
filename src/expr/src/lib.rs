@@ -14,6 +14,7 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(let_chains)]
+#![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
