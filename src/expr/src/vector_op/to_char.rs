@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Write};
 use std::sync::LazyLock;
+use std::unreachable;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
@@ -43,13 +44,19 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     static PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
         "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd", "US", "us", "MS",
-        "ms",
+        "ms", "TZH:TZM", "tzh:tzm", "TZHTZM", "tzhtzm", "TZH", "tzh",
     ];
     // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     static CHRONO_PATTERNS: &[&str] = &[
         "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f",
+        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d", "%6f", "%6f", "%3f", "%3f", "%:z",
+        "%:z", "%z", "%z", "%#z", "%#z",
     ];
+    static _ASSERT: () = {
+        if PG_PATTERNS.len() != CHRONO_PATTERNS.len() {
+            unreachable!();
+        }
+    };
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasickBuilder::new()
             .ascii_case_insensitive(false)
@@ -62,6 +69,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
         true
     });
+    tracing::debug!(tmpl, chrono_tmpl, "compile_pattern_to_chrono");
     ChronoPatternBuilder {
         tmpl: chrono_tmpl,
         items_builder: |tmpl| StrftimeItems::new(tmpl).collect::<Vec<_>>(),
