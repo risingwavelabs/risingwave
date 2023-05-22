@@ -440,8 +440,8 @@ mod tests {
 
     async fn check_role(
         clients: Vec<ElectionHandle>,
-        leader_count: usize,
-        follower_count: usize,
+        expected_leader_count: usize,
+        expected_follower_count: usize,
     ) -> (Vec<ElectionHandle>, Vec<ElectionHandle>) {
         let mut leaders = vec![];
         let mut followers = vec![];
@@ -453,8 +453,8 @@ mod tests {
             }
         }
 
-        assert_eq!(leaders.len(), leader_count);
-        assert_eq!(followers.len(), follower_count);
+        assert_eq!(leaders.len(), expected_leader_count);
+        assert_eq!(followers.len(), expected_follower_count);
         (leaders, followers)
     }
 
