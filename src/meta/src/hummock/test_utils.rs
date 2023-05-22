@@ -55,8 +55,8 @@ where
 {
     // Increase version by 2.
     let mut epoch: u64 = 1;
-    let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_tables(epoch, table_ids);
+    let sstable_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables,
