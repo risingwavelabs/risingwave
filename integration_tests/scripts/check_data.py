@@ -61,13 +61,13 @@ def check_cdc_table(rel: str, upstream: str):
 
 def run_mysql_upstream(sql):
     print("Running SQL: {}".format(sql))
-    return subprocess.check_output(["mysql", "-h", "mysql", "-P", "3306", "-D", "mydb",
+    return subprocess.check_output(["mysql", "-h", "localhost", "-P", "8306", "-D", "mydb", "--protocol=tcp",
                                     "-u", "root", "-p", "123456", "-Ne", sql, "-B"])
 
 
 def run_psql_upstream(sql):
     print("Running SQL: {}".format(sql))
-    return subprocess.check_output(["psql", "-h", "postgres", "-p", "5432",
+    return subprocess.check_output(["psql", "-h", "localhost", "-p", "8432",
                                     "-d", "mydb", "-U", "myuser", "--tuples-only", "-c", sql])
 
 
