@@ -153,9 +153,8 @@ where
         let is_finished = if let Some(row) = row
             && let Some(is_finished) = row.datum_at(state_len - 1)
         {
-            let is_finished = is_finished.into_bool();
-            println!("actor_id {:?} Is finished? {:?}", self.actor_id, is_finished);
-            is_finished
+            
+            is_finished.into_bool()
         } else {
             false
         };
@@ -571,7 +570,7 @@ where
     /// For `current_pos` and `old_pos` are just pk of upstream.
     /// They should be strictly increasing.
     async fn persist_state(
-        actor_id: ActorId,
+        _actor_id: ActorId,
         epoch: EpochPair,
         table: &mut StateTable<S>,
         is_finished: bool,
@@ -582,7 +581,7 @@ where
         if let Some(current_pos_inner) = current_pos {
             // state w/o vnodes.
             Self::build_temporary_state(current_state, is_finished, current_pos_inner);
-            Self::flush_data(actor_id, table, epoch, old_state, current_state).await?;
+            Self::flush_data(_actor_id, table, epoch, old_state, current_state).await?;
             *old_state = Some(current_state.into());
         } else {
             table.commit_no_data_expected(epoch);
@@ -599,7 +598,7 @@ where
     // State table interface should be updated, such that it can reuse this `vnode`
     // as both `PRIMARY KEY` and `vnode`.
     async fn flush_data(
-        actor_id: ActorId,
+        _actor_id: ActorId,
         table: &mut StateTable<S>,
         epoch: EpochPair,
         old_state: &mut Option<Vec<Datum>>,
@@ -614,10 +613,6 @@ where
                     // fill the state
                     current_partial_state[0] = datum.clone();
                     old_state[0] = datum;
-                    println!(
-                        "actor_id: {:?}\nWriting record:\nold: {:?}\nnew: {:?}",
-                        actor_id, old_state, current_partial_state
-                    );
                     table.write_record(Record::Update {
                         old_row: &old_state[..],
                         new_row: &(*current_partial_state),
@@ -634,10 +629,6 @@ where
                 let datum = Some((vnode as i16).into());
                 // fill the state
                 current_partial_state[0] = datum;
-                println!(
-                    "actor id:{:?}, No existing state, inserting: {:?}",
-                    actor_id, current_partial_state
-                );
                 table.write_record(Record::Insert {
                     new_row: &(*current_partial_state),
                 })
