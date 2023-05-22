@@ -15,7 +15,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-aho-corasick = "0.7"
+aho-corasick = "1"
 anyhow = "1"
 arrow-array = "36"
 arrow-schema = "36"
