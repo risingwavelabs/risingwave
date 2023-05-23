@@ -1779,22 +1779,30 @@ def section_hummock(panels):
         ),
 
         panels.timeseries_count(
-            "Merge Imm - Finished Tasks Count",
+            "Uploader - Tasks Count",
             "",
             [
                 panels.target(
                     f"sum(irate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "merge imm tasks - {{table_id}} @ {{instance}} ",
                 ),
+                panels.target(
+                    f"sum(irate({metric('state_store_spill_task_counts')}[$__rate_interval])) by (job,instance,uploader_stage)",
+                    "Uploader spill tasks - {{uploader_stage}} @ {{instance}} ",
+                ),
             ],
         ),
         panels.timeseries_bytes(
-            "Merge Imm - Finished Task Memory Size",
+            "Uploader - Task Size",
             "",
             [
                 panels.target(
                     f"sum(rate({table_metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
-                    "tasks memory size - {{table_id}} @ {{instance}} ",
+                    "Merging tasks memory size - {{table_id}} @ {{instance}} ",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_spill_task_size')}[$__rate_interval])) by (job,instance,uploader_stage)",
+                    "Uploading tasks size - {{uploader_stage}} @ {{instance}} ",
                 ),
             ],
         ),
@@ -1858,11 +1866,11 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({table_metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({table_metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance,table_id) / sum(rate({table_metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
                     "shared_buffer - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('compactor_shared_buffer_to_sstable_size')}[$__rate_interval]))by(job,instance) / sum(rate({metric('state_store_shared_buffer_to_sstable_size_count')}[$__rate_interval]))by(job,instance)",
+                    f"sum(rate({metric('compactor_shared_buffer_to_sstable_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({metric('compactor_shared_buffer_to_sstable_size_count')}[$__rate_interval]))by(job,instance)",
                     "sync - {{job}} @ {{instance}}",
                 ),
             ],
@@ -1899,6 +1907,10 @@ def section_hummock(panels):
                 ),
                 panels.target(
                     f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "Memory limiter usage - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
                     "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],
