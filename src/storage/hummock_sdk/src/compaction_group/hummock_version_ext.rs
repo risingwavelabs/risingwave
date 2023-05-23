@@ -24,14 +24,11 @@ use risingwave_pb::hummock::{
     CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, GroupTableChange,
     HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
-use tracing::warn;
 
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::prost_key_range::KeyRangeExt;
-use crate::{
-    can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId, KeyRangeCommon,
-};
+use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
@@ -951,39 +948,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
-
-    #[cfg(debug_assertions)]
-    {
-        let print_sstables = |sstables: &[SstableInfo]| -> Vec<u64> {
-            sstables.iter().map(|sst| sst.sst_id).collect_vec()
-        };
-        let ret = can_concat(&operand.table_infos);
-        if !ret {
-            for i in 1..operand.table_infos.len() {
-                if operand.table_infos[i - 1]
-                    .key_range
-                    .as_ref()
-                    .unwrap()
-                    .compare_right_with(&operand.table_infos[i].key_range.as_ref().unwrap().left)
-                    != Ordering::Less
-                {
-                    let sst1 = &operand.table_infos[i - 1];
-                    let sst2 = &operand.table_infos[i];
-                    warn!("{}(range tombstone count: {} ) not concat with {}(range tombstone count: {})",
-                        sst1.sst_id,
-                        sst1.range_tombstone_count,
-                        sst2.sst_id,
-                        sst2.range_tombstone_count
-                    );
-                }
-            }
-        }
-        debug_assert!(
-            ret,
-            "the files [{:?}] are not sorted",
-            print_sstables(&operand.table_infos)
-        );
-    }
+    debug_assert!(can_concat(&operand.table_infos));
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockSstableObjectId, u64> {

@@ -271,19 +271,15 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
-
-        let mut sst_infos_string = String::default();
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
                     .compactor_metrics
                     .write_build_l0_bytes
                     .inc_by(sst_info.file_size());
-                append_sstable_info_to_string(&mut sst_infos_string, &sst_info.sst_info);
             }
             level0.extend(ssts);
         }
-        info!("Compaction Result: \n{}", sst_infos_string);
         Ok(level0)
     } else {
         Err(err.unwrap())
