@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp;
-use std::iter::{Map, Take};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -728,7 +727,7 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
             .max_delay(DEFAULT_RETRY_MAX_DELAY)
             .take(DEFAULT_RETRY_MAX_ATTEMPTS)
