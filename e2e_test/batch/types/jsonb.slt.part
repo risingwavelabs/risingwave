@@ -209,3 +209,54 @@ select * from jsonb_object_keys('"string"'::jsonb)
 
 statement error cannot call jsonb_object_keys
 select * from jsonb_object_keys('[]'::jsonb)
+
+
+# jsonb_each
+query TT
+select * from jsonb_each('{"a":"foo", "b":"bar"}'::jsonb);
+----
+a "foo"
+b "bar"
+
+query T
+select jsonb_each('{"a":"foo", "b":"bar"}'::jsonb);
+----
+(a,"""foo""")
+(b,"""bar""")
+
+statement error cannot cannot deconstruct
+select * from jsonb_each('null'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each('1'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each('"string"'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each('[]'::jsonb)
+
+# jsonb_each_text
+query TT
+select * from jsonb_each_text('{"a":"foo", "b":"bar"}'::jsonb);
+----
+a foo
+b bar
+
+query T
+select jsonb_each_text('{"a":"foo", "b":"bar"}'::jsonb);
+----
+(a,foo)
+(b,bar)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each_text('null'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each_text('1'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each_text('"string"'::jsonb)
+
+statement error cannot cannot deconstruct
+select * from jsonb_each_text('[]'::jsonb)

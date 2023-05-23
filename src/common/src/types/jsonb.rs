@@ -343,10 +343,7 @@ impl<'a> JsonbRef<'a> {
     ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, String> {
         match &self.0 {
             Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
-            _ => Err(format!(
-                "cannot call jsonb_each on a jsonb {}",
-                self.type_name()
-            )),
+            _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
         }
     }
 }
