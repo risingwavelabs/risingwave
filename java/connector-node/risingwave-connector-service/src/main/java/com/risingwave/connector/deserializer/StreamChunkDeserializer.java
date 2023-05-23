@@ -143,6 +143,26 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getDate(index);
                             };
                     break;
+
+                case INTERVAL:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getInterval(index);
+                            };
+                    break;
+
+                case JSONB:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getJsonb(index);
+                            };
+                    break;
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription("unsupported type " + typeName)

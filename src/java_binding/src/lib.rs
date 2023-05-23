@@ -498,6 +498,40 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetIntervalValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JString<'a> {
+    execute_and_catch(env, move || {
+        let interval = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_interval()
+            .to_string();
+        Ok(env.new_string(interval)?)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetJsonbValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JString<'a> {
+    execute_and_catch(env, move || {
+        let jsonb = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_jsonb()
+            .to_string();
+        Ok(env.new_string(jsonb)?)
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampValue<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, JavaBindingRow>,

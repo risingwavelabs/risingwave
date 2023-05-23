@@ -71,6 +71,16 @@ public class BaseRow implements AutoCloseable {
         return Binding.rowGetDateValue(pointer, index);
     }
 
+    // string representation of interval: "2 mons 3 days 00:00:00.000004" or "P1Y2M3DT4H5M6.789123S"
+    public String getInterval(int index) {
+        return Binding.rowGetIntervalValue(pointer, index);
+    }
+
+    // string representation of jsonb: '{"key": "value"}'
+    public String getJsonb(int index) {
+        return Binding.rowGetJsonbValue(pointer, index);
+    }
+
     @Override
     public void close() {
         if (!isClosed) {

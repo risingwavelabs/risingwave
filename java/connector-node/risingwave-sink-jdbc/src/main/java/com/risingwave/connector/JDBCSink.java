@@ -25,6 +25,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.postgresql.util.PGInterval;
+import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -92,8 +94,23 @@ public class JDBCSink extends SinkBase {
                 try {
                     PreparedStatement stmt =
                             conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
+                    var columnNames = getTableSchema().getColumnNames();
                     for (int i = 0; i < row.size(); i++) {
-                        stmt.setObject(i + 1, row.get(i));
+                        switch (getTableSchema().getColumnType(columnNames[i])) {
+                            case INTERVAL:
+                                stmt.setObject(i + 1, new PGInterval((String) row.get(i)));
+                                break;
+                            case JSONB:
+                                // reference: https://github.com/pgjdbc/pgjdbc/issues/265
+                                var pgObj = new PGobject();
+                                pgObj.setType("jsonb");
+                                pgObj.setValue((String) row.get(i));
+                                stmt.setObject(i + 1, pgObj);
+                                break;
+                            default:
+                                stmt.setObject(i + 1, row.get(i));
+                                break;
+                        }
                     }
                     return stmt;
                 } catch (SQLException e) {
