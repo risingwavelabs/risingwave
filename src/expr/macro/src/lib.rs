@@ -164,7 +164,7 @@ impl FunctionAttr {
     fn ident_name(&self) -> String {
         format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
             .replace("[]", "list")
-            .replace(&['<', '>', ' ', ','], "_")
+            .replace(['<', '>', ' ', ','], "_")
     }
 }
 

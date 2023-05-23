@@ -539,6 +539,14 @@ impl FunctionAttr {
             ReturnType::Result => quote! { Some(value?) },
             ReturnType::ResultOption => quote! { value? },
         };
+        let columns = match self.ret.starts_with("struct") {
+            true => quote! {
+                std::iter::once(index_array.into_ref())
+                    .chain(value_array.fields().cloned())
+                    .collect()
+            },
+            false => quote! { vec![index_array.into_ref(), value_array.into_ref()] },
+        };
 
         Ok(quote! {
             |return_type, chunk_size, children| {
@@ -593,7 +601,7 @@ impl FunctionAttr {
                                     if index_builder.len() == self.chunk_size {
                                         let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
                                         let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
-                                        yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], self.chunk_size);
+                                        yield DataChunk::new(#columns, self.chunk_size);
                                     }
                                 }
                             }
@@ -603,7 +611,7 @@ impl FunctionAttr {
                             let len = index_builder.len();
                             let index_array = index_builder.finish();
                             let value_array = value_builder.finish();
-                            yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], len);
+                            yield DataChunk::new(#columns, len);
                         }
                     }
                 }
