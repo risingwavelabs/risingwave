@@ -62,7 +62,7 @@ impl FunctionAttr {
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
@@ -286,7 +286,7 @@ impl FunctionAttr {
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
@@ -438,7 +438,7 @@ impl FunctionAttr {
         let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::table_function::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
@@ -475,7 +475,7 @@ impl FunctionAttr {
     fn generate_build_table_function(&self) -> Result<TokenStream2> {
         let num_args = self.args.len();
         let fn_name = format_ident!("{}", self.user_fn.name);
-        let struct_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let struct_name = format_ident!("{}", self.ident_name());
         let ids = (0..num_args)
             .filter(|i| match &self.prebuild {
                 Some(s) => !s.contains(&format!("${i}")),
@@ -603,6 +603,10 @@ fn data_type_name(ty: &str) -> TokenStream2 {
 }
 
 fn data_type(ty: &str) -> TokenStream2 {
+    if let Some(ty) = ty.strip_suffix("[]") {
+        let inner_type = data_type(ty);
+        return quote! { risingwave_common::types::DataType::List(Box::new(#inner_type)) };
+    }
     let variant = format_ident!("{}", types::data_type(ty));
     quote! { risingwave_common::types::DataType::#variant }
 }

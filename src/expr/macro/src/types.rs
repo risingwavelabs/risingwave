@@ -44,6 +44,8 @@ pub fn data_type(ty: &str) -> &str {
     // and the signature won't be accessed. So we simply return a placeholder here.
     if ty == "any" {
         return "Int32";
+    } else if ty.ends_with("[]") {
+        return "List";
     }
     lookup_matrix(ty, 1)
 }
@@ -57,6 +59,8 @@ pub fn variant(ty: &str) -> &str {
 pub fn array_type(ty: &str) -> &str {
     if ty == "any" {
         return "ArrayImpl";
+    } else if ty.ends_with("[]") {
+        return "ListArray";
     }
     lookup_matrix(ty, 3)
 }

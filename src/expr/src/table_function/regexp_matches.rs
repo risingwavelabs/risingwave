@@ -20,13 +20,11 @@ use crate::expr::expr_regexp::RegexpContext;
 use crate::ExprError;
 
 #[function(
-    "regexp_matches(varchar, varchar) -> setof list",
-    type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
+    "regexp_matches(varchar, varchar) -> setof varchar[]",
     prebuild = "RegexpContext::from_pattern_flags($1, None)?"
 )]
 #[function(
-    "regexp_matches(varchar, varchar, varchar) -> setof list",
-    type_infer = "|_| Ok(DataType::List(Box::new(DataType::Varchar)))",
+    "regexp_matches(varchar, varchar, varchar) -> setof varchar[]",
     prebuild = "RegexpContext::from_pattern_flags($1, $2)?"
 )]
 fn regexp_matches<'a>(
