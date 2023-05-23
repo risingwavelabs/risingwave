@@ -5,4 +5,4 @@ FROM
 LIMIT
     10;
 
-SELECT * FROM lineitem_rw_count LIMIT 10;
+SELECT * FROM orders_rw_count LIMIT 10;

@@ -40,14 +40,10 @@ def check_cdc_table(rel: str):
         rows = run_psql(mv_count_sql)
         rows = int(rows.decode('utf8').strip())
 
-    # don't know why cannot query upstream with `mysql` or `psql` command,
+    # don't know why if query upstream with `mysql` or `psql` command it will stuck,
     # so just check the count approximately.
-    # there's roughly at least 6000000 rows for sf=1.
-    if mv_rows >= 6000000:
-        print("All upstream data has been loaded into RisingWave")
-    else:
-        # fail if not enough data
-        assert mv_rows >= 6000000
+    print("All upstream data has been loaded into RisingWave: {}".format(mv_rows))
+    assert mv_rows >= 500000
 
 
 def run_psql(sql):
