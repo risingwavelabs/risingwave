@@ -184,7 +184,7 @@ WITH (
     scan.startup.mode = 'earliest')
 ROW format JSON;
 
-# we cannot create debezium source without pk
+# we cannot create maxwell source without pk
 statement error
 create table s13 (
   id integer,
@@ -316,6 +316,22 @@ WITH (
   properties.bootstrap.server = '127.0.0.1:29092',
 	topic = 'debezium_mongo_json_customers')
 ROW FORMAT DEBEZIUM_MONGO_JSON
+
+# we cannot create upsert_json source without pk
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '127.0.0.1:29092',
+	topic = 'upsert_json')
+ROW FORMAT UPSERT_JSON
 
 statement ok
 CREATE TABLE upsert_students (

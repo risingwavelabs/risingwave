@@ -27,7 +27,7 @@ pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
     arg_schema: SchemaRef,
     return_type: DataType,
-    client: ArrowFlightUdfClient,
+    client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     #[allow(dead_code)]
     chunk_size: usize,
@@ -78,16 +78,14 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         bail!("expect UDTF");
     };
 
-    // connect to UDF service
     let arg_schema = Arc::new(Schema::new(
         udtf.arg_types
             .iter()
             .map(|t| Field::new("", DataType::from(t).into(), true))
             .collect(),
     ));
-    let client = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(&udtf.link))
-    })?;
+    // connect to UDF service
+    let client = crate::expr::expr_udf::get_or_create_client(&udtf.link)?;
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
