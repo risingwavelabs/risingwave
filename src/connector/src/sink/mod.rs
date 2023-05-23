@@ -29,7 +29,6 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

@@ -497,41 +497,6 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
     })
 }
 
-// TODO(Siyuan): It seems we cannot just use the string representation of the interval and jsonb
-// type to work with JDBC. These two types are postgres specific types. #[no_mangle]
-// pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetIntervalValue<'a>(
-//     env: EnvParam<'a>,
-//     pointer: Pointer<'a, JavaBindingRow>,
-//     idx: jint,
-// ) -> JString<'a> {
-//     execute_and_catch(env, move || {
-//         let interval = pointer
-//             .as_ref()
-//             .datum_at(idx as usize)
-//             .unwrap()
-//             .into_interval()
-//             .to_string();
-//         Ok(env.new_string(interval)?)
-//     })
-// }
-//
-// #[no_mangle]
-// pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetJsonbValue<'a>(
-//     env: EnvParam<'a>,
-//     pointer: Pointer<'a, JavaBindingRow>,
-//     idx: jint,
-// ) -> JString<'a> {
-//     execute_and_catch(env, move || {
-//         let jsonb = pointer
-//             .as_ref()
-//             .datum_at(idx as usize)
-//             .unwrap()
-//             .into_jsonb()
-//             .to_string();
-//         Ok(env.new_string(jsonb)?)
-//     })
-// }
-
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampValue<'a>(
     env: EnvParam<'a>,
@@ -662,7 +627,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimeValue<
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         let class = JClass::from(class_ref.as_obj());
-        let JValue::Object(date_obj) = env.call_static_method_unchecked(
+        let JValue::Object(obj) = env.call_static_method_unchecked(
             class,
             *constructor,
             ReturnType::Object,
@@ -673,7 +638,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimeValue<
                 sig: "(Ljava/lang/String;)Ljava/sql/Time;".into(),
             }));
         };
-        Ok(date_obj)
+        Ok(obj)
     })
 }
 
