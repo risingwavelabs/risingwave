@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
 use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
@@ -276,49 +276,6 @@ impl LogicalAgg {
         } else {
             self.gen_single_plan(stream_input)
         }
-    }
-
-    // Check if the output of the aggregation needs to be sorted and return ordering req by group
-    // keys If group key order satisfies required order, push down the sort below the
-    // aggregation and use sort aggregation. The data type of the columns need to be int32
-    fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
-        let group_key_order = Order {
-            column_orders: self
-                .group_key()
-                .ones()
-                .map(|group_by_idx| {
-                    required_order
-                        .column_orders
-                        .iter()
-                        .find(|o| o.column_index == group_by_idx)
-                        .cloned()
-                        .unwrap_or_else(|| ColumnOrder::new(group_by_idx, OrderType::ascending()))
-                })
-                .collect(),
-        };
-        return (
-            !required_order.column_orders.is_empty()
-                && group_key_order.satisfies(required_order)
-                && self.group_key().ones().all(|group_by_idx| {
-                    self.schema().fields().get(group_by_idx).unwrap().data_type == DataType::Int32
-                }),
-            group_key_order,
-        );
-    }
-
-    // Check if the input is already sorted, and hence sort merge aggregation can be used
-    // It can only be used, if the input is sorted on all group key indices and the
-    // datatype of the column is int32
-    fn input_provides_order_on_group_keys(&self, new_logical: &Agg<PlanRef>) -> bool {
-        self.group_key().ones().all(|group_by_idx| {
-            let input = &new_logical.input;
-            input
-                .order()
-                .column_orders
-                .iter()
-                .any(|order| order.column_index == group_by_idx)
-                && input.schema().fields().get(group_by_idx).unwrap().data_type == DataType::Int32
-        })
     }
 
     pub fn core(&self) -> &Agg<PlanRef> {
@@ -900,15 +857,6 @@ impl LogicalAgg {
             .collect();
         Agg::new(agg_calls, group_key, input).into()
     }
-
-    fn to_batch_simple_agg(&self) -> Result<PlanRef> {
-        let input = self.input().to_batch()?;
-        let new_logical = Agg {
-            input,
-            ..self.core.clone()
-        };
-        Ok(BatchSimpleAgg::new(new_logical).into())
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -1078,34 +1026,26 @@ impl ToBatch for LogicalAgg {
         self.to_batch_with_order_required(&Order::any())
     }
 
+    // TODO(rc): `to_batch_with_order_required` seems to be useless after we decide to use
+    // `BatchSortAgg` only when input is already sorted
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+        let input = self.input().to_batch()?;
+        let new_logical = Agg {
+            input,
+            ..self.core.clone()
+        };
         let agg_plan = if self.group_key().is_empty() {
-            self.to_batch_simple_agg()?
+            BatchSimpleAgg::new(new_logical).into()
+        } else if self
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_batch_enable_sort_agg()
+            && new_logical.input_provides_order_on_group_keys()
+        {
+            BatchSortAgg::new(new_logical).into()
         } else {
-            let mut input_order = Order::any();
-            let (output_requires_order, group_key_order) =
-                self.output_requires_order_on_group_keys(required_order);
-            if output_requires_order {
-                // Push down sort before aggregation
-                input_order = self
-                    .core
-                    .o2i_col_mapping()
-                    .rewrite_provided_order(&group_key_order);
-            }
-            let new_input = self.input().to_batch_with_order_required(&input_order)?;
-            let mut new_logical = self.core.clone();
-            new_logical.input = new_input;
-            if self
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_batch_enable_sort_agg()
-                && (self.input_provides_order_on_group_keys(&new_logical) || output_requires_order)
-            {
-                BatchSortAgg::new(new_logical).into()
-            } else {
-                BatchHashAgg::new(new_logical).into()
-            }
+            BatchHashAgg::new(new_logical).into()
         };
         required_order.enforce_if_not_satisfies(agg_plan)
     }

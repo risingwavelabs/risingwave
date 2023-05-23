@@ -424,7 +424,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         } else {
             None
         };
-        let order_by = if self.flip_coin() && !distinct {
+
+        // Only can generate ORDER BY if distinct_allowed is banned globally in the generator.
+        // This avoids ORDER BY + Distinct aggregate from being generated.
+        // See https://github.com/risingwavelabs/risingwave/issues/9860.
+        let order_by = if self.flip_coin() && !distinct && !self.is_distinct_allowed {
             self.gen_order_by()
         } else {
             vec![]
