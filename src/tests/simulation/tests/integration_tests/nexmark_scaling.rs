@@ -100,23 +100,38 @@ async fn nexmark_scaling_up_down_common(
     drop: &str,
     number_of_nodes: usize,
 ) -> Result<()> {
-    // tracing_subscriber::fmt()
-    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-    //     .init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    println!("Beginning of test"); // TODO: remove line
+
     let sleep_sec = 20;
 
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+    println!(
+        "created OG cluster with {} worker nodes",
+        cluster.get_number_worker_nodes().await
+    ); // TODO: remove line
+
     cluster.run(create).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
     let expected = cluster.run(select).await?;
+    println!("got expected result"); // TODO: remove line
+
+    println!("Cleaning cluster"); // TODO: remove line
     cluster.run(drop).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
 
     cluster.run(create).await?;
 
+    println!("adding compute node"); // TODO: remove line
     cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(sleep_sec)).await; // TODO: 60 sec sleep seems like to much
+    sleep(Duration::from_secs(sleep_sec)).await;
+    println!(
+        "Now {} compute nodes in cluster",
+        cluster.get_number_worker_nodes().await
+    ); // TODO: remove line
 
     let mut unregistered_nodes: Vec<String> = vec![];
     for _ in 0..number_of_nodes {
@@ -124,12 +139,34 @@ async fn nexmark_scaling_up_down_common(
             .unregister_compute_node()
             .await
             .expect("unregistering node failed");
+        println!("Unregister compute node {:?}", node_host_addr); // TODO: remove line
+        println!(
+            "Now compute nodes in cluster {}",
+            cluster.get_number_worker_nodes().await
+        ); // TODO: remove line
+
         unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
         sleep(Duration::from_secs(sleep_sec)).await;
     }
-    cluster.kill_nodes(&unregistered_nodes).await;
 
-    cluster.run(select).await?.assert_result_eq(&expected);
+    // question: If I mark CN as DELETING does meta remove fragments from DELETING CN?
+    // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
+    // end of the workflow
+
+    // TODO: call reschedule here
+    println!("Killing nodes"); // TODO: remove line
+    cluster.kill_nodes(&unregistered_nodes).await;
+    println!(
+        // TODO: remove line
+        "Nodes killed. Now compute nodes in cluster {}",
+        cluster.get_number_worker_nodes().await
+    );
+
+    println!("run select"); // TODO: remove line
+    let select_result = cluster.run(select).await?;
+    println!("Got new result"); // TODO: remove line
+
+    select_result.assert_result_eq(&expected);
 
     Ok(())
 }

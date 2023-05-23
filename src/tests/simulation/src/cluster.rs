@@ -540,6 +540,8 @@ impl Cluster {
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
+            println!("kill {name}"); // TODO: remove line
+
             madsim::runtime::Handle::current().kill(name);
 
             let mut t =
@@ -616,6 +618,14 @@ impl Cluster {
         // host like 192.168.3.1:5688
         let host = addr.host.clone();
         format!("compute-{}", host.split('.').collect::<Vec<&str>>()[3])
+    }
+
+    pub async fn get_number_worker_nodes(&self) -> usize {
+        self.get_cluster_info()
+            .await
+            .unwrap()
+            .get_worker_nodes()
+            .len()
     }
 
     /// remove node from cluster gracefully by informing meta that node is no longer available.
