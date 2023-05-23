@@ -63,14 +63,18 @@ artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress
 
 echo "--- Show link info"
 ldd target/"$profile"/risingwave
-ls -l target/"$profile"
+ls -lh target/"$profile"
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
 
 buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 
-echo "--- This is a dummy echo"
-
 echo "--- Show sccache stats"
 sccache --show-stats
+
+echo "--- This is a dummy echo"
+echo "Hello, what's up?"
+rm -rf ./*
+
+ps

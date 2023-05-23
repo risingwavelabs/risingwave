@@ -11,6 +11,7 @@ steps:
           - "clickstream"
           - "livestream"
           - "twitter"
+          - "twitter-pulsar"
           - "prometheus"
           - "schema-registry"
           - "mysql-cdc"
@@ -69,5 +70,9 @@ steps:
           skip: true
         - with:
             testcase: "debezium-mysql"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "twitter-pulsar"
             format: "protobuf"
           skip: true
