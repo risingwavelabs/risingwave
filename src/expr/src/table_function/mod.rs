@@ -264,11 +264,11 @@ impl<'a> TableFunctionOutputIter<'a> {
         let chunk = self.stream.next().await.transpose()?;
         self.chunk = chunk.map(|c| {
             let (c1, c2) = c.split_column_at(1);
-            let indexes = c1.column_at(0).array();
+            let indexes = c1.column_at(0).clone();
             let values = if c2.columns().len() > 1 {
                 Arc::new(StructArray::from(c2).into())
             } else {
-                c2.column_at(0).array()
+                c2.column_at(0).clone()
             };
             (indexes, values)
         });

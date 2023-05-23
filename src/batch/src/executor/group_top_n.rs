@@ -194,20 +194,14 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                 let heap = groups
                     .entry(key)
                     .or_insert_with(|| TopNHeap::new(self.limit, self.offset, self.with_ties));
-                heap.push(HeapElem {
-                    encoded_row,
-                    chunk: chunk.clone(),
-                    row_id,
-                });
+                heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         for (_, heap) in groups {
-            for HeapElem { chunk, row_id, .. } in heap.dump() {
-                if let Some(spilled) =
-                    chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
-                {
+            for ele in heap.dump() {
+                if let Some(spilled) = chunk_builder.append_one_row(ele.row()) {
                     yield spilled
                 }
             }

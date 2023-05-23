@@ -12,7 +12,9 @@ def clean_demo(demo: str):
     demo_dir = os.path.join(project_dir, demo)
     print("Clean demo: {}".format(demo))
 
-    subprocess.run(["docker", "compose", "down"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "down", "-v",
+                   "--remove-orphans"], cwd=demo_dir, check=True)
+
 
 arg_parser = argparse.ArgumentParser(description='Clean the demo')
 arg_parser.add_argument('--case',

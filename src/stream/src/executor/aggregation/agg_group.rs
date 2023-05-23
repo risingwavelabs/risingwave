@@ -16,9 +16,8 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::{Record, RecordType};
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
@@ -215,10 +214,10 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         &mut self,
         storages: &mut [AggStateStorage<S>],
         ops: &[Op],
-        columns: &[Column],
+        columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
-        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
+        let columns = columns.iter().map(|col| col.as_ref()).collect_vec();
         for ((state, storage), visibility) in self
             .states
             .iter_mut()
