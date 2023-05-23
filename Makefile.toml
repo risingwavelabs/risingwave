@@ -461,10 +461,11 @@ script = '''
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground \
+RUST_BACKTRACE=1 \
 cargo run --bin risingwave \
           --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          ${RISINGWAVE_FEATURE_FLAGS}
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          -- playground
 '''
 
 [tasks.ctl]

@@ -20,7 +20,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
@@ -29,6 +29,8 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
+strum = "0.24"
+strum_macros = "0.24"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
