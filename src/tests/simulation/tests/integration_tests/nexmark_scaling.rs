@@ -21,6 +21,7 @@ use itertools::Itertools;
 use madsim::time::{sleep, Instant};
 use risingwave_pb::common::WorkerNode;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
+use risingwave_simulation::ctl_ext::predicate;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 use tracing_subscriber::fmt::format;
@@ -141,12 +142,12 @@ async fn nexmark_scaling_up_down_common(
         cluster.get_number_worker_nodes().await
     ); // TODO: remove line
 
-    // TODO: reschedule here as well!
+    // TODO: reschedule here as well?
 
     let mut unregistered_nodes: Vec<WorkerNode> = vec![];
     for _ in 0..number_of_nodes {
         let rand_node: WorkerNode = cluster
-            .unregister_compute_node()
+            .unregister_compute_node() // TODO:  sometimes collect same node twice. This is not what we want!
             .await
             .expect("unregistering node failed");
         println!("Unregister compute node {:?}", rand_node); // TODO: remove line
@@ -158,28 +159,49 @@ async fn nexmark_scaling_up_down_common(
         unregistered_nodes.push(rand_node);
         sleep(Duration::from_secs(sleep_sec)).await;
     }
+    let unregistered_node_addrs = unregistered_nodes
+        .iter()
+        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
+        .collect_vec();
+    let uniq = unregistered_node_addrs
+        .clone()
+        .into_iter()
+        .unique()
+        .collect_vec();
+    // make sure that we do not unregister the same node multiple times
+    assert_ne!(unregistered_node_addrs.len(), uniq.len());
 
     // question: If I mark CN as DELETING does meta remove fragments from DELETING CN?
     // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
     // end of the workflow
 
-    // remove all PAs from the DELETING nodes
+    // get all fragments. For each fragments remove the PUs from the deleted nodes
+    let fragment_ids = cluster
+        .cluster
+        .locate_fragments([predicate::can_reschedule()])
+        .await
+        .expect("failed to retrieve fragments from cluster")
+        .iter()
+        .map(|f| f.id())
+        .collect_vec();
     let mut plan = "".to_string();
-    let mut chunks = unregistered_nodes.chunks(1).peekable();
-    while let Some(chunk) = chunks.next() {
-        let mut plan_node = format!(
-            "{}-[{}]", // TODO: first arg is not node_id, but fragment id
-            chunk[0].get_id(),
-            chunk[0]
-                .get_parallel_units()
-                .iter()
-                .map(|pu| pu.id)
-                .join(",")
-        );
+    let unregistered_nodes_pu_ids = unregistered_nodes
+        .iter()
+        .map(|node| node.get_parallel_units())
+        .collect_vec()
+        .into_iter()
+        .flatten()
+        .collect_vec()
+        .into_iter()
+        .map(|pu| pu.id)
+        .join(",");
+    let mut chunks = fragment_ids.chunks(1).peekable();
+    while let Some(fragment_id) = chunks.next() {
+        let mut plan_frag = format!("{}-[{}]", fragment_id[0], unregistered_nodes_pu_ids);
         if chunks.peek().is_some() {
-            plan_node = format!("{};", plan_node);
+            plan_frag = format!("{};", plan_frag);
         }
-        plan = format!("{}{}", plan, plan_node)
+        plan = format!("{}{}", plan, plan_frag)
     }
 
     println!("removing fragments via plan {}", plan);
@@ -192,10 +214,6 @@ async fn nexmark_scaling_up_down_common(
     // I have to generate the new schedule plan myself. Hardcode it here
 
     println!("Killing nodes"); // TODO: remove line
-    let unregistered_node_addrs = unregistered_nodes
-        .iter()
-        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
-        .collect_vec();
     cluster.kill_nodes(&unregistered_node_addrs).await;
     println!(
         // TODO: remove line
@@ -210,13 +228,6 @@ async fn nexmark_scaling_up_down_common(
     select_result.assert_result_eq(&expected);
 
     Ok(())
-}
-
-// TODO: remove hardcoded version
-#[madsim::test]
-async fn nexmark_scaling_up_down_2_q3_hardcoded() -> Result<()> {
-    use risingwave_simulation::nexmark::queries::q3::*;
-    nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2).await
 }
 
 macro_rules! test {
