@@ -18,12 +18,14 @@ pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
+pub mod pg_constraint;
 pub mod pg_conversion;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_enum;
 pub mod pg_index;
 pub mod pg_indexes;
+pub mod pg_inherits;
 pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
@@ -47,12 +49,14 @@ pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
+pub use pg_constraint::*;
 pub use pg_conversion::*;
 pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_enum::*;
 pub use pg_index::*;
 pub use pg_indexes::*;
+pub use pg_inherits::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
@@ -665,6 +669,14 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
+    }
+
+    pub(super) fn read_inherits_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_INHERITS_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_CONSTRAINT_DATA_ROWS.clone())
     }
 
     pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {
