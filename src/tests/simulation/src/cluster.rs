@@ -548,7 +548,7 @@ impl Cluster {
             // so that the node is expired and removed from the cluster
             if rand::thread_rng().gen_bool(0.1) {
                 // max_heartbeat_interval_secs = 60
-                t += Duration::from_secs(opts.restart_delay_secs as u64);
+                t += Duration::from_secs(restart_delay_secs.unwrap_or_default());
             }
             if restart {
                 tokio::time::sleep(t).await;

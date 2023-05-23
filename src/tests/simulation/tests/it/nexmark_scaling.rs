@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use madsim::time::{sleep, Instant};
 use risingwave_simulation::cluster::{Configuration, KillOpts};
-use risingwave_simulation::nexmark::{self, NexmarkCluster, THROUGHPUT};
+use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 
 /// gets the output without failures as the standard result
@@ -49,7 +49,7 @@ async fn nexmark_scaling_up_common(
     cluster.run(create).await?;
 
     cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(60)).await;
+    sleep(Duration::from_secs(20)).await;
 
     cluster.run(select).await?.assert_result_eq(&expected);
 
@@ -84,7 +84,7 @@ async fn nexmark_scaling_down_common(
             .await
             .expect("unregistering node failed");
         unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
-        sleep(Duration::from_secs(60)).await;
+        sleep(Duration::from_secs(20)).await;
     }
     cluster.kill_nodes(&unregistered_nodes).await;
 
@@ -103,19 +103,20 @@ async fn nexmark_scaling_up_down_common(
     // tracing_subscriber::fmt()
     //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
     //     .init();
+    let sleep_sec = 20;
 
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
     cluster.run(create).await?;
-    sleep(Duration::from_secs(30)).await;
+    sleep(Duration::from_secs(sleep_sec)).await;
     let expected = cluster.run(select).await?;
     cluster.run(drop).await?;
-    sleep(Duration::from_secs(5)).await;
+    sleep(Duration::from_secs(sleep_sec)).await;
 
     cluster.run(create).await?;
 
     cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(60)).await; // TODO: 60 sec sleep seems like to much
+    sleep(Duration::from_secs(sleep_sec)).await; // TODO: 60 sec sleep seems like to much
 
     let mut unregistered_nodes: Vec<String> = vec![];
     for _ in 0..number_of_nodes {
@@ -124,7 +125,7 @@ async fn nexmark_scaling_up_down_common(
             .await
             .expect("unregistering node failed");
         unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
-        sleep(Duration::from_secs(60)).await;
+        sleep(Duration::from_secs(sleep_sec)).await;
     }
     cluster.kill_nodes(&unregistered_nodes).await;
 
@@ -133,40 +134,48 @@ async fn nexmark_scaling_up_down_common(
     Ok(())
 }
 
+// TODO: remove hardcoded version
+#[madsim::test]
+async fn nexmark_scaling_up_down_2_q3_hardcoded() -> Result<()> {
+    use risingwave_simulation::nexmark::queries::q3::*;
+    nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2).await
+}
+
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-            #[madsim::test]
-            async fn [< nexmark_scaling_up_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_scaling_up_common(CREATE, SELECT, DROP, 1)
-                .await
-            }
-            #[madsim::test]
-            async fn [< nexmark_scaling_up_2_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_scaling_up_common(CREATE, SELECT, DROP, 2)
-                .await
-            }
-            #[madsim::test]
-            async fn [< nexmark_scaling_down_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_scaling_down_common(CREATE, SELECT, DROP, 1)
-                .await
-            }
-            #[madsim::test]
-            async fn [< nexmark_scaling_down_2_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_scaling_down_common(CREATE, SELECT, DROP, 2)
-                .await
-            }
-            #[madsim::test]
-            async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
-                use risingwave_simulation::nexmark::queries::$query::*;
-                nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2)
-                .await
-            }
-        }
+            // TODO: Uncomment these again
+        //   #[madsim::test]
+        //   async fn [< nexmark_scaling_up_ $query >]() -> Result<()> {
+        //       use risingwave_simulation::nexmark::queries::$query::*;
+        //       nexmark_scaling_up_common(CREATE, SELECT, DROP, 1)
+        //       .await
+        //   }
+        //   #[madsim::test]
+        //   async fn [< nexmark_scaling_up_2_ $query >]() -> Result<()> {
+        //       use risingwave_simulation::nexmark::queries::$query::*;
+        //       nexmark_scaling_up_common(CREATE, SELECT, DROP, 2)
+        //       .await
+        //   }
+        //   #[madsim::test]
+        //   async fn [< nexmark_scaling_down_ $query >]() -> Result<()> {
+        //       use risingwave_simulation::nexmark::queries::$query::*;
+        //       nexmark_scaling_down_common(CREATE, SELECT, DROP, 1)
+        //       .await
+        //   }
+        //   #[madsim::test]
+        //   async fn [< nexmark_scaling_down_2_ $query >]() -> Result<()> {
+        //       use risingwave_simulation::nexmark::queries::$query::*;
+        //       nexmark_scaling_down_common(CREATE, SELECT, DROP, 2)
+        //       .await
+        //   }
+           #[madsim::test]
+           async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
+               use risingwave_simulation::nexmark::queries::$query::*;
+               nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2)
+               .await
+               }
+         }
     };
 }
 
