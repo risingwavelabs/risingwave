@@ -22,7 +22,7 @@ use risingwave_common::array::{
     ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
 };
 use risingwave_common::cast::{
-    parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea,
+    parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea as str_to_bytea_common,
     str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::row::OwnedRow;
@@ -239,6 +239,11 @@ pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+#[function("cast(varchar) -> bytea")]
+pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
+    str_to_bytea_common(elem).map_err(|err| ExprError::Parse(err.into()))
+}
+
 /// A lite version of casting from string to target type. Used by frontend to handle types that have
 /// to be created by casting.
 ///
@@ -273,9 +278,7 @@ pub fn literal_parsing(
         DataType::List { .. } => return Err(None),
         DataType::Struct(_) => return Err(None),
         DataType::Jsonb => return Err(None),
-        DataType::Bytea => str_to_bytea(s)
-            .map_err(|err| ExprError::Parse(err.into()))?
-            .into(),
+        DataType::Bytea => str_to_bytea(s)?.into(),
     };
     Ok(scalar)
 }
