@@ -5943,6 +5943,7 @@ dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
  "aws-types",
+ "base64 0.21.0",
  "bincode",
  "byteorder",
  "bytes",
