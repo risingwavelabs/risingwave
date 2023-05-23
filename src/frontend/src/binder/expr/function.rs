@@ -647,6 +647,7 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
