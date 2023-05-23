@@ -36,11 +36,6 @@ use itertools::Itertools;
 use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::Level;
-use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter, EnvFilter};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
@@ -772,7 +767,7 @@ impl S3ObjectStore {
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
-                tracing::warn!(target: "http timout retry", "{:?} occurs, trying to retry S3 get_object request.", e);
+                tracing::warn!(target: "http_timout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
                 return true;
             }
         }
