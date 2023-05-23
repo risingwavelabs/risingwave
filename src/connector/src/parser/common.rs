@@ -18,7 +18,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Result};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
     str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::types::{
@@ -83,7 +83,9 @@ fn do_parse_simd_json_value(
             .map_err(|_| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
+        DataType::Bytea => {
+            ScalarImpl::Bytea(str_to_bytea(ensure_str!(v, "bytea")).map_err(|e| anyhow!(e))?)
+        }
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => {
