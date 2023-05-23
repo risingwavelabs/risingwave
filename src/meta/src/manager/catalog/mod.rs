@@ -803,7 +803,8 @@ where
                     .await?
                     .internal_table_ids();
 
-                // Only 1 should be used by table scan.
+                // At most 1 should be used by table scan,
+                // backwards compatible with indexes without backfill state persisted.
                 assert!(internal_table_ids.len() <= 1);
                 index_internal_table_ids.push(internal_table_ids[0]);
             }
@@ -1602,7 +1603,8 @@ where
                         .await?
                         .internal_table_ids();
 
-                    // Only 1 should be used by table scan.
+                    // At most 1 should be used by table scan,
+                    // backwards compatible with indexes without backfill state persisted.
                     assert!(internal_table_ids.len() <= 1);
                     index_internal_table_ids.push(internal_table_ids[0]);
                 }

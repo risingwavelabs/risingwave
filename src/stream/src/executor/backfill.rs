@@ -26,6 +26,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
@@ -155,8 +156,10 @@ where
             snapshot.try_next().await?.unwrap().is_none()
         };
 
-        // Backfill not Finished: Need to Backfill if snapshot is not empty.
-        // Backfill is  Finished: No Need to Backfill.
+        // | backfill_is_finished | snapshot_empty | need_to_backfill |
+        // | t                    | t/f            | f                |
+        // | f                    | t              | f                |
+        // | f                    | f              | t                |
         let to_backfill = !is_finished && !is_snapshot_empty;
 
         // Current position of the upstream_table storage primary key.
@@ -372,14 +375,16 @@ where
                     // This is because we can't update state table in first epoch,
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
-                    if !is_finished && is_snapshot_empty {
+                    if is_snapshot_empty {
                         current_pos =
                             Self::construct_initial_finished_state(pk_in_output_indices.len())
                     }
+
                     // We will update current_pos at least once,
                     // since snapshot read has to be non-empty,
                     // Or snapshot was empty and we construct a placeholder state.
                     debug_assert_ne!(current_pos, None);
+
                     Self::persist_state(
                         barrier.epoch,
                         &mut self.state_table,
@@ -529,7 +534,7 @@ where
         old_state: &mut Option<Vec<Datum>>,
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
-        // Backwards compatibility with no state table.
+        // Backwards compatibility with no state table in backfill.
         let Some(table) = table else {
             return Ok(())
         };
@@ -557,8 +562,8 @@ where
                 table.commit_no_data_expected(epoch);
                 return Ok(());
             } else {
-                vnodes.iter_ones().for_each(|vnode| {
-                    let datum = Some((vnode as i16).into());
+                vnodes.iter_vnodes_scalar().for_each(|vnode| {
+                    let datum = Some(vnode.into());
                     current_partial_state[0] = datum.clone();
                     old_state[0] = datum;
                     table.write_record(Record::Update {
@@ -569,8 +574,8 @@ where
             }
         } else {
             // No existing state, create a new entry.
-            vnodes.iter_ones().for_each(|vnode| {
-                let datum = Some((vnode as i16).into());
+            vnodes.iter_vnodes_scalar().for_each(|vnode| {
+                let datum = Some(vnode.into());
                 // fill the state
                 current_partial_state[0] = datum;
                 table.write_record(Record::Insert {
@@ -620,10 +625,10 @@ where
         state_len: usize,
     ) -> StreamExecutorResult<bool> {
         debug_assert!(!state_table.vnode_bitmap().is_empty());
-        let vnodes = state_table.vnodes().iter_ones();
+        let vnodes = state_table.vnodes().iter_vnodes_scalar();
         let mut is_finished = true;
         for vnode in vnodes {
-            let key: &[Datum] = &[Some((vnode as i16).into())];
+            let key: &[Datum] = &[Some(vnode.into())];
             let row = state_table.get_row(key).await?;
 
             // original_backfill_datum_pos = (state_len - 1)
