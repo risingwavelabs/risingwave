@@ -288,6 +288,7 @@ mod tests {
         assert!(matches!(res, Some(_)));
         if let Some(res) = res {
             let res = res.unwrap();
+            println!("{:?}", res);
             assert!(
                 res == DataChunk::from_pretty(
                     "

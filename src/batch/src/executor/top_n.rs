@@ -186,11 +186,7 @@ impl TopNHeap {
 
     /// Returns the elements in the range `[offset, offset+limit)`.
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
-        self.heap
-            .into_sorted_vec()
-            .into_iter()
-            .rev()
-            .skip(self.offset)
+        self.heap.into_sorted_vec().into_iter().skip(self.offset)
     }
 }
 
