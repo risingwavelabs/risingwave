@@ -71,10 +71,7 @@ impl Rule for OverWindowToAggAndJoinRule {
             out_fields.push(input_len + group_exprs.len() + i);
         }
         let common_input = LogicalShare::create(over_window.input());
-        let agg = LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone());
-        if agg.is_err() {
-            return None;
-        }
+        let agg = LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone()).ok()?;
         let mut on_clause = Condition::true_cond();
         window_functions[0]
             .partition_by
@@ -95,7 +92,7 @@ impl Rule for OverWindowToAggAndJoinRule {
             });
         Some(
             LogicalProject::with_out_col_idx(
-                LogicalJoin::new(common_input, agg.unwrap().0, JoinType::Inner, on_clause).into(),
+                LogicalJoin::new(common_input, agg.0, JoinType::Inner, on_clause).into(),
                 out_fields.into_iter(),
             )
             .into(),
