@@ -85,6 +85,7 @@ fn do_parse_simd_json_value(
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Bytea => match format {
+            // debezium converts postgres bytea to base64 format
             SourceFormat::DebeziumJson => ScalarImpl::Bytea(
                 base64::engine::general_purpose::STANDARD
                     .decode(ensure_str!(v, "bytea"))

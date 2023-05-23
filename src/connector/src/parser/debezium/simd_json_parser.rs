@@ -821,7 +821,7 @@ mod tests {
 
         #[tokio::test]
         async fn test_other_types() {
-            // this test includes all supported numeric types, with the schema
+            // this test includes the remaining types, with the schema
             // CREATE TABLE orders (
             //     o_key integer,
             //     o_boolean boolean,
