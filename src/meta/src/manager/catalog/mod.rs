@@ -804,7 +804,7 @@ where
                     .internal_table_ids();
 
                 // Only 1 should be used by table scan.
-                assert_eq!(internal_table_ids.len(), 1);
+                assert!(internal_table_ids.len() <= 1);
                 index_internal_table_ids.push(internal_table_ids[0]);
             }
 
@@ -1603,7 +1603,7 @@ where
                         .internal_table_ids();
 
                     // Only 1 should be used by table scan.
-                    assert_eq!(internal_table_ids.len(), 1);
+                    assert!(internal_table_ids.len() <= 1);
                     index_internal_table_ids.push(internal_table_ids[0]);
                 }
 

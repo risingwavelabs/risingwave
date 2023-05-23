@@ -151,12 +151,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     prefix_hint_len,
                     versioned,
                 );
-                let state_table = StateTable::from_table_catalog(
-                    node.get_state_table().unwrap(),
-                    state_store,
-                    vnodes,
-                )
-                .await;
+                let state_table = if let Ok(table) = node.get_state_table() {
+                    Some(StateTable::from_table_catalog(table, state_store, vnodes).await)
+                } else {
+                    None
+                };
 
                 BackfillExecutor::new(
                     upstream_table,

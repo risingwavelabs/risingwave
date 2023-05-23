@@ -72,7 +72,7 @@ pub struct BackfillExecutor<S: StateStore> {
     upstream: BoxedExecutor,
 
     /// Internal state table for persisting state of backfill state.
-    state_table: StateTable<S>,
+    state_table: Option<StateTable<S>>,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -96,7 +96,7 @@ where
     pub fn new(
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
-        state_table: StateTable<S>,
+        state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
@@ -134,9 +134,16 @@ where
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
-        self.state_table.init_epoch(first_barrier.epoch);
+        if let Some(state_table) = self.state_table.as_mut() {
+            state_table.init_epoch(first_barrier.epoch);
+        }
 
-        let is_finished = Self::check_all_vnode_finished(&self.state_table, state_len).await?;
+        // Maintain backwards compatibility with no state table.
+        let is_finished = if let Some(state_table) = self.state_table.as_mut() {
+            Self::check_all_vnode_finished(state_table, state_len).await?
+        } else {
+            first_barrier.is_newly_added(self.actor_id)
+        };
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -214,8 +221,8 @@ where
             for message in upstream {
                 // Then forward messages directly to the downstream.
                 if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
-                    if let Message::Barrier(barrier) = &message {
-                        self.state_table.commit_no_data_expected(barrier.epoch);
+                    if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &message {
+                        state_table.commit_no_data_expected(barrier.epoch);
                     }
                     yield message;
                 }
@@ -431,9 +438,9 @@ where
         #[for_await]
         for msg in upstream {
             if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
-                if let Message::Barrier(barrier) = &msg {
-                    self.state_table.commit_no_data_expected(barrier.epoch);
-                }
+                if let Some(state_table) = self.state_table.as_mut() && let Message::Barrier(barrier) = &msg {
+                        state_table.commit_no_data_expected(barrier.epoch);
+                    }
                 yield msg;
             }
         }
@@ -551,12 +558,16 @@ where
     /// They should be strictly increasing.
     async fn persist_state(
         epoch: EpochPair,
-        table: &mut StateTable<S>,
+        table: &mut Option<StateTable<S>>,
         is_finished: bool,
         current_pos: &Option<OwnedRow>,
         old_state: &mut Option<Vec<Datum>>,
         current_state: &mut [Datum],
     ) -> StreamExecutorResult<()> {
+        // Backwards compatibility with no state table.
+        let Some(table) = table else {
+            return Ok(())
+        };
         if let Some(current_pos_inner) = current_pos {
             // state w/o vnodes.
             Self::build_temporary_state(current_state, is_finished, current_pos_inner);
