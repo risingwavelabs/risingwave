@@ -336,6 +336,19 @@ impl<'a> JsonbRef<'a> {
             )),
         }
     }
+
+    /// Returns an iterator over the key-value pairs if this is an object.
+    pub fn object_key_values(
+        self,
+    ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, String> {
+        match &self.0 {
+            Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
+            _ => Err(format!(
+                "cannot call jsonb_each on a jsonb {}",
+                self.type_name()
+            )),
+        }
+    }
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra

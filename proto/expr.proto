@@ -215,7 +215,9 @@ message TableFunction {
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;
-    JSONB_OBJECT_KEYS = 12;
+    JSONB_EACH = 12;
+    JSONB_EACH_TEXT = 13;
+    JSONB_OBJECT_KEYS = 14;
     // User defined table function
     UDTF = 100;
   }

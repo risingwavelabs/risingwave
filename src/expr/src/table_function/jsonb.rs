@@ -15,7 +15,7 @@
 //! JSONB table functions.
 
 use anyhow::anyhow;
-use risingwave_common::types::JsonbRef;
+use risingwave_common::types::{JsonbRef, ScalarRef, StructValue};
 use risingwave_expr_macro::function;
 
 use super::*;
@@ -37,4 +37,27 @@ fn jsonb_array_elements_text(json: JsonbRef<'_>) -> Result<impl Iterator<Item = 
 #[function("jsonb_object_keys(jsonb) -> setof varchar")]
 fn jsonb_object_keys(json: JsonbRef<'_>) -> Result<impl Iterator<Item = &str>> {
     json.object_keys().map_err(|e| anyhow!(e).into())
+}
+
+/// Expands the top-level JSON object into a set of key/value pairs.
+#[function("jsonb_each(jsonb) -> setof struct<key varchar, value jsonb>")]
+fn jsonb_each(json: JsonbRef<'_>) -> Result<impl Iterator<Item = StructValue> + '_> {
+    // TODO: avoid allocation
+    let elems = json
+        .object_key_values()
+        .map_err(|e| ExprError::Internal(anyhow!(e)))?;
+    Ok(
+        elems
+            .map(|(k, v)| StructValue::new(vec![Some(k.into()), Some(v.to_owned_scalar().into())])),
+    )
+}
+
+/// Expands the top-level JSON object into a set of key/value pairs.
+#[function("jsonb_each_text(jsonb) -> setof struct<key varchar, value varchar>")]
+fn jsonb_each_text(json: JsonbRef<'_>) -> Result<impl Iterator<Item = StructValue> + '_> {
+    // TODO: avoid allocation
+    let elems = json
+        .object_key_values()
+        .map_err(|e| ExprError::Internal(anyhow!(e)))?;
+    Ok(elems.map(|(k, v)| StructValue::new(vec![Some(k.into()), Some(v.force_string().into())])))
 }

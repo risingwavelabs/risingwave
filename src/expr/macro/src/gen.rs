@@ -73,6 +73,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::func::_register(#descriptor_type {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -297,6 +298,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::agg::_register(#descriptor_type {
                     func: crate::agg::AggKind::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -467,6 +469,7 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
+                use risingwave_common::types::{DataType, DataTypeName};
                 unsafe { crate::sig::table_function::_register(#descriptor_type {
                     func: risingwave_pb::expr::table_function::Type::#pb_type,
                     inputs_type: &[#(#args),*],
@@ -618,14 +621,19 @@ impl FunctionAttr {
 
 fn data_type_name(ty: &str) -> TokenStream2 {
     let variant = format_ident!("{}", types::data_type(ty));
-    quote! { risingwave_common::types::DataTypeName::#variant }
+    quote! { DataTypeName::#variant }
 }
 
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { risingwave_common::types::DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::List(Box::new(#inner_type)) };
+    }
+    if ty.starts_with("struct<") {
+        return quote! { DataType::Struct(Arc::new(
+            #ty.parse().expect("invalid struct type")
+        )) };
     }
     let variant = format_ident!("{}", types::data_type(ty));
-    quote! { risingwave_common::types::DataType::#variant }
+    quote! { DataType::#variant }
 }

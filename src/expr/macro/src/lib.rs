@@ -162,7 +162,9 @@ impl ReturnType {
 impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
-        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret).replace("[]", "list")
+        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
+            .replace("[]", "list")
+            .replace(&['<', '>', ' ', ','], "_")
     }
 }
 

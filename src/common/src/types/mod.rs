@@ -35,9 +35,9 @@ use serde::{Deserialize, Serialize};
 use strum_macros::EnumDiscriminants;
 
 use crate::array::{
-    ArrayBuilderImpl, ArrayError, ArrayResult, ListRef, ListValue, PrimitiveArrayItemType,
-    StructRef, StructValue, NULL_VAL_FOR_HASH,
+    ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
+pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
