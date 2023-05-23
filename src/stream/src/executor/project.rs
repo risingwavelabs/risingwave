@@ -16,7 +16,6 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
@@ -130,8 +129,7 @@ impl Inner {
                     self.ctx.on_compute_error(err, &self.info.identity)
                 })
                 .await;
-            let new_column = Column::new(evaluated_expr);
-            projected_columns.push(new_column);
+            projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
         let vis = vis.into_visibility();

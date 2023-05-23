@@ -10,6 +10,8 @@
 
 ################# ENV
 
+set -u
+
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
 export TEST_NUM=100
@@ -19,6 +21,8 @@ export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
 export MADSIM_BIN="target/sim/ci-sim/risingwave_simulation"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
+
+set +u
 
 ################## COMMON
 

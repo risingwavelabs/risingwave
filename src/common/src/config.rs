@@ -581,7 +581,7 @@ mod default {
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10
+            30
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {

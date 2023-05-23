@@ -145,6 +145,12 @@ impl KinesisSplitReader {
                     );
                     yield chunk;
                 }
+                Err(SdkError::ServiceError { err, .. })
+                    if err.is_resource_not_found_exception() =>
+                {
+                    tracing::warn!("shard {:?} is closed, stop reading", self.shard_id);
+                    break;
+                }
                 Err(SdkError::ServiceError { err, .. }) if err.is_expired_iterator_exception() => {
                     tracing::warn!(
                         "stream {:?} shard {:?} iterator expired, renew it",
@@ -283,6 +289,7 @@ mod tests {
 
             scan_startup_mode: None,
             seq_offset: None,
+            enable_split_reduction: None,
         };
 
         let mut trim_horizen_reader = KinesisSplitReader::new(

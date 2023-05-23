@@ -140,7 +140,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 }
 
                 var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
+                if (!srcColName.equalsIgnoreCase(field)) {
                     throw ValidatorUtils.invalidArgument(
                             String.format("column name mismatch: %s, [%s]", field, srcColName));
                 }
@@ -150,7 +150,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                             String.format("incompatible data type of column %s", srcColName));
                 }
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field);
+                    // RisingWave always use lower case for column name
+                    pkFields.add(field.toLowerCase());
                 }
             }
 
