@@ -352,7 +352,7 @@
   stream_error: |-
     Feature is not yet implemented: General version of streaming over window is not implemented yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
-- name: split diff order_by and partition_by in window
+- id: split diff order_by and partition_by in window
   sql: |
     create table t(x int, y int, z int);
     select *, rank() over(PARTITION BY x ORDER BY y) w0, sum(x) over(PARTITION BY z ORDER BY y) w1, row_number() over(PARTITION BY x ORDER BY y) w2, rank() over(PARTITION BY y ORDER BY x) w3 from t;

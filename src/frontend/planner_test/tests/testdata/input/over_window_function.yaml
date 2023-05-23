@@ -217,6 +217,15 @@
   - logical_plan
   - batch_error
   - stream_error
+- id: split diff order_by and partition_by in window
+  sql: |
+    create table t(x int, y int, z int);
+    select *, rank() over(PARTITION BY x ORDER BY y) w0, sum(x) over(PARTITION BY z ORDER BY y) w1, row_number() over(PARTITION BY x ORDER BY y) w2, rank() over(PARTITION BY y ORDER BY x) w3 from t;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_error
+  - stream_error
 - id: create_bid
   sql: |
     /*
