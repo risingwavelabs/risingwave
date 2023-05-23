@@ -21,7 +21,7 @@ use crate::ExprError;
 
 #[function(
     "regexp_matches(varchar, varchar) -> setof varchar[]",
-    prebuild = "RegexpContext::from_pattern_flags($1, None)?"
+    prebuild = "RegexpContext::from_pattern($1)?"
 )]
 #[function(
     "regexp_matches(varchar, varchar, varchar) -> setof varchar[]",

@@ -43,10 +43,19 @@ impl RegexpContext {
         ))
     }
 
-    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+    pub fn from_pattern(pattern: Datum) -> Result<Self> {
         let pattern = match &pattern {
             None => NULL_PATTERN,
             Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Self::new(pattern, "")
+    }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
             _ => bail!("invalid pattern: {pattern:?}"),
         };
         let flags = match &flags {
