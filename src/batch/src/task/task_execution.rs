@@ -294,10 +294,6 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
-    /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponse>>>,
-
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
@@ -333,7 +329,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
             epoch,
-            state_rx: Mutex::new(None),
             context,
             runtime,
             sender,
@@ -463,6 +458,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         {
             self.runtime.spawn(fut);
         }
+
+        let this = self.clone();
+        self.runtime.spawn(async move {
+            use tokio::time::Duration;
+            const WAIT_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(600);
+            // If `receivers` is still not taken by `get_task_output` after `WAIT_UPSTREAM_TIMEOUT`,
+            // it's likely upstream task has failed.
+            tokio::time::sleep(WAIT_UPSTREAM_TIMEOUT).await;
+            if this.receivers.lock().iter().any(Option::is_some) {
+                this.abort("upstream task may have failed".into());
+            }
+        });
 
         Ok(())
     }
@@ -662,13 +669,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .into()),
             _ => Ok(false),
         }
-    }
-
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
-        self.state_rx
-            .lock()
-            .take()
-            .expect("The state receivers must have been inited!")
     }
 
     pub fn mem_usage(&self) -> usize {
