@@ -157,11 +157,7 @@ where
 
         // Backfill not Finished: Need to Backfill if snapshot is not empty.
         // Backfill is  Finished: No Need to Backfill.
-        let to_backfill = if !is_finished {
-            !is_snapshot_empty
-        } else {
-            false
-        };
+        let to_backfill = !is_finished && !is_snapshot_empty;
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
