@@ -16,6 +16,7 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
+use base64::Engine as _;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
@@ -83,7 +84,15 @@ fn do_parse_simd_json_value(
             .map_err(|_| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
+        DataType::Bytea => match format {
+            SourceFormat::DebeziumJson => ScalarImpl::Bytea(
+                base64::engine::general_purpose::STANDARD
+                    .decode(ensure_str!(v, "bytea"))
+                    .map_err(|e| anyhow!(e))?
+                    .into(),
+            ),
+            _ => ScalarImpl::Bytea(ensure_str!(v, "bytea").to_string().as_bytes().into()),
+        },
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s).map_err(|e| anyhow!(e))?.into(),
             BorrowedValue::Static(_) => {

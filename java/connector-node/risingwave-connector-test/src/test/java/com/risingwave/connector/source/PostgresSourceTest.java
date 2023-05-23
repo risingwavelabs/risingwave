@@ -326,6 +326,44 @@ public class PostgresSourceTest {
         if (eventStream.hasNext()) {
             List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
             for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s", msg.getPayload());
+            }
+        }
+        connection.close();
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonOther() throws InterruptedException, SQLException {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query = "create type bear as enum ('polar', 'brown', 'panda')";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "CREATE TABLE orders ("
+                        + "o_key integer,"
+                        + "o_boolean boolean,"
+                        + "o_bit bit,"
+                        + "o_bytea bytea,"
+                        + "o_json jsonb,"
+                        + "o_xml xml,"
+                        + "o_uuid uuid,"
+                        + "o_point point,"
+                        + "o_enum bear,"
+                        + "o_char char,"
+                        + "o_varchar varchar,"
+                        + "o_character character,"
+                        + "o_character_varying character varying,"
+                        + "PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "INSERT INTO orders VALUES (1, 'false', b'1', decode('0123456789ABCDEF', 'hex'), '{\"k1\": \"v1\", \"k2\": 11}', xmlcomment('hahaha'), gen_random_uuid(), point(1, 2), 'polar', 'h', 'ha', 'h', 'hahaha')";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStreamStart(
+                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
                 System.out.printf("%s\n", msg.getPayload());
             }
         }

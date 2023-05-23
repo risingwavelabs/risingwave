@@ -28,6 +28,7 @@ aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
+base64 = "0.21.1"
 bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }

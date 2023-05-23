@@ -159,12 +159,15 @@ impl DebeziumJsonParser {
 mod tests {
 
     use std::convert::TryInto;
+    use std::sync::Arc;
 
     use chrono::{NaiveDate, NaiveTime};
-    use risingwave_common::array::Op;
+    use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, Date, Interval, Scalar, ScalarImpl, Time, Timestamp};
+    use risingwave_common::types::{
+        DataType, Date, Interval, Scalar, ScalarImpl, StructType, Time, Timestamp,
+    };
     use serde_json::Value;
 
     use super::*;
@@ -690,6 +693,40 @@ mod tests {
             ]
         }
 
+        // schema for the remaining types
+        fn get_other_types_test_columns() -> Vec<SourceColumnDesc> {
+            let point_type = Arc::new(StructType {
+                fields: vec![DataType::Float32, DataType::Float32],
+                field_names: vec![String::from('x'), String::from('y')],
+            });
+            vec![
+                SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
+                SourceColumnDesc::simple("o_boolean", DataType::Boolean, ColumnId::from(1)),
+                SourceColumnDesc::simple("o_bit", DataType::Boolean, ColumnId::from(2)),
+                SourceColumnDesc::simple("o_bytea", DataType::Bytea, ColumnId::from(3)),
+                SourceColumnDesc::simple("o_json", DataType::Jsonb, ColumnId::from(4)),
+                SourceColumnDesc::simple("o_xml", DataType::Varchar, ColumnId::from(5)),
+                SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
+                SourceColumnDesc {
+                    name: "o_point".to_string(),
+                    data_type: DataType::Struct(point_type),
+                    column_id: 7.into(),
+                    fields: vec![],
+                    is_row_id: false,
+                    is_meta: false,
+                },
+                SourceColumnDesc::simple("o_enum", DataType::Varchar, ColumnId::from(8)),
+                SourceColumnDesc::simple("o_char", DataType::Varchar, ColumnId::from(9)),
+                SourceColumnDesc::simple("o_varchar", DataType::Varchar, ColumnId::from(10)),
+                SourceColumnDesc::simple("o_character", DataType::Varchar, ColumnId::from(11)),
+                SourceColumnDesc::simple(
+                    "o_character_varying",
+                    DataType::Varchar,
+                    ColumnId::from(12),
+                ),
+            ]
+        }
+
         #[tokio::test]
         async fn test_temporal_types() {
             // this test includes all supported temporal types, with the schema
@@ -780,6 +817,63 @@ mod tests {
             assert!(row[6].eq(&Some(ScalarImpl::Decimal("123456.7890".parse().unwrap()))));
             assert!(row[7].eq(&Some(ScalarImpl::Decimal("123.456".parse().unwrap()))));
             assert!(row[8].eq(&Some(ScalarImpl::Decimal("123.12".parse().unwrap()))));
+        }
+
+        #[tokio::test]
+        async fn test_other_types() {
+            // this test includes all supported numeric types, with the schema
+            // CREATE TABLE orders (
+            //     o_key integer,
+            //     o_boolean boolean,
+            //     o_bit bit,
+            //     o_bytea bytea,
+            //     o_json jsonb,
+            //     o_xml xml,
+            //     o_uuid uuid,
+            //     o_point point,
+            //     o_enum bear,
+            //     o_char char,
+            //     o_varchar varchar,
+            //     o_character character,
+            //     o_character_varying character varying,
+            //     PRIMARY KEY (o_key)
+            //  );
+            // this test covers an insert event on the table above
+            let data = br#"{"payload":{"before":null,"after":{"o_key":1,"o_boolean":false,"o_bit":true,"o_bytea":"ASNFZ4mrze8=","o_json":"{\"k1\": \"v1\", \"k2\": 11}","o_xml":"<!--hahaha-->","o_uuid":"60f14fe2-f857-404a-b586-3b5375b3259f","o_point":{"x":1.0,"y":2.0,"wkb":"AQEAAAAAAAAAAADwPwAAAAAAAABA","srid":null},"o_enum":"polar","o_char":"h","o_varchar":"ha","o_character":"h","o_character_varying":"hahaha"},"source":{"version":"1.9.7.Final","connector":"postgresql","name":"RW_CDC_localhost.test.orders","ts_ms":1684743927178,"snapshot":"last","db":"test","sequence":"[null,\"26524528\"]","schema":"public","table":"orders","txId":730,"lsn":26524528,"xmin":null},"op":"r","ts_ms":1684743927343,"transaction":null}}"#;
+            let columns = get_other_types_test_columns();
+            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
+                .await
+                .try_into()
+                .unwrap();
+            assert_eq!(op, Op::Insert);
+            assert!(row[0].eq(&Some(ScalarImpl::Int32(1))));
+            assert!(row[1].eq(&Some(ScalarImpl::Bool(false))));
+            assert!(row[2].eq(&Some(ScalarImpl::Bool(true))));
+            assert!(row[3].eq(&Some(ScalarImpl::Bytea(Box::new([
+                u8::from_str_radix("01", 16).unwrap(),
+                u8::from_str_radix("23", 16).unwrap(),
+                u8::from_str_radix("45", 16).unwrap(),
+                u8::from_str_radix("67", 16).unwrap(),
+                u8::from_str_radix("89", 16).unwrap(),
+                u8::from_str_radix("AB", 16).unwrap(),
+                u8::from_str_radix("CD", 16).unwrap(),
+                u8::from_str_radix("EF", 16).unwrap()
+            ])))));
+            assert_json_eq(&row[4], "{\"k1\": \"v1\", \"k2\": 11}");
+            assert!(row[5].eq(&Some(ScalarImpl::Utf8("<!--hahaha-->".into()))));
+            assert!(row[6].eq(&Some(ScalarImpl::Utf8(
+                "60f14fe2-f857-404a-b586-3b5375b3259f".into()
+            ))));
+            assert!(row[7].eq(&Some(ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Float32(1.into())),
+                Some(ScalarImpl::Float32(2.into()))
+            ])))));
+            assert!(row[8].eq(&Some(ScalarImpl::Utf8("polar".into()))));
+            assert!(row[9].eq(&Some(ScalarImpl::Utf8("h".into()))));
+            assert!(row[10].eq(&Some(ScalarImpl::Utf8("ha".into()))));
+            assert!(row[11].eq(&Some(ScalarImpl::Utf8("h".into()))));
+            assert!(row[12].eq(&Some(ScalarImpl::Utf8("hahaha".into()))));
         }
     }
 }
