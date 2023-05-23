@@ -158,6 +158,11 @@ impl TopNHeap {
                 } else {
                     self.heap.push(peek);
                 }
+                // let inner = self.heap.inner();
+                // let mut peek = inner.peek_mut().unwrap();
+                // if elem < *peek {
+                //     *peek = elem;
+                // }
             } else {
                 let peek = self.heap.peek().unwrap().clone();
                 match elem.cmp(&peek) {
@@ -186,7 +191,11 @@ impl TopNHeap {
 
     /// Returns the elements in the range `[offset, offset+limit)`.
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
-        self.heap.into_sorted_vec().into_iter().skip(self.offset)
+        self.heap
+            .into_sorted_vec()
+            .into_iter()
+            .rev()
+            .skip(self.offset)
     }
 }
 

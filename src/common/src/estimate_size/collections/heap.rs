@@ -57,6 +57,10 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         item
     }
 
+    pub fn inner(&mut self) -> &mut BinaryHeap<T> {
+        &mut self.inner
+    }
+
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -72,12 +76,10 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
     pub fn into_sorted_vec(self) -> Vec<T, MonitoredGlobalAlloc> {
         let old_cap = self.inner.capacity();
         let alloc = MonitoredGlobalAlloc::with_memory_context(self.mem_ctx.clone());
-        let vec = self.inner.into_sorted_vec();
+        let vec = self.inner.into_iter_sorted();
 
         let mut ret = Vec::with_capacity_in(vec.len(), alloc);
-        for item in vec {
-            ret.push(item);
-        }
+        ret.extend(vec);
 
         self.mem_ctx.add(-((old_cap * size_of::<T>()) as i64));
         ret
