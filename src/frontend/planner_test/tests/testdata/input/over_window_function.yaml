@@ -33,7 +33,7 @@
   expected_outputs:
   - stream_error
   - logical_plan
-  - batch_error
+  - batch_plan
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
@@ -233,8 +233,8 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_batch
+  - batch_plan
   - stream_plan
-  - batch_error
 - id: create_bid
   sql: |
     /*

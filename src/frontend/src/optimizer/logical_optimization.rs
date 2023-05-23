@@ -532,6 +532,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
+        plan = plan.optimize_by_rules(&DAG_TO_TREE);
+
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 

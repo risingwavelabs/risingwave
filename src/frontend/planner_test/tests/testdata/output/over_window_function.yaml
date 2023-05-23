@@ -58,9 +58,14 @@
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
       └─LogicalProject { exprs: [t.x, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  batch_error: |-
-    Feature is not yet implemented: batch query doesn't support share operator for now
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+  batch_plan: |
+    BatchNestedLoopJoin { type: Inner, predicate: true, output: [sum(sum(t.x))] }
+    ├─BatchExchange { order: [], dist: Single }
+    | └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+    └─BatchSimpleAgg { aggs: [sum(sum(t.x))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [sum(t.x)] }
+          └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
@@ -385,11 +390,17 @@
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalJoin { type: Inner, on: (t.y = t.y), output: [t.x, t.y, sum(t.x), max(t.x), min(t.w)] }
-    ├─LogicalShare { id = 1 }
-    | └─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
+    ├─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
     └─LogicalAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w)] }
-      └─LogicalShare { id = 1 }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
+      └─LogicalScan { table: t, columns: [t.x, t.y, t.w] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w)] }
+      ├─BatchExchange { order: [], dist: HashShard(t.y) }
+      | └─BatchScan { table: t, columns: [t.x, t.y, t.w], distribution: SomeShard }
+      └─BatchHashAgg { group_key: [t.y], aggs: [sum(t.x), max(t.x), min(t.w)] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
+          └─BatchScan { table: t, columns: [t.x, t.y, t.w], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [x, y, sum, max, min, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, t.y, y], pk_columns: [t._row_id, t.y, y], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: Inner, predicate: t.y = t.y, output: [t.x, t.y, sum(t.x), max(t.x), min(t.w), t._row_id, t.y] }
@@ -401,9 +412,6 @@
           └─StreamExchange { dist: HashShard(t.y) }
             └─StreamShare { id = 1 }
               └─StreamTableScan { table: t, columns: [t.x, t.y, t.w, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-  batch_error: |-
-    Feature is not yet implemented: batch query doesn't support share operator for now
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - id: create_bid
   sql: |
     /*
