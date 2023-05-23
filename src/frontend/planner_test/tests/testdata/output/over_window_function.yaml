@@ -27,7 +27,7 @@
   logical_plan: |
     LogicalProject { exprs: [lead] }
     └─LogicalOverWindow { window_functions: [lead(t.x) OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
-      └─LogicalProject { exprs: [t.x, t._row_id] }
+      └─LogicalProject { exprs: [t.x, t._row_id, 2:Int32] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
     Feature is not yet implemented: Batch over window is not implemented yet
@@ -561,19 +561,19 @@
   sql: |
     create table t(x int, y int, z int, w int);
     select * from (
-        SELECT x, y, z, avg(z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
+        SELECT x, y, z, avg(z * z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
     )
     WHERE z > 0 and y > 0 and x > 0 and res <= 3;
   logical_plan: |
     LogicalProject { exprs: [t.x, t.y, t.z, avg] }
     └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) AND (avg <= 3:Int32::Decimal) }
       └─LogicalProject { exprs: [t.x, t.y, t.z, avg] }
-        └─LogicalOverWindow { window_functions: [avg(t.z) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id, Abs(t.w) as $expr1, (t.y + 1:Int32) as $expr2] }
+        └─LogicalOverWindow { window_functions: [avg($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id, (t.z * t.z) as $expr1, Abs(t.w) as $expr2, (t.y + 1:Int32) as $expr3] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y, t.z, avg] }
     └─LogicalFilter { predicate: (avg <= 3:Int32::Decimal) }
-      └─LogicalOverWindow { window_functions: [avg(t.z) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─LogicalProject { exprs: [t.x, t.y, t.z, Abs(t.w) as $expr1, (t.y + 1:Int32) as $expr2] }
+      └─LogicalOverWindow { window_functions: [avg($expr1) OVER(PARTITION BY $expr3 ORDER BY $expr2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalProject { exprs: [t.x, t.y, t.z, (t.z * t.z) as $expr1, Abs(t.w) as $expr2, (t.y + 1:Int32) as $expr3] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w], predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) }
