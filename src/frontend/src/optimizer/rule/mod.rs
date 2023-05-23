@@ -68,6 +68,8 @@ pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
 mod over_window_to_agg_and_join_rule;
 pub use over_window_to_agg_and_join_rule::*;
+mod over_window_split_by_window_rule;
+pub use over_window_split_by_window_rule::*;
 mod over_agg_to_topn_rule;
 pub use join_commute_rule::*;
 pub use over_agg_to_topn_rule::*;
@@ -115,6 +117,8 @@ mod except_merge_rule;
 pub use except_merge_rule::*;
 mod apply_union_transpose_rule;
 pub use apply_union_transpose_rule::*;
+mod apply_dedup_transpose_rule;
+pub use apply_dedup_transpose_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -141,6 +145,7 @@ macro_rules! for_all_rules {
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
+            , { OverWindowSplitByWindowRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -163,6 +168,7 @@ macro_rules! for_all_rules {
             , { IntersectMergeRule }
             , { ExceptMergeRule }
             , { ApplyUnionTransposeRule }
+            , { ApplyDedupTransposeRule }
         }
     };
 }

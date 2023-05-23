@@ -263,25 +263,72 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    LOG.info("{}", msg.getPayload());
-                                }
-                            }
-                        });
-        // Q1: ordinary insert (read)
-        Thread.sleep(1000);
-        t1.start();
         query =
                 "INSERT INTO orders (O_KEY, O_BOOL, O_BITS, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON, O_TEXT_ARR)"
                         + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
         SourceTestClient.performQuery(connection, query);
-        Thread.sleep(1000);
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
+        connection.close();
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonDateTime() throws InterruptedException, SQLException {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query =
+                "CREATE TABLE orders ("
+                        + "o_key integer, "
+                        + "o_time_0 time(0), "
+                        + "o_time_6 time(6), "
+                        + "o_timez_0 time(0) with time zone, "
+                        + "o_timez_6 time(6) with time zone, "
+                        + "o_timestamp_0 timestamp(0), "
+                        + "o_timestamp_6 timestamp(6), "
+                        + "o_timestampz_0 timestamp(0) with time zone, "
+                        + "o_timestampz_6 timestamp(6) with time zone, "
+                        + "o_interval interval, "
+                        + "o_date date, "
+                        + "PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', INTERVAL '1 years 2 months 3 days 4 hours 5 minutes 6.78 seconds', '1999-09-09')";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStreamStart(
+                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
+        connection.close();
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonNumeric() throws InterruptedException, SQLException {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query =
+                "CREATE TABLE orders (o_key integer, o_smallint smallint, o_integer integer, o_bigint bigint, o_real real, o_double double precision, o_numeric numeric, o_numeric_6_3 numeric(6,3), o_money money, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "INSERT INTO orders VALUES (0, 32767, 2147483647, 9223372036854775807, 9.999, 9.999999, 123456.7890, 123.456, 123.12)";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                testClient.getEventStreamStart(
+                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+        if (eventStream.hasNext()) {
+            List<ConnectorServiceProto.CdcMessage> messages = eventStream.next().getEventsList();
+            for (ConnectorServiceProto.CdcMessage msg : messages) {
+                System.out.printf("%s\n", msg.getPayload());
+            }
+        }
         connection.close();
     }
 }
