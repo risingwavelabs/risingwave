@@ -269,6 +269,7 @@ mod tests {
 
     #[test]
     fn test_bytea() {
+        use crate::types::ToText;
         assert_eq!(str_to_bytea("fgo").unwrap().as_ref().to_text(), r"\x66676f");
         assert_eq!(
             str_to_bytea(r"\xDeadBeef").unwrap().as_ref().to_text(),
