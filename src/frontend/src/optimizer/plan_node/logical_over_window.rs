@@ -443,15 +443,19 @@ impl ToStream for LogicalOverWindow {
             }
 
             let order_by = &self.window_functions()[0].order_by;
-            if order_by.len() != 1
-                || !stream_input
-                    .watermark_columns()
-                    .contains(order_by[0].column_index)
-                || order_by[0].order_type != OrderType::ascending()
+            if order_by.len() != 1 || order_by[0].order_type != OrderType::ascending() {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "Only support window functions order by single column and in ascending order"
+                        .to_string(),
+                )
+                .into());
+            }
+            if !stream_input
+                .watermark_columns()
+                .contains(order_by[0].column_index)
             {
                 return Err(ErrorCode::InvalidInputSyntax(
-                    "Only support window functions order by single watermark column in ascending order"
-                        .to_string(),
+                    "The column ordered by must be a watermark column".to_string(),
                 )
                 .into());
             }
