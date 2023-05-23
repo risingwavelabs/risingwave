@@ -19,7 +19,6 @@ use assert_matches::assert_matches;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
@@ -107,7 +106,7 @@ pub fn gen_projected_data(
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
-        let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
+        let chunk = DataChunk::new(vec![array], batch_size);
         ret.push(chunk);
     }
 
@@ -214,7 +213,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
         .columns()
         .iter()
         .zip_eq_fast(actual.columns().iter())
-        .for_each(|(c1, c2)| assert_eq!(c1.array(), c2.array()));
+        .for_each(|(c1, c2)| assert_eq!(c1, c2));
 
     is_data_chunk_eq(&expect, &actual)
 }
