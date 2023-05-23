@@ -299,7 +299,7 @@ impl Cluster {
             .await?
     }
 
-    /// retrieve cluster info from meta node running at addr
+    /// mark node running at addr for deletion. Node will no longer accept new fragments
     pub async fn unregister_worker_node(&self, addr: HostAddr) -> Result<()> {
         let _ = self
             .ctl

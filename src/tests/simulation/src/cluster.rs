@@ -32,7 +32,7 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::{DeleteWorkerNodeRequest, ListAllNodesRequest};
 use risingwave_rpc_client;
@@ -614,7 +614,7 @@ impl Cluster {
     }
 
     /// simple mapping between compute node HostAddr and its task name
-    pub fn cn_host_addr_to_task(&self, addr: &HostAddr) -> String {
+    pub fn cn_host_addr_to_task(&self, addr: HostAddress) -> String {
         // host like 192.168.3.1:5688
         let host = addr.host.clone();
         format!("compute-{}", host.split('.').collect::<Vec<&str>>()[3])
@@ -629,20 +629,20 @@ impl Cluster {
     }
 
     /// remove node from cluster gracefully by informing meta that node is no longer available.
-    pub async fn unregister_compute_node(&self) -> Result<HostAddr> {
+    pub async fn unregister_compute_node(&self) -> Result<WorkerNode> {
         let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
         let rand_node = worker_nodes
             .choose(&mut rand::thread_rng())
             .unwrap()
             .clone();
-        let addr = rand_node.host.expect("node does not have host");
+        let addr = rand_node.clone().host.expect("node does not have host");
         let addr = HostAddr {
             host: addr.host,
             port: addr.port as u16,
         };
         self.unregister_worker_node(addr.clone()).await?;
 
-        Ok(addr)
+        Ok(rand_node)
     }
 
     /// Create a node for kafka producer and prepare data.

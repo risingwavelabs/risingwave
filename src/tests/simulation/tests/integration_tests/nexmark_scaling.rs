@@ -17,10 +17,13 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use madsim::time::{sleep, Instant};
+use risingwave_pb::common::WorkerNode;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
+use tracing_subscriber::fmt::format;
 
 /// gets the output without failures as the standard result
 // TODO: may be nice to have
@@ -77,16 +80,21 @@ async fn nexmark_scaling_down_common(
 
     cluster.run(create).await?;
 
-    let mut unregistered_nodes: Vec<String> = vec![];
+    let mut unregistered_nodes: Vec<WorkerNode> = vec![];
     for _ in 0..number_of_nodes {
-        let node_host_addr = cluster
+        let unregistered_node = cluster
             .unregister_compute_node()
             .await
             .expect("unregistering node failed");
-        unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
+        unregistered_nodes.push(unregistered_node);
         sleep(Duration::from_secs(20)).await;
     }
-    cluster.kill_nodes(&unregistered_nodes).await;
+    let unregistered_node_addrs = unregistered_nodes
+        .iter()
+        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
+        .collect_vec();
+
+    cluster.kill_nodes(&unregistered_node_addrs).await;
 
     cluster.run(select).await?.assert_result_eq(&expected);
 
@@ -133,19 +141,21 @@ async fn nexmark_scaling_up_down_common(
         cluster.get_number_worker_nodes().await
     ); // TODO: remove line
 
-    let mut unregistered_nodes: Vec<String> = vec![];
+    // TODO: reschedule here as well!
+
+    let mut unregistered_nodes: Vec<WorkerNode> = vec![];
     for _ in 0..number_of_nodes {
-        let node_host_addr = cluster
+        let rand_node: WorkerNode = cluster
             .unregister_compute_node()
             .await
             .expect("unregistering node failed");
-        println!("Unregister compute node {:?}", node_host_addr); // TODO: remove line
+        println!("Unregister compute node {:?}", rand_node); // TODO: remove line
         println!(
             "Now compute nodes in cluster {}",
             cluster.get_number_worker_nodes().await
         ); // TODO: remove line
 
-        unregistered_nodes.push(cluster.cn_host_addr_to_task(&node_host_addr));
+        unregistered_nodes.push(rand_node);
         sleep(Duration::from_secs(sleep_sec)).await;
     }
 
@@ -153,9 +163,40 @@ async fn nexmark_scaling_up_down_common(
     // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
     // end of the workflow
 
-    // TODO: call reschedule here
+    // remove all PAs from the DELETING nodes
+    let mut plan = "".to_string();
+    let mut chunks = unregistered_nodes.chunks(1).peekable();
+    while let Some(chunk) = chunks.next() {
+        let mut plan_node = format!(
+            "{}-[{}]", // TODO: first arg is not node_id, but fragment id
+            chunk[0].get_id(),
+            chunk[0]
+                .get_parallel_units()
+                .iter()
+                .map(|pu| pu.id)
+                .join(",")
+        );
+        if chunks.peek().is_some() {
+            plan_node = format!("{};", plan_node);
+        }
+        plan = format!("{}{}", plan, plan_node)
+    }
+
+    println!("removing fragments via plan {}", plan);
+    cluster
+        .reschedule(plan)
+        .await
+        .expect("expect rescheduling to work");
+
+    // Notes: use RescheduleRequest. scale_service.rs reschedule
+    // I have to generate the new schedule plan myself. Hardcode it here
+
     println!("Killing nodes"); // TODO: remove line
-    cluster.kill_nodes(&unregistered_nodes).await;
+    let unregistered_node_addrs = unregistered_nodes
+        .iter()
+        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
+        .collect_vec();
+    cluster.kill_nodes(&unregistered_node_addrs).await;
     println!(
         // TODO: remove line
         "Nodes killed. Now compute nodes in cluster {}",
