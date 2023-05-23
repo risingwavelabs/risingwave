@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
@@ -177,11 +178,12 @@ impl Binder {
         self.context.clause = None;
 
         // Bind GROUP BY clause.
+        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
         let group_by = select
             .group_by
             .into_iter()
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
             .try_collect()?;
         self.context.clause = None;
 
@@ -295,6 +297,55 @@ impl Binder {
             }
         }
         Ok((select_list, aliases))
+    }
+
+    /// Bind an `GROUP BY` expression in a [`Select`], which can be either:
+    /// * index of an output column
+    /// * an arbitrary expression on input columns
+    /// * an output-column name
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
+    ///   marked with `usize::MAX`.
+    fn bind_group_by_expr_in_select(
+        &mut self,
+        expr: Expr,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<ExprImpl> {
+        let name = match &expr {
+            Expr::Identifier(ident) => Some(ident.real_value()),
+            _ => None,
+        };
+        match self.bind_expr(expr) {
+            Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
+                Some(ScalarImpl::Int32(idx)) => idx
+                    .saturating_sub(1)
+                    .try_into()
+                    .ok()
+                    .and_then(|i: usize| select_items.get(i).cloned())
+                    .ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "GROUP BY position {idx} is not in select list"
+                        ))
+                        .into()
+                    }),
+                _ => Err(ErrorCode::BindError("non-integer constant in GROUP BY".into()).into()),
+            },
+            Ok(e) => Ok(e),
+            Err(e) => match name {
+                None => Err(e),
+                Some(name) => match name_to_index.get(&name) {
+                    None => Err(e),
+                    Some(&usize::MAX) => Err(ErrorCode::BindError(format!(
+                        "GROUP BY \"{name}\" is ambiguous"
+                    ))
+                    .into()),
+                    Some(out_idx) => Ok(select_items[*out_idx].clone()),
+                },
+            },
+        }
     }
 
     pub fn bind_returning_list(
