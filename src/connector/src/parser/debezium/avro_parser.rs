@@ -29,7 +29,7 @@ use super::operators::*;
 use crate::impl_common_parser_logic;
 use crate::parser::avro::util::{
     avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
-    get_field_from_avro_value,
+    get_field_from_avro_value, get_option_field_from_avro_value,
 };
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
@@ -202,28 +202,42 @@ impl DebeziumAvroParser {
         if let Value::String(op_str) = op {
             match op_str.as_str() {
                 DEBEZIUM_UPDATE_OP => {
-                    let before = get_field_from_avro_value(&avro_value, BEFORE)
+                    let before = get_option_field_from_avro_value(&avro_value, BEFORE)
                         .map_err(|_| {
                             RwError::from(ProtocolError(
                                 "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
                             ))
                         })?;
-                    let after = get_field_from_avro_value(&avro_value, AFTER)?;
+                    if let Some(before) = before {
+                        let after = get_field_from_avro_value(&avro_value, AFTER)?;
 
-                    writer.update(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        let before = from_avro_value(
-                            get_field_from_avro_value(before, column.name.as_str())?.clone(),
-                            field_schema,
-                        )?;
-                        let after = from_avro_value(
-                            get_field_from_avro_value(after, column.name.as_str())?.clone(),
-                            field_schema,
-                        )?;
+                        writer.update(|column| {
+                            let field_schema =
+                                extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
+                            let before = from_avro_value(
+                                get_field_from_avro_value(before, column.name.as_str())?.clone(),
+                                field_schema,
+                            )?;
+                            let after = from_avro_value(
+                                get_field_from_avro_value(after, column.name.as_str())?.clone(),
+                                field_schema,
+                            )?;
 
-                        Ok((before, after))
-                    })
+                            Ok((before, after))
+                        })
+                    } else {
+                        // before is None/null, this is a insert event
+                        let after = get_field_from_avro_value(&avro_value, AFTER)?;
+
+                        writer.insert(|column| {
+                            let field_schema =
+                                extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
+                            from_avro_value(
+                                get_field_from_avro_value(after, column.name.as_str())?.clone(),
+                                field_schema,
+                            )
+                        })
+                    }
                 }
                 DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
                     let after = get_field_from_avro_value(&avro_value, AFTER)?;
