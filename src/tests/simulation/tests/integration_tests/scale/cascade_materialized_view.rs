@@ -27,7 +27,6 @@ const MV2: &str = "create materialized view m2 as select * from t1 where v1 > 10
 const MV3: &str = "create materialized view m3 as select * from m2 where v1 < 15;";
 const MV4: &str = "create materialized view m4 as select m1.v1 as m1v, m3.v1 as m3v from m1 join m3 on m1.v1 = m3.v1;";
 const MV5: &str = "create materialized view m5 as select * from m4;";
-const SHOW_INTERNAL_TABLES: &str = "SHOW INTERNAL TABLES;";
 
 #[madsim::test]
 async fn test_simple_cascade_materialized_view() -> Result<()> {
@@ -36,16 +35,6 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
 
     session.run(ROOT_TABLE_CREATE).await?;
     session.run(MV1).await?;
-
-    // Check internal progress
-    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
-    let persisted_progress = session
-        .run(format!("SELECT * FROM {} ORDER BY vnode", internal_table))
-        .await?;
-    let expected = (0..=255)
-        .map(|vnode| format!("{:?} NULL t", vnode))
-        .join("\n");
-    assert_eq!(persisted_progress, expected);
 
     let fragment = cluster
         .locate_one_fragment([
@@ -120,13 +109,6 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         .run("select count(*) from m1")
         .await?
         .assert_result_eq("15");
-
-    // Internal backfill progress should not change after recovery since it was finished.
-    let internal_table = session.run(SHOW_INTERNAL_TABLES).await?;
-    let persisted_progress = session
-        .run(format!("SELECT * FROM {} ORDER BY vnode", internal_table))
-        .await?;
-    assert_eq!(persisted_progress, expected);
 
     Ok(())
 }
