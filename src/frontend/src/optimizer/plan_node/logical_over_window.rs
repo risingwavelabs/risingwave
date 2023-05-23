@@ -432,7 +432,6 @@ impl ToBatch for LogicalOverWindow {
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let stream_input = self.core.input.to_stream(ctx)?;
-        stream_input.watermark_columns();
 
         if ctx.emit_on_window_close() {
             if !self.core.funcs_have_same_partition_and_order() {
