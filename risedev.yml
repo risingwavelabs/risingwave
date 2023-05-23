@@ -536,8 +536,6 @@ profile:
   ci-3cn-3fe-in-memory:
     config-path: src/config/ci.toml
     steps:
-      - use: etcd
-        unsafe-no-fsync: true
       - use: meta-node
         enable-in-memory-kv-state-backend: true
       - use: compute-node
