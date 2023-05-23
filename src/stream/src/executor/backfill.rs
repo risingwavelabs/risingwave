@@ -372,8 +372,6 @@ where
                     // This is because we can't update state table in first epoch,
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
-                    println!("finished: {:?}", is_finished);
-                    println!("snapshot_empty: {:?}", is_snapshot_empty);
                     if !is_finished && is_snapshot_empty {
                         current_pos =
                             Self::construct_initial_finished_state(pk_in_output_indices.len())
