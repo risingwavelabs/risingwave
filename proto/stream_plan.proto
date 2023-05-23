@@ -238,6 +238,7 @@ message HashAggNode {
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
+  bool emit_on_window_close = 8;
 }
 
 message TopNNode {

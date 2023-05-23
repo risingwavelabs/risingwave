@@ -645,6 +645,7 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
+                emit_on_window_close: me.emit_on_window_close(),
             })
         }
         Node::HashJoin(_) => {

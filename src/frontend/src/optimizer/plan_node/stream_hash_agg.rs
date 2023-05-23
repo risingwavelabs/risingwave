@@ -45,6 +45,15 @@ impl StreamHashAgg {
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
     ) -> Self {
+        Self::new_with_eowc(logical, vnode_col_idx, row_count_idx, false)
+    }
+
+    pub fn new_with_eowc(
+        logical: generic::Agg<PlanRef>,
+        vnode_col_idx: Option<usize>,
+        row_count_idx: usize,
+        emit_on_window_close: bool,
+    ) -> Self {
         assert_eq!(logical.agg_calls[row_count_idx], PlanAggCall::count_star());
 
         let input = logical.input.clone();
@@ -69,7 +78,7 @@ impl StreamHashAgg {
             &logical,
             dist,
             false,
-            false, // TODO(rc): support generating EOWC hash agg plan
+            emit_on_window_close,
             watermark_columns,
         );
         StreamHashAgg {
@@ -90,6 +99,12 @@ impl StreamHashAgg {
 
     pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.logical.i2o_col_mapping()
+    }
+
+    pub fn to_eowc_version(&self) -> Self {
+        let mut new = self.clone();
+        new.base.emit_on_window_close = true;
+        new
     }
 }
 
@@ -124,11 +139,9 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let logical = generic::Agg {
-            input,
-            ..self.logical.clone()
-        };
-        Self::new(logical, self.vnode_col_idx, self.row_count_idx)
+        let mut new = self.clone();
+        new.logical.input = input;
+        new
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -170,6 +183,7 @@ impl StreamNode for StreamHashAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
+            emit_on_window_close: self.base.emit_on_window_close,
         })
     }
 }
@@ -180,8 +194,8 @@ impl ExprRewritable for StreamHashAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.vnode_col_idx, self.row_count_idx).into()
+        let mut new = self.clone();
+        new.logical.rewrite_exprs(r);
+        new.into()
     }
 }

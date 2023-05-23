@@ -1081,7 +1081,9 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let eowc = ctx.emit_on_window_close();
         let stream_input = self.input().to_stream(ctx)?;
+
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() {
             let input = if self.group_key().count_ones(..) != self.input().schema().len() {
@@ -1099,22 +1101,37 @@ impl ToStream for LogicalAgg {
             return logical_dedup.to_stream(ctx);
         }
 
-        let stream_agg = self.gen_dist_stream_agg_plan(stream_input)?;
+        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
 
-        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_simple_agg() {
-            final_agg.agg_calls()
-        } else if let Some(final_agg) = stream_agg.as_stream_hash_agg() {
-            final_agg.agg_calls()
+        let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
+            if eowc {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
+                        .to_string(),
+                )
+                .into());
+            }
+            (plan.clone(), final_agg.agg_calls().len())
+        } else if let Some(final_agg) = plan.as_stream_hash_agg() {
+            (
+                if eowc {
+                    final_agg.to_eowc_version().into()
+                } else {
+                    plan.clone()
+                },
+                final_agg.agg_calls().len(),
+            )
         } else {
             panic!("the root PlanNode must be either StreamHashAgg or StreamSimpleAgg");
         };
-        if self.agg_calls().len() == final_agg_calls.len() {
+
+        if self.agg_calls().len() == n_final_agg_calls {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`
-            Ok(stream_agg)
+            Ok(plan)
         } else {
             // a `count(*)` is appended, should project the output
             Ok(StreamProject::new(generic::Project::with_out_col_idx(
-                stream_agg,
+                plan,
                 0..self.schema().len(),
             ))
             .into())
