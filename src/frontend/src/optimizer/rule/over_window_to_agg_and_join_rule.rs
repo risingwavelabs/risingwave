@@ -57,11 +57,9 @@ impl Rule for OverWindowToAggAndJoinRule {
                     false,
                     OrderBy::any(),
                     Condition::true_cond(),
-                );
-                if agg_call.is_err() {
-                    return None;
-                }
-                select_exprs.push(agg_call.unwrap().into());
+                )
+                .ok()?;
+                select_exprs.push(agg_call.into());
             } else {
                 return None;
             }
