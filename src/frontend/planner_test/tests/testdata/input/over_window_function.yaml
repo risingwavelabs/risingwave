@@ -329,7 +329,7 @@
   sql: |
     create table t(x int, y int, z int, w int);
     select * from (
-        SELECT x, y, z, avg(z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
+        SELECT x, y, z, avg(z * z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
     )
     WHERE z > 0 and y > 0 and x > 0 and res <= 3;
   expected_outputs:
