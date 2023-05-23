@@ -342,7 +342,7 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::trace!(
+        tracing::info!(
             target: PGWIRE_QUERY_LOG,
             "(simple query) session: {}, status: {}, time: {}ms, sql: {}",
             session_id,
@@ -438,7 +438,7 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::trace!(
+        tracing::info!(
             target: PGWIRE_QUERY_LOG,
             "(extended query parse) session: {}, status: {}, time: {}ms, sql: {}",
             session_id,
@@ -457,7 +457,11 @@ where
         statement_name: String,
         type_ids: Vec<i32>,
     ) -> PsqlResult<()> {
-        if self.prepare_statement_store.contains_key(&statement_name) {
+        if statement_name.is_empty() {
+            // Remove the unnamed prepare statement first, in case the unsupported sql binds a wrong
+            // prepare statement.
+            self.unnamed_prepare_statement.take();
+        } else if self.prepare_statement_store.contains_key(&statement_name) {
             return Err(PsqlError::ParseError("Duplicated statement name".into()));
         }
 
@@ -577,7 +581,7 @@ where
             let result = session.execute(portal).await;
 
             let mills = start.elapsed().as_millis();
-            tracing::trace!(
+            tracing::info!(
                 target: PGWIRE_QUERY_LOG,
                 "(extended query execute) session: {}, status: {}, time: {}ms, sql: {}",
                 session_id,

@@ -1,0 +1,88 @@
+- id: create_sources
+  sql: |
+    create source auction (id BIGINT, "item_name" VARCHAR, description VARCHAR, "initial_bid" BIGINT, reserve BIGINT, "date_time" TIMESTAMP, expires TIMESTAMP, seller BIGINT, category BIGINT, "extra" VARCHAR)
+    with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Auction',
+    nexmark.split.num = '4',
+    nexmark.min.event.gap.in.ns = '1000'
+    );
+    create source bid (auction BIGINT, bidder BIGINT, price BIGINT, "channel" VARCHAR, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR)
+    with (
+    connector = 'nexmark',
+    nexmark.table.type = 'Bid',
+    nexmark.split.num = '4',
+    nexmark.min.event.gap.in.ns = '1000'
+    );
+  expected_outputs: []
+- id: self_join
+  before:
+  - create_sources
+  sql: |
+    select count(*) cnt from auction A join auction B on A.id = B.id where A.initial_bid = 1 and B.initial_bid = 2;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- id: nexmark_q5
+  before:
+  - create_sources
+  sql: |
+    SELECT AuctionBids.auction, AuctionBids.num FROM (
+      SELECT
+        bid.auction,
+        count(*) AS num,
+        window_start AS starttime
+      FROM
+        HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+      GROUP BY
+        window_start,
+        bid.auction
+    ) AS AuctionBids
+    JOIN (
+      SELECT
+        max(CountBids.num) AS maxn,
+        CountBids.starttime_c
+      FROM (
+        SELECT
+          count(*) AS num,
+          window_start AS starttime_c
+        FROM HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
+        GROUP BY
+          bid.auction,
+          window_start
+      ) AS CountBids
+      GROUP BY
+        CountBids.starttime_c
+    ) AS MaxBids
+    ON AuctionBids.starttime = MaxBids.starttime_c AND AuctionBids.num >= MaxBids.maxn;
+  expected_outputs:
+  - stream_plan
+  - logical_plan
+  - batch_plan
+- sql: |
+    set rw_enable_share_plan=true;
+    create table t(a int, b int);
+    with cte as (select count(*) from t) select * from cte union all select * from cte;
+  expected_outputs:
+  - stream_plan
+- sql: |
+    set rw_enable_share_plan=false;
+    create table t(a int, b int);
+    with cte as (select count(*) from t) select * from cte union all select * from cte;
+  expected_outputs:
+  - stream_plan
+- id: force_share_source_for_self_join
+  before:
+  - create_sources
+  sql: |
+    set rw_enable_share_plan=false;
+    select count(*) cnt from auction A join auction B on A.id = B.id;
+  expected_outputs:
+  - stream_plan
+- id: self_join_multiple_edges
+  sql: |
+    create table t (a int, b int);
+    with cte as (select a, sum(b) sum from t group by a) select count(*) from cte c1 join cte c2 on c1.a = c2.a;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan

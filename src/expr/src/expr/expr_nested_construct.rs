@@ -15,7 +15,6 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
     StructValue,
@@ -52,7 +51,6 @@ impl Expression for NestedConstructExpression {
             builder.append_array_refs(columns, input.capacity());
             Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
         } else if let DataType::List { .. } = &self.data_type {
-            let columns = columns.into_iter().map(Column::new).collect();
             let chunk = DataChunk::new(columns, input.vis().clone());
             let mut builder = ListArrayBuilder::with_type(input.capacity(), self.data_type.clone());
             for row in chunk.rows_with_holes() {

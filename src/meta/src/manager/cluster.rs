@@ -72,8 +72,7 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let meta_store = env.meta_store_ref();
-        let core = ClusterManagerCore::new(meta_store.clone()).await?;
+        let core = ClusterManagerCore::new(env.meta_store_ref()).await?;
 
         Ok(Self {
             env,

@@ -80,7 +80,12 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
-risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+expect-test = "1"
+risingwave_hummock_test = { path = "../storage/hummock_test", features = [
+    "test",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 tracing-test = "0.2"
 
 [[bench]]

@@ -23,7 +23,6 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use minitrace::prelude::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
@@ -576,9 +575,9 @@ impl Barrier {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
-    col_idx: usize,
-    data_type: DataType,
-    val: ScalarImpl,
+    pub col_idx: usize,
+    pub data_type: DataType,
+    pub val: ScalarImpl,
 }
 
 impl PartialOrd for Watermark {
