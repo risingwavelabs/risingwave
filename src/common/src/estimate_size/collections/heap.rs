@@ -75,7 +75,9 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
         let vec = self.inner.into_sorted_vec();
 
         let mut ret = Vec::with_capacity_in(vec.len(), alloc);
-        ret.extend(vec);
+        for item in vec {
+            ret.push(item);
+        }
 
         self.mem_ctx.add(-((old_cap * size_of::<T>()) as i64));
         ret
