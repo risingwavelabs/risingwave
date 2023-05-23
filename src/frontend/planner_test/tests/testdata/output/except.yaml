@@ -89,7 +89,7 @@
     ├── columns: [ vnode, _row_id, t1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -97,7 +97,7 @@
     ├── columns: [ vnode, _row_id, t2_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -174,7 +174,7 @@
     ├── columns: [ vnode, a, t1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -182,7 +182,7 @@
     ├── columns: [ vnode, a, t2_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 

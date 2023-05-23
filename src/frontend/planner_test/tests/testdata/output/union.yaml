@@ -38,9 +38,9 @@
         ├──  Upstream
         └──  BatchPlanNode
 
-    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 1 { columns: [ vnode, _row_id, t2_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 1 { columns: [ vnode, _row_id, t2_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ a, b, c, t1._row_id, null:Serial, 0:Int32 ], primary key: [ $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3, 4, 5 ], read pk prefix len hint: 3 }
 
@@ -115,7 +115,7 @@
     ├── columns: [ vnode, _row_id, t1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -123,7 +123,7 @@
     ├── columns: [ vnode, _row_id, t2_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -205,7 +205,7 @@
     ├── columns: [ vnode, a, t1_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
@@ -213,7 +213,7 @@
     ├── columns: [ vnode, a, t2_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 

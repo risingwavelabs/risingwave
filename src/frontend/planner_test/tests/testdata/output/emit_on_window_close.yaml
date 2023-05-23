@@ -121,7 +121,7 @@
     ├── columns: [ vnode, _row_id, t_backfill_finished ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
-    ├── distribution key: []
+    ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
