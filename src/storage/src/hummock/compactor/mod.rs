@@ -181,10 +181,15 @@ impl Compactor {
                 .await
                 .unwrap();
 
-        println!(
-            "TRACE: copy_block_count {} total_block_count {} need_quota {} file_counts {}",
-            copy_block_count, total_block_count, need_quota, file_counts
-        );
+        if total_block_count != 0 {
+            tracing::info!(
+                "TRACE: copy_block_count {} total_block_count {} need_quota {} file_counts {}",
+                copy_block_count,
+                total_block_count,
+                need_quota,
+                file_counts
+            );
+        }
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 

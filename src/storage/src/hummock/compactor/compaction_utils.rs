@@ -236,6 +236,48 @@ pub async fn block_overlap_info(
     compact_task: &CompactTask,
     context: Arc<CompactorContext>,
 ) -> HummockResult<(usize, usize)> {
+    if compact_task.target_level == 0 || compact_task.target_level == compact_task.base_level {
+        return Ok((0, 0));
+    }
+    let mut block_meta_vec = vec![vec![]; compact_task.input_ssts.len()];
+    let mut total_block_count = 0;
+
+    for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
+        for sstable_info in &input_level.table_infos {
+            let block_metas = context
+                .sstable_store
+                .sstable(sstable_info, &mut StoreLocalStatistic::default())
+                .await?
+                .value()
+                .meta
+                .block_metas
+                .clone();
+
+            total_block_count += block_metas.len();
+            block_meta_vec[idx].extend(block_metas);
+        }
+
+        let last_key = input_level
+            .table_infos
+            .last()
+            .unwrap()
+            .get_key_range()
+            .as_ref()
+            .unwrap()
+            .get_right();
+        let end_block_meta = BlockMeta {
+            smallest_key: last_key.clone(),
+            ..Default::default()
+        };
+        block_meta_vec[idx].push(end_block_meta);
+    }
+
+    let copy_block_count = check_copy_block(&block_meta_vec);
+
+    Ok((copy_block_count, total_block_count))
+}
+
+fn check_copy_block(block_meta_vec: &Vec<Vec<BlockMeta>>) -> usize {
     #[derive(Eq)]
     struct Item<'a> {
         arr: &'a Vec<BlockMeta>,
@@ -264,31 +306,11 @@ pub async fn block_overlap_info(
         }
     }
 
-    let mut block_meta_vec = vec![vec![]; compact_task.input_ssts.len()];
-    let mut total_block_count = 0;
-
-    for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
-        for sstable_info in &input_level.table_infos {
-            let block_metas = context
-                .sstable_store
-                .sstable(sstable_info, &mut StoreLocalStatistic::default())
-                .await?
-                .value()
-                .meta
-                .block_metas
-                .clone();
-
-            total_block_count += block_metas.len();
-            block_meta_vec[idx].extend(block_metas);
-        }
-    }
-
     let mut heap = BinaryHeap::default();
     use std::cmp::Reverse;
-    for block_meta_list in &block_meta_vec {
-        // let first_item = block_meta_list.cursor_front();
+    for block_meta_list in block_meta_vec {
         let first_item = Item {
-            arr: &block_meta_list,
+            arr: block_meta_list,
             idx: 0,
         };
         heap.push(Reverse(first_item));
@@ -301,20 +323,26 @@ pub async fn block_overlap_info(
 
         if next_idx < top_item.arr.len() {
             let next_block = &top_item.arr[next_idx];
-            if let Some(top_block) = heap.peek() {
-                if next_block.smallest_key < top_block.0.arr[top_block.0.idx].smallest_key {
-                    copy_block_count += 0;
+            match heap.peek() {
+                Some(top_block) => {
+                    if next_block.smallest_key < top_block.0.arr[top_block.0.idx].smallest_key {
+                        copy_block_count += 1;
+                    }
+
+                    heap.push(Reverse(Item {
+                        arr: top_item.arr,
+                        idx: next_idx,
+                    }))
                 }
 
-                heap.push(Reverse(Item {
-                    arr: top_item.arr,
-                    idx: next_idx,
-                }))
+                None => {
+                    copy_block_count += top_item.arr.len() - top_item.idx;
+                }
             }
         }
     }
 
-    Ok((copy_block_count, total_block_count))
+    copy_block_count
 }
 
 pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &CompactTask) -> usize {
@@ -335,10 +363,11 @@ pub fn estimate_task_memory_capacity(context: Arc<CompactorContext>, task: &Comp
     }
 }
 
+#[cfg(test)]
 mod tests {
-    use std::collections::BinaryHeap;
     use std::vec;
 
+    use crate::hummock::compactor::compaction_utils::check_copy_block;
     use crate::hummock::BlockMeta;
 
     #[tokio::test]
@@ -444,45 +473,7 @@ mod tests {
             block_meta_vec[idx].extend(block_metas);
         }
 
-        let mut heap = BinaryHeap::default();
-        use std::cmp::Reverse;
-        for block_meta_list in &block_meta_vec {
-            // let first_item = block_meta_list.cursor_front();
-            let first_item = Item {
-                arr: block_meta_list,
-                idx: 0,
-            };
-            heap.push(Reverse(first_item));
-        }
-
-        println!("heap is_empty {}", heap.is_empty());
-        let mut copy_block_count = 0;
-        while !heap.is_empty() {
-            let top_item = heap.pop().unwrap().0;
-            println!(
-                "top_item {:?} len {}",
-                top_item.arr[top_item.idx],
-                top_item.arr.len()
-            );
-            let next_idx = top_item.idx + 1;
-
-            if next_idx < top_item.arr.len() {
-                let next_block = &top_item.arr[next_idx];
-                println!("next_block {:?}", next_block);
-                if let Some(top_block) = heap.peek() {
-                    println!("peek_block {:?}", top_block.0.arr[top_block.0.idx]);
-
-                    if next_block.smallest_key < top_block.0.arr[top_block.0.idx].smallest_key {
-                        copy_block_count += 1;
-                    }
-
-                    heap.push(Reverse(Item {
-                        arr: top_item.arr,
-                        idx: next_idx,
-                    }))
-                }
-            }
-        }
+        let copy_block_count = check_copy_block(&block_meta_vec);
 
         println!(
             "copy_block_count {} total_block_count {}",
