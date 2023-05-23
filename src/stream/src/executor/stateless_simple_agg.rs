@@ -15,7 +15,6 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -84,7 +83,7 @@ impl StatelessSimpleAggExecutor {
                     .args
                     .val_indices()
                     .iter()
-                    .map(|idx| columns[*idx].array_ref())
+                    .map(|idx| columns[*idx].as_ref())
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &col_refs)
             })?;
@@ -138,7 +137,7 @@ impl StatelessSimpleAggExecutor {
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
                             })?;
-                        let columns: Vec<Column> = builders
+                        let columns = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                             .try_collect()?;

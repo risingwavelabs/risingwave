@@ -96,6 +96,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     }
 }
 
+#[derive(Clone, Default)]
 pub struct TableGroupInfo {
     pub group_id: CompactionGroupId,
     pub group_size: u64,
@@ -104,6 +105,10 @@ pub struct TableGroupInfo {
 }
 
 pub trait HummockVersionExt {
+    type CombinedLevelsIter<'a>: Iterator<Item = &'a Level> + 'a
+    where
+        Self: 'a;
+
     /// Gets `compaction_group_id`'s levels
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels;
     /// Gets `compaction_group_id`'s levels
@@ -114,7 +119,7 @@ pub trait HummockVersionExt {
     /// Gets all levels.
     ///
     /// Levels belonging to the same compaction group retain their relative order.
-    fn get_combined_levels(&self) -> Vec<&Level>;
+    fn get_combined_levels(&self) -> Self::CombinedLevelsIter<'_>;
     fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
@@ -144,6 +149,8 @@ pub trait HummockVersionUpdateExt {
 }
 
 impl HummockVersionExt for HummockVersion {
+    type CombinedLevelsIter<'a> = impl Iterator<Item = &'a Level> + 'a;
+
     fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
@@ -159,19 +166,22 @@ impl HummockVersionExt for HummockVersion {
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
     }
 
-    fn get_combined_levels(&self) -> Vec<&Level> {
-        let mut combined_levels = vec![];
-        for level in self.levels.values() {
-            combined_levels.extend(level.l0.as_ref().unwrap().sub_levels.iter().rev());
-            combined_levels.extend(level.levels.iter());
-        }
-        combined_levels
+    fn get_combined_levels(&self) -> Self::CombinedLevelsIter<'_> {
+        self.levels.values().flat_map(|level| {
+            level
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .rev()
+                .chain(level.levels.iter())
+        })
     }
 
     /// This function does NOT dedup.
     fn get_object_ids(&self) -> Vec<u64> {
         self.get_combined_levels()
-            .iter()
             .flat_map(|level| {
                 level
                     .table_infos
@@ -211,6 +221,9 @@ impl HummockVersionExt for HummockVersion {
     fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
         let mut infos = vec![];
         for (group_id, group) in &self.levels {
+            if group.member_table_ids.len() == 1 {
+                continue;
+            }
             let group_size = group
                 .levels
                 .iter()
@@ -483,7 +496,6 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels,
                     delete_sst_ids_set,
                     insert_sst_level_id,
-                    insert_sub_level_id,
                     insert_table_infos,
                     ..
                 } = summary;
@@ -497,13 +509,31 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                insert_new_sub_level(
-                    levels.l0.as_mut().unwrap(),
-                    insert_sub_level_id,
-                    LevelType::Overlapping,
-                    insert_table_infos,
-                    None,
-                );
+                // The sst may be flushed by spill-to-s3, so we must sort them as epoch
+                // order.
+                for (max_epoch, ssts) in &insert_table_infos
+                    .into_iter()
+                    .sorted_by(|sst1, sst2| sst1.max_epoch.cmp(&sst2.max_epoch))
+                    .group_by(|sst| sst.max_epoch)
+                {
+                    let mut level_type = LevelType::Overlapping;
+                    let mut ssts = ssts.collect_vec();
+                    ssts.sort_by(|sst1, sst2| {
+                        let a = sst1.key_range.as_ref().unwrap();
+                        let b = sst2.key_range.as_ref().unwrap();
+                        a.compare(b)
+                    });
+                    if can_concat(&ssts) {
+                        level_type = LevelType::Nonoverlapping;
+                    }
+                    insert_new_sub_level(
+                        levels.l0.as_mut().unwrap(),
+                        max_epoch,
+                        level_type,
+                        ssts,
+                        None,
+                    );
+                }
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
                 levels.apply_compact_ssts(summary);
@@ -731,8 +761,10 @@ pub fn try_get_compaction_group_id_by_table_id(
 }
 
 /// Gets all compaction group ids.
-pub fn get_compaction_group_ids(version: &HummockVersion) -> Vec<CompactionGroupId> {
-    version.levels.keys().cloned().collect()
+pub fn get_compaction_group_ids(
+    version: &HummockVersion,
+) -> impl Iterator<Item = CompactionGroupId> + '_ {
+    version.levels.keys().cloned()
 }
 
 /// Gets all member table ids.
@@ -748,7 +780,7 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
 pub fn get_compaction_group_ssts(
     version: &HummockVersion,
     group_id: CompactionGroupId,
-) -> Vec<(HummockSstableObjectId, HummockSstableId)> {
+) -> impl Iterator<Item = (HummockSstableObjectId, HummockSstableId)> + '_ {
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
@@ -764,7 +796,6 @@ pub fn get_compaction_group_ssts(
                 .iter()
                 .map(|table_info| (table_info.get_object_id(), table_info.get_sst_id()))
         })
-        .collect_vec()
 }
 
 pub fn new_sub_level(

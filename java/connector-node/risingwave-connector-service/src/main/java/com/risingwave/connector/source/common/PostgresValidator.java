@@ -124,7 +124,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             var pkFields = new HashSet<String>();
             while (res.next()) {
                 var name = res.getString(1);
-                pkFields.add(name);
+                // RisingWave always use lower case for column name
+                pkFields.add(name.toLowerCase());
             }
 
             if (!ValidatorUtils.isPrimaryKeyMatch(tableSchema, pkFields)) {
@@ -146,7 +147,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 }
 
                 var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
+                if (!srcColName.equalsIgnoreCase(field)) {
                     throw ValidatorUtils.invalidArgument(
                             "table column defined in the source mismatches upstream column "
                                     + field);

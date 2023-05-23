@@ -14,7 +14,7 @@
 
 use std::iter::TrustedLen;
 
-use super::column::Column;
+use super::ArrayRef;
 use crate::array::DataChunk;
 use crate::row::Row;
 use crate::types::DatumRef;
@@ -151,17 +151,6 @@ impl PartialEq for RowRef<'_> {
 }
 impl Eq for RowRef<'_> {}
 
-impl PartialOrd for RowRef<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.iter().partial_cmp(other.iter())
-    }
-}
-impl Ord for RowRef<'_> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.iter().cmp(other.iter())
-    }
-}
-
 impl Row for RowRef<'_> {
     type Iter<'a> = RowRefIter<'a>
     where
@@ -170,11 +159,7 @@ impl Row for RowRef<'_> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         debug_assert!(self.idx < self.chunk.capacity());
         // for `RowRef`, the index is always in bound.
-        unsafe {
-            self.chunk.columns()[index]
-                .array_ref()
-                .value_at_unchecked(self.idx)
-        }
+        unsafe { self.chunk.columns()[index].value_at_unchecked(self.idx) }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
@@ -183,7 +168,6 @@ impl Row for RowRef<'_> {
         self.chunk
             .columns()
             .get_unchecked(index)
-            .array_ref()
             .value_at_unchecked(self.idx)
     }
 
@@ -202,7 +186,7 @@ impl Row for RowRef<'_> {
 
 #[derive(Clone)]
 pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, Column>,
+    columns: std::slice::Iter<'a, ArrayRef>,
     row_idx: usize,
 }
 
@@ -214,7 +198,7 @@ impl<'a> Iterator for RowRefIter<'a> {
         unsafe {
             self.columns
                 .next()
-                .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
+                .map(|col| col.value_at_unchecked(self.row_idx))
         }
     }
 

@@ -21,7 +21,6 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -110,11 +109,6 @@ impl Compactor {
 
     pub fn max_concurrent_task_number(&self) -> u64 {
         self.max_concurrent_task_number.load(Ordering::Relaxed)
-    }
-
-    pub fn set_config(&self, config: CompactorRuntimeConfig) {
-        self.max_concurrent_task_number
-            .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
 
     pub fn is_busy(&self, limit: u32) -> bool {
@@ -247,16 +241,6 @@ impl CompactorManager {
         // To remove the heartbeats, they need to be forcefully purged,
         // which is only safe when the context has been completely removed from meta.
         tracing::info!("Removed compactor session {}", context_id);
-    }
-
-    pub fn set_compactor_config(
-        &self,
-        context_id: HummockContextId,
-        config: CompactorRuntimeConfig,
-    ) {
-        if let Some(compactor) = self.policy.read().get_compactor(context_id) {
-            compactor.set_config(config);
-        }
     }
 
     pub fn get_compactor(&self, context_id: HummockContextId) -> Option<Arc<Compactor>> {
@@ -398,15 +382,10 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
-                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
-                    {
-                        // Refresh the expiry of the task as it is showing progress.
-                        task_ref.expire_at = now + self.task_expiry_seconds;
-                        // Update the task state to the latest state.
-                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
-                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
-                    }
+                    // Refresh the expiry of the task as it is showing progress.
+                    task_ref.expire_at = now + self.task_expiry_seconds;
+                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
                 }
             }
         }
@@ -449,7 +428,9 @@ mod tests {
     use risingwave_pb::hummock::CompactTaskProgress;
 
     use crate::hummock::compaction::default_level_selector;
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::hummock::test_utils::{
+        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    };
     use crate::hummock::CompactorManager;
 
     #[tokio::test]
@@ -459,6 +440,12 @@ mod tests {
             let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
             let context_id = worker_node.id;
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+            register_table_ids_to_compaction_group(
+                hummock_manager.as_ref(),
+                &[1],
+                StaticCompactionGroupId::StateDefault.into(),
+            )
+            .await;
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
             let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
@@ -500,7 +487,7 @@ mod tests {
                 num_ssts_uploaded: 0,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(
@@ -511,7 +498,7 @@ mod tests {
                 num_ssts_uploaded: 1,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(

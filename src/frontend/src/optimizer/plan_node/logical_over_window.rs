@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
-use super::generic::{OverWindow, PlanWindowFunction};
+use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
@@ -53,7 +53,40 @@ impl LogicalOverWindow {
         input: PlanRef,
         mut select_exprs: Vec<ExprImpl>,
     ) -> Result<(PlanRef, Vec<ExprImpl>)> {
-        let input_len = input.schema().len();
+        let mut input_proj_builder = ProjectBuilder::default();
+        for (idx, field) in input.schema().fields().iter().enumerate() {
+            input_proj_builder
+                .add_expr(&InputRef::new(idx, field.data_type()).into())
+                .map_err(|err| {
+                    ErrorCode::NotImplemented(format!("{err} inside input"), None.into())
+                })?;
+        }
+        let mut input_len = input.schema().len();
+        for expr in &select_exprs {
+            if let ExprImpl::WindowFunction(window_function) = expr {
+                let input_idx_in_order_by: Vec<_> = window_function
+                    .order_by
+                    .sort_exprs
+                    .iter()
+                    .map(|x| input_proj_builder.add_expr(&x.expr))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside order_by"), None.into())
+                    })?;
+                let input_idx_in_partition_by: Vec<_> = window_function
+                    .partition_by
+                    .iter()
+                    .map(|x| input_proj_builder.add_expr(x))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
+                    })?;
+                input_len = input_len
+                    .max(*input_idx_in_order_by.iter().max().unwrap_or(&0) + 1)
+                    .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
+            }
+        }
+
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
             if let ExprImpl::WindowFunction(_) = expr {
@@ -94,44 +127,45 @@ impl LogicalOverWindow {
 
         let plan_window_funcs = window_funcs
             .into_iter()
-            .map(Self::convert_window_function)
+            .map(|x| Self::convert_window_function(x, &input_proj_builder))
             .try_collect()?;
 
-        Ok((Self::new(plan_window_funcs, input).into(), select_exprs))
+        Ok((
+            Self::new(
+                plan_window_funcs,
+                LogicalProject::with_core(input_proj_builder.build(input)).into(),
+            )
+            .into(),
+            select_exprs,
+        ))
     }
 
-    fn convert_window_function(window_function: WindowFunction) -> Result<PlanWindowFunction> {
-        // TODO: rewrite expressions in `ORDER BY`, `PARTITION BY` and arguments to `InputRef` like
-        // in `LogicalAgg`
-        let order_by: Vec<_> = window_function
+    fn convert_window_function(
+        window_function: WindowFunction,
+        input_proj_builder: &ProjectBuilder,
+    ) -> Result<PlanWindowFunction> {
+        let order_by = window_function
             .order_by
             .sort_exprs
             .into_iter()
-            .map(|e| match e.expr.as_input_ref() {
-                Some(i) => Ok(ColumnOrder::new(i.index(), e.order_type)),
-                None => Err(ErrorCode::NotImplemented(
-                    "ORDER BY expression in window function".to_string(),
-                    None.into(),
-                )),
+            .map(|e| {
+                ColumnOrder::new(
+                    input_proj_builder.expr_index(&e.expr).unwrap(),
+                    e.order_type,
+                )
             })
-            .try_collect()?;
-        let partition_by: Vec<_> = window_function
+            .collect_vec();
+        let partition_by = window_function
             .partition_by
             .into_iter()
-            .map(|e| match e.as_input_ref() {
-                Some(i) => Ok(*i.clone()),
-                None => Err(ErrorCode::NotImplemented(
-                    "PARTITION BY expression in window function".to_string(),
-                    None.into(),
-                )),
-            })
-            .try_collect()?;
+            .map(|e| InputRef::new(input_proj_builder.expr_index(&e).unwrap(), e.return_type()))
+            .collect_vec();
 
         let mut args = window_function.args;
         let frame = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
                 // ignore user-defined frame for rank functions
-                Frame::Rows(
+                Frame::rows(
                     FrameBound::UnboundedPreceding,
                     FrameBound::UnboundedFollowing,
                 )
@@ -160,21 +194,21 @@ impl LogicalOverWindow {
                 // override the frame
                 // TODO(rc): We can only do the optimization for constant offset.
                 if window_function.kind == WindowFuncKind::Lag {
-                    Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
+                    Frame::rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
                 } else {
-                    Frame::Rows(FrameBound::CurrentRow, FrameBound::Following(offset))
+                    Frame::rows(FrameBound::CurrentRow, FrameBound::Following(offset))
                 }
             }
             WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
                 // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
                 // CurrentRow)` but we don't support yet.
                 if order_by.is_empty() {
-                    Frame::Rows(
+                    Frame::rows(
                         FrameBound::UnboundedPreceding,
                         FrameBound::UnboundedFollowing,
                     )
                 } else {
-                    Frame::Rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                    Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
                 }
             }),
         };
@@ -363,7 +397,6 @@ impl ToBatch for LogicalOverWindow {
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let stream_input = self.core.input.to_stream(ctx)?;
-        stream_input.watermark_columns();
 
         if ctx.emit_on_window_close() {
             if !self.core.funcs_have_same_partition_and_order() {

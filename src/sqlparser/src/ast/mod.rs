@@ -675,7 +675,7 @@ pub struct WindowFrame {
     /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
     /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
     pub end_bound: Option<WindowFrameBound>,
-    // TBD: EXCLUDE
+    pub exclusion: Option<WindowFrameExclusion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -734,6 +734,27 @@ impl fmt::Display for WindowFrameBound {
     }
 }
 
+/// Frame exclusion option of [WindowFrame].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameExclusion {
+    CurrentRow,
+    Group,
+    Ties,
+    NoOthers,
+}
+
+impl fmt::Display for WindowFrameExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW"),
+            WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP"),
+            WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES"),
+            WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddDropSync {
@@ -766,6 +787,7 @@ pub enum ShowObject {
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
+    Indexes { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -798,6 +820,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
+            ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
         }
     }
 }

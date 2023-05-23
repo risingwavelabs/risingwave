@@ -1,3 +1,20 @@
+# We don't support CSV header for Kafka
+statement error CSV HEADER is not supported when creating table with Kafka connector
+create table s0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format csv DELIMITED BY ',';
+
+statement ok
+create table s0 (v1 int, v2 varchar) with (
+  connector = 'kafka',
+  topic = 'kafka_1_csv_topic',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format csv WITHOUT HEADER DELIMITED BY ',';
+
 # expect fail with invalid broker address
 statement error
 create table s1 (v1 int, v2 varchar) with (
@@ -167,7 +184,7 @@ WITH (
     scan.startup.mode = 'earliest')
 ROW format JSON;
 
-# we cannot create debezium source without pk
+# we cannot create maxwell source without pk
 statement error
 create table s13 (
   id integer,
@@ -281,7 +298,7 @@ create table s21 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
 
 # create kafka source with generated column
 statement ok
-create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
+create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1, p timestamptz as proctime()) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_generated_columns',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -299,6 +316,22 @@ WITH (
   properties.bootstrap.server = '127.0.0.1:29092',
 	topic = 'debezium_mongo_json_customers')
 ROW FORMAT DEBEZIUM_MONGO_JSON
+
+# we cannot create upsert_json source without pk
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '127.0.0.1:29092',
+	topic = 'upsert_json')
+ROW FORMAT UPSERT_JSON
 
 statement ok
 CREATE TABLE upsert_students (
@@ -321,6 +354,14 @@ flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
 sleep 1s
+
+query IT rowsort
+select v1, v2 from s0;
+----
+1 1
+2 22
+3 333
+4 4444
 
 query IT rowsort
 select * from s1
@@ -371,8 +412,9 @@ select count(*) from s5
 ----
 100
 
+# we only support at-least-once semantic, count distinct to make result deterministic in recovery test
 query I
-select count(*) from s7
+select count(distinct (v1,v2)) from s7
 ----
 100
 
@@ -490,11 +532,11 @@ select * from s21;
 NULL NULL NULL
 
 query III rowsort
-select * from s22;
+select v1, v2, v3, p >= date '2021-01-01' from s22;
 ----
-19 20 21
-20 21 22
-NULL NULL NULL
+19 20 21 t
+20 21 22 t
+NULL NULL NULL t
 
 query II 
 SELECT

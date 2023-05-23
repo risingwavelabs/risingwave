@@ -45,6 +45,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
 };
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -138,6 +139,7 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
@@ -152,6 +154,7 @@ impl HummockEventHandler {
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
+            state_store_metrics,
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
                 spawn(flush_imms(

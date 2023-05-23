@@ -16,8 +16,7 @@ use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
-use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
@@ -211,7 +210,7 @@ impl DataChunkBuilder {
 
         let columns = new_array_builders.into_iter().fold(
             Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> Vec<Column> {
+            |mut vec, array_builder| -> Vec<ArrayRef> {
                 let column = array_builder.finish().into();
                 vec.push(column);
                 vec
@@ -222,6 +221,10 @@ impl DataChunkBuilder {
 
     pub fn buffered_count(&self) -> usize {
         self.buffered_count
+    }
+
+    pub fn num_columns(&self) -> usize {
+        self.data_types.len()
     }
 
     pub fn data_types(&self) -> Vec<DataType> {

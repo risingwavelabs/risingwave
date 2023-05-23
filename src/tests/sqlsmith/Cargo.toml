@@ -40,6 +40,10 @@ libtest-mimic = "0.6"
 name = "sqlsmith"
 path = "src/bin/main.rs"
 
+[[bin]]
+name = "sqlsmith-reducer"
+path = "src/bin/reducer.rs"
+
 [features]
 enable_sqlsmith_unit_test = []
 

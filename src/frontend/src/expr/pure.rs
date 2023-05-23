@@ -154,8 +154,21 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
+            | expr_node::Type::Asind
+            | expr_node::Type::Sinh
+            | expr_node::Type::Cosh
+            | expr_node::Type::Coth
+            | expr_node::Type::Tanh
+            | expr_node::Type::Atanh
+            | expr_node::Type::Asinh
+            | expr_node::Type::Acosh
             | expr_node::Type::Decode
             | expr_node::Type::Encode
+            | expr_node::Type::Sha1
+            | expr_node::Type::Sha224
+            | expr_node::Type::Sha256
+            | expr_node::Type::Sha384
+            | expr_node::Type::Sha512
             | expr_node::Type::Tand
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray =>

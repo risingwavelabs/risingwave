@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema, SchemaRef};
-use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
+use futures_util::stream;
+use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_udf::ArrowFlightUdfClient;
 
@@ -26,7 +27,7 @@ pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
     arg_schema: SchemaRef,
     return_type: DataType,
-    client: ArrowFlightUdfClient,
+    client: Arc<ArrowFlightUdfClient>,
     identifier: String,
     #[allow(dead_code)]
     chunk_size: usize,
@@ -39,7 +40,15 @@ impl TableFunction for UserDefinedTableFunction {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+        self.eval_inner(input)
+    }
+}
+
+#[cfg(not(madsim))]
+impl UserDefinedTableFunction {
+    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
         let mut columns = Vec::with_capacity(self.children.len());
         for c in &self.children {
             let val = c.eval_checked(input).await?.as_ref().into();
@@ -51,33 +60,32 @@ impl TableFunction for UserDefinedTableFunction {
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = self.client.call(&self.identifier, input).await?;
-        let array: arrow_array::ArrayRef = if output.num_columns() == 1 {
-            output.column(0).clone()
-        } else {
-            Arc::new(arrow_array::StructArray::from(output))
-        };
-        // TODO: split by chunk_size
-        Ok(vec![Arc::new(ArrayImpl::try_from(&array)?)])
+        #[for_await]
+        for res in self
+            .client
+            .call_stream(&self.identifier, stream::once(async { input }))
+            .await?
+        {
+            let output = DataChunk::try_from(&res?)?;
+            yield output;
+        }
     }
 }
 
 #[cfg(not(madsim))]
-pub fn new_user_defined(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
+pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     let Some(udtf) = &prost.udtf else {
         bail!("expect UDTF");
     };
 
-    // connect to UDF service
     let arg_schema = Arc::new(Schema::new(
         udtf.arg_types
             .iter()
             .map(|t| Field::new("", DataType::from(t).into(), true))
             .collect(),
     ));
-    let client = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(ArrowFlightUdfClient::connect(&udtf.link))
-    })?;
+    // connect to UDF service
+    let client = crate::expr::expr_udf::get_or_create_client(&udtf.link)?;
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
@@ -97,14 +105,14 @@ impl TableFunction for UserDefinedTableFunction {
         panic!("UDF is not supported in simulation yet");
     }
 
-    async fn eval(&self, _input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
         panic!("UDF is not supported in simulation yet");
     }
 }
 
 #[cfg(madsim)]
 pub fn new_user_defined(
-    _prost: &TableFunctionPb,
+    _prost: &PbTableFunction,
     _chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     panic!("UDF is not supported in simulation yet");
