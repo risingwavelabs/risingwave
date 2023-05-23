@@ -232,6 +232,7 @@ lazy_static! {
         vec![
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
             OverWindowToTopNRule::create(),
