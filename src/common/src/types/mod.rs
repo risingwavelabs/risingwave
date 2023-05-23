@@ -629,6 +629,23 @@ impl ToDatumRef for DatumRef<'_> {
     }
 }
 
+/// To make sure there is `as_scalar_ref` for all scalar ref types.
+pub trait SelfAsScalarRef {
+    fn as_scalar_ref(&self) -> Self;
+}
+macro_rules! impl_self_as_scalar_ref {
+    ($($t:ty),*) => {
+        $(
+            impl SelfAsScalarRef for $t {
+                fn as_scalar_ref(&self) -> Self {
+                    *self
+                }
+            }
+        )*
+    };
+}
+impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_> }
+
 /// `for_all_native_types` includes all native variants of our scalar types.
 ///
 /// Specifically, it doesn't support u8/u16/u32/u64.
@@ -979,10 +996,6 @@ macro_rules! impl_scalar_impl_ref_conversion {
                         Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
                     ), *
                 }
-            }
-
-            pub fn as_scalar_ref(&self) -> Self {
-                *self
             }
         }
     };

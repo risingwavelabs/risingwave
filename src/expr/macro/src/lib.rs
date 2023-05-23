@@ -129,8 +129,12 @@ struct UserFunctionAttr {
     arg_option: bool,
     /// The return type.
     return_type: ReturnType,
+    /// The inner type `T` in `impl Iterator<Item = T>`
+    iterator_item_type: Option<ReturnType>,
     /// The number of generic types.
     generic: usize,
+    /// The span of return type.
+    return_type_span: proc_macro2::Span,
     // /// `#[list(0)]` in arguments.
     // list: Vec<(usize, usize)>,
     // /// `#[struct(0)]` in arguments.

@@ -31,6 +31,7 @@ use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
+mod jsonb;
 mod regexp_matches;
 mod repeat;
 mod unnest;

@@ -518,7 +518,19 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let value = match self.user_fn.return_type {
+        let iter = match self.user_fn.return_type {
+            ReturnType::T => quote! { iter },
+            ReturnType::Option => quote! { iter.flatten() },
+            ReturnType::Result => quote! { iter? },
+            ReturnType::ResultOption => quote! { value?.flatten() },
+        };
+        let iterator_item_type = self.user_fn.iterator_item_type.clone().ok_or_else(|| {
+            Error::new(
+                self.user_fn.return_type_span,
+                "expect `impl Iterator` in return type",
+            )
+        })?;
+        let value = match iterator_item_type {
             ReturnType::T => quote! { Some(value) },
             ReturnType::Option => quote! { value },
             ReturnType::Result => quote! { Some(value?) },
@@ -567,7 +579,8 @@ impl FunctionAttr {
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#elems),)*) = row && visible {
-                                for value in #fn_name(#(#elems,)* #const_arg) {
+                                let iter = #fn_name(#(#elems,)* #const_arg);
+                                for value in #iter {
                                     index_builder.append(Some(i as i64));
                                     match #value {
                                         Some(v) => value_builder.append(Some(v.as_scalar_ref())),
