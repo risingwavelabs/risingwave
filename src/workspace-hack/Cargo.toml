@@ -97,7 +97,6 @@ tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 [build-dependencies]
 ahash = { version = "0.8" }
@@ -185,6 +184,5 @@ tracing-core = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
-zstd-sys = { version = "2", default-features = false, features = ["legacy", "std", "zdict_builder"] }
 
 ### END HAKARI SECTION
