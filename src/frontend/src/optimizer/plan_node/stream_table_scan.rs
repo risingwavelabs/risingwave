@@ -154,12 +154,13 @@ impl StreamTableScan {
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
+        catalog_builder.set_dist_key_in_pk(vec![0]);
 
         let num_of_columns = catalog_builder.columns().len();
         catalog_builder.set_value_indices((1..num_of_columns).collect_vec());
 
         catalog_builder
-            .build(vec![], 1)
+            .build(vec![0], 1)
             .with_id(state.gen_table_id_wrapped())
     }
 }
