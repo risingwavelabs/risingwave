@@ -149,6 +149,7 @@ lazy_static! {
         vec![
             ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
