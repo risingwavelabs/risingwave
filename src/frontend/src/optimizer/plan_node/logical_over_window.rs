@@ -64,6 +64,14 @@ impl LogicalOverWindow {
         let mut input_len = input.schema().len();
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
+                let input_idx_in_args: Vec<_> = window_function
+                    .args
+                    .iter()
+                    .map(|x| input_proj_builder.add_expr(x))
+                    .try_collect()
+                    .map_err(|err| {
+                        ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
+                    })?;
                 let input_idx_in_order_by: Vec<_> = window_function
                     .order_by
                     .sort_exprs
@@ -82,6 +90,7 @@ impl LogicalOverWindow {
                         ErrorCode::NotImplemented(format!("{err} inside partition_by"), None.into())
                     })?;
                 input_len = input_len
+                    .max(*input_idx_in_args.iter().max().unwrap_or(&0) + 1)
                     .max(*input_idx_in_order_by.iter().max().unwrap_or(&0) + 1)
                     .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
             }
@@ -215,14 +224,8 @@ impl LogicalOverWindow {
 
         let args = args
             .into_iter()
-            .map(|e| match e.as_input_ref() {
-                Some(i) => Ok(*i.clone()),
-                None => Err(ErrorCode::NotImplemented(
-                    "expression arguments in window function".to_string(),
-                    None.into(),
-                )),
-            })
-            .try_collect()?;
+            .map(|e| InputRef::new(input_proj_builder.expr_index(&e).unwrap(), e.return_type()))
+            .collect_vec();
 
         Ok(PlanWindowFunction {
             kind: window_function.kind,
