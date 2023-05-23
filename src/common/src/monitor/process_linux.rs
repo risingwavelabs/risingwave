@@ -100,12 +100,12 @@ impl Collector for ProcessCollector {
         };
 
         // memory
-        self.vsize.set(p.stat.vsize as i64);
-        self.rss.set(p.stat.rss * *PAGESIZE);
+        self.vsize.set(p.stat().vsize as i64);
+        self.rss.set(p.stat().rss * *PAGESIZE);
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / *CLOCK_TICK;
+            let total = (p.stat().utime + p.stat().stime) / *CLOCK_TICK;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
             self.cpu_total.collect()
