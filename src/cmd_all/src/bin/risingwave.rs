@@ -17,7 +17,13 @@
 use std::str::FromStr;
 
 use anyhow::Result;
-use clap::{command, Arg, Command, Parser};
+use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use risingwave_cmd_all::PlaygroundOpts;
+use risingwave_compactor::CompactorOpts;
+use risingwave_compute::ComputeNodeOpts;
+use risingwave_ctl::CliOpts as CtlOpts;
+use risingwave_frontend::FrontendOpts;
+use risingwave_meta::MetaNodeOpts;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 use tracing::Level;
@@ -29,9 +35,8 @@ risingwave_common::enable_task_local_jemalloc_on_unix!();
 risingwave_common::enable_jemalloc_on_unix!();
 
 const BINARY_NAME: &str = "risingwave";
-const ARGS_ID: &str = "args";
 
-/// Component to lanuch.
+/// Component to launch.
 #[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
 enum Component {
@@ -45,17 +50,20 @@ enum Component {
 
 impl Component {
     /// Start the component from the given `args` without `argv[0]`.
-    fn start(self, mut args: Vec<String>) {
-        eprintln!("launching `{}` with args `{:?}`", self, args);
-        args.insert(0, format!("{} {}", BINARY_NAME, self)); // mock argv[0]
+    fn start(self, matches: &ArgMatches) {
+        eprintln!("launching `{}`", self);
+
+        fn parse_opts<T: FromArgMatches>(matches: &ArgMatches) -> T {
+            T::from_arg_matches(matches).map_err(|e| e.exit()).unwrap()
+        }
 
         match self {
-            Self::Compute => compute(args),
-            Self::Meta => meta(args),
-            Self::Frontend => frontend(args),
-            Self::Compactor => compactor(args),
-            Self::Ctl => ctl(args),
-            Self::Playground => playground(args),
+            Self::Compute => compute(parse_opts(matches)),
+            Self::Meta => meta(parse_opts(matches)),
+            Self::Frontend => frontend(parse_opts(matches)),
+            Self::Compactor => compactor(parse_opts(matches)),
+            Self::Ctl => ctl(parse_opts(matches)),
+            Self::Playground => playground(parse_opts(matches)),
         }
     }
 
@@ -71,24 +79,36 @@ impl Component {
         }
     }
 
+    /// Append component-specific arguments to the given `cmd`.
+    fn augment_args(self, cmd: Command) -> Command {
+        match self {
+            Component::Compute => ComputeNodeOpts::augment_args(cmd),
+            Component::Meta => MetaNodeOpts::augment_args(cmd),
+            Component::Frontend => FrontendOpts::augment_args(cmd),
+            Component::Compactor => CompactorOpts::augment_args(cmd),
+            Component::Ctl => CtlOpts::augment_args(cmd),
+            Component::Playground => PlaygroundOpts::augment_args(cmd),
+        }
+    }
+
     /// `clap` commands for all components.
     fn commands() -> Vec<Command> {
         Self::iter()
             .map(|c| {
                 let name: &'static str = c.into();
-                let args = Arg::new(ARGS_ID)
-                    // make arguments transaprent to `clap`
-                    .num_args(0..)
-                    .allow_hyphen_values(true)
-                    .trailing_var_arg(true);
-                Command::new(name).visible_aliases(c.aliases()).arg(args)
+                let command = Command::new(name).visible_aliases(c.aliases());
+                c.augment_args(command)
             })
             .collect()
     }
 }
 
 fn main() -> Result<()> {
-    let risingwave = || command!(BINARY_NAME);
+    let risingwave = || {
+        command!(BINARY_NAME)
+            .about("All-in-one executable for components of RisingWave")
+            .propagate_version(true)
+    };
     let command = risingwave()
         // `$ ./meta <args>`
         .multicall(true)
@@ -100,65 +120,51 @@ fn main() -> Result<()> {
                 .subcommand_help_heading("Components")
                 .subcommand_required(true)
                 .subcommands(Component::commands()),
-        )
-        .disable_help_flag(true); // avoid top-level options
+        );
 
     let matches = command.get_matches();
 
     let multicall = matches.subcommand().unwrap();
     let argv_1 = multicall.1.subcommand();
-    let subcommand = argv_1.unwrap_or(multicall);
+    let (component_name, matches) = argv_1.unwrap_or(multicall);
 
-    let component = Component::from_str(subcommand.0)?;
-    let args = subcommand
-        .1
-        .get_many::<String>(ARGS_ID)
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect();
-
-    component.start(args);
+    let component = Component::from_str(component_name)?;
+    component.start(matches);
 
     Ok(())
 }
 
-fn compute(args: Vec<String>) {
-    let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
+fn compute(opts: ComputeNodeOpts) {
     risingwave_rt::init_risingwave_logger(
         risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
     );
     risingwave_rt::main_okk(risingwave_compute::start(opts));
 }
 
-fn meta(args: Vec<String>) {
-    let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
+fn meta(opts: MetaNodeOpts) {
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     risingwave_rt::main_okk(risingwave_meta::start(opts));
 }
 
-fn frontend(args: Vec<String>) {
-    let opts = risingwave_frontend::FrontendOpts::parse_from(args);
+fn frontend(opts: FrontendOpts) {
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     risingwave_rt::main_okk(risingwave_frontend::start(opts));
 }
 
-fn compactor(args: Vec<String>) {
-    let opts = risingwave_compactor::CompactorOpts::parse_from(args);
+fn compactor(opts: CompactorOpts) {
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     risingwave_rt::main_okk(risingwave_compactor::start(opts));
 }
 
-fn ctl(args: Vec<String>) {
-    let opts = risingwave_ctl::CliOpts::parse_from(args);
+fn ctl(opts: CtlOpts) {
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     risingwave_rt::main_okk(risingwave_ctl::start(opts)).unwrap();
 }
 
-fn playground(_args: Vec<String>) {
+fn playground(opts: PlaygroundOpts) {
     let settings = risingwave_rt::LoggerSettings::new()
         .enable_tokio_console(false)
         .with_target("risingwave_storage", Level::WARN);
     risingwave_rt::init_risingwave_logger(settings);
-    risingwave_rt::main_okk(risingwave_cmd_all::playground()).unwrap()
+    risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
