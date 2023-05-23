@@ -22,7 +22,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use lru::{DefaultHasher, KeyRef, LruCache};
+use prometheus::IntGauge;
 use risingwave_common::estimate_size::EstimateSize;
+
+use crate::common::metrics::MetricsInfo;
 
 const REPORT_SIZE_EVERY_N_KB_CHANGE: usize = 4096;
 
@@ -35,6 +38,8 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     watermark_epoch: Arc<AtomicU64>,
     /// The heap size of keys/values
     kv_heap_size: usize,
+    /// The metrics of memory usage
+    memory_usage_metrics: Option<IntGauge>,
     /// The size reported last time
     last_reported_size_bytes: usize,
 }
@@ -42,6 +47,26 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
     ManagedLruCache<K, V, S, A>
 {
+    pub fn new_inner(
+        inner: LruCache<K, V, S, A>,
+        watermark_epoch: Arc<AtomicU64>,
+        metrics_info: Option<MetricsInfo>,
+    ) -> Self {
+        let memory_usage_metrics = metrics_info.map(|info| {
+            info.metrics
+                .stream_memory_usage
+                .with_label_values(&[&info.table_id, &info.actor_id])
+        });
+
+        Self {
+            inner,
+            watermark_epoch,
+            kv_heap_size: 0,
+            memory_usage_metrics,
+            last_reported_size_bytes: 0,
+        }
+    }
+
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
         let epoch = self.watermark_epoch.load(Ordering::Relaxed);
@@ -191,12 +216,14 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 pub fn new_unbounded<K: Hash + Eq + EstimateSize, V: EstimateSize>(
     watermark_epoch: Arc<AtomicU64>,
 ) -> ManagedLruCache<K, V> {
-    ManagedLruCache {
-        inner: LruCache::unbounded(),
-        watermark_epoch,
-        kv_heap_size: 0,
-        last_reported_size_bytes: 0,
-    }
+    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, None)
+}
+
+pub fn new_unbounded_with_metrics<K: Hash + Eq + EstimateSize, V: EstimateSize>(
+    watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
+) -> ManagedLruCache<K, V> {
+    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, Some(metrics_info))
 }
 
 pub fn new_with_hasher_in<
@@ -206,27 +233,27 @@ pub fn new_with_hasher_in<
     A: Clone + Allocator,
 >(
     watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
     hasher: S,
     alloc: A,
 ) -> ManagedLruCache<K, V, S, A> {
-    ManagedLruCache {
-        inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+    ManagedLruCache::new_inner(
+        LruCache::unbounded_with_hasher_in(hasher, alloc),
         watermark_epoch,
-        kv_heap_size: 0,
-        last_reported_size_bytes: 0,
-    }
+        Some(metrics_info),
+    )
 }
 
 pub fn new_with_hasher<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher>(
     watermark_epoch: Arc<AtomicU64>,
+    metrics_info: MetricsInfo,
     hasher: S,
 ) -> ManagedLruCache<K, V, S> {
-    ManagedLruCache {
-        inner: LruCache::unbounded_with_hasher(hasher),
+    ManagedLruCache::new_inner(
+        LruCache::unbounded_with_hasher(hasher),
         watermark_epoch,
-        kv_heap_size: 0,
-        last_reported_size_bytes: 0,
-    }
+        Some(metrics_info),
+    )
 }
 
 pub struct MutGuard<'a, V: EstimateSize> {
