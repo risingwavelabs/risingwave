@@ -331,7 +331,7 @@ impl<'a> JsonbRef<'a> {
         match &self.0 {
             Value::Object(object) => Ok(object.keys().map(|s| s.as_str())),
             _ => Err(format!(
-                "cannot call json_object_keys on a jsonb {}",
+                "cannot call jsonb_object_keys on a jsonb {}",
                 self.type_name()
             )),
         }

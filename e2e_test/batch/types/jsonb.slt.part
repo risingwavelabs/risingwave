@@ -150,3 +150,62 @@ SELECT '{
 		true}'::jsonb; -- OK
 ----
 {"one": 1, "three": true, "two": "two"}
+
+# jsonb_array_elements
+query T
+select * from jsonb_array_elements('[1,true, [2,false]]'::jsonb);
+----
+1
+true
+[2, false]
+
+statement error cannot extract elements
+select * from jsonb_array_elements('null'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements('1'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements('"string"'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements('{}'::jsonb)
+
+
+# jsonb_array_elements_text
+query T
+select * from jsonb_array_elements_text('["foo", "bar"]'::jsonb);
+----
+foo
+bar
+
+statement error cannot extract elements
+select * from jsonb_array_elements_text('null'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements_text('1'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements_text('"string"'::jsonb)
+
+statement error cannot extract elements
+select * from jsonb_array_elements_text('{}'::jsonb)
+
+# jsonb_object_keys
+query T
+select * from jsonb_object_keys('{"f1":"abc","f2":{"f3":"a", "f4":"b"}}'::jsonb);
+----
+f1
+f2
+
+statement error cannot call jsonb_object_keys
+select * from jsonb_object_keys('null'::jsonb)
+
+statement error cannot call jsonb_object_keys
+select * from jsonb_object_keys('1'::jsonb)
+
+statement error cannot call jsonb_object_keys
+select * from jsonb_object_keys('"string"'::jsonb)
+
+statement error cannot call jsonb_object_keys
+select * from jsonb_object_keys('[]'::jsonb)
