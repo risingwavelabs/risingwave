@@ -192,7 +192,6 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
-    connector_properties: ConnectorProperties,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -279,15 +278,11 @@ where
                         })
                         .collect();
 
-                    let mut options = SplitDiffOptions::default();
-
-                    if handle.connector_properties.enable_split_reduction() {
-                        options.enable_scale_in = true;
-                    }
-
-                    if let Some(change) =
-                        diff_splits(prev_actor_splits, &discovered_splits, options)
-                    {
+                    if let Some(change) = diff_splits(
+                        prev_actor_splits,
+                        &discovered_splits,
+                        SplitDiffOptions::default(),
+                    ) {
                         split_assignment.insert(*fragment_id, change);
                     }
                 }
@@ -714,8 +709,6 @@ where
             worker.tick().await?;
         }
 
-        let connector_properties = worker.connector_properties.clone();
-
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
@@ -726,7 +719,6 @@ where
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
-                connector_properties,
             },
         );
 
