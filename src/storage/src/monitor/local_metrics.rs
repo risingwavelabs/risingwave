@@ -146,6 +146,9 @@ impl StoreLocalStatistic {
         metrics
             .bloom_filter_true_negative_counts
             .inc_by(self.bloom_filter_true_negative_counts);
+        metrics
+            .bloom_filter_check_counts
+            .inc_by(self.bloom_filter_check_counts);
         metrics.read_req_check_bloom_filter_counts.inc();
 
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
@@ -440,6 +443,7 @@ macro_rules! define_bloom_filter_metrics {
 
 define_bloom_filter_metrics!(
     read_req_check_bloom_filter_counts,
+    bloom_filter_check_counts,
     bloom_filter_true_negative_counts,
     read_req_positive_but_non_exist_counts,
     read_req_bloom_filter_positive_counts
