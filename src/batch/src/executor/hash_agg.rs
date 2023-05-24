@@ -167,7 +167,6 @@ pub struct HashAggExecutor<K> {
 }
 
 impl<K> HashAggExecutor<K> {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         agg_init_states: Vec<BoxedAggState>,
         group_key_columns: Vec<usize>,
