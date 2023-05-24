@@ -30,6 +30,11 @@ import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+enum DatabaseType {
+    MYSQL,
+    POSTGRES;
+}
+
 public class JDBCSink extends SinkBase {
     public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
     private static final String DELETE_TEMPLATE = "DELETE FROM %s WHERE %s";
@@ -39,6 +44,7 @@ public class JDBCSink extends SinkBase {
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
+    private final DatabaseType targetDbType;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
     private String updateDeleteConditionBuffer;
@@ -48,6 +54,17 @@ public class JDBCSink extends SinkBase {
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
+
+        var jdbcUrl = config.getJdbcUrl().toLowerCase();
+        if (jdbcUrl.startsWith("jdbc:mysql")) {
+            this.targetDbType = DatabaseType.MYSQL;
+        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
+            this.targetDbType = DatabaseType.POSTGRES;
+        } else {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("Unsupported jdbc url")
+                    .asRuntimeException();
+        }
 
         this.config = config;
         try {
@@ -92,27 +109,7 @@ public class JDBCSink extends SinkBase {
                         String.format(
                                 INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
                 try {
-                    PreparedStatement stmt =
-                            conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
-                    var columnNames = getTableSchema().getColumnNames();
-                    for (int i = 0; i < row.size(); i++) {
-                        switch (getTableSchema().getColumnType(columnNames[i])) {
-                            case INTERVAL:
-                                stmt.setObject(i + 1, new PGInterval((String) row.get(i)));
-                                break;
-                            case JSONB:
-                                // reference: https://github.com/pgjdbc/pgjdbc/issues/265
-                                var pgObj = new PGobject();
-                                pgObj.setType("jsonb");
-                                pgObj.setValue((String) row.get(i));
-                                stmt.setObject(i + 1, pgObj);
-                                break;
-                            default:
-                                stmt.setObject(i + 1, row.get(i));
-                                break;
-                        }
-                    }
-                    return stmt;
+                    return generatePreparedStatement(insertStmt, row, targetDbType);
                 } catch (SQLException e) {
                     throw io.grpc.Status.INTERNAL
                             .withDescription(
@@ -214,6 +211,34 @@ public class JDBCSink extends SinkBase {
                         .withDescription("unspecified row operation")
                         .asRuntimeException();
         }
+    }
+
+    private PreparedStatement generatePreparedStatement(
+            String insertStmt, SinkRow row, DatabaseType targetDbType) throws SQLException {
+        PreparedStatement stmt = conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
+        var columnNames = getTableSchema().getColumnNames();
+        for (int i = 0; i < row.size(); i++) {
+            switch (getTableSchema().getColumnType(columnNames[i])) {
+                case INTERVAL:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        stmt.setObject(i + 1, new PGInterval((String) row.get(i)));
+                    }
+                    break;
+                case JSONB:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        // reference: https://github.com/pgjdbc/pgjdbc/issues/265
+                        var pgObj = new PGobject();
+                        pgObj.setType("jsonb");
+                        pgObj.setValue((String) row.get(i));
+                        stmt.setObject(i + 1, pgObj);
+                    }
+                    break;
+                default:
+                    stmt.setObject(i + 1, row.get(i));
+                    break;
+            }
+        }
+        return stmt;
     }
 
     @Override
