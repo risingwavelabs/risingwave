@@ -3,50 +3,51 @@ import struct
 import sys
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
-sys.path.append('src/udf/python')  # noqa
+
+sys.path.append("src/udf/python")  # noqa
 
 from risingwave.udf import udf, udtf, UdfServer
 
 
-@udf(input_types=[], result_type='INT')
+@udf(input_types=[], result_type="INT")
 def int_42() -> int:
     return 42
 
 
-@udf(input_types=['INT', 'INT'], result_type='INT')
+@udf(input_types=["INT", "INT"], result_type="INT")
 def gcd(x: int, y: int) -> int:
     while y != 0:
         (x, y) = (y, x % y)
     return x
 
 
-@udf(name='gcd3', input_types=['INT', 'INT', 'INT'], result_type='INT')
+@udf(name="gcd3", input_types=["INT", "INT", "INT"], result_type="INT")
 def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
 
-@udf(input_types=['BYTEA'], result_type='STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>')
+@udf(input_types=["BYTEA"], result_type="STRUCT<VARCHAR, VARCHAR, SMALLINT, SMALLINT>")
 def extract_tcp_info(tcp_packet: bytes):
-    src_addr, dst_addr = struct.unpack('!4s4s', tcp_packet[12:20])
-    src_port, dst_port = struct.unpack('!HH', tcp_packet[20:24])
+    src_addr, dst_addr = struct.unpack("!4s4s", tcp_packet[12:20])
+    src_port, dst_port = struct.unpack("!HH", tcp_packet[20:24])
     src_addr = socket.inet_ntoa(src_addr)
     dst_addr = socket.inet_ntoa(dst_addr)
     return src_addr, dst_addr, src_port, dst_port
 
 
-@udtf(input_types='INT', result_types='INT')
+@udtf(input_types="INT", result_types="INT")
 def series(n: int) -> Iterator[int]:
     for i in range(n):
         yield i
 
 
-@udtf(input_types='INT', result_types=['INT', 'VARCHAR'])
+@udtf(input_types="INT", result_types=["INT", "VARCHAR"])
 def series2(n: int) -> Iterator[Tuple[int, str]]:
     for i in range(n):
-        yield i, f'#{i}'
+        yield i, f"#{i}"
 
 
-@udf(input_types='VARCHAR', result_type='DECIMAL')
+@udf(input_types="VARCHAR", result_type="DECIMAL")
 def hex_to_dec(hex: Optional[str]) -> Optional[Decimal]:
     if not hex:
         return None
@@ -69,26 +70,31 @@ def array_access(list: List[str], idx: int) -> Optional[str]:
     return list[idx - 1]
 
 
-@udf(input_types=['JSONB', 'INT'], result_type='JSONB')
+@udf(input_types=["JSONB", "INT"], result_type="JSONB")
 def jsonb_access(json: Any, i: int) -> Any:
     if not json:
         return None
     return json[i]
 
 
-@udf(input_types=['JSONB[]'], result_type='JSONB')
+@udf(input_types=["JSONB[]"], result_type="JSONB")
 def jsonb_concat(list: List[Any]) -> Any:
     if not list:
         return None
     return list
 
 
-@udf(input_types='JSONB[]', result_type='JSONB[]')
+@udf(input_types="JSONB[]", result_type="JSONB[]")
 def jsonb_array_identity(list: List[Any]) -> List[Any]:
     return list
 
 
-if __name__ == '__main__':
+@udf(input_types="STRUCT<JSONB[], INT>", result_type="STRUCT<JSONB[], INT>")
+def jsonb_array_struct_identity(v: Tuple[List[Any], int]) -> Tuple[List[Any], int]:
+    return v
+
+
+if __name__ == "__main__":
     server = UdfServer(location="0.0.0.0:8815")
     server.add_function(int_42)
     server.add_function(gcd)
@@ -101,4 +107,5 @@ if __name__ == '__main__':
     server.add_function(jsonb_access)
     server.add_function(jsonb_concat)
     server.add_function(jsonb_array_identity)
+    server.add_function(jsonb_array_struct_identity)
     server.serve()

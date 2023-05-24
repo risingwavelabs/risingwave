@@ -52,6 +52,10 @@ create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_con
 statement ok
 create function jsonb_array_identity(jsonb[]) returns jsonb[] language python as jsonb_array_identity using link 'http://localhost:8815';
 
+statement ok
+create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
+language python as jsonb_array_struct_identity using link 'http://localhost:8815';
+
 query TTTTT rowsort
 show functions
 ----
@@ -63,6 +67,7 @@ hex_to_dec varchar numeric python http://localhost:8815
 int_42 (empty) integer python http://localhost:8815
 jsonb_access jsonb, integer jsonb python http://localhost:8815
 jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
+jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
 jsonb_concat jsonb[] jsonb python http://localhost:8815
 series integer integer python http://localhost:8815
 series2 integer struct<x integer,y varchar> python http://localhost:8815
@@ -109,6 +114,11 @@ query T
 select jsonb_array_identity(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
 ----
 {NULL,1,"\"str\"","{}"}
+
+query T
+select jsonb_array_struct_identity(ROW(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+----
+({NULL,1,"\"str\"","{}"},4)
 
 query I
 select series(5);
