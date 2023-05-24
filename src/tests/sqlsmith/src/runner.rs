@@ -331,7 +331,7 @@ async fn test_stream_queries<R: Rng>(
 
     // Generate an update for some inserts, on the corresponding table.
     if insert_updates_before {
-        let update_statements = generate_update_statements(rng, &tables, &inserts);
+        let update_statements = generate_update_statements(rng, &tables, &inserts)?;
         for update_statement in update_statements {
             let sql = update_statement.to_string();
             tracing::info!("[EXECUTING UPDATES]: {}", &sql);

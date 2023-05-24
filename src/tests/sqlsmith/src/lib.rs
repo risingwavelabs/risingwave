@@ -19,6 +19,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use anyhow::Result;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
@@ -83,7 +84,7 @@ pub fn generate_update_statements<R: Rng>(
     rng: &mut R,
     tables: &[Table],
     inserts: &[Statement],
-) -> Vec<Statement> {
+) -> Result<Vec<Statement>> {
     let mut gen = SqlGenerator::new(rng, vec![]);
     gen.generate_update_statements(tables, inserts)
 }

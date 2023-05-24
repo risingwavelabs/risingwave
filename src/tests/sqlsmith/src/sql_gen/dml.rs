@@ -14,6 +14,7 @@
 
 use std::iter;
 
+use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::Rng;
 use risingwave_common::types::DataType;
@@ -60,13 +61,13 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         &mut self,
         tables: &[Table],
         inserts: &[Statement],
-    ) -> Vec<Statement> {
+    ) -> Result<Vec<Statement>> {
         for insert in inserts {
             match insert {
                 Statement::Insert {
                     table_name, source, ..
                 } => {
-                    let values = Self::extract_insert_values(source);
+                    let values = Self::extract_insert_values(source)?;
                     let table = tables
                         .iter()
                         .find(|table| table.name == table_name.real_value())
@@ -201,8 +202,12 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .collect()
     }
 
-    fn extract_insert_values(source: &Query) -> &[Vec<Expr>] {
-        todo!()
+    fn extract_insert_values(source: &Query) -> Result<&[Vec<Expr>]> {
+        let body = &source.body;
+        match body {
+            SetExpr::Values(values) => Ok(&values.0),
+            _ => bail!("Should not have insert values"),
+        }
     }
 
     fn gen_values(&mut self, data_types: &[DataType], row_count: usize) -> Vec<Vec<Expr>> {
