@@ -22,6 +22,7 @@ use std::fs;
 
 use clap::ValueEnum;
 use educe::Educe;
+pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;

@@ -465,7 +465,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::memory::MonitoredGlobalAlloc;
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -574,7 +574,7 @@ mod tests {
             column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
-            MonitoredGlobalAlloc::for_test(),
+            MemoryContext::none(),
         ))
     }
 

@@ -371,4 +371,3 @@ volumes:
     external: false
   message_queue:
     external: false
-name: risingwave-compose

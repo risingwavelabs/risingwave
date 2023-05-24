@@ -125,9 +125,6 @@ async fn test_over_window() {
                 | + | 4 | p2 | 200 | 20 |
                 +---+---+----+-----+----+
               output:
-              - !watermark
-                col_idx: 0
-                val: 1
               - !chunk |-
                 +---+---+----+-----+----+---+----+
                 | + | 1 | p1 | 100 | 10 |   | 16 |
@@ -159,9 +156,6 @@ async fn test_over_window() {
                 | + | 13 | p3 | 301 | 39 |
                 +---+----+----+-----+----+
               output:
-              - !watermark
-                col_idx: 0
-                val: 5
               - !chunk |-
                 +---+---+----+-----+----+----+----+
                 | + | 5 | p1 | 102 | 18 | 16 | 13 |
@@ -207,9 +201,6 @@ async fn test_over_window_aggregate() {
                 | + | 4 | p1 | 102 | 20 |
                 +---+---+----+-----+----+
               output:
-              - !watermark
-                col_idx: 0
-                val: 1
               - !chunk |-
                 +---+---+----+-----+----+----+
                 | + | 1 | p1 | 100 | 10 | 26 |

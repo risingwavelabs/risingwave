@@ -34,12 +34,6 @@ pub struct KinesisProperties {
     )]
     pub seq_offset: Option<String>,
 
-    #[serde(
-        rename = "enable.split.reduction",
-        alias = "kinesis.enable.split.reduction"
-    )]
-    pub enable_split_reduction: Option<bool>,
-
     #[serde(flatten)]
     pub common: KinesisCommon,
 }
