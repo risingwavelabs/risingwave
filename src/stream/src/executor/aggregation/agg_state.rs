@@ -20,7 +20,6 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
