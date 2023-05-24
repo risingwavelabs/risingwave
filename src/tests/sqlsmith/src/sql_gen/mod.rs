@@ -72,8 +72,8 @@ impl Table {
 /// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
-    name: String,
-    data_type: DataType,
+    pub(crate) name: String,
+    pub(crate) data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {

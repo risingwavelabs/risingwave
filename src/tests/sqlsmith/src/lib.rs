@@ -21,7 +21,10 @@ use std::collections::{HashMap, HashSet};
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_sqlparser::ast::{BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement, TableConstraint};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement,
+    TableConstraint,
+};
 use risingwave_sqlparser::parser::Parser;
 
 use crate::sql_gen::SqlGenerator;
@@ -46,7 +49,7 @@ pub fn insert_sql_gen(rng: &mut impl Rng, tables: Vec<Table>, count: usize) -> V
     let mut gen = SqlGenerator::new(rng, vec![]);
     tables
         .into_iter()
-        .map(|table| format!("{}", gen.gen_insert_stmt(table, count)))
+        .map(|table| format!("{}", gen.generate_insert_statement(&table, count)))
         .collect()
 }
 
@@ -76,6 +79,15 @@ pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
     .to_string()
 }
 
+pub fn generate_update_statements<R: Rng>(
+    rng: &mut R,
+    tables: &[Table],
+    inserts: &[Statement],
+) -> Vec<Statement> {
+    let mut gen = SqlGenerator::new(rng, vec![]);
+    gen.generate_update_statements(tables, inserts)
+}
+
 /// Parse SQL
 /// FIXME(Noel): Introduce error type for sqlsmith for this.
 pub fn parse_sql<S: AsRef<str>>(sql: S) -> Vec<Statement> {
@@ -99,12 +111,10 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 .collect();
             let mut pk_indices = HashSet::new();
             for (i, column) in columns.iter().enumerate() {
-                let is_primary_key = column.options.iter().any(|option|
-                    match option.option {
-                        ColumnOption::Unique { is_primary: true } => true,
-                        _ => false,
-                    }
-                );
+                let is_primary_key = column
+                    .options
+                    .iter()
+                    .any(|option| option.option == ColumnOption::Unique { is_primary: true });
                 if is_primary_key {
                     pk_indices.insert(i);
                 }
@@ -136,22 +146,25 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
     }
 }
 
-pub fn parse_create_table_statements(sql: &str) -> Vec<Table> {
+pub fn parse_create_table_statements(sql: impl AsRef<str>) -> (Vec<Table>, Vec<Statement>) {
     let statements = parse_sql(&sql);
-    statements
+    let tables = statements
         .iter()
         .map(create_table_statement_to_table)
-        .collect()
+        .collect();
+    (tables, statements)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+
     use expect_test::{expect, Expect};
 
     use super::*;
 
-    fn check(actual: Vec<Table>, expect: Expect) {
-        let actual = format!("{:#?}", actual); // pretty print the output.
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
         expect.assert_eq(&actual);
     }
 
@@ -165,50 +178,183 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
         check(
             parse_create_table_statements(test_string),
             expect![[r#"
-            [
-                Table {
-                    name: "t",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
+                (
+                    [
+                        Table {
+                            name: "t",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                            ],
+                            pk_indices: [],
+                        },
+                        Table {
+                            name: "t2",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                                Column {
+                                    name: "v2",
+                                    data_type: Boolean,
+                                },
+                            ],
+                            pk_indices: [],
+                        },
+                        Table {
+                            name: "t3",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                                Column {
+                                    name: "v2",
+                                    data_type: Boolean,
+                                },
+                                Column {
+                                    name: "v3",
+                                    data_type: Int16,
+                                },
+                            ],
+                            pk_indices: [],
                         },
                     ],
-                    pk_indices: [],
-                },
-                Table {
-                    name: "t2",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
+                    [
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
                         },
-                        Column {
-                            name: "v2",
-                            data_type: Boolean,
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t2",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v2",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Boolean,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
+                        },
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t3",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v2",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Boolean,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v3",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        SmallInt,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
                         },
                     ],
-                    pk_indices: [],
-                },
-                Table {
-                    name: "t3",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
-                        },
-                        Column {
-                            name: "v2",
-                            data_type: Boolean,
-                        },
-                        Column {
-                            name: "v3",
-                            data_type: Int16,
-                        },
-                    ],
-                    pk_indices: [],
-                },
-            ]"#]],
+                )"#]],
         );
     }
 
@@ -223,75 +369,300 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
         check(
             parse_create_table_statements(test_string),
             expect![[r#"
-                [
-                    Table {
-                        name: "t",
-                        columns: [
-                            Column {
-                                name: "v1",
-                                data_type: Int32,
-                            },
-                        ],
-                        pk_indices: [
-                            0,
-                        ],
-                    },
-                    Table {
-                        name: "t2",
-                        columns: [
-                            Column {
-                                name: "v1",
-                                data_type: Int32,
-                            },
-                            Column {
-                                name: "v2",
-                                data_type: Int16,
-                            },
-                        ],
-                        pk_indices: [
-                            1,
-                        ],
-                    },
-                    Table {
-                        name: "t3",
-                        columns: [
-                            Column {
-                                name: "v1",
-                                data_type: Int32,
-                            },
-                            Column {
-                                name: "v2",
-                                data_type: Int16,
-                            },
-                        ],
-                        pk_indices: [
-                            0,
-                            1,
-                        ],
-                    },
-                    Table {
-                        name: "t4",
-                        columns: [
-                            Column {
-                                name: "v1",
-                                data_type: Int32,
-                            },
-                            Column {
-                                name: "v2",
-                                data_type: Int16,
-                            },
-                            Column {
-                                name: "v3",
-                                data_type: Boolean,
-                            },
-                        ],
-                        pk_indices: [
-                            2,
-                            0,
-                            1,
-                        ],
-                    },
-                ]"#]],
+                (
+                    [
+                        Table {
+                            name: "t",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                            ],
+                            pk_indices: [
+                                0,
+                            ],
+                        },
+                        Table {
+                            name: "t2",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                                Column {
+                                    name: "v2",
+                                    data_type: Int16,
+                                },
+                            ],
+                            pk_indices: [
+                                1,
+                            ],
+                        },
+                        Table {
+                            name: "t3",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                                Column {
+                                    name: "v2",
+                                    data_type: Int16,
+                                },
+                            ],
+                            pk_indices: [
+                                0,
+                                1,
+                            ],
+                        },
+                        Table {
+                            name: "t4",
+                            columns: [
+                                Column {
+                                    name: "v1",
+                                    data_type: Int32,
+                                },
+                                Column {
+                                    name: "v2",
+                                    data_type: Int16,
+                                },
+                                Column {
+                                    name: "v3",
+                                    data_type: Boolean,
+                                },
+                            ],
+                            pk_indices: [
+                                2,
+                                1,
+                                0,
+                            ],
+                        },
+                    ],
+                    [
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
+                        },
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t2",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v2",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        SmallInt,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
+                        },
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t3",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v2",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        SmallInt,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
+                        },
+                        CreateTable {
+                            or_replace: false,
+                            temporary: false,
+                            if_not_exists: false,
+                            name: ObjectName(
+                                [
+                                    Ident {
+                                        value: "t4",
+                                        quote_style: None,
+                                    },
+                                ],
+                            ),
+                            columns: [
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v1",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Int,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v2",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        SmallInt,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                                ColumnDef {
+                                    name: Ident {
+                                        value: "v3",
+                                        quote_style: None,
+                                    },
+                                    data_type: Some(
+                                        Boolean,
+                                    ),
+                                    collation: None,
+                                    options: [
+                                        ColumnOptionDef {
+                                            name: None,
+                                            option: Unique {
+                                                is_primary: true,
+                                            },
+                                        },
+                                    ],
+                                },
+                            ],
+                            constraints: [],
+                            with_options: [],
+                            source_schema: None,
+                            source_watermarks: [],
+                            append_only: false,
+                            query: None,
+                        },
+                    ],
+                )"#]],
         );
     }
 }

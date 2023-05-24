@@ -27,7 +27,8 @@ use risingwave_frontend::{
 };
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
+    create_table_statement_to_table, is_permissible_error, mview_sql_gen,
+    parse_create_table_statements, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
@@ -95,11 +96,7 @@ async fn create_tables(
     let sql = get_seed_table_sql();
     setup_sql.push_str(&sql);
 
-    let statements = parse_sql(&sql);
-    let mut tables = statements
-        .iter()
-        .map(create_table_statement_to_table)
-        .collect_vec();
+    let (tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
         let create_sql = s.to_string();

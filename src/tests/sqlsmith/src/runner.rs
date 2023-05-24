@@ -28,8 +28,8 @@ use tokio_postgres::Client;
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
-    sql_gen, Table,
+    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
+    parse_sql, session_sql_gen, sql_gen, Table,
 };
 
 type PgResult<A> = std::result::Result<A, PgError>;
@@ -78,7 +78,7 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let _inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
@@ -90,7 +90,6 @@ pub async fn generate(
         &mut rng,
         tables.clone(),
         base_tables,
-        inserts,
         max_rows_inserted,
     )
     .await;
@@ -175,7 +174,6 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         &mut rng,
         tables.clone(),
         base_tables,
-        inserts.clone(),
         max_rows_inserted,
     )
     .await;
@@ -230,7 +228,6 @@ async fn test_sqlsmith<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     base_tables: Vec<Table>,
-    inserts: Vec<Statement>,
     row_count: usize,
 ) {
     // Test inserted rows should be at least 50% population count,
@@ -255,7 +252,7 @@ async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), inserts, sample_size)
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), vec![], sample_size)
         .await
         .unwrap();
     tracing::info!(
@@ -319,6 +316,8 @@ async fn test_batch_queries<R: Rng>(
 }
 
 /// Test stream queries, returns skipped query statistics
+/// 50-50 chance to insert before OR after create stream query
+/// (`insert_updates_before`).
 async fn test_stream_queries<R: Rng>(
     client: &Client,
     rng: &mut R,
@@ -327,6 +326,19 @@ async fn test_stream_queries<R: Rng>(
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;
+
+    let insert_updates_before = rng.gen_bool(0.5);
+
+    // Generate an update for some inserts, on the corresponding table.
+    if insert_updates_before {
+        let update_statements = generate_update_statements(rng, &tables, &inserts);
+        for update_statement in update_statements {
+            let sql = update_statement.to_string();
+            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+            let response = client.simple_query(&sql).await;
+        }
+    }
+
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
@@ -352,12 +364,8 @@ async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table
     tracing::info!("Preparing tables...");
 
     let sql = get_seed_table_sql(testdata);
-    let statements = parse_sql(sql);
+    let (base_tables, statements) = parse_create_table_statements(sql);
     let mut mvs_and_base_tables = vec![];
-    let base_tables = statements
-        .iter()
-        .map(create_table_statement_to_table)
-        .collect_vec();
     mvs_and_base_tables.extend_from_slice(&base_tables);
 
     for stmt in &statements {
