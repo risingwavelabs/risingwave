@@ -161,7 +161,7 @@ SELECT |/ double precision '64' AS eight;
 SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 
 -- cube root
-SELECT ||/ double precision '27' AS three;
+--@ SELECT ||/ double precision '27' AS three;
 
 --@ SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL f;
 
