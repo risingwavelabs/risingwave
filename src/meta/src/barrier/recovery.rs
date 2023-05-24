@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -247,44 +247,50 @@ where
         Ok(true)
     }
 
-    /// This function will generate a migration plan, which includes:
-    /// 1. mapping for all expired and in-used worker to a new one.
-    /// 2. mapping for all expired and in-used parallel unit to a new one.
-    /// 3. cached worker parallel units.
+    /// This function will generate a migration plan, which includes the mapping for all expired and
+    /// in-used parallel unit to a new one.
     async fn generate_migration_plan(
         &self,
         info: &BarrierActorInfo,
-        mut expired_workers: HashSet<WorkerId>,
+        expired_workers: HashSet<WorkerId>,
     ) -> MetaResult<MigrationPlan> {
         let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
 
-        // filter out workers that are already in migration plan.
-        if !cached_plan.is_empty() {
-            // clean up expired workers that are already in migration plan and haven't been used by
-            // any actors.
-            cached_plan
-                .worker_plan
-                .retain(|_, to| expired_workers.contains(to) || info.actor_map.contains_key(to));
-            cached_plan.parallel_unit_plan.retain(|_, to| {
-                expired_workers.contains(&to.worker_node_id)
-                    || info.actor_map.contains_key(&to.worker_node_id)
-            });
-
-            expired_workers.retain(|id| !cached_plan.worker_plan.contains_key(id));
-        }
-
-        if expired_workers.is_empty() {
-            // all expired workers are already in migration plan.
-            debug!("all expired workers are already in migration plan.");
-            return Ok(cached_plan);
-        }
-        debug!("got expired workers {:#?}", expired_workers);
-        let mut expired_workers = expired_workers.into_iter().collect_vec();
         let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
 
+        let mut to_migrate_parallel_units: BTreeSet<_> = all_worker_parallel_units
+            .iter()
+            .filter(|(worker, _)| expired_workers.contains(worker))
+            .flat_map(|(_, pu)| pu.iter().cloned())
+            .collect();
+        cached_plan.parallel_unit_plan.retain(|from, to| {
+            if to_migrate_parallel_units.contains(from) {
+                if !to_migrate_parallel_units.contains(&to.id) {
+                    // clean up target parallel units in migration plan that are expired and not
+                    // used by any actors.
+                    return !expired_workers.contains(&to.worker_node_id);
+                }
+                return true;
+            }
+            false
+        });
+        to_migrate_parallel_units.retain(|id| !cached_plan.parallel_unit_plan.contains_key(id));
+
+        if to_migrate_parallel_units.is_empty() {
+            // all expired parallel units are already in migration plan.
+            debug!("all expired parallel units are already in migration plan.");
+            return Ok(cached_plan);
+        }
+        let mut to_migrate_parallel_units =
+            to_migrate_parallel_units.into_iter().rev().collect_vec();
+        debug!(
+            "got to migrate parallel units {:#?}",
+            to_migrate_parallel_units
+        );
+
         let start = Instant::now();
-        // if expire workers are not empty, should wait for newly joined worker.
-        'discovery: while !expired_workers.is_empty() {
+        // if in-used expire parallel units are not empty, should wait for newly joined worker.
+        'discovery: while !to_migrate_parallel_units.is_empty() {
             let current_nodes = self
                 .cluster_manager
                 .list_active_streaming_compute_nodes()
@@ -293,32 +299,35 @@ where
                 .into_iter()
                 .filter(|node| {
                     !info.actor_map.contains_key(&node.id)
-                        && !cached_plan.worker_plan.values().contains(&node.id)
+                        && !cached_plan
+                            .parallel_unit_plan
+                            .values()
+                            .map(|pu| pu.worker_node_id)
+                            .contains(&node.id)
                 })
                 .collect_vec();
-
-            for new_node in new_nodes {
-                if let Some(from) = expired_workers.pop() {
-                    debug!(
-                        "new worker joined, plan to migrate from worker {} to {}",
-                        from, new_node.id
-                    );
-                    cached_plan.worker_plan.insert(from, new_node.id);
-                    assert!(all_worker_parallel_units.contains_key(&from));
-                    let from_parallel_units = all_worker_parallel_units.get(&from).unwrap();
-                    // todo: remove it and migrate actors only based on parallel unit mapping.
-                    assert!(from_parallel_units.len() <= new_node.parallel_units.len());
-                    for (i, pu) in from_parallel_units.iter().enumerate() {
+            if !new_nodes.is_empty() {
+                debug!("new workers joined: {:#?}", new_nodes);
+                let target_parallel_units = new_nodes
+                    .into_iter()
+                    .flat_map(|node| node.parallel_units)
+                    .collect_vec();
+                for target_parallel_unit in target_parallel_units {
+                    if let Some(from) = to_migrate_parallel_units.pop() {
+                        debug!(
+                            "plan to migrate from parallel unit {} to {}",
+                            from, target_parallel_unit.id
+                        );
                         cached_plan
                             .parallel_unit_plan
-                            .insert(*pu, new_node.parallel_units[i].clone());
+                            .insert(from, target_parallel_unit);
+                    } else {
+                        break 'discovery;
                     }
-                } else {
-                    break 'discovery;
                 }
             }
             warn!(
-                "waiting for new worker to join, elapsed: {}s",
+                "waiting for new workers to join, elapsed: {}s",
                 start.elapsed().as_secs()
             );
             // wait to get newly joined CN
@@ -327,13 +336,6 @@ where
 
         // update migration plan, if there is a chain in the plan, update it.
         let mut new_plan = MigrationPlan::default();
-        for (from, to) in &cached_plan.worker_plan {
-            let mut to = *to;
-            while let Some(target) = cached_plan.worker_plan.get(&to) {
-                to = *target;
-            }
-            new_plan.worker_plan.insert(*from, to);
-        }
         for (from, to) in &cached_plan.parallel_unit_plan {
             let mut to = to.clone();
             while let Some(target) = cached_plan.parallel_unit_plan.get(&to.id) {
@@ -343,9 +345,13 @@ where
         }
 
         assert!(
-            new_plan.worker_plan.values().all_unique(),
-            "target workers must be unique: {:?}",
-            new_plan.worker_plan
+            new_plan
+                .parallel_unit_plan
+                .values()
+                .map(|pu| pu.id)
+                .all_unique(),
+            "target parallel units must be unique: {:?}",
+            new_plan.parallel_unit_plan
         );
 
         new_plan.insert(self.env.meta_store()).await?;

@@ -19,6 +19,7 @@
 
 #![feature(stmt_expr_attributes)]
 #![cfg(madsim)]
+#![feature(lazy_cell)]
 
 // TODO: uncomment all of these mods again.
 // mod cascade_materialized_view;

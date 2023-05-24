@@ -14,7 +14,9 @@
 
 use std::sync::Arc;
 
-use prometheus::core::{AtomicU64, Collector, Desc, GenericCounterVec};
+use prometheus::core::{
+    AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
+};
 use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry, HistogramVec,
@@ -51,6 +53,18 @@ pub struct HummockStateStoreMetrics {
     pub merge_imm_task_counts: GenericCounterVec<AtomicU64>,
     // merge imm ops
     pub merge_imm_batch_memory_sz: GenericCounterVec<AtomicU64>,
+
+    // spill task counts from unsealed
+    pub spill_task_counts_from_unsealed: GenericCounter<AtomicU64>,
+    // spill task size from unsealed
+    pub spill_task_size_from_unsealed: GenericCounter<AtomicU64>,
+    // spill task counts from sealed
+    pub spill_task_counts_from_sealed: GenericCounter<AtomicU64>,
+    // spill task size from sealed
+    pub spill_task_size_from_sealed: GenericCounter<AtomicU64>,
+
+    // uploading task
+    pub uploader_uploading_task_size: GenericGauge<AtomicU64>,
 }
 
 impl HummockStateStoreMetrics {
@@ -176,6 +190,31 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let spill_task_counts = register_int_counter_vec_with_registry!(
+            "state_store_spill_task_counts",
+            "Total number of started spill tasks",
+            &["uploader_stage"],
+            registry
+        )
+        .unwrap();
+
+        let spill_task_size = register_int_counter_vec_with_registry!(
+            "state_store_spill_task_size",
+            "Total task of started spill tasks",
+            &["uploader_stage"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_uploading_task_size = GenericGauge::new(
+            "state_store_uploader_uploading_task_size",
+            "Total size of uploader uploading tasks",
+        )
+        .unwrap();
+        registry
+            .register(Box::new(uploader_uploading_task_size.clone()))
+            .unwrap();
+
         let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -219,6 +258,11 @@ impl HummockStateStoreMetrics {
             write_batch_size,
             merge_imm_task_counts,
             merge_imm_batch_memory_sz,
+            spill_task_counts_from_sealed: spill_task_counts.with_label_values(&["sealed"]),
+            spill_task_counts_from_unsealed: spill_task_counts.with_label_values(&["unsealed"]),
+            spill_task_size_from_sealed: spill_task_size.with_label_values(&["sealed"]),
+            spill_task_size_from_unsealed: spill_task_size.with_label_values(&["unsealed"]),
+            uploader_uploading_task_size,
         }
     }
 
