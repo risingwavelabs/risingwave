@@ -36,7 +36,7 @@ services:
   # Use this command to connect to the DB from outside the container:
   #   docker exec postgres psql --username=myuser --dbname=mydb
   postgres:
-    image: postgres
+    image: postgres:14-alpine
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=123456
@@ -67,7 +67,13 @@ services:
       - "./postgres_prepare.sql:/postgres_prepare.sql"      
     container_name: postgres_prepare
     restart: on-failure
-  datagen:
+  datagen_tpch:
+    image: ghcr.io/risingwavelabs/go-tpc:v0.1
+    depends_on: [postgres]
+    command: tpch prepare --sf 1 --threads 4 -d postgres -U myuser -p '123456' -H postgres -D mydb -P 5432 --conn-params sslmode=disable
+    container_name: datagen_tpch
+    restart: on-failure
+  datagen_kafka:
     build: ../datagen
     depends_on: [message_queue]
     command:
@@ -75,7 +81,7 @@ services:
       - -c
       - /datagen --mode nexmark --qps 2 kafka --brokers message_queue:29092
     restart: always
-    container_name: datagen
+    container_name: datagen_kafka
   message_queue:
     extends:
       file: ../../docker/docker-compose.yml
