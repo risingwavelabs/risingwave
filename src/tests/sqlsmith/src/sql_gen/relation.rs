@@ -355,10 +355,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_table_subquery(&mut self) -> (TableWithJoins, Vec<Table>) {
         let (subquery, columns) = self.gen_local_query();
         let alias = self.gen_table_name_with_prefix("sq");
-        let table = Table {
-            name: alias.clone(),
-            columns,
-        };
+        let table = Table::new(alias.clone(), columns);
         let relation = TableWithJoins {
             relation: TableFactor::Derived {
                 lateral: false,

@@ -135,10 +135,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             from,
         };
 
-        let with_tables = vec![Table {
-            name: alias.name.real_value(),
-            columns: query_schema,
-        }];
+        let with_tables = vec![Table::new(alias.name.real_value(), query_schema)];
         (
             With {
                 recursive: false,

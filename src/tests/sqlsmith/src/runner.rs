@@ -20,6 +20,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
+use risingwave_sqlparser::ast::Statement;
 use tokio::time::{sleep, Duration};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
@@ -77,7 +78,7 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
@@ -89,6 +90,7 @@ pub async fn generate(
         &mut rng,
         tables.clone(),
         base_tables,
+        inserts,
         max_rows_inserted,
     )
     .await;
@@ -159,7 +161,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
@@ -173,6 +175,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         &mut rng,
         tables.clone(),
         base_tables,
+        inserts.clone(),
         max_rows_inserted,
     )
     .await;
@@ -181,7 +184,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         .await
         .unwrap();
     tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), count)
+    test_stream_queries(client, &mut rng, tables.clone(), inserts, count)
         .await
         .unwrap();
     tracing::info!("Passed stream queries");
@@ -209,13 +212,16 @@ async fn populate_tables<R: Rng>(
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
-) -> String {
+) -> Vec<Statement> {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
         tracing::info!("[EXECUTING INSERT]: {}", insert);
         client.simple_query(insert).await.unwrap();
     }
-    inserts.into_iter().map(|i| format!("{};\n", i)).collect()
+    inserts
+        .iter()
+        .map(|s| parse_sql(s).into_iter().next().unwrap())
+        .collect_vec()
 }
 
 /// Sanity checks for sqlsmith
@@ -224,6 +230,7 @@ async fn test_sqlsmith<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     base_tables: Vec<Table>,
+    inserts: Vec<Statement>,
     row_count: usize,
 ) {
     // Test inserted rows should be at least 50% population count,
@@ -248,7 +255,7 @@ async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), inserts, sample_size)
         .await
         .unwrap();
     tracing::info!(
@@ -316,6 +323,7 @@ async fn test_stream_queries<R: Rng>(
     client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
+    inserts: Vec<Statement>,
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;

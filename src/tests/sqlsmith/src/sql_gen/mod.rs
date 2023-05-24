@@ -38,11 +38,16 @@ mod utils;
 pub struct Table {
     pub name: String,
     pub columns: Vec<Column>,
+    pub pk_indices: Vec<usize>,
 }
 
 impl Table {
     pub fn new(name: String, columns: Vec<Column>) -> Self {
-        Self { name, columns }
+        Self {
+            name,
+            columns,
+            pk_indices: vec![],
+        }
     }
 
     pub fn get_qualified_columns(&self) -> Vec<Column> {
@@ -177,10 +182,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
-        let table = Table {
-            name: name.to_string(),
-            columns: schema,
-        };
+        let table = Table::new(name.to_string(), schema);
         let name = ObjectName(vec![Ident::new_unchecked(name)]);
         let mview = Statement::CreateView {
             or_replace: false,
