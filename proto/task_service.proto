@@ -27,6 +27,7 @@ message TaskInfoResponse {
     FAILED = 7;
     ABORTED = 8;
     CANCELLED = 9;
+    PING = 10;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;

@@ -459,18 +459,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             self.runtime.spawn(fut);
         }
 
-        let this = self.clone();
-        self.runtime.spawn(async move {
-            use tokio::time::Duration;
-            const WAIT_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(600);
-            // If `receivers` is still not taken by `get_task_output` after `WAIT_UPSTREAM_TIMEOUT`,
-            // it's likely upstream task has failed.
-            tokio::time::sleep(WAIT_UPSTREAM_TIMEOUT).await;
-            if this.receivers.lock().iter().any(Option::is_some) {
-                this.abort("upstream task may have failed".into());
-            }
-        });
-
         Ok(())
     }
 
@@ -516,6 +504,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let mut error = None;
 
         let mut shutdown_rx = self.shutdown_rx.clone();
+        let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(600));
+        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat_interval.reset();
         loop {
             select! {
                 biased;
@@ -584,6 +575,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
+                _ = heartbeat_interval.tick() => {
+                    if let Some(&mut ref mut reporter) = state_tx {
+                        if reporter
+                            .send(TaskInfoResponse {
+                                task_id: Some(self.task_id.to_prost()),
+                                task_status: TaskStatus::Ping.into(),
+                                error_message: "".to_string(),
+                            })
+                            .await.is_err() {
+                            self.abort("ping failed".into());
+                        }
+                    }
+                },
             }
         }
 
