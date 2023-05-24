@@ -804,6 +804,7 @@ where
                     .map(|fragments| fragments.internal_table_ids())
                 {
                     Ok(v) => v,
+                    // Handle backwards compat with no state persistence.
                     Err(_) => vec![],
                 };
 
@@ -1612,6 +1613,7 @@ where
                         .map(|fragments| fragments.internal_table_ids())
                     {
                         Ok(v) => v,
+                        // Handle backwards compat with no state persistence.
                         Err(_) => vec![],
                     };
 
