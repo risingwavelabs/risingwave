@@ -64,21 +64,23 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     ) -> Result<Vec<Statement>> {
         let mut updates = vec![];
         for insert in inserts {
-            match insert {
-                Statement::Insert {
-                    table_name, source, ..
-                } => {
-                    let values = Self::extract_insert_values(source)?;
-                    let table = tables
-                        .iter()
-                        .find(|table| table.name == table_name.real_value())
-                        .expect("Inserted values should always have an existing table");
-                    let pk_indices = &table.pk_indices;
-                    let mut updates_for_insert =
-                        self.generate_update_statements_inner(table, values, pk_indices);
-                    updates.append(&mut updates_for_insert);
+            if self.rng.gen_bool(0.1) {
+                 match insert {
+                    Statement::Insert {
+                        table_name, source, ..
+                    } => {
+                        let values = Self::extract_insert_values(source)?;
+                        let table = tables
+                            .iter()
+                            .find(|table| table.name == table_name.real_value())
+                            .expect("Inserted values should always have an existing table");
+                        let pk_indices = &table.pk_indices;
+                        let mut updates_for_insert =
+                            self.generate_update_statements_inner(table, values, pk_indices);
+                        updates.append(&mut updates_for_insert);
+                    }
+                    _ => bail!("Should only have insert statements"),
                 }
-                _ => bail!("Should only have insert statements"),
             }
         }
         Ok(updates)
@@ -100,10 +102,15 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             // do delete for a random subset of rows.
             let delete_statements = self.generate_delete_statements(table, values);
             // then insert back some number of rows.
-            let insert_statement = self.generate_insert_statement(table, delete_statements.len());
+            let insert_statements = if delete_statements.len() == 0 {
+                vec![]
+            } else {
+                let insert_statement = self.generate_insert_statement(table, delete_statements.len());
+                vec![insert_statement]
+            };
             delete_statements
                 .into_iter()
-                .chain(iter::once(insert_statement))
+                .chain(insert_statements.into_iter())
                 .collect()
         } else {
             let value_indices = (0..table.columns.len())
@@ -148,6 +155,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
                 Assignment { id, value }
             })
             .collect_vec();
+        assert!(assignments.len() >= 1);
         Statement::Update {
             table_name: ObjectName::from_test_str(&table.name),
             assignments,
@@ -157,6 +165,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     }
 
     fn create_selection_expr(table: &Table, selected_indices: &[usize], row: &[Expr]) -> Expr {
+        assert!(selected_indices.len() >= 1);
         assert!(!selected_indices.is_empty());
         let match_exprs = selected_indices
             .iter()
