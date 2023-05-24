@@ -16,7 +16,7 @@ use std::collections::BinaryHeap;
 use std::mem::size_of;
 
 use crate::estimate_size::EstimateSize;
-use crate::memory::MemoryContext;
+use crate::memory::{MemoryContext, MonitoredGlobalAlloc};
 
 pub struct MemMonitoredHeap<T> {
     inner: BinaryHeap<T>,
@@ -60,6 +60,47 @@ impl<T: Ord + EstimateSize> MemMonitoredHeap<T> {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn peek(&self) -> Option<&T> {
+        self.inner.peek()
+    }
+
+    pub fn into_sorted_vec(self) -> Vec<T, MonitoredGlobalAlloc> {
+        let old_cap = self.inner.capacity();
+        let alloc = MonitoredGlobalAlloc::with_memory_context(self.mem_ctx.clone());
+        let vec = self.inner.into_iter_sorted();
+
+        let mut ret = Vec::with_capacity_in(vec.len(), alloc);
+        ret.extend(vec);
+
+        self.mem_ctx.add(-((old_cap * size_of::<T>()) as i64));
+        ret
+    }
+}
+
+impl<T> Extend<T> for MemMonitoredHeap<T>
+where
+    T: Ord + EstimateSize,
+{
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let old_cap = self.inner.capacity();
+        let mut items_heap_size = 0usize;
+        let items = iter.into_iter();
+        self.inner.reserve_exact(items.size_hint().0);
+        for item in items {
+            items_heap_size += item.estimated_heap_size();
+            self.inner.push(item);
+        }
+
+        let new_cap = self.inner.capacity();
+
+        let diff = (new_cap - old_cap) * size_of::<T>() + items_heap_size;
+        self.mem_ctx.add(diff as i64);
+    }
 }
 
 #[cfg(test)]
@@ -85,5 +126,28 @@ mod tests {
         assert_eq!(heap.inner.capacity() as i64, gauge.get());
 
         assert!(!heap.is_empty());
+    }
+
+    #[test]
+    fn test_heap_drop() {
+        let gauge = IntGauge::new("test", "test").unwrap();
+        let mem_ctx = MemoryContext::root(gauge.clone());
+
+        let vec = {
+            let mut heap = MemMonitoredHeap::<u8>::new_with(mem_ctx);
+            assert_eq!(0, gauge.get());
+
+            heap.push(9u8);
+            heap.push(1u8);
+            assert_eq!(heap.inner.capacity() as i64, gauge.get());
+
+            heap.into_sorted_vec()
+        };
+
+        assert_eq!(2, gauge.get());
+
+        drop(vec);
+
+        assert_eq!(0, gauge.get());
     }
 }
