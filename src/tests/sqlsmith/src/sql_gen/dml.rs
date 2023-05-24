@@ -164,7 +164,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             .map(|i| {
                 let match_val = row[i].clone();
                 let match_col = Expr::Identifier(table.columns[i].name.as_str().into());
-                
+
                 Expr::BinaryOp {
                     left: Box::new(match_col),
                     op: BinaryOperator::Eq,

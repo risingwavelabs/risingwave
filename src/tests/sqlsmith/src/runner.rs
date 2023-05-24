@@ -78,7 +78,7 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    let _inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
@@ -89,11 +89,14 @@ pub async fn generate(
         client,
         &mut rng,
         tables.clone(),
-        base_tables,
+        base_tables.clone(),
         max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
+
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
 
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
@@ -202,6 +205,22 @@ fn generate_rng(seed: Option<u64>) -> impl Rng {
         SmallRng::seed_from_u64(seed)
     } else {
         SmallRng::from_entropy()
+    }
+}
+
+async fn update_base_tables<R: Rng>(
+    client: &Client,
+    rng: &mut R,
+    base_tables: &[Table],
+    inserts: &[Statement],
+) {
+    let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
+    for update_statement in update_statements {
+        if rng.gen_bool(0.5) {
+            let sql = update_statement.to_string();
+            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+            client.simple_query(&sql).await.unwrap();
+        }
     }
 }
 
@@ -327,12 +346,10 @@ async fn test_stream_queries<R: Rng>(
 ) -> Result<f64> {
     let mut skipped = 0;
 
-    let insert_updates_before = rng.gen_bool(0.5);
-
     // Generate an update for some inserts, on the corresponding table.
-    if insert_updates_before {
-        let update_statements = generate_update_statements(rng, &tables, &inserts)?;
-        for update_statement in update_statements {
+    let update_statements = generate_update_statements(rng, &tables, &inserts)?;
+    for update_statement in update_statements {
+        if rng.gen_bool(0.5) {
             let sql = update_statement.to_string();
             tracing::info!("[EXECUTING UPDATES]: {}", &sql);
             let response = client.simple_query(&sql).await;
