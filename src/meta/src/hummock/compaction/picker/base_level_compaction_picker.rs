@@ -93,8 +93,13 @@ impl LevelCompactionPicker {
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
-            self.config.max_bytes_for_level_base,
-            self.config.level0_sub_level_compact_level_count as usize,
+            // divide by 2 because we need to select files of base level and it need use the other
+            // half quota.
+            std::cmp::min(
+                self.config.max_bytes_for_level_base,
+                self.config.max_compaction_bytes / 2,
+            ),
+            0,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
@@ -160,23 +165,31 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        let mb_size = 1024 * 1024;
-        let (min_write_amp_input, target_level_size, _) = input_levels
-            .iter()
-            .min_by(
-                |(input, target_level_size, _), (input2, target_level_size2, _)| {
-                    let score1 = *target_level_size / mb_size * (input2.total_file_size / mb_size);
-                    let score2 = *target_level_size2 / mb_size * (input.total_file_size / mb_size);
-                    score1.cmp(&score2)
-                },
-            )
-            .unwrap();
-        let min_write_amp_meet = min_write_amp_input.total_file_size >= *target_level_size;
-        input_levels.sort_by(|(_, _, target_files1), (_, _, target_files2)| {
-            target_files1.len().cmp(&target_files2.len())
-        });
+        const MB_SIZE: u64 = 1024 * 1024;
+        let mut min_score = u64::MAX;
+        let mut min_target_file_size = u64::MAX;
+        let max_base_level_compact_size = target_level.total_file_size / 4;
+        for (input, target_level_size, _) in &input_levels {
+            if input.total_file_size == 0 {
+                continue;
+            }
+            let score = *target_level_size * MB_SIZE / input.total_file_size;
+            min_score = std::cmp::min(min_score, score);
+            if score <= MB_SIZE {
+                min_target_file_size = std::cmp::min(*target_level_size, min_target_file_size);
+            }
+        }
+        let min_write_amp_meet = min_score <= MB_SIZE;
+        let min_target_files_meet = min_target_file_size <= max_base_level_compact_size;
         for (input, target_file_size, target_level_files) in input_levels {
             if min_write_amp_meet && input.total_file_size < target_file_size {
+                continue;
+            }
+
+            if min_target_files_meet
+                && min_target_files_meet
+                && target_file_size > max_base_level_compact_size
+            {
                 continue;
             }
 
@@ -231,9 +244,9 @@ impl LevelCompactionPicker {
             let tier_sub_level_compact_level_count =
                 self.config.level0_sub_level_compact_level_count as usize;
             let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
-                0,
+                self.config.sub_level_max_compaction_bytes / 2,
                 max_compaction_bytes,
-                1,
+                self.config.level0_sub_level_compact_level_count as usize,
                 self.config.level0_max_compact_file_number,
                 overlap_strategy.clone(),
             );
@@ -769,13 +782,13 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(
-            3,
+            2,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
         );
         assert_eq!(
-            4,
+            3,
             ret.input_levels
                 .iter()
                 .filter(|l| l.level_idx == 0)

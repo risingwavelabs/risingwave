@@ -269,6 +269,10 @@ impl NonOverlapSubLevelPicker {
                     extra_overlap_sst.push(other.clone());
                 }
 
+                if pending_compact {
+                    break;
+                }
+
                 extra_overlap_levels.push((reverse_index, extra_overlap_sst));
                 *old_overlap_range = new_overlap_range;
             }
