@@ -186,7 +186,7 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if min_target_files_meet
+            if min_write_amp_meet
                 && min_target_files_meet
                 && target_file_size > max_base_level_compact_size
             {
