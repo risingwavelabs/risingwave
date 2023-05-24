@@ -131,6 +131,10 @@ public class JsonDeserializer implements Deserializer {
     }
 
     private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
+        // value might be null
+        if (value == null) {
+            return null;
+        }
         switch (typeName) {
             case INT16:
                 return castLong(value).shortValue();
