@@ -43,9 +43,8 @@ python3 run_demos.py --case ${case} --format ${format}
 echo "--- Check if the ingestion is successful"
 # extract the type of upstream source,e.g. mysql,postgres,etc
 upstream=$(echo ${case} | cut -d'-' -f 1)
-# check if upstream is mysql
 if [ "${upstream}" == "mysql" ]; then
-  echo "--- install mysql"
+  echo "install mysql"
   sudo yum install -y mysql
 fi
 
