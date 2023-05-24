@@ -39,6 +39,10 @@ use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.

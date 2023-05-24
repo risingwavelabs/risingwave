@@ -59,6 +59,7 @@ use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
+#[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
     vpd_id: Option<String>,

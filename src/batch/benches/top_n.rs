@@ -17,6 +17,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, TopNExecutor};
 use risingwave_common::enable_jemalloc_on_unix;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
@@ -64,6 +65,7 @@ fn create_top_n_executor(
         false,
         "TopNExecutor".into(),
         CHUNK_SIZE,
+        MemoryContext::none(),
     ))
 }
 
