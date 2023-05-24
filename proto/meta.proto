@@ -365,6 +365,7 @@ service ScaleService {
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
+  rpc GetSchedule(GetScheduleRequest) returns (GetScheduleResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
 }
 

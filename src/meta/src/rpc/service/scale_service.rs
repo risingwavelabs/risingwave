@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::hash::marker::Actor;
-use risingwave_pb::common::{Fragment, WorkerNode, WorkerType};
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -145,9 +145,9 @@ where
                                                          // TODO: create actor proto
                 for actor in fragment.get_actors() {
                     let id = actor.actor_id;
-                    let PU_id = table_fragment
+                    let pu_id = table_fragment
                         .get_actor_status()
-                        .get(*id)
+                        .get(&id)
                         .expect("expected actor status") // TODO: handle gracefully
                         .get_parallel_unit()?
                         .get_id();
@@ -155,7 +155,7 @@ where
                 }
                 let id = fragment.get_fragment_id();
                 let actors = actor_list;
-                let typeFlags = fragment.fragment_type_mask; // TODO: convert into type flag
+                let type_flags = fragment.fragment_type_mask; // TODO: convert into type flag
 
                 // TODO: create fragment and append to fragment list
             }
@@ -186,6 +186,12 @@ where
         //     Fragments: fragmentList,
         //     Workers:   workerList,
         // }, nil
+
+        // TODO: change response
+        Ok(Response::new(GetScheduleResponse {
+            fragment_list: vec![],
+            worker_list: vec![],
+        }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
