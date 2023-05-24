@@ -83,6 +83,11 @@ def jsonb_concat(list: List[Any]) -> Any:
     return list
 
 
+@udf(input_types='JSONB[]', result_type='JSONB[]')
+def jsonb_array_identity(list: List[Any]) -> List[Any]:
+    return list
+
+
 if __name__ == '__main__':
     server = UdfServer(location="0.0.0.0:8815")
     server.add_function(int_42)
@@ -95,4 +100,5 @@ if __name__ == '__main__':
     server.add_function(array_access)
     server.add_function(jsonb_access)
     server.add_function(jsonb_concat)
+    server.add_function(jsonb_array_identity)
     server.serve()

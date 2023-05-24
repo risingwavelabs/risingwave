@@ -60,9 +60,9 @@ class ScalarFunction(UserDefinedFunction):
             # evaluate the function for each row
             column = [self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)]
 
-        # convert value to json for jsonb columns
-        if self._result_schema.types[0] == pa.large_string():
-            column = [(json.dumps(v) if v is not None else None) for v in column]
+        # convert value to json string for jsonb or jsonb[] columns
+        column = _process_output_array(column, self._result_schema.types[0])
+
         array = pa.array(column, type=self._result_schema.types[0])
         yield pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
@@ -75,6 +75,17 @@ def _process_input_array(array: list, type: pa.DataType) -> list:
         ]
     if pa.types.is_large_string(type):
         return [(json.loads(v) if v is not None else None) for v in array]
+    return array
+
+
+def _process_output_array(array: list, type: pa.DataType) -> list:
+    if pa.types.is_list(type):
+        return [
+            (_process_output_array(v, type.value_type) if v is not None else None)
+            for v in array
+        ]
+    if pa.types.is_large_string(type):
+        return [(json.dumps(v) if v is not None else None) for v in array]
     return array
 
 
