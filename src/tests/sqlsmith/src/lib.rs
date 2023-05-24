@@ -17,10 +17,12 @@
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
 
+use std::collections::{HashMap, HashSet};
+
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement,
+    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement, TableConstraint,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -86,10 +88,38 @@ pub fn parse_sql<S: AsRef<str>>(sql: S) -> Vec<Statement> {
 /// Extract relevant info from CREATE TABLE statement, to construct a Table
 pub fn create_table_statement_to_table(statement: &Statement) -> Table {
     match statement {
-        Statement::CreateTable { name, columns, .. } => Table::new(
-            name.0[0].real_value(),
-            columns.iter().map(|c| c.clone().into()).collect(),
-        ),
+        Statement::CreateTable {
+            name,
+            columns,
+            constraints,
+            ..
+        } => {
+            let column_name_to_index_mapping: HashMap<_, _> = columns
+                .iter()
+                .enumerate()
+                .map(|(i, c)| (&c.name, i))
+                .collect();
+            let mut pk_indices = HashSet::new();
+            for constraint in constraints {
+                if let TableConstraint::Unique {
+                    columns,
+                    is_primary: true,
+                    ..
+                } = constraint
+                {
+                    for column in columns {
+                        let pk_index = column_name_to_index_mapping.get(column).unwrap();
+                        pk_indices.insert(*pk_index);
+                    }
+                }
+            }
+            let pk_indices = pk_indices.into_iter().collect();
+            Table::new_with_pk(
+                name.0[0].real_value(),
+                columns.iter().map(|c| c.clone().into()).collect(),
+                pk_indices,
+            )
+        }
         _ => panic!(
             "Only CREATE TABLE statements permitted, received: {}",
             statement

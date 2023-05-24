@@ -50,6 +50,14 @@ impl Table {
         }
     }
 
+    pub fn new_with_pk(name: String, columns: Vec<Column>, pk_indices: Vec<usize>) -> Self {
+        Self {
+            name,
+            columns,
+            pk_indices,
+        }
+    }
+
     pub fn get_qualified_columns(&self) -> Vec<Column> {
         self.columns
             .iter()
