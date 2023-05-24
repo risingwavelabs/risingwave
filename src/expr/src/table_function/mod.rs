@@ -142,7 +142,7 @@ pub fn build(
         .get(func, &args)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}({}) -> {:?}",
+                "{:?}({}) -> setof {:?}",
                 func,
                 args.iter().map(|t| format!("{:?}", t)).join(", "),
                 return_type,
