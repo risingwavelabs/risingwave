@@ -85,8 +85,8 @@ SELECT f.f1, @f.f1 AS abs_f1
    FROM FLOAT8_TBL f;
 
 -- truncate
---@ SELECT f.f1, trunc(f.f1) AS trunc_f1
---@    FROM FLOAT8_TBL f;
+SELECT f.f1, trunc(f.f1) AS trunc_f1
+   FROM FLOAT8_TBL f;
 
 -- round
 SELECT f.f1, round(f.f1) AS round_f1
@@ -158,10 +158,10 @@ SELECT |/ double precision '64' AS eight;
 --@    WHERE f.f1 > '0.0';
 
 -- check edge cases for exp
---@ SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
+SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 
 -- cube root
---@ SELECT ||/ double precision '27' AS three;
+SELECT ||/ double precision '27' AS three;
 
 --@ SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL f;
 
