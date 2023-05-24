@@ -145,16 +145,16 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             })
             .collect_vec();
         Statement::Update {
-            table_name: ObjectName::from(vec![table.name.as_str().into()]),
+            table_name: ObjectName::from_test_str(&table.name),
             assignments,
-            selection: Some(Self::create_select_pk_expr(table, pk_indices, &row)),
+            selection: Some(Self::create_selection_expr(table, pk_indices, &row)),
             returning: vec![],
         }
     }
 
-    fn create_select_pk_expr(table: &Table, pk_indices: &[usize], row: &[Expr]) -> Expr {
-        assert!(pk_indices.len() >= 1);
-        let match_exprs = pk_indices
+    fn create_selection_expr(table: &Table, selected_indices: &[usize], row: &[Expr]) -> Expr {
+        assert!(selected_indices.len() >= 1);
+        let match_exprs = selected_indices
             .iter()
             .copied()
             .map(|i| {
@@ -183,7 +183,22 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         table: &Table,
         values: &[Vec<Expr>],
     ) -> Vec<Statement> {
-        todo!()
+        let selected = (0..table.columns.len()).collect_vec();
+        values
+            .iter()
+            .filter_map(|row| {
+                if self.rng.gen_bool(0.2) {
+                    let selection = Some(Self::create_selection_expr(table, &selected, row));
+                    Some(Statement::Delete {
+                        table_name: ObjectName::from_test_str(&table.name),
+                        selection,
+                        returning: vec![],
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     fn extract_insert_values(source: &Query) -> &[Vec<Expr>] {
