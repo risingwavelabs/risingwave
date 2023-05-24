@@ -83,9 +83,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     /// Evict epochs lower than the watermark
     fn evict_by_epoch(&mut self, epoch: u64) {
         while let Some((key, value)) = self.inner.pop_lru_by_epoch(epoch) {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(key.estimated_size() + value.estimated_size());
+            self.kv_heap_size_dec(key.estimated_size() + value.estimated_size());
         }
     }
 
@@ -110,9 +108,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             .saturating_add(key_size + v.estimated_heap_size());
         let old_val = self.inner.put(k, v);
         if let Some(old_val) = &old_val {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(key_size + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(key_size + old_val.estimated_heap_size());
         }
         old_val
     }
@@ -124,6 +120,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
+                self.memory_usage_metrics.clone(),
             )
         })
     }
@@ -135,6 +132,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
+                self.memory_usage_metrics.clone(),
             )
         })
     }
@@ -154,21 +152,18 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
+                self.memory_usage_metrics.clone(),
             )
         })
     }
 
     pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(k.estimated_heap_size() + v.estimated_heap_size());
+        self.kv_heap_size_inc(k.estimated_heap_size() + v.estimated_heap_size());
 
         let old_kv = self.inner.push(k, v);
 
         if let Some((old_key, old_val)) = &old_kv {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(old_key.estimated_heap_size() + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(old_key.estimated_heap_size() + old_val.estimated_heap_size());
         }
         old_kv
     }
@@ -195,16 +190,21 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     fn kv_heap_size_inc(&mut self, size: usize) {
         self.kv_heap_size = self.kv_heap_size.saturating_add(size);
+        self.report_memory_usage();
     }
 
     fn kv_heap_size_dec(&mut self, size: usize) {
         self.kv_heap_size = self.kv_heap_size.saturating_add(size);
+        self.report_memory_usage();
     }
 
-    fn need_report(&mut self) -> bool {
+    fn report_memory_usage(&mut self) -> bool {
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
+            self.memory_usage_metrics
+                .as_ref()
+                .map(|metrics| metrics.set(self.kv_heap_size as _));
             self.last_reported_size_bytes = self.kv_heap_size;
             true
         } else {
@@ -263,6 +263,7 @@ pub struct MutGuard<'a, V: EstimateSize> {
     // The total size of a collection
     total_size: &'a mut usize,
     last_reported_size_bytes: &'a mut usize,
+    memory_usage_metrics: Option<IntGauge>,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
@@ -270,6 +271,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         inner: &'a mut V,
         total_size: &'a mut usize,
         last_reported_size_bytes: &'a mut usize,
+        memory_usage_metrics: Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -277,13 +279,17 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
             original_val_size,
             total_size,
             last_reported_size_bytes,
+            memory_usage_metrics,
         }
     }
 
-    fn need_report(&mut self) -> bool {
+    fn report_memory_usage(&mut self) -> bool {
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
+            self.memory_usage_metrics
+                .as_ref()
+                .map(|metrics| metrics.set(*self.total_size as _));
             *self.last_reported_size_bytes = *self.total_size;
             true
         } else {
@@ -298,6 +304,7 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
             .total_size
             .saturating_add(self.inner.estimated_size())
             .saturating_sub(self.original_val_size);
+        self.report_memory_usage();
     }
 }
 
@@ -322,6 +329,7 @@ pub struct UnsafeMutGuard<V: EstimateSize> {
     // The total size of a collection
     total_size: NonNull<usize>,
     last_reported_size_bytes: NonNull<usize>,
+    memory_usage_metrics: Option<IntGauge>,
 }
 
 impl<V: EstimateSize> UnsafeMutGuard<V> {
@@ -329,6 +337,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
         inner: &mut V,
         total_size: &mut usize,
         last_reported_size_bytes: &mut usize,
+        memory_usage_metrics: Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -336,6 +345,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size,
             total_size: total_size.into(),
             last_reported_size_bytes: last_reported_size_bytes.into(),
+            memory_usage_metrics,
         }
     }
 
@@ -349,6 +359,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size: self.original_val_size,
             total_size: self.total_size.as_mut(),
             last_reported_size_bytes: self.last_reported_size_bytes.as_mut(),
+            memory_usage_metrics: self.memory_usage_metrics.clone(),
         }
     }
 }
