@@ -798,10 +798,14 @@ where
 
             let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
             for index_table_id in &index_table_ids {
-                let internal_table_ids = fragment_manager
+                let internal_table_ids = match fragment_manager
                     .select_table_fragments_by_table_id(&(index_table_id.into()))
-                    .await?
-                    .internal_table_ids();
+                    .await
+                    .map(|fragments| fragments.internal_table_ids())
+                {
+                    Ok(v) => v,
+                    Err(_) => vec![],
+                };
 
                 // 1 should be used by table scan.
                 if internal_table_ids.len() == 1 {
@@ -1602,10 +1606,14 @@ where
                 let mut index_internal_table_ids = Vec::with_capacity(index_table_ids.len());
 
                 for index_table_id in &index_table_ids {
-                    let internal_table_ids = fragment_manager
+                    let internal_table_ids = match fragment_manager
                         .select_table_fragments_by_table_id(&(index_table_id.into()))
-                        .await?
-                        .internal_table_ids();
+                        .await
+                        .map(|fragments| fragments.internal_table_ids())
+                    {
+                        Ok(v) => v,
+                        Err(_) => vec![],
+                    };
 
                     // 1 should be used by table scan.
                     if internal_table_ids.len() == 1 {
