@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{fmt, vec};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -558,6 +558,21 @@ impl MetaClient {
         };
         let resp = self.inner.revoke_privilege(request).await?;
         Ok(resp.version)
+    }
+
+    /// removes all fragments from worker nodes. Aborts if it encounters error
+    pub async fn clear_workers(&self, addrs: Vec<HostAddr>) -> Result<()> {
+        let request = ClearWorkerNodesRequest {
+            host_addresses: addrs
+                .iter()
+                .map(|a| HostAddress {
+                    host: a.host.clone(),
+                    port: a.port as i32,
+                })
+                .collect_vec(),
+        };
+        self.inner.clear_workers(request).await?;
+        Ok(())
     }
 
     /// Unregister the current node to the cluster.
@@ -1411,6 +1426,7 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, clear_workers, ClearWorkerNodesRequest, ClearWorkerNodesResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }

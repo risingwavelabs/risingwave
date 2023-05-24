@@ -617,7 +617,9 @@ impl Cluster {
     pub fn cn_host_addr_to_task(&self, addr: HostAddress) -> String {
         // host like 192.168.3.1:5688
         let host = addr.host.clone();
-        format!("compute-{}", host.split('.').collect::<Vec<&str>>()[3])
+        let x = format!("compute-{}", host.split('.').collect::<Vec<&str>>()[3]);
+        println!("task name is: {}", x); // TODO: remove
+        x
     }
 
     pub async fn get_number_worker_nodes(&self) -> usize {
@@ -628,21 +630,26 @@ impl Cluster {
             .len()
     }
 
-    /// remove node from cluster gracefully by informing meta that node is no longer available.
-    pub async fn unregister_compute_node(&self) -> Result<WorkerNode> {
+    /// remove n random nodes from cluster gracefully by informing meta that node is no longer
+    /// available.
+    pub async fn unregister_compute_nodes(&self, n: usize) -> Result<Vec<WorkerNode>> {
         let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
-        let rand_node = worker_nodes
-            .choose(&mut rand::thread_rng())
-            .unwrap()
-            .clone();
-        let addr = rand_node.clone().host.expect("node does not have host");
-        let addr = HostAddr {
-            host: addr.host,
-            port: addr.port as u16,
-        };
-        self.unregister_worker_node(addr.clone()).await?;
-
-        Ok(rand_node)
+        if worker_nodes.len() < n {
+            return Err(anyhow!("cannot remove more nodes than present"));
+        }
+        let rand_nodes: Vec<&WorkerNode> = worker_nodes
+            .choose_multiple(&mut rand::thread_rng(), 2)
+            .collect();
+        let rand_nodes = rand_nodes.iter().map(|n| n.clone().clone()).collect_vec();
+        for rand_node in rand_nodes.clone() {
+            let addr = rand_node.clone().host.expect("node does not have host");
+            let addr = HostAddr {
+                host: addr.host,
+                port: addr.port as u16,
+            };
+            self.unregister_worker_node(addr.clone()).await?;
+        }
+        Ok(rand_nodes)
     }
 
     /// Create a node for kafka producer and prepare data.

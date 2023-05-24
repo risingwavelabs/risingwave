@@ -14,6 +14,8 @@
 
 #![cfg(madsim)]
 
+use std::collections::HashSet;
+use std::hash::Hash;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -82,13 +84,19 @@ async fn nexmark_scaling_down_common(
     cluster.run(create).await?;
 
     let mut unregistered_nodes: Vec<WorkerNode> = vec![];
-    for _ in 0..number_of_nodes {
-        let unregistered_node = cluster
-            .unregister_compute_node()
-            .await
-            .expect("unregistering node failed");
-        unregistered_nodes.push(unregistered_node);
-        sleep(Duration::from_secs(20)).await;
+    let rand_nodes: Vec<WorkerNode> = cluster
+        .unregister_compute_nodes(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
+        .await
+        .expect("unregistering node failed");
+    for rand_node in rand_nodes {
+        println!("Unregister compute node {:?}", rand_node); // TODO: remove line
+        println!(
+            "Now compute nodes in cluster {}",
+            cluster.get_number_worker_nodes().await
+        ); // TODO: remove line
+
+        unregistered_nodes.push(rand_node);
+        sleep(Duration::from_secs(30)).await;
     }
     let unregistered_node_addrs = unregistered_nodes
         .iter()
@@ -100,6 +108,15 @@ async fn nexmark_scaling_down_common(
     cluster.run(select).await?.assert_result_eq(&expected);
 
     Ok(())
+}
+
+fn has_unique_elements<T>(iter: T) -> bool
+where
+    T: IntoIterator,
+    T::Item: Eq + Hash,
+{
+    let mut uniq = HashSet::new();
+    iter.into_iter().all(move |x| uniq.insert(x))
 }
 
 /// Setup a nexmark stream, inject failures, and verify results.
@@ -145,11 +162,11 @@ async fn nexmark_scaling_up_down_common(
     // TODO: reschedule here as well?
 
     let mut unregistered_nodes: Vec<WorkerNode> = vec![];
-    for _ in 0..number_of_nodes {
-        let rand_node: WorkerNode = cluster
-            .unregister_compute_node() // TODO:  sometimes collect same node twice. This is not what we want!
-            .await
-            .expect("unregistering node failed");
+    let rand_nodes: Vec<WorkerNode> = cluster
+        .unregister_compute_nodes(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
+        .await
+        .expect("unregistering node failed");
+    for rand_node in rand_nodes {
         println!("Unregister compute node {:?}", rand_node); // TODO: remove line
         println!(
             "Now compute nodes in cluster {}",
@@ -159,17 +176,12 @@ async fn nexmark_scaling_up_down_common(
         unregistered_nodes.push(rand_node);
         sleep(Duration::from_secs(sleep_sec)).await;
     }
-    let unregistered_node_addrs = unregistered_nodes
+    let unregistered_node_task_names = unregistered_nodes
         .iter()
         .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
         .collect_vec();
-    let uniq = unregistered_node_addrs
-        .clone()
-        .into_iter()
-        .unique()
-        .collect_vec();
     // make sure that we do not unregister the same node multiple times
-    assert_ne!(unregistered_node_addrs.len(), uniq.len());
+    assert!(has_unique_elements(unregistered_node_task_names.iter()));
 
     // question: If I mark CN as DELETING does meta remove fragments from DELETING CN?
     // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
@@ -214,7 +226,7 @@ async fn nexmark_scaling_up_down_common(
     // I have to generate the new schedule plan myself. Hardcode it here
 
     println!("Killing nodes"); // TODO: remove line
-    cluster.kill_nodes(&unregistered_node_addrs).await;
+    cluster.kill_nodes(&unregistered_node_task_names).await;
     println!(
         // TODO: remove line
         "Nodes killed. Now compute nodes in cluster {}",
@@ -229,6 +241,8 @@ async fn nexmark_scaling_up_down_common(
 
     Ok(())
 }
+
+// TODO: We need to call ClearWorkers instead of manually trying to reschedule
 
 macro_rules! test {
     ($query:ident) => {

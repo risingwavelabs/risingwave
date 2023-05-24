@@ -456,6 +456,10 @@ impl ClusterManagerCore {
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
 
+    // remove ths
+    // TODO: maybe remove this
+    //     fn clear_workers(&self) {}
+
     fn delete_worker_node(&mut self, worker: Worker) {
         worker
             .worker_node

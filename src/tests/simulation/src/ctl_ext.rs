@@ -314,6 +314,22 @@ impl Cluster {
         Ok(())
     }
 
+    // TODO: do I need this one?
+    /// remove all fragments from worker node
+    pub async fn clear_worker_node(&self, addr: HostAddr) -> Result<()> {
+        let _ = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::clear_worker_node(
+                    &risingwave_ctl::common::CtlContext::default(),
+                    addr,
+                )
+                .await
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {

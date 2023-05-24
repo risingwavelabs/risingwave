@@ -198,6 +198,15 @@ message ActivateWorkerNodeResponse {
   common.Status status = 1;
 }
 
+message ClearWorkerNodesRequest {
+  repeated common.HostAddress host_addresses = 1;
+}
+
+// TODO: what do I want to return here? 
+message ClearWorkerNodesResponse {
+  common.Status status = 1;
+}
+
 // TODO: Rename this Retire, Deactivate, Drop, Discontinue, forget 
 // Not drain, since we are not only draining, but also unscheduling 
 // This is not deleting the node, it just removes fragments from it and makes it unschedulable 
@@ -224,6 +233,7 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc ClearWorkers(ClearWorkerNodesRequest) returns (ClearWorkerNodesResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
@@ -330,6 +340,13 @@ message GetClusterInfoResponse {
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
+}
+
+message GetScheduleRequest {}
+
+message GetScheduleResponse {
+  repeated common.Fragment fragment_list = 1;
+  repeated common.WorkerNode worker_list = 2;
 }
 
 message RescheduleRequest {

@@ -25,8 +25,17 @@ use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::CtlContext;
 
+/// mark node as unschedulable
 pub async fn unregister_worker_node(context: &CtlContext, addr: HostAddr) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     meta_client.unregister(addr).await?;
+    // TODO: automatically call clear_worker_node here?
+    Ok(())
+}
+
+/// remove all fragments from worker node
+pub async fn clear_worker_nodes(context: &CtlContext, addrs: Vec<HostAddr>) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client.clear_workers(addrs).await?;
     Ok(())
 }

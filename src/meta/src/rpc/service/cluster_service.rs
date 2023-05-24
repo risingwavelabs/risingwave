@@ -15,8 +15,8 @@
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
-    ListAllNodesResponse,
+    AddWorkerNodeResponse, ClearWorkerNodesRequest, ClearWorkerNodesResponse,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -43,6 +43,16 @@ impl<S> ClusterService for ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
+    async fn clear_workers(
+        &self,
+        request: Request<ClearWorkerNodesRequest>,
+    ) -> Result<Response<ClearWorkerNodesResponse>, Status> {
+        assert!(false);
+        // TODO: implement this one
+
+        Ok(Response::new(ClearWorkerNodesResponse { status: None }))
+    }
+
     async fn add_worker_node(
         &self,
         request: Request<AddWorkerNodeRequest>,

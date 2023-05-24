@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::common::WorkerType;
+use risingwave_common::hash::marker::Actor;
+use risingwave_pb::common::{Fragment, WorkerNode, WorkerType};
 use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
-    RescheduleResponse, ResumeRequest, ResumeResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetScheduleRequest, GetScheduleResponse,
+    PauseRequest, PauseResponse, RescheduleRequest, RescheduleResponse, ResumeRequest,
+    ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -123,6 +125,67 @@ where
             actor_splits,
             source_infos,
         }))
+    }
+
+    async fn get_schedule(
+        &self,
+        request: Request<GetScheduleRequest>,
+    ) -> Result<Response<GetScheduleResponse>, Status> {
+        let cluster_info = self
+            .get_cluster_info(Request::new(GetClusterInfoRequest {}))
+            .await?
+            .into_inner();
+
+        // Compile fragments
+
+        let mut fragment_list: Vec<risingwave_pb::common::Fragment> = vec![];
+        for table_fragment in cluster_info.get_table_fragments() {
+            for (_, fragment) in table_fragment.get_fragments() {
+                let mut actor_list: Vec<Actor> = vec![]; // TODO: create actor type
+                                                         // TODO: create actor proto
+                for actor in fragment.get_actors() {
+                    let id = actor.actor_id;
+                    let PU_id = table_fragment
+                        .get_actor_status()
+                        .get(*id)
+                        .expect("expected actor status") // TODO: handle gracefully
+                        .get_parallel_unit()?
+                        .get_id();
+                    // TODO: create actor and append it to actor_list
+                }
+                let id = fragment.get_fragment_id();
+                let actors = actor_list;
+                let typeFlags = fragment.fragment_type_mask; // TODO: convert into type flag
+
+                // TODO: create fragment and append to fragment list
+            }
+        }
+
+        // Compile workers
+
+        // TODO: can I use WorkerNode here or do I have to write my own type?
+        let mut worker_list: Vec<WorkerNode> = cluster_info.worker_nodes;
+
+        // workerList := []Worker{}
+        // for _, worker := range response.WorkerNodes {
+        //     puList := []ParallelUnitID{}
+        //     for _, pu := range worker.ParallelUnits {
+        //         puList = append(puList, ParallelUnitID(pu.Id))
+        //     }
+        //
+        //     worker := Worker{
+        //         ID:            WorkerID(worker.Id),
+        //         ParallelUnits: puList,
+        //         Host:          worker.Host.Host,
+        //         Port:          worker.Host.Port,
+        //     }
+        //     workerList = append(workerList, worker)
+        // }
+        //
+        // return &Schedule{
+        //     Fragments: fragmentList,
+        //     Workers:   workerList,
+        // }, nil
     }
 
     #[cfg_attr(coverage, no_coverage)]
