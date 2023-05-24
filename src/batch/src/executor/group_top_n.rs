@@ -23,6 +23,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -132,7 +133,6 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
 }
 
 impl<K: HashKey> GroupTopNExecutor<K> {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         child: BoxedExecutor,
         column_orders: Vec<ColumnOrder>,
@@ -191,9 +191,14 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                 .zip_eq_fast(keys.into_iter())
                 .enumerate()
             {
-                let heap = groups
-                    .entry(key)
-                    .or_insert_with(|| TopNHeap::new(self.limit, self.offset, self.with_ties));
+                let heap = groups.entry(key).or_insert_with(|| {
+                    TopNHeap::new(
+                        self.limit,
+                        self.offset,
+                        self.with_ties,
+                        MemoryContext::none(),
+                    )
+                });
                 heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
             }
         }

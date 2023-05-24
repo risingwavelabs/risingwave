@@ -129,6 +129,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
+            Expr::IsUnknown(expr) => self.bind_is_unknown(ExprType::IsNull, *expr),
+            Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
             Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
             Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
             Expr::Case {
@@ -438,6 +440,13 @@ impl Binder {
 
     pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
+        Ok(FunctionCall::new(func_type, vec![expr])?.into())
+    }
+
+    pub(super) fn bind_is_unknown(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
+        let expr = self
+            .bind_expr_inner(expr)?
+            .cast_implicit(DataType::Boolean)?;
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 

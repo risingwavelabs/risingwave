@@ -1,2 +1,2 @@
 grafanalib >= 0.7.0
-jsonmerge
+jsonmerge >= 1.9.0
