@@ -62,6 +62,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         tables: &[Table],
         inserts: &[Statement],
     ) -> Result<Vec<Statement>> {
+        let mut updates = vec![];
         for insert in inserts {
             match insert {
                 Statement::Insert {
@@ -73,12 +74,14 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
                         .find(|table| table.name == table_name.real_value())
                         .expect("Inserted values should always have an existing table");
                     let pk_indices = &table.pk_indices;
-                    self.generate_update_statements_inner(table, values, pk_indices);
+                    let mut updates_for_insert =
+                        self.generate_update_statements_inner(table, values, pk_indices);
+                    updates.append(&mut updates_for_insert);
                 }
-                _ => panic!("Should only have insert statements"),
+                _ => bail!("Should only have insert statements"),
             }
         }
-        todo!()
+        Ok(updates)
     }
 
     pub(crate) fn generate_update_statements_inner(
@@ -148,25 +151,25 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         Statement::Update {
             table_name: ObjectName::from_test_str(&table.name),
             assignments,
-            selection: Some(Self::create_selection_expr(table, pk_indices, &row)),
+            selection: Some(Self::create_selection_expr(table, pk_indices, row)),
             returning: vec![],
         }
     }
 
     fn create_selection_expr(table: &Table, selected_indices: &[usize], row: &[Expr]) -> Expr {
-        assert!(selected_indices.len() >= 1);
+        assert!(!selected_indices.is_empty());
         let match_exprs = selected_indices
             .iter()
             .copied()
             .map(|i| {
                 let match_val = row[i].clone();
                 let match_col = Expr::Identifier(table.columns[i].name.as_str().into());
-                let match_expr = Expr::BinaryOp {
+                
+                Expr::BinaryOp {
                     left: Box::new(match_col),
                     op: BinaryOperator::Eq,
                     right: Box::new(match_val),
-                };
-                match_expr
+                }
             })
             .collect_vec();
         match_exprs

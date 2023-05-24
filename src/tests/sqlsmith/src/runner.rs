@@ -335,7 +335,7 @@ async fn test_stream_queries<R: Rng>(
         for update_statement in update_statements {
             let sql = update_statement.to_string();
             tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-            let response = client.simple_query(&sql).await;
+            let _response = client.simple_query(&sql).await;
         }
     }
 
