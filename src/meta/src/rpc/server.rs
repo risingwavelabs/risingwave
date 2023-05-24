@@ -73,7 +73,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, MetaResult};
+use crate::{hummock, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -338,6 +338,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
+
+    let data_directory = system_params_reader.data_directory().to_string();
+    if data_directory.is_empty() || data_directory.ends_with("//") {
+        return Err(MetaError::system_param(format!(
+            "The data directory {:?} is misconfigured",
+            data_directory
+        )));
+    }
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
