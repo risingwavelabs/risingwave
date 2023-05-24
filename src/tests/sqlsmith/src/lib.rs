@@ -126,3 +126,145 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
         ),
     }
 }
+
+pub fn parse_create_table_statements(sql: &str) -> Vec<Table> {
+    let statements = parse_sql(&sql);
+    statements
+        .iter()
+        .map(create_table_statement_to_table)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use expect_test::{expect, Expect};
+
+    fn check(actual: Vec<Table>, expect: Expect) {
+        let actual = format!("{:#?}", actual); // pretty print the output.
+        expect.assert_eq(&actual);
+    }
+
+    #[test]
+    fn test_parse_create_table_statements_no_pk() {
+        let test_string = "
+CREATE TABLE t(v1 int);
+CREATE TABLE t2(v1 int, v2 bool);
+CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
+        ";
+        check(parse_create_table_statements(test_string), expect![[r#"
+            [
+                Table {
+                    name: "t",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+                Table {
+                    name: "t2",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                        Column {
+                            name: "v2",
+                            data_type: Boolean,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+                Table {
+                    name: "t3",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                        Column {
+                            name: "v2",
+                            data_type: Boolean,
+                        },
+                        Column {
+                            name: "v3",
+                            data_type: Int16,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+            ]"#]]);
+    }
+
+    #[test]
+    fn test_parse_create_table_statements_with_pk() {
+        let test_string = "
+CREATE TABLE t(v1 int PRIMARY KEY);
+CREATE TABLE t2(v1 int, v2 smallint PRIMARY KEY);
+CREATE TABLE t3(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY);
+CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY);
+";
+        check(parse_create_table_statements(test_string), expect![[r#"
+            [
+                Table {
+                    name: "t",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+                Table {
+                    name: "t2",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                        Column {
+                            name: "v2",
+                            data_type: Int16,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+                Table {
+                    name: "t3",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                        Column {
+                            name: "v2",
+                            data_type: Int16,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+                Table {
+                    name: "t4",
+                    columns: [
+                        Column {
+                            name: "v1",
+                            data_type: Int32,
+                        },
+                        Column {
+                            name: "v2",
+                            data_type: Int16,
+                        },
+                        Column {
+                            name: "v3",
+                            data_type: Boolean,
+                        },
+                    ],
+                    pk_indices: [],
+                },
+            ]"#]]);
+    }
+}
