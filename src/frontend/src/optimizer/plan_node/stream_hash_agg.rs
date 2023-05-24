@@ -37,6 +37,9 @@ pub struct StreamHashAgg {
 
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
+
+    /// Whether to emit output only when the window is closed by watermark.
+    emit_on_window_close: bool,
 }
 
 impl StreamHashAgg {
@@ -86,6 +89,7 @@ impl StreamHashAgg {
             logical,
             vnode_col_idx,
             row_count_idx,
+            emit_on_window_close,
         }
     }
 
@@ -102,9 +106,12 @@ impl StreamHashAgg {
     }
 
     pub fn to_eowc_version(&self) -> Self {
-        let mut new = self.clone();
-        new.base.emit_on_window_close = true;
-        new
+        Self::new_with_eowc(
+            self.logical.clone(),
+            self.vnode_col_idx,
+            self.row_count_idx,
+            true,
+        )
     }
 }
 
@@ -139,9 +146,16 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut new = self.clone();
-        new.logical.input = input;
-        new
+        let logical = generic::Agg {
+            input,
+            ..self.logical.clone()
+        };
+        Self::new_with_eowc(
+            logical,
+            self.vnode_col_idx,
+            self.row_count_idx,
+            self.emit_on_window_close,
+        )
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -194,8 +208,14 @@ impl ExprRewritable for StreamHashAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.clone();
-        new.logical.rewrite_exprs(r);
-        new.into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new_with_eowc(
+            logical,
+            self.vnode_col_idx,
+            self.row_count_idx,
+            self.emit_on_window_close,
+        )
+        .into()
     }
 }
