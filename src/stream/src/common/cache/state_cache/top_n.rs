@@ -14,7 +14,6 @@
 
 use risingwave_common::array::Op;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common_proc_macro::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 use crate::common::cache::TopNCache;

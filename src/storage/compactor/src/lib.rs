@@ -18,12 +18,16 @@ mod server;
 mod telemetry;
 
 use clap::Parser;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 
 use crate::server::compactor_serve;
 
-/// Command-line arguments for compute-node.
+/// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless worker node that compacts data for the storage engine"
+)]
 pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.

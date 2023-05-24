@@ -1728,13 +1728,9 @@ def section_hummock(panels):
             ],
         ),
         panels.timeseries_percentage(
-            "Filter/Cache Miss Rate",
+            "Cache Miss Rate",
             "",
             [
-                panels.target(
-                    f"1 - (sum(rate({table_metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)) / (sum(rate({table_metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type))",
-                    "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
-                ),
                 panels.target(
                     f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
                     "meta cache miss rate - {{table_id}} @ {{job}} @ {{instance}}",
@@ -1747,12 +1743,22 @@ def section_hummock(panels):
                     f"(sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)) / (sum(rate({metric('file_cache_latency_count', file_cache_get_filter)}[$__rate_interval])) by (instance))",
                     "file cache miss rate @ {{instance}}",
                 ),
-
+            ],
+        ),
+        panels.timeseries_percentage(
+            "Read Request Bloom-Filter Filtered Rate",
+            "Negative / Total",
+            [
                 panels.target(
                     f"1 - (((sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
-
+            ],
+        ),
+        panels.timeseries_percentage(
+            "Read Request Bloom-Filter False-Positive Rate",
+            "False-Positive / Positive",
+            [
                 panels.target(
                     f"1 - (((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
                     "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
@@ -1779,22 +1785,30 @@ def section_hummock(panels):
         ),
 
         panels.timeseries_count(
-            "Merge Imm - Finished Tasks Count",
+            "Uploader - Tasks Count",
             "",
             [
                 panels.target(
                     f"sum(irate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by (job,instance,table_id)",
                     "merge imm tasks - {{table_id}} @ {{instance}} ",
                 ),
+                panels.target(
+                    f"sum(irate({metric('state_store_spill_task_counts')}[$__rate_interval])) by (job,instance,uploader_stage)",
+                    "Uploader spill tasks - {{uploader_stage}} @ {{instance}} ",
+                ),
             ],
         ),
         panels.timeseries_bytes(
-            "Merge Imm - Finished Task Memory Size",
+            "Uploader - Task Size",
             "",
             [
                 panels.target(
                     f"sum(rate({table_metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by (job,instance,table_id)",
-                    "tasks memory size - {{table_id}} @ {{instance}} ",
+                    "Merging tasks memory size - {{table_id}} @ {{instance}} ",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_spill_task_size')}[$__rate_interval])) by (job,instance,uploader_stage)",
+                    "Uploading tasks size - {{uploader_stage}} @ {{instance}} ",
                 ),
             ],
         ),
@@ -1858,11 +1872,11 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({table_metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({table_metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
+                    f"sum(rate({table_metric('state_store_write_batch_size_sum')}[$__rate_interval]))by(job,instance,table_id) / sum(rate({table_metric('state_store_write_batch_size_count')}[$__rate_interval]))by(job,instance,table_id)",
                     "shared_buffer - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('compactor_shared_buffer_to_sstable_size')}[$__rate_interval]))by(job,instance) / sum(rate({metric('state_store_shared_buffer_to_sstable_size_count')}[$__rate_interval]))by(job,instance)",
+                    f"sum(rate({metric('compactor_shared_buffer_to_sstable_size_sum')}[$__rate_interval]))by(job,instance) / sum(rate({metric('compactor_shared_buffer_to_sstable_size_count')}[$__rate_interval]))by(job,instance)",
                     "sync - {{job}} @ {{instance}}",
                 ),
             ],
@@ -1899,6 +1913,10 @@ def section_hummock(panels):
                 ),
                 panels.target(
                     f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                    "Memory limiter usage - {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
                     "uploading memory - {{job}} @ {{instance}}",
                 ),
             ],

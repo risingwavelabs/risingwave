@@ -319,7 +319,7 @@ impl FunctionAttr {
             let array = format_ident!("a{i}");
             let variant: TokenStream2 = types::variant(arg).parse().unwrap();
             quote! {
-                let ArrayImpl::#variant(#array) = input.column_at(#i).array_ref() else {
+                let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
                     bail!("input type mismatch. expect: {}", stringify!(#variant));
                 };
             }
@@ -373,9 +373,11 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
+                use risingwave_common::estimate_size::EstimateSize;
+
                 use crate::Result;
 
-                #[derive(Clone)]
+                #[derive(Clone, EstimateSize)]
                 struct Agg {
                     return_type: DataType,
                     state: Option<#state_type>,
@@ -413,6 +415,9 @@ impl FunctionAttr {
                             None => builder.append_null(),
                         }
                         Ok(())
+                    }
+                    fn estimated_size(&self) -> usize {
+                        EstimateSize::estimated_size(self)
                     }
                 }
 

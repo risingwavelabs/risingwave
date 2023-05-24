@@ -184,7 +184,7 @@ WITH (
     scan.startup.mode = 'earliest')
 ROW format JSON;
 
-# we cannot create debezium source without pk
+# we cannot create maxwell source without pk
 statement error
 create table s13 (
   id integer,
@@ -305,6 +305,13 @@ create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1, p timestamptz as proc
   scan.startup.mode = 'earliest'
 ) row format json
 
+statement ok
+create source s23 (bytea_example bytea) with (
+  connector = 'kafka',
+  topic = 'json_bytea',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 CREATE TABLE mongo_customers (
@@ -316,6 +323,22 @@ WITH (
   properties.bootstrap.server = '127.0.0.1:29092',
 	topic = 'debezium_mongo_json_customers')
 ROW FORMAT DEBEZIUM_MONGO_JSON
+
+# we cannot create upsert_json source without pk
+statement error
+CREATE TABLE upsert_students (
+    "ID" INT,
+    "firstName" VARCHAR,
+    "lastName" VARCHAR,
+    age INT,
+    height REAL,
+    weight REAL
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = '127.0.0.1:29092',
+	topic = 'upsert_json')
+ROW FORMAT UPSERT_JSON
 
 statement ok
 CREATE TABLE upsert_students (
@@ -346,6 +369,9 @@ select v1, v2 from s0;
 2 22
 3 333
 4 4444
+
+statement ok
+drop table s0
 
 query IT rowsort
 select * from s1
@@ -522,6 +548,12 @@ select v1, v2, v3, p >= date '2021-01-01' from s22;
 20 21 22 t
 NULL NULL NULL t
 
+query T rowsort
+select * from s23;
+----
+\x31324344
+\xdeadbeef
+
 query II 
 SELECT
 	*
@@ -598,6 +630,9 @@ drop table s21
 
 statement ok
 drop source s22
+
+statement ok
+drop source s23
 
 statement ok
 DROP TABLE mongo_customers;
