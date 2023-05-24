@@ -483,9 +483,10 @@ impl FunctionAttr {
 
     fn generate_build_table_function(&self) -> Result<TokenStream2> {
         let num_args = self.args.len();
+        let return_types = output_types(&self.ret);
         let fn_name = format_ident!("{}", self.user_fn.name);
         let struct_name = format_ident!("{}", self.ident_name());
-        let ids = (0..num_args)
+        let arg_ids = (0..num_args)
             .filter(|i| match &self.prebuild {
                 Some(s) => !s.contains(&format!("${i}")),
                 None => true,
@@ -495,17 +496,27 @@ impl FunctionAttr {
             Some(s) => s.contains(&format!("${i}")),
             None => false,
         });
-        let elems: Vec<_> = ids.iter().map(|i| format_ident!("v{i}")).collect();
+        let inputs: Vec<_> = arg_ids.iter().map(|i| format_ident!("i{i}")).collect();
         let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
         let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
-        let child: Vec<_> = ids.iter().map(|i| format_ident!("child{i}")).collect();
-        let array_refs: Vec<_> = ids.iter().map(|i| format_ident!("array{i}")).collect();
-        let arrays: Vec<_> = ids.iter().map(|i| format_ident!("a{i}")).collect();
+        let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
         let arg_arrays = self
             .args
             .iter()
             .map(|t| format_ident!("{}", types::array_type(t)));
-        let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
+        let outputs = (0..return_types.len())
+            .map(|i| format_ident!("o{i}"))
+            .collect_vec();
+        let builders = (0..return_types.len())
+            .map(|i| format_ident!("builder{i}"))
+            .collect_vec();
+        let builder_types = return_types
+            .iter()
+            .map(|ty| format_ident!("{}Builder", types::array_type(ty)))
+            .collect_vec();
+        let return_types = return_types.iter().map(|ty| data_type(ty)).collect_vec();
         let const_arg = match &self.prebuild {
             Some(_) => quote! { &self.const_arg },
             None => quote! {},
@@ -533,19 +544,11 @@ impl FunctionAttr {
                 "expect `impl Iterator` in return type",
             )
         })?;
-        let value = match iterator_item_type {
-            ReturnType::T => quote! { Some(value) },
-            ReturnType::Option => quote! { value },
-            ReturnType::Result => quote! { Some(value?) },
-            ReturnType::ResultOption => quote! { value? },
-        };
-        let columns = match self.ret.starts_with("struct") {
-            true => quote! {
-                std::iter::once(index_array.into_ref())
-                    .chain(value_array.fields().cloned())
-                    .collect()
-            },
-            false => quote! { vec![index_array.into_ref(), value_array.into_ref()] },
+        let output = match iterator_item_type {
+            ReturnType::T => quote! { Some(output) },
+            ReturnType::Option => quote! { output },
+            ReturnType::Result => quote! { Some(output?) },
+            ReturnType::ResultOption => quote! { output? },
         };
 
         Ok(quote! {
@@ -586,22 +589,24 @@ impl FunctionAttr {
                         )*
 
                         let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
-                        let mut value_builder = #array_builder::with_type(self.chunk_size, self.return_type.clone());
+                        #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
-                            if let (#(Some(#elems),)*) = row && visible {
-                                let iter = #fn_name(#(#elems,)* #const_arg);
-                                for value in #iter {
+                            if let (#(Some(#inputs),)*) = row && visible {
+                                let iter = #fn_name(#(#inputs,)* #const_arg);
+                                for output in #iter {
                                     index_builder.append(Some(i as i64));
-                                    match #value {
-                                        Some(v) => value_builder.append(Some(v.as_scalar_ref())),
-                                        None => value_builder.append_null(),
+                                    match #output {
+                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
-                                        let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
-                                        let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
-                                        yield DataChunk::new(#columns, self.chunk_size);
+                                        let columns = vec![
+                                            std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish().into_ref(),
+                                            #(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref(),)*
+                                        ];
+                                        yield DataChunk::new(columns, self.chunk_size);
                                     }
                                 }
                             }
@@ -609,9 +614,11 @@ impl FunctionAttr {
 
                         if index_builder.len() > 0 {
                             let len = index_builder.len();
-                            let index_array = index_builder.finish();
-                            let value_array = value_builder.finish();
-                            yield DataChunk::new(#columns, len);
+                            let columns = vec![
+                                index_builder.finish().into_ref(),
+                                #(#builders.finish().into_ref(),)*
+                            ];
+                            yield DataChunk::new(columns, len);
                         }
                     }
                 }
@@ -644,4 +651,18 @@ fn data_type(ty: &str) -> TokenStream2 {
     }
     let variant = format_ident!("{}", types::data_type(ty));
     quote! { DataType::#variant }
+}
+
+/// Extract multiple output types.
+///
+/// ```ignore
+/// output_types("int32") -> ["int32"]
+/// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
+/// ```
+fn output_types(ty: &str) -> Vec<&str> {
+    if let Some(s) = ty.strip_prefix("struct<") && let Some(args) = s.strip_suffix('>') {
+        args.split(',').map(|s| s.split_whitespace().nth(1).unwrap()).collect()
+    } else {
+        vec![ty]
+    }
 }
