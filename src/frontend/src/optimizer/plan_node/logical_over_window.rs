@@ -27,7 +27,7 @@ use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, WindowFunction};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -96,13 +96,19 @@ impl LogicalOverWindow {
                     .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
             }
         }
-
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
             if let ExprImpl::WindowFunction(window) = expr {
-                if let WindowFuncKind::Aggregate(kind) = window.kind
+                let (kind, args, partition_by, order_by, frame) = (
+                    window.kind,
+                    &window.args,
+                    &window.partition_by,
+                    &window.order_by,
+                    &window.frame,
+                );
+                if let WindowFuncKind::Aggregate(agg_kind) = kind
                     && matches!(
-                        kind,
+                        agg_kind,
                         AggKind::Avg
                             | AggKind::StddevPop
                             | AggKind::StddevSamp
@@ -110,7 +116,22 @@ impl LogicalOverWindow {
                             | AggKind::VarSamp
                     )
                 {
-                    unimplemented!("invalid agg kind in over window: {:?}", window.kind);
+                    match agg_kind {
+                        AggKind::Avg => {
+                            assert_eq!(args.len(), 1);
+                            window_funcs.push(WindowFunction::new(WindowFuncKind::Aggregate(AggKind::Sum), partition_by.clone(), order_by.clone(), args.clone(), frame.clone())?);
+                            let left_ref = InputRef::new(input_len + window_funcs.len() - 1, window_funcs.last().unwrap().return_type());
+                            window_funcs.push(WindowFunction::new(WindowFuncKind::Aggregate(AggKind::Count), partition_by.clone(), order_by.clone(), args.clone(), frame.clone())?);
+                            let right_ref = InputRef::new(input_len + window_funcs.len() - 1, window_funcs.last().unwrap().return_type());
+                            let new_expr = ExprImpl::from(
+                                FunctionCall::new(ExprType::Divide, vec![left_ref.into(), right_ref.into()]).unwrap(),
+                            );
+                            let _ = std::mem::replace(expr, new_expr);
+                        }
+                        _ => {
+                            unimplemented!("unsupported agg kind in over window: {:?}", agg_kind);
+                        }
+                    }
                 } else {
                     let new_expr =
                         InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
