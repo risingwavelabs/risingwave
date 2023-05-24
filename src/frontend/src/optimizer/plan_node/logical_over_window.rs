@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -98,14 +99,27 @@ impl LogicalOverWindow {
 
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
-            if let ExprImpl::WindowFunction(_) = expr {
-                let new_expr =
-                    InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
-                        .into();
-                let f = std::mem::replace(expr, new_expr)
-                    .into_window_function()
-                    .unwrap();
-                window_funcs.push(*f);
+            if let ExprImpl::WindowFunction(window) = expr {
+                if let WindowFuncKind::Aggregate(kind) = window.kind
+                    && matches!(
+                        kind,
+                        AggKind::Avg
+                            | AggKind::StddevPop
+                            | AggKind::StddevSamp
+                            | AggKind::VarPop
+                            | AggKind::VarSamp
+                    )
+                {
+                    unimplemented!("invalid agg kind in over window: {:?}", window.kind);
+                } else {
+                    let new_expr =
+                        InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
+                            .into();
+                    let f = std::mem::replace(expr, new_expr)
+                        .into_window_function()
+                        .unwrap();
+                    window_funcs.push(*f);
+                }
             }
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
