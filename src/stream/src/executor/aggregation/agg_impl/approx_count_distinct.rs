@@ -18,7 +18,6 @@ use std::mem;
 
 use risingwave_common::bail;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common_proc_macro::EstimateSize;
 
 use super::approx_distinct_utils::{RegisterBucket, StreamingApproxCountDistinct};
 use crate::executor::error::StreamExecutorResult;

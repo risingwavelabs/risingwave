@@ -22,6 +22,7 @@ use futures::{stream, StreamExt, TryFutureExt};
 use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
@@ -165,26 +166,49 @@ async fn compact_shared_buffer(
         compact_data_size
     };
     // mul 1.2 for other extra memory usage.
-    let sub_compaction_sstable_size = std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
-    if parallelism > 1 && compact_data_size > sstable_size {
-        let mut last_buffer_size = 0;
-        let mut last_user_key = UserKey::default();
-        for (data_size, user_key) in size_and_start_user_keys {
-            if last_buffer_size >= sub_compaction_data_size && last_user_key.as_ref() != user_key {
-                last_user_key.set(user_key);
-                key_split_append(
-                    &FullKey {
-                        user_key,
-                        epoch: HummockEpoch::MAX,
-                    }
-                    .encode()
-                    .into(),
-                );
-                last_buffer_size = data_size;
-            } else {
-                last_user_key.set(user_key);
-                last_buffer_size += data_size;
+    let mut sub_compaction_sstable_size =
+        std::cmp::min(sstable_size, sub_compaction_data_size * 6 / 5);
+    let mut split_weight_by_vnode = 0;
+    if existing_table_ids.len() > 1 {
+        if parallelism > 1 && compact_data_size > sstable_size {
+            let mut last_buffer_size = 0;
+            let mut last_user_key = UserKey::default();
+            for (data_size, user_key) in size_and_start_user_keys {
+                if last_buffer_size >= sub_compaction_data_size
+                    && last_user_key.as_ref() != user_key
+                {
+                    last_user_key.set(user_key);
+                    key_split_append(
+                        &FullKey {
+                            user_key,
+                            epoch: HummockEpoch::MAX,
+                        }
+                        .encode()
+                        .into(),
+                    );
+                    last_buffer_size = data_size;
+                } else {
+                    last_user_key.set(user_key);
+                    last_buffer_size += data_size;
+                }
             }
+        }
+    } else {
+        let mut vnodes = vec![];
+        for imm in &payload {
+            vnodes.extend(imm.collect_vnodes());
+        }
+        vnodes.sort();
+        vnodes.dedup();
+        const MIN_SSTABLE_SIZE: u64 = 8 * 1024 * 1024;
+        if compact_data_size >= MIN_SSTABLE_SIZE && !vnodes.is_empty() {
+            let mut avg_vnode_size = compact_data_size / (vnodes.len() as u64);
+            split_weight_by_vnode = VirtualNode::COUNT;
+            while avg_vnode_size < MIN_SSTABLE_SIZE && split_weight_by_vnode > 0 {
+                split_weight_by_vnode /= 2;
+                avg_vnode_size *= 2;
+            }
+            sub_compaction_sstable_size = compact_data_size;
         }
     }
 
@@ -200,6 +224,7 @@ async fn compact_shared_buffer(
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
+            split_weight_by_vnode as u32,
         );
         let iter = OrderedMergeIteratorInner::new(
             payload.iter().map(|imm| imm.clone().into_forward_iter()),
@@ -245,7 +270,6 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
-
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
@@ -255,7 +279,6 @@ async fn compact_shared_buffer(
             }
             level0.extend(ssts);
         }
-
         Ok(level0)
     } else {
         Err(err.unwrap())
@@ -418,6 +441,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: Arc<CompactorContext>,
         sub_compaction_sstable_size: usize,
+        split_weight_by_vnode: u32,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
@@ -433,7 +457,7 @@ impl SharedBufferCompactRunner {
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
                 split_by_table: false,
-                split_weight_by_vnode: 0,
+                split_weight_by_vnode,
             },
         );
         Self {
