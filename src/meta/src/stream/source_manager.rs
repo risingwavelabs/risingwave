@@ -53,6 +53,8 @@ pub struct SourceManager<S: MetaStore> {
     metrics: Arc<MetaMetrics>,
 }
 
+const MAX_FAIL_CNT: u32 = 10;
+
 struct SharedSplitMap {
     splits: Option<BTreeMap<SplitId, SplitImpl>>,
 }
@@ -66,9 +68,19 @@ struct ConnectorSourceWorker {
     enumerator: SplitEnumeratorImpl,
     period: Duration,
     metrics: Arc<MetaMetrics>,
+    connector_properties: ConnectorProperties,
+    fail_cnt: u32,
 }
 
 impl ConnectorSourceWorker {
+    async fn refresh(&mut self) -> MetaResult<()> {
+        let enumerator = SplitEnumeratorImpl::create(self.connector_properties.clone()).await?;
+        self.enumerator = enumerator;
+        self.fail_cnt = 0;
+        tracing::info!("refreshed source enumerator: {}", self.source_name);
+        Ok(())
+    }
+
     pub async fn create(
         connector_rpc_endpoint: &Option<String>,
         source: &Source,
@@ -81,7 +93,7 @@ impl ConnectorSourceWorker {
             let table_schema = Self::extract_source_schema(source);
             properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
-        let enumerator = SplitEnumeratorImpl::create(properties).await?;
+        let enumerator = SplitEnumeratorImpl::create(properties.clone()).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
             source_id: source.id,
@@ -90,6 +102,8 @@ impl ConnectorSourceWorker {
             enumerator,
             period,
             metrics,
+            connector_properties: properties,
+            fail_cnt: 0,
         })
     }
 
@@ -108,6 +122,11 @@ impl ConnectorSourceWorker {
                     }
                 }
                 _ = interval.tick() => {
+                    if self.fail_cnt > MAX_FAIL_CNT {
+                        if let Err(e) = self.refresh().await {
+                            tracing::error!("error happened when refresh from connector source worker: {}", e.to_string());
+                        }
+                    }
                     if let Err(e) = self.tick().await {
                         tracing::error!("error happened when tick from connector source worker: {}", e.to_string());
                     }
@@ -125,9 +144,11 @@ impl ConnectorSourceWorker {
         };
         let splits = self.enumerator.list_splits().await.map_err(|e| {
             source_is_up(0);
+            self.fail_cnt += 1;
             e
         })?;
         source_is_up(1);
+        self.fail_cnt = 0;
         let mut current_splits = self.current_splits.lock().await;
         current_splits.splits.replace(
             splits
@@ -171,6 +192,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    connector_properties: ConnectorProperties,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -257,7 +279,15 @@ where
                         })
                         .collect();
 
-                    if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
+                    let mut options = SplitDiffOptions::default();
+
+                    if handle.connector_properties.enable_split_reduction() {
+                        options.enable_scale_in = true;
+                    }
+
+                    if let Some(change) =
+                        diff_splits(prev_actor_splits, &discovered_splits, options)
+                    {
                         split_assignment.insert(*fragment_id, change);
                     }
                 }
@@ -359,15 +389,35 @@ impl<T: SplitMetaData + Clone> Ord for ActorSplitsAssignment<T> {
     }
 }
 
+#[derive(Debug)]
+struct SplitDiffOptions {
+    enable_scale_in: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for SplitDiffOptions {
+    fn default() -> Self {
+        SplitDiffOptions {
+            enable_scale_in: false,
+        }
+    }
+}
+
 fn diff_splits<T>(
     actor_splits: HashMap<ActorId, Vec<T>>,
     discovered_splits: &BTreeMap<SplitId, T>,
+    opts: SplitDiffOptions,
 ) -> Option<HashMap<ActorId, Vec<T>>>
 where
     T: SplitMetaData + Clone,
 {
+    // if no actors, return
     if actor_splits.is_empty() {
         return None;
+    }
+
+    if discovered_splits.is_empty() {
+        tracing::warn!("no splits discovered");
     }
 
     let prev_split_ids: HashSet<_> = actor_splits
@@ -375,18 +425,58 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    let new_discovered_splits: HashSet<_> = discovered_splits
-        .keys()
-        .filter(|split_id| !prev_split_ids.contains(*split_id))
+    tracing::debug!("previous splits {:?}", prev_split_ids);
+    tracing::debug!("discovered splits {:?}", discovered_splits.keys());
+
+    let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
+
+    let dropped_splits: HashSet<_> = prev_split_ids
+        .difference(&discovered_split_ids)
         .cloned()
         .collect();
 
-    if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
-        return None;
+    if !dropped_splits.is_empty() {
+        if opts.enable_scale_in {
+            tracing::debug!("dropping splits {:?}", dropped_splits);
+        } else {
+            tracing::warn!(
+                "dropping splits {:?} happened, but it is not allowed",
+                dropped_splits
+            );
+        }
+    }
+
+    let new_discovered_splits: HashSet<_> = discovered_split_ids
+        .into_iter()
+        .filter(|split_id| !prev_split_ids.contains(split_id))
+        .collect();
+
+    tracing::debug!("new created splits {:?}", new_discovered_splits);
+
+    if opts.enable_scale_in {
+        // if we support scale in, no more splits are discovered, and no splits are dropped, return
+        // we need to check if discovered_split_ids is empty, because if it is empty, we need to
+        // handle the case of scale in to zero (like deleting all objects from s3)
+        if dropped_splits.is_empty()
+            && new_discovered_splits.is_empty()
+            && !discovered_splits.is_empty()
+        {
+            return None;
+        }
+    } else {
+        // if we do not support scale in, and no more splits are discovered, return
+        if new_discovered_splits.is_empty() && !discovered_splits.is_empty() {
+            return None;
+        }
     }
 
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
-    for (actor_id, splits) in actor_splits {
+
+    for (actor_id, mut splits) in actor_splits {
+        if opts.enable_scale_in {
+            splits.drain_filter(|split| dropped_splits.contains(&split.id()));
+        }
+
         heap.push(ActorSplitsAssignment { actor_id, splits })
     }
 
@@ -490,37 +580,41 @@ where
         core.apply_source_change(source_fragments, split_assignment, dropped_actors);
     }
 
+    // After introducing the remove function for split, there may be a very occasional split removal
+    // during scaling, in which case we need to use the old splits for reallocation instead of the
+    // latest splits (which may be missing), so that we can resolve the split removal in the next
+    // command.
     pub async fn reallocate_splits(
         &self,
-        fragment_id: &FragmentId,
-        actor_ids: impl IntoIterator<Item = ActorId>,
+        prev_actor_ids: &[ActorId],
+        curr_actor_ids: &[ActorId],
     ) -> MetaResult<HashMap<ActorId, Vec<SplitImpl>>> {
         let core = self.core.lock().await;
-        let source_id = core.fragment_sources.get(fragment_id).unwrap();
-        let handle = core.managed_sources.get(source_id).unwrap();
 
-        if handle.splits.lock().await.splits.is_none() {
-            // force refresh source
-            let (tx, rx) = oneshot::channel();
-            handle
-                .sync_call_tx
-                .send(tx)
-                .map_err(|e| anyhow!(e.to_string()))?;
-            rx.await.map_err(|e| anyhow!(e.to_string()))??;
-        }
+        let prev_splits = prev_actor_ids
+            .iter()
+            .flat_map(|actor_id| core.actor_splits.get(actor_id).unwrap())
+            .cloned()
+            .collect_vec();
 
-        let splits = handle.discovered_splits().await.unwrap();
-        if splits.is_empty() {
-            tracing::warn!("no splits detected for source {}", source_id);
-            return Ok(Default::default());
-        }
-
-        let empty_actor_splits = actor_ids
-            .into_iter()
-            .map(|actor_id| (actor_id, vec![]))
+        let empty_actor_splits = curr_actor_ids
+            .iter()
+            .map(|actor_id| (*actor_id, vec![]))
             .collect();
 
-        Ok(diff_splits(empty_actor_splits, &splits).unwrap_or_default())
+        let prev_splits = prev_splits
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let diff = diff_splits(
+            empty_actor_splits,
+            &prev_splits,
+            SplitDiffOptions::default(),
+        )
+        .unwrap_or_default();
+
+        Ok(diff)
     }
 
     pub async fn pre_allocate_splits(&self, table_id: &TableId) -> MetaResult<SplitAssignment> {
@@ -567,7 +661,9 @@ where
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
 
-                if let Some(diff) = diff_splits(empty_actor_splits, &splits) {
+                if let Some(diff) =
+                    diff_splits(empty_actor_splits, &splits, SplitDiffOptions::default())
+                {
                     assigned.insert(fragment_id, diff);
                 }
             }
@@ -618,6 +714,8 @@ where
             worker.tick().await?;
         }
 
+        let connector_properties = worker.connector_properties.clone();
+
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
 
         let handle = tokio::spawn(async move { worker.run(sync_call_rx).await });
@@ -628,6 +726,7 @@ where
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                connector_properties,
             },
         );
 
@@ -722,12 +821,12 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     use anyhow::anyhow;
-    use risingwave_common::array::JsonbVal;
+    use risingwave_common::types::JsonbVal;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
     use crate::model::ActorId;
-    use crate::stream::source_manager::diff_splits;
+    use crate::stream::source_manager::{diff_splits, SplitDiffOptions};
 
     #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
     struct TestSplit {
@@ -764,14 +863,83 @@ mod tests {
     }
 
     #[test]
+    fn test_drop_splits() {
+        let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
+        actor_splits.insert(0, vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
+        actor_splits.insert(1, vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
+        actor_splits.insert(2, vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
+
+        let mut prev_split_to_actor = HashMap::new();
+        for (actor_id, splits) in &actor_splits {
+            for split in splits {
+                prev_split_to_actor.insert(split.id(), *actor_id);
+            }
+        }
+
+        let discovered_splits: BTreeMap<SplitId, TestSplit> = (1..5)
+            .map(|i| {
+                let split = TestSplit { id: i };
+                (split.id(), split)
+            })
+            .collect();
+
+        let opts = SplitDiffOptions {
+            enable_scale_in: true,
+        };
+
+        let prev_split_ids: HashSet<_> = actor_splits
+            .values()
+            .flat_map(|splits| splits.iter().map(|split| split.id()))
+            .collect();
+
+        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+        check_all_splits(&discovered_splits, &diff);
+
+        let mut after_split_to_actor = HashMap::new();
+        for (actor_id, splits) in &diff {
+            for split in splits {
+                after_split_to_actor.insert(split.id(), *actor_id);
+            }
+        }
+
+        let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
+
+        let retained_split_ids: HashSet<_> =
+            prev_split_ids.intersection(&discovered_split_ids).collect();
+
+        for retained_split_id in retained_split_ids {
+            assert_eq!(
+                prev_split_to_actor.get(retained_split_id),
+                after_split_to_actor.get(retained_split_id)
+            )
+        }
+    }
+
+    #[test]
+    fn test_drop_splits_to_empty() {
+        let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
+        actor_splits.insert(0, vec![TestSplit { id: 0 }]);
+
+        let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
+
+        let opts = SplitDiffOptions {
+            enable_scale_in: true,
+        };
+
+        let diff = diff_splits(actor_splits, &discovered_splits, opts).unwrap();
+
+        assert!(!diff.is_empty())
+    }
+
+    #[test]
     fn test_diff_splits() {
         let actor_splits = HashMap::new();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        assert!(diff_splits(actor_splits, &discovered_splits).is_none());
+        assert!(diff_splits(actor_splits, &discovered_splits, Default::default()).is_none());
 
         let actor_splits = (0..3).map(|i| (i, vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert!(splits.is_empty())
@@ -785,7 +953,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);
@@ -801,7 +969,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 3);
         for splits in diff.values() {
             let len = splits.len();
@@ -822,7 +990,7 @@ mod tests {
             })
             .collect();
 
-        let diff = diff_splits(actor_splits, &discovered_splits).unwrap();
+        let diff = diff_splits(actor_splits, &discovered_splits, Default::default()).unwrap();
         assert_eq!(diff.len(), 5);
         for splits in diff.values() {
             assert_eq!(splits.len(), 1);

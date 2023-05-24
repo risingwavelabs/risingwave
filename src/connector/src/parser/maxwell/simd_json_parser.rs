@@ -127,9 +127,9 @@ impl MaxwellParser {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::Op;
+    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};

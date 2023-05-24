@@ -139,7 +139,10 @@ pub async fn handle_grant_privilege(
         grantees,
         with_grant_option,
         granted_by,
-    } = stmt else { return Err(ErrorCode::BindError("Invalid grant statement".to_string()).into()); };
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid grant statement".to_string()).into());
+    };
     let mut users = vec![];
     {
         let user_reader = session.env().user_info_reader();
@@ -179,7 +182,10 @@ pub async fn handle_revoke_privilege(
         granted_by,
         revoke_grant_option,
         cascade,
-    } = stmt else { return Err(ErrorCode::BindError("Invalid revoke statement".to_string()).into()); };
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid revoke statement".to_string()).into());
+    };
     let mut users = vec![];
     let mut granted_by_id = None;
     {

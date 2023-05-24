@@ -14,13 +14,13 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
 use super::{
-    ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -30,18 +30,13 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
     pub base: PlanBase,
-    pub logical: LogicalUpdate,
+    pub logical: generic::Update<PlanRef>,
 }
 
 impl BatchUpdate {
-    pub fn new(logical: LogicalUpdate) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::Single,
-            Order::any(),
-        );
+    pub fn new(logical: generic::Update<PlanRef>, schema: Schema) -> Self {
+        let ctx = logical.input.ctx();
+        let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
         Self { base, logical }
     }
 }
@@ -54,11 +49,13 @@ impl fmt::Display for BatchUpdate {
 
 impl PlanTreeNodeUnary for BatchUpdate {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical, self.schema().clone())
     }
 }
 
@@ -76,16 +73,16 @@ impl ToBatchPb for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
         let exprs = self
             .logical
-            .exprs()
+            .exprs
             .iter()
             .map(|x| x.to_expr_proto())
             .collect();
 
         NodeBody::Update(UpdateNode {
             exprs,
-            table_id: self.logical.table_id().table_id(),
-            table_version_id: self.logical.table_version_id(),
-            returning: self.logical.has_returning(),
+            table_id: self.logical.table_id.table_id(),
+            table_version_id: self.logical.table_version_id,
+            returning: self.logical.returning,
         })
     }
 }
@@ -104,13 +101,8 @@ impl ExprRewritable for BatchUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_update()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical, self.schema().clone()).into()
     }
 }

@@ -16,9 +16,9 @@ use std::collections::VecDeque;
 use std::future::Future;
 
 use assert_matches::assert_matches;
+use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
@@ -29,6 +29,7 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
+use super::{BoxedExecutorBuilder, ExecutorBuilder};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
@@ -105,7 +106,7 @@ pub fn gen_projected_data(
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
-        let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
+        let chunk = DataChunk::new(vec![array], batch_size);
         ret.push(chunk);
     }
 
@@ -212,7 +213,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
         .columns()
         .iter()
         .zip_eq_fast(actual.columns().iter())
-        .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
+        .for_each(|(c1, c2)| assert_eq!(c1, c2));
 
     is_data_chunk_eq(&expect, &actual)
 }
@@ -337,5 +338,80 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
 
     fn reset(&mut self) {
         self.datums = vec![];
+    }
+}
+
+pub struct BlockExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BlockExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BlockExecutor {}))
+    }
+}
+
+pub struct BlockExecutor {}
+
+impl Executor for BlockExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BlockExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BlockExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to block
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
+}
+
+pub struct BusyLoopExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BusyLoopExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BusyLoopExecutor {}))
+    }
+}
+
+pub struct BusyLoopExecutor {}
+
+impl Executor for BusyLoopExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BusyLoopExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BusyLoopExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to generate data
+        loop {
+            yield DataChunk::new_dummy(1);
+        }
     }
 }

@@ -23,6 +23,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -132,7 +133,6 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
 }
 
 impl<K: HashKey> GroupTopNExecutor<K> {
-    #[expect(clippy::too_many_arguments)]
     pub fn new(
         child: BoxedExecutor,
         column_orders: Vec<ColumnOrder>,
@@ -191,23 +191,22 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                 .zip_eq_fast(keys.into_iter())
                 .enumerate()
             {
-                let heap = groups
-                    .entry(key)
-                    .or_insert_with(|| TopNHeap::new(self.limit, self.offset, self.with_ties));
-                heap.push(HeapElem {
-                    encoded_row,
-                    chunk: chunk.clone(),
-                    row_id,
+                let heap = groups.entry(key).or_insert_with(|| {
+                    TopNHeap::new(
+                        self.limit,
+                        self.offset,
+                        self.with_ties,
+                        MemoryContext::none(),
+                    )
                 });
+                heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
             }
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         for (_, heap) in groups {
-            for HeapElem { chunk, row_id, .. } in heap.dump() {
-                if let Some(spilled) =
-                    chunk_builder.append_one_row(chunk.row_at_unchecked_vis(row_id))
-                {
+            for ele in heap.dump() {
+                if let Some(spilled) = chunk_builder.append_one_row(ele.row()) {
                     yield spilled
                 }
             }

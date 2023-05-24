@@ -21,14 +21,13 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{Datelike, Timelike};
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
@@ -309,6 +308,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Timestamptz, ScalarRefImpl::Int64(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
+            let secs = v.div_euclid(1_000_000);
+            let nsecs = v.rem_euclid(1_000_000) * 1000;
+            let parsed = NaiveDateTime::from_timestamp_opt(secs, nsecs as u32).unwrap();
+            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
             json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
@@ -328,10 +331,11 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
         }
-        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+        (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
+            let elems = list_ref.iter();
+            let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in list_ref.values_ref() {
+            for sub_datum_ref in elems {
                 let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
@@ -339,7 +343,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
                 st.fields
                     .iter()
                     .zip_eq_fast(st.field_names.iter())
@@ -363,8 +367,8 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 #[cfg(test)]
 mod tests {
 
+    use risingwave_common::cast::str_with_time_zone_to_timestamptz;
     use risingwave_common::types::{Interval, ScalarImpl, Time, Timestamp};
-    use risingwave_expr::vector_op::cast::str_with_time_zone_to_timestamptz;
 
     use super::*;
     #[test]
@@ -411,7 +415,7 @@ mod tests {
         // https://github.com/debezium/debezium/blob/main/debezium-core/src/main/java/io/debezium/time/ZonedTimestamp.java
         let tstz_str = "2018-01-26T18:30:09.453Z";
         let tstz_inner = str_with_time_zone_to_timestamptz(tstz_str).unwrap();
-        datum_to_json_object(
+        let tstz_value = datum_to_json_object(
             &Field {
                 data_type: DataType::Timestamptz,
                 ..mock_field.clone()
@@ -419,6 +423,7 @@ mod tests {
             Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
         )
         .unwrap();
+        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
 
         let ts_value = datum_to_json_object(
             &Field {

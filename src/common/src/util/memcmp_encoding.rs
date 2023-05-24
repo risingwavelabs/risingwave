@@ -17,11 +17,11 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::row::{OwnedRow, Row};
-use crate::types::num256::Int256;
-use crate::types::{DataType, Date, Datum, ScalarImpl, Time, Timestamp, ToDatumRef, F32, F64};
+use crate::types::{
+    DataType, Date, Datum, Int256, ScalarImpl, Serial, Time, Timestamp, ToDatumRef, F32, F64,
+};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default
@@ -213,7 +213,7 @@ pub fn encode_chunk(
 ) -> memcomparable::Result<Vec<Vec<u8>>> {
     let encoded_columns: Vec<_> = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type))
+        .map(|o| encode_array(chunk.column_at(o.column_index), o.order_type))
         .try_collect()?;
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
@@ -259,7 +259,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, RowExt};
-    use crate::types::{DataType, ScalarImpl, F32};
+    use crate::types::{DataType, FloatExt, ScalarImpl, F32};
     use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]

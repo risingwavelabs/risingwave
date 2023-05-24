@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod agg;
 pub mod arithmetic_op;
 pub mod array_access;
 pub mod array_range_access;
@@ -38,6 +37,7 @@ pub mod position;
 pub mod repeat;
 pub mod replace;
 pub mod round;
+pub mod sha;
 pub mod split_part;
 pub mod string;
 pub mod string_to_array;

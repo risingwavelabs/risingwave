@@ -27,10 +27,10 @@ use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
-use super::agg_common::{AggExecutorArgs, GroupAggExecutorExtraArgs};
+use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
@@ -191,7 +191,7 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
 }
 
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
-    pub fn new(args: AggExecutorArgs<S, GroupAggExecutorExtraArgs>) -> StreamResult<Self> {
+    pub fn new(args: AggExecutorArgs<S, HashAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
         let schema = generate_agg_schema(
             args.input.as_ref(),
@@ -220,7 +220,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                metrics: args.extra.metrics,
+                metrics: args.metrics,
             },
         })
     }
@@ -371,6 +371,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
+                    this.actor_ctx.clone(),
                 )
                 .await?;
             agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
@@ -517,7 +518,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Flush distinct dedup state.
-        vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+        vars.distinct_dedup
+            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
@@ -534,7 +536,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             stats: ExecutionStats::new(),
             agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
             group_change_set: HashSet::new(),
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
+            distinct_dedup: DistinctDeduplicater::new(
+                &this.agg_calls,
+                &this.watermark_epoch,
+                this.metrics.clone(),
+            ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
@@ -637,7 +643,7 @@ pub mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::function::aggregate::{AggArgs, AggCall, AggKind};
+    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 

@@ -190,7 +190,7 @@ impl FrontendEnv {
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
-            0,
+            Default::default(),
             &config.meta,
         )
         .await?;
@@ -198,7 +198,6 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
         let mut join_handles = vec![heartbeat_join_handle];
@@ -418,6 +417,8 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: RwLock<ConfigMap>,
+    /// buffer the Notices to users,
+    notices: RwLock<Vec<String>>,
 
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
@@ -442,6 +443,7 @@ impl SessionImpl {
             config_map: Default::default(),
             id,
             current_query_cancel_flag: Mutex::new(None),
+            notices: Default::default(),
         }
     }
 
@@ -459,6 +461,7 @@ impl SessionImpl {
             // Mock session use non-sense id.
             id: (0, 0),
             current_query_cancel_flag: Mutex::new(None),
+            notices: Default::default(),
         }
     }
 
@@ -601,6 +604,10 @@ impl SessionImpl {
         tripwire
     }
 
+    fn clear_notices(&self) {
+        *self.notices.write() = vec![];
+    }
+
     pub fn cancel_current_query(&self) {
         let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
         if let Some(trigger) = flag_guard.take() {
@@ -612,10 +619,12 @@ impl SessionImpl {
             info!("Trying to cancel query in distributed mode.");
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
+        self.clear_notices()
     }
 
     pub fn cancel_current_creating_job(&self) {
         self.env.creating_streaming_job_tracker.abort_jobs(self.id);
+        self.clear_notices()
     }
 
     /// This function only used for test now.
@@ -645,11 +654,12 @@ impl SessionImpl {
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
                 loop {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            target: "risingwave_frontend_slow_query_log",
+                            target: SLOW_QUERY_LOG,
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
@@ -661,6 +671,12 @@ impl SessionImpl {
         }
         .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
+    }
+
+    pub fn notice_to_user(&self, str: impl Into<String>) {
+        let notice = str.into();
+        tracing::trace!("notice to user:{}", notice);
+        self.notices.write().push(notice);
     }
 }
 
@@ -686,7 +702,7 @@ impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManag
             .map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Not found database name: {}", database),
+                    format!("database \"{}\" does not exist", database),
                 ))
             })?
             .id();
@@ -921,6 +937,11 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
             Portal::Portal(portal) => Ok(infer(Some(portal.bound_result.bound), portal.statement)?),
             Portal::PureStatement(statement) => Ok(infer(None, statement)?),
         }
+    }
+
+    fn take_notices(self: Arc<Self>) -> Vec<String> {
+        let inner = &mut (*self.notices.write());
+        std::mem::take(inner)
     }
 }
 

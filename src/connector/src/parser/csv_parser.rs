@@ -16,12 +16,10 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
+use risingwave_common::cast::{str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
 
 use crate::impl_common_parser_logic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
@@ -39,7 +37,7 @@ pub struct CsvParserConfig {
     pub has_header: bool,
 }
 
-/// Parser for JSON format
+/// Parser for CSV format
 #[derive(Debug)]
 pub struct CsvParser {
     rw_columns: Vec<SourceColumnDesc>,

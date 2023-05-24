@@ -19,13 +19,17 @@
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <parquet.version>1.12.3</parquet.version>
-        <hadoop.version>3.3.2</hadoop.version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>com.risingwave.java</groupId>
             <artifactId>proto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>s3-common</artifactId>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
@@ -82,34 +86,6 @@
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-client</artifactId>
-            <version>${hadoop.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.hadoop</groupId>
-            <artifactId>hadoop-aws</artifactId>
-            <version>${hadoop.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql_2.12</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.scala-lang</groupId>
-            <artifactId>scala-library</artifactId>
-            <version>2.12.17</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>io.delta</groupId>
-            <artifactId>delta-core_2.12</artifactId>
-            <version>2.2.0</version>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>

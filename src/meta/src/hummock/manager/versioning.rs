@@ -29,12 +29,11 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionCheckpoint,
-    HummockVersionDelta, HummockVersionStats,
+    CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
+    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionStats,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::trigger_safepoint_stat;
@@ -235,14 +234,22 @@ where
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
         let mut guard = write_lock!(self, versioning).await;
-        let configs = self
-            .compaction_group_manager
-            .read()
-            .await
-            .get_compaction_group_configs(target_group_ids);
-        let mut new_write_limits =
-            calc_new_write_limits(configs, guard.write_limit.clone(), &guard.current_version);
-        let all_group_ids = get_compaction_group_ids(&guard.current_version);
+        let config_mgr = self.compaction_group_manager.read().await;
+        let target_group_configs = target_group_ids
+            .iter()
+            .filter_map(|id| {
+                config_mgr
+                    .try_get_compaction_group_config(*id)
+                    .map(|config| (*id, config))
+            })
+            .collect();
+        let mut new_write_limits = calc_new_write_limits(
+            target_group_configs,
+            guard.write_limit.clone(),
+            &guard.current_version,
+        );
+        let all_group_ids: HashSet<_> =
+            HashSet::from_iter(get_compaction_group_ids(&guard.current_version));
         new_write_limits.drain_filter(|group_id, _| !all_group_ids.contains(group_id));
         if new_write_limits == guard.write_limit {
             return false;
@@ -309,15 +316,13 @@ pub(super) fn calc_new_write_limits(
     new_write_limits
 }
 
-pub(super) fn create_init_version() -> HummockVersion {
+pub(super) fn create_init_version(default_compaction_config: CompactionConfig) -> HummockVersion {
     let mut init_version = HummockVersion {
         id: FIRST_VERSION_ID,
         levels: Default::default(),
         max_committed_epoch: INVALID_EPOCH,
         safe_epoch: INVALID_EPOCH,
     };
-    // Initialize independent levels via corresponding compaction groups' config.
-    let default_compaction_config = CompactionConfigBuilder::new().build();
     for group_id in [
         StaticCompactionGroupId::StateDefault as CompactionGroupId,
         StaticCompactionGroupId::MaterializedView as CompactionGroupId,

@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl bash lld maven unzip
 
 FROM base as builder
 
@@ -29,12 +29,12 @@ RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/rust-toolchain") \
+  && rustup show \
   && rustup component add rustfmt
 
 RUN cargo fetch
 
-RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "static-link static-log-level" && \
+RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "rw-static-link" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
   cargo clean

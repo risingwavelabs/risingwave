@@ -22,6 +22,7 @@ use tonic::{Request, Response, Status};
 
 use crate::manager::ClusterManagerRef;
 use crate::storage::MetaStore;
+use crate::MetaError;
 
 #[derive(Clone)]
 pub struct ClusterServiceImpl<S: MetaStore> {
@@ -49,10 +50,12 @@ where
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
         let host = req.get_host()?.clone();
-        let worker_node_parallelism = req.worker_node_parallelism as usize;
+        let property = req
+            .property
+            .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let worker_node = self
             .cluster_manager
-            .add_worker_node(worker_type, host, worker_node_parallelism)
+            .add_worker_node(worker_type, host, property)
             .await?;
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,

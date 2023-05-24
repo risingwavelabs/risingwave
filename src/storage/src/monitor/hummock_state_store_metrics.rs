@@ -46,6 +46,11 @@ pub struct HummockStateStoreMetrics {
     pub write_batch_tuple_counts: GenericCounterVec<AtomicU64>,
     pub write_batch_duration: HistogramVec,
     pub write_batch_size: HistogramVec,
+
+    // finished task counts
+    pub merge_imm_task_counts: GenericCounterVec<AtomicU64>,
+    // merge imm ops
+    pub merge_imm_batch_memory_sz: GenericCounterVec<AtomicU64>,
 }
 
 impl HummockStateStoreMetrics {
@@ -59,7 +64,7 @@ impl HummockStateStoreMetrics {
         .unwrap();
 
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
-            "state_bloom_filter_check_counts",
+            "state_store_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
             &["table_id", "type"],
             registry
@@ -155,6 +160,22 @@ impl HummockStateStoreMetrics {
         let write_batch_size =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
+        let merge_imm_task_counts = register_int_counter_vec_with_registry!(
+            "state_store_merge_imm_task_counts",
+            "Total number of merge imm task that have been finished",
+            &["table_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
+        let merge_imm_batch_memory_sz = register_int_counter_vec_with_registry!(
+            "state_store_merge_imm_memory_sz",
+            "Number of imm batches that have been merged by a merge task",
+            &["table_id", "shard_id"],
+            registry
+        )
+        .unwrap();
+
         let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -196,6 +217,8 @@ impl HummockStateStoreMetrics {
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
+            merge_imm_task_counts,
+            merge_imm_batch_memory_sz,
         }
     }
 
@@ -238,7 +261,7 @@ impl StateStoreCollector {
         descs.extend(meta_cache_size.desc().into_iter().cloned());
         let limit_memory_size = IntGauge::with_opts(Opts::new(
             "state_store_limit_memory_size",
-            "the size of cache for meta file cache",
+            "the size of uploading SSTs memory usage",
         ))
         .unwrap();
         descs.extend(limit_memory_size.desc().into_iter().cloned());

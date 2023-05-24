@@ -36,7 +36,9 @@ impl MetaNodeService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("meta-node")))
+            Ok(Command::new(
+                Path::new(&prefix_bin).join("risingwave").join("meta-node"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("meta-node")))
         }
@@ -80,11 +82,13 @@ impl MetaNodeService {
             }
         }
 
+        let mut is_persistent_meta_store = false;
         match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
             [] => {
                 cmd.arg("--backend").arg("mem");
             }
             etcds => {
+                is_persistent_meta_store = true;
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
@@ -104,7 +108,7 @@ impl MetaNodeService {
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
 
-        let is_shared_backend = match (
+        let (is_shared_backend, is_persistent_backend) = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
             provide_aws_s3.as_slice(),
@@ -112,7 +116,7 @@ impl MetaNodeService {
         ) {
             (true, [], [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
-                false
+                (false, false)
             }
             (true, _, _, _) => {
                 return Err(anyhow!(
@@ -145,6 +149,11 @@ impl MetaNodeService {
         if is_shared_backend && provide_compactor.is_empty() {
             return Err(anyhow!(
                 "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
+            ));
+        }
+        if is_persistent_meta_store && !is_persistent_backend {
+            return Err(anyhow!(
+                "When using a persistent meta store (etcd), a persistent state store is required (e.g. minio, aws-s3, etc.)."
             ));
         }
 

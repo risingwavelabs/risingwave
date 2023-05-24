@@ -59,5 +59,5 @@ use risingwave_expr_macro::function;
 /// ```
 #[function("array_length(list) -> int64")]
 fn array_length(array: ListRef<'_>) -> i64 {
-    array.values_ref().len() as _
+    array.iter().len() as _
 }

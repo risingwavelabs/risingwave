@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::list_array::display_for_explain;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{literal_type_match, DataType, Datum};
+use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -175,9 +174,7 @@ mod tests {
         if let RexNode::Constant(prost) = node {
             let data2 = deserialize_datum(
                 prost.get_body().as_slice(),
-                &DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                &DataType::List(Box::new(DataType::Varchar)),
             )
             .unwrap()
             .unwrap();

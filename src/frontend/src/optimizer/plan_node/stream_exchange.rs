@@ -17,6 +17,7 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
+use super::stream::StreamPlanRef;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -40,6 +41,7 @@ impl StreamExchange {
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamExchange {
@@ -60,6 +62,7 @@ impl StreamExchange {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         StreamExchange {

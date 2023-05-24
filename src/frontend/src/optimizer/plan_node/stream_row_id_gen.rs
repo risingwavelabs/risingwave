@@ -44,6 +44,7 @@ impl StreamRowIdGen {
             input.functional_dependency().clone(),
             distribution,
             input.append_only(),
+            input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
         Self {

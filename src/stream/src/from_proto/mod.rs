@@ -21,15 +21,13 @@ mod batch_query;
 mod chain;
 mod dml;
 mod dynamic_filter;
+mod eowc_over_window;
 mod expand;
 mod filter;
-mod global_simple_agg;
 mod group_top_n;
-mod group_top_n_appendonly;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
-mod local_simple_agg;
 mod lookup;
 mod lookup_union;
 mod merge;
@@ -39,12 +37,13 @@ mod now;
 mod project;
 mod project_set;
 mod row_id_gen;
+mod simple_agg;
 mod sink;
 mod sort;
 mod source;
+mod stateless_simple_agg;
 mod temporal_join;
 mod top_n;
-mod top_n_appendonly;
 mod union;
 mod values;
 mod watermark_filter;
@@ -61,15 +60,13 @@ use self::batch_query::*;
 use self::chain::*;
 use self::dml::*;
 use self::dynamic_filter::*;
+use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
-use self::global_simple_agg::*;
 use self::group_top_n::GroupTopNExecutorBuilder;
-use self::group_top_n_appendonly::AppendOnlyGroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
-use self::local_simple_agg::*;
 use self::lookup::*;
 use self::lookup_union::*;
 use self::merge::*;
@@ -79,12 +76,13 @@ use self::now::NowExecutorBuilder;
 use self::project::*;
 use self::project_set::*;
 use self::row_id_gen::RowIdGenExecutorBuilder;
+use self::simple_agg::*;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
+use self::stateless_simple_agg::*;
 use self::temporal_join::*;
 use self::top_n::*;
-use self::top_n_appendonly::*;
 use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
@@ -133,10 +131,10 @@ pub async fn create_executor(
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder,
-        NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
-        NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
-        NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
+        NodeBody::TopN => TopNExecutorBuilder::<false>,
+        NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
+        NodeBody::StatelessSimpleAgg => StatelessSimpleAggExecutorBuilder,
+        NodeBody::SimpleAgg => SimpleAggExecutorBuilder,
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
@@ -152,8 +150,8 @@ pub async fn create_executor(
         NodeBody::Expand => ExpandExecutorBuilder,
         NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
         NodeBody::ProjectSet => ProjectSetExecutorBuilder,
-        NodeBody::GroupTopN => GroupTopNExecutorBuilder,
-        NodeBody::AppendOnlyGroupTopN => AppendOnlyGroupTopNExecutorBuilder,
+        NodeBody::GroupTopN => GroupTopNExecutorBuilder::<false>,
+        NodeBody::AppendOnlyGroupTopN => GroupTopNExecutorBuilder::<true>,
         NodeBody::Sort => SortExecutorBuilder,
         NodeBody::WatermarkFilter => WatermarkFilterBuilder,
         NodeBody::Dml => DmlExecutorBuilder,
@@ -164,5 +162,6 @@ pub async fn create_executor(
         NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
         NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
         NodeBody::NoOp => NoOpExecutorBuilder,
+        NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
     }
 }

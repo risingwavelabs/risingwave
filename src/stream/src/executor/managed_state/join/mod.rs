@@ -30,7 +30,7 @@ use risingwave_common::row;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -84,7 +84,7 @@ impl<R: Row> JoinRow<R> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, EstimateSize)]
 pub struct EncodedJoinRow {
     pub compacted_row: CompactedRow,
     degree: DegreeType,
@@ -101,12 +101,6 @@ impl EncodedJoinRow {
     fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
         let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
-    }
-}
-
-impl EstimateSize for EncodedJoinRow {
-    fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.len()
     }
 }
 

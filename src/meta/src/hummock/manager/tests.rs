@@ -36,6 +36,7 @@ use risingwave_pb::hummock::{
     CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::{
     default_level_selector, LevelSelector, ManualCompactionOption, SpaceReclaimCompactionSelector,
@@ -93,7 +94,6 @@ fn get_compaction_group_object_ids(
     group_id: CompactionGroupId,
 ) -> Vec<HummockSstableObjectId> {
     get_compaction_group_ssts(version, group_id)
-        .into_iter()
         .map(|(object_id, _)| object_id)
         .collect_vec()
 }
@@ -169,7 +169,11 @@ async fn test_hummock_compaction_task() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    let original_tables = generate_test_sstables_with_table_id(
+        epoch,
+        1,
+        get_sst_ids(&hummock_manager, sst_num).await,
+    );
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
         &original_tables,
@@ -397,7 +401,11 @@ async fn test_release_context_resource() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();
@@ -479,7 +487,11 @@ async fn test_hummock_manager_basic() {
         .add_worker_node(
             WorkerType::ComputeNode,
             fake_host_address_2,
-            fake_parallelism,
+            Property {
+                worker_node_parallelism: fake_parallelism,
+                is_streaming: true,
+                is_serving: true,
+            },
         )
         .await
         .unwrap();
@@ -722,7 +734,8 @@ async fn test_print_compact_task() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
+    let original_tables =
+        generate_test_sstables_with_table_id(epoch, 1, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
         &original_tables,
@@ -896,7 +909,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = get_compaction_group_ids(&cur_version);
+    let compaction_groups = get_compaction_group_ids(&cur_version).collect_vec();
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
@@ -936,10 +949,14 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
+    let original_tables = generate_test_sstables_with_table_id(
+        epoch,
+        1,
+        get_sst_ids(&hummock_manager, sst_num).await,
+    );
+    register_table_ids_to_compaction_group(
         &hummock_manager,
-        &original_tables,
+        &[1],
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
@@ -1063,10 +1080,14 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
-    register_sstable_infos_to_compaction_group(
+    let original_tables = generate_test_sstables_with_table_id(
+        epoch,
+        1,
+        get_sst_ids(&hummock_manager, sst_num).await,
+    );
+    register_table_ids_to_compaction_group(
         &hummock_manager,
-        &original_tables,
+        &[1],
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
@@ -1443,7 +1464,11 @@ async fn test_split_compaction_group_on_demand_basic() {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
-            key_range: None,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(100, 1, 20),
+                right: iterator_test_key_of_epoch(100, 100, 20),
+                right_exclusive: false,
+            }),
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
@@ -1456,7 +1481,11 @@ async fn test_split_compaction_group_on_demand_basic() {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
-            key_range: None,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(100, 101, 20),
+                right: iterator_test_key_of_epoch(101, 100, 20),
+                right_exclusive: false,
+            }),
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,

@@ -34,6 +34,10 @@
 #![allow(incomplete_features)]
 #![feature(const_option_ext)]
 #![feature(iterator_try_collect)]
+#![feature(round_ties_even)]
+#![feature(iter_order_by)]
+#![feature(exclusive_range_pattern)]
+#![feature(binary_heap_into_iter_sorted)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -45,6 +49,7 @@ pub mod array;
 pub mod util;
 pub mod buffer;
 pub mod cache;
+pub mod cast;
 pub mod catalog;
 pub mod config;
 pub mod constants;

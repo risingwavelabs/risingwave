@@ -25,13 +25,11 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalTestExt;
-use risingwave_common::types::{
-    DataType, DataTypeName, Date, Decimal, Interval, Time, Timestamp, F32, F64,
-};
+use risingwave_common::types::*;
+use risingwave_expr::agg::{build as build_agg, AggArgs, AggCall};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::func::func_sigs;
-use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::PbType;
 
@@ -45,25 +43,27 @@ fn bench_expr(c: &mut Criterion) {
 
     let input = DataChunk::new(
         vec![
-            BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into(),
-            I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
-            I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
-            I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
-            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| F32::from(i as f32))).into(),
-            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| F64::from(i as f64))).into(),
-            DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into(),
-            DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into(),
-            TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into(),
-            TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into(),
-            I64Array::from_iter(1..=CHUNK_SIZE as i64).into(),
-            IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _))).into(),
-            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into(),
+            BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into_ref(),
+            I16Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+            I32Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+            I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into_ref(),
+            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f32)).into_ref(),
+            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| i as f64)).into_ref(),
+            DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into_ref(),
+            DateArray::from_iter((1..=CHUNK_SIZE).map(|_| Date::default())).into_ref(),
+            TimeArray::from_iter((1..=CHUNK_SIZE).map(|_| Time::default())).into_ref(),
+            TimestampArray::from_iter((1..=CHUNK_SIZE).map(|_| Timestamp::default())).into_ref(),
+            I64Array::from_iter(1..=CHUNK_SIZE as i64).into_ref(),
+            IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| Interval::from_days(i as _)))
+                .into_ref(),
+            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into_ref(),
             Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
                 .into_bytes_array()
-                .into(),
+                .into_ref(),
             // special varchar arrays
             // 14: timezone
-            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(|_| Some("Australia/Sydney"))).into(),
+            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(|_| Some("Australia/Sydney")))
+                .into_ref(),
             // 15: time field
             Utf8Array::from_iter_display(
                 [
@@ -86,7 +86,7 @@ fn bench_expr(c: &mut Criterion) {
                 .take(CHUNK_SIZE)
                 .map(Some),
             )
-            .into(),
+            .into_ref(),
             // 16: extract field for date
             Utf8Array::from_iter_display(
                 ["DAY", "MONTH", "YEAR", "DOW", "DOY"]
@@ -95,7 +95,7 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE)
                     .map(Some),
             )
-            .into(),
+            .into_ref(),
             // 17: extract field for time
             Utf8Array::from_iter_display(
                 ["HOUR", "MINUTE", "SECOND"]
@@ -104,22 +104,23 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE)
                     .map(Some),
             )
-            .into(),
+            .into_ref(),
             // 18: extract field for timestamptz
             Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
-                .into(),
+                .into_ref(),
             // 19: boolean string
-            Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE)).into(),
+            Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE))
+                .into_ref(),
             // 20: date string
             Utf8Array::from_iter_display(
                 [Some(Date::default())].into_iter().cycle().take(CHUNK_SIZE),
             )
-            .into(),
+            .into_ref(),
             // 21: time string
             Utf8Array::from_iter_display(
                 [Some(Time::default())].into_iter().cycle().take(CHUNK_SIZE),
             )
-            .into(),
+            .into_ref(),
             // 22: timestamp string
             Utf8Array::from_iter_display(
                 [Some(Timestamp::default())]
@@ -127,7 +128,7 @@ fn bench_expr(c: &mut Criterion) {
                     .cycle()
                     .take(CHUNK_SIZE),
             )
-            .into(),
+            .into_ref(),
             // 23: timestamptz string
             Utf8Array::from_iter_display(
                 [Some("2021-04-01 00:00:00+00:00")]
@@ -135,7 +136,7 @@ fn bench_expr(c: &mut Criterion) {
                     .cycle()
                     .take(CHUNK_SIZE),
             )
-            .into(),
+            .into_ref(),
             // 24: interval string
             Utf8Array::from_iter_display(
                 [Some(Interval::default())]
@@ -143,14 +144,14 @@ fn bench_expr(c: &mut Criterion) {
                     .cycle()
                     .take(CHUNK_SIZE),
             )
-            .into(),
+            .into_ref(),
             // 25: serial array
-            SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into(),
+            SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
             JsonbArray::from_iter(
                 (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
             )
-            .into(),
+            .into_ref(),
         ],
         CHUNK_SIZE,
     );
@@ -281,13 +282,17 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {sig:?}");
             continue;
         }
-        let agg = match create_agg_state_unary(
-            sig.inputs_type[0].into(),
-            input_index_for_type(sig.inputs_type[0].into()),
-            sig.func,
-            sig.ret_type.into(),
-            false,
-        ) {
+        let agg = match build_agg(AggCall {
+            kind: sig.func,
+            args: AggArgs::Unary(
+                sig.inputs_type[0].into(),
+                input_index_for_type(sig.inputs_type[0].into()),
+            ),
+            return_type: sig.ret_type.into(),
+            column_orders: vec![],
+            filter: None,
+            distinct: false,
+        }) {
             Ok(agg) => agg,
             Err(e) => {
                 println!("error: {e}");
@@ -296,7 +301,7 @@ fn bench_expr(c: &mut Criterion) {
         };
         // to workaround the lifetime issue
         let agg = RefCell::new(agg);
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
+        c.bench_function(&format!("{sig:?}"), |bencher| {
             #[allow(clippy::await_holding_refcell_ref)]
             bencher.to_async(FuturesExecutor).iter(|| async {
                 agg.borrow_mut()

@@ -30,7 +30,7 @@ use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_pb::catalog::Table;
@@ -186,6 +186,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             self.materialize_cache.data.clear();
                         }
                     }
+                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
@@ -441,21 +442,13 @@ pub struct MaterializeCache<SD> {
     table_id: String,
 }
 
-#[derive(EnumAsInner)]
+#[derive(EnumAsInner, EstimateSize)]
 pub enum CacheValue {
     Overwrite(Option<CompactedRow>),
     Ignore(Option<EmptyValue>),
 }
 
 type EmptyValue = ();
-
-impl EstimateSize for CacheValue {
-    fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
-    }
-}
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(

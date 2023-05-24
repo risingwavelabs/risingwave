@@ -21,7 +21,11 @@
 #![feature(exclusive_range_pattern)]
 #![feature(lazy_cell)]
 #![feature(try_blocks)]
+#![feature(round_ties_even)]
+#![feature(generators)]
+#![feature(iter_from_generator)]
 
+pub mod agg;
 mod error;
 pub mod expr;
 pub mod function;

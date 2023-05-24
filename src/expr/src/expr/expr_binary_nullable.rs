@@ -156,7 +156,7 @@ mod tests {
         .split_column_at(2);
         let expr = build_from_pretty("(and:boolean $0:boolean $1:boolean)");
         let result = expr.eval(&input).await.unwrap();
-        assert_eq!(result, target.column_at(0).array());
+        assert_eq!(&result, target.column_at(0));
     }
 
     #[tokio::test]
@@ -178,7 +178,7 @@ mod tests {
         .split_column_at(2);
         let expr = build_from_pretty("(or:boolean $0:boolean $1:boolean)");
         let result = expr.eval(&input).await.unwrap();
-        assert_eq!(result, target.column_at(0).array());
+        assert_eq!(&result, target.column_at(0));
     }
 
     #[tokio::test]
@@ -196,7 +196,7 @@ mod tests {
         .split_column_at(2);
         let expr = build_from_pretty("(is_distinct_from:boolean $0:int4 $1:int4)");
         let result = expr.eval(&input).await.unwrap();
-        assert_eq!(result, target.column_at(0).array());
+        assert_eq!(&result, target.column_at(0));
     }
 
     #[tokio::test]
@@ -214,7 +214,7 @@ mod tests {
         .split_column_at(2);
         let expr = build_from_pretty("(is_not_distinct_from:boolean $0:int4 $1:int4)");
         let result = expr.eval(&input).await.unwrap();
-        assert_eq!(result, target.column_at(0).array());
+        assert_eq!(&result, target.column_at(0));
     }
 
     #[tokio::test]
@@ -231,6 +231,6 @@ mod tests {
         .split_column_at(2);
         let expr = build_from_pretty("(format_type:varchar $0:int4 $1:int4)");
         let result = expr.eval(&input).await.unwrap();
-        assert_eq!(result, target.column_at(0).array());
+        assert_eq!(&result, target.column_at(0));
     }
 }

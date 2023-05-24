@@ -31,7 +31,7 @@ pub mod common;
 /// instead of playground mode to use this tool. risectl will read environment variables
 /// `RW_META_ADDR` and `RW_HUMMOCK_URL` to configure itself.
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
+#[clap(version, about = "The DevOps tool that provides internal access to the RisingWave cluster", long_about = None)]
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
 pub struct CliOpts {
@@ -76,7 +76,10 @@ enum ComputeCommands {
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
-    ListVersion,
+    ListVersion {
+        #[clap(short, long = "verbose", default_value_t = false)]
+        verbose: bool,
+    },
 
     /// list hummock version deltas in the meta store
     ListVersionDeltas {
@@ -234,8 +237,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch(context).await?
         }
-        Commands::Hummock(HummockCommands::ListVersion) => {
-            cmd_impl::hummock::list_version(context).await?;
+        Commands::Hummock(HummockCommands::ListVersion { verbose }) => {
+            cmd_impl::hummock::list_version(context, verbose).await?;
         }
         Commands::Hummock(HummockCommands::ListVersionDeltas {
             start_id,

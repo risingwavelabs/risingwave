@@ -18,8 +18,9 @@ export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
+rustup show
 source ci/scripts/common.sh
 
 echo "--- Install protoc3"
@@ -43,8 +44,8 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
-cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
-cargo build --bin risectl --features "static-link static-log-level" --profile release
+cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
+cargo build --bin risectl --features "rw-static-link" --profile release
 cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"

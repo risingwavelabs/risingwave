@@ -112,20 +112,12 @@ struct NowAsInputRef {
     index: usize,
 }
 impl ExprRewriter for NowAsInputRef {
-    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> crate::expr::ExprImpl {
-        let (func_type, inputs, ret) = func_call.decompose();
-        let inputs = inputs
-            .into_iter()
-            .map(|expr| self.rewrite_expr(expr))
-            .collect();
-        match func_type {
-            Type::Now => InputRef {
-                index: self.index,
-                data_type: DataType::Timestamptz,
-            }
-            .into(),
-            _ => FunctionCall::new_unchecked(func_type, inputs, ret).into(),
+    fn rewrite_now(&mut self, _: crate::expr::Now) -> crate::expr::ExprImpl {
+        InputRef {
+            index: self.index,
+            data_type: DataType::Timestamptz,
         }
+        .into()
     }
 }
 

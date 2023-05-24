@@ -19,7 +19,7 @@ use risingwave_batch::task::{BatchTaskContext, TaskOutput, TaskOutputId};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
-use risingwave_common::memory::MemoryContextRef;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -91,7 +91,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         todo!()
     }
 
-    fn create_executor_mem_context(&self, _executor_id: &str) -> Option<MemoryContextRef> {
-        None
+    fn create_executor_mem_context(&self, _executor_id: &str) -> MemoryContext {
+        MemoryContext::none()
     }
 }

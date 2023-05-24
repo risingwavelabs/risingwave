@@ -126,7 +126,7 @@ impl BlockLocation {
 }
 
 #[async_trait::async_trait]
-pub trait StreamingUploader: Send + Sync {
+pub trait StreamingUploader: Send {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()>;
 
     async fn finish(self: Box<Self>) -> ObjectResult<()>;
@@ -143,7 +143,7 @@ pub trait ObjectStore: Send + Sync {
     /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
 
-    fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
+    async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader>;
 
     /// If the `block_loc` is None, the whole object will be returned.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
@@ -208,12 +208,6 @@ impl ObjectStoreImpl {
 macro_rules! dispatch_async {
     ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
         $object_store.$method_name($($args, )*).await
-    }
-}
-
-macro_rules! dispatch_sync {
-    ($object_store:expr, $method_name:ident $(, $args:expr)*) => {
-        $object_store.$method_name($($args, )*)
     }
 }
 
@@ -342,8 +336,8 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, upload, dispatch_async, path, obj)
     }
 
-    pub fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
-        object_store_impl_method_body!(self, streaming_upload, dispatch_sync, path)
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+        object_store_impl_method_body!(self, streaming_upload, dispatch_async, path)
     }
 
     pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -626,7 +620,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         ret
     }
 
-    pub fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
+    pub async fn streaming_upload(&self, path: &str) -> ObjectResult<MonitoredStreamingUploader> {
         let operation_type = "streaming_upload_start";
         let media_type = self.media_type();
         let _timer = self
@@ -635,7 +629,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
             .with_label_values(&[media_type, operation_type])
             .start_timer();
 
-        let handle_res = self.inner.streaming_upload(path);
+        let handle_res = self.inner.streaming_upload(path).await;
 
         try_update_failure_metric(&self.object_store_metrics, &handle_res, operation_type);
         Ok(MonitoredStreamingUploader::new(

@@ -37,8 +37,7 @@ impl BatchGroupTopN {
         let base = PlanBase::new_batch_from_logical(
             &logical,
             logical.input.distribution().clone(),
-            // BatchGroupTopN outputs data in the order of specified order
-            logical.order.clone(),
+            Order::any(),
         );
         BatchGroupTopN { base, logical }
     }

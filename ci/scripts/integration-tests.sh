@@ -22,6 +22,14 @@ while getopts 'c:f:' opt; do
 done
 shift $((OPTIND -1))
 
+echo "--- clean up docker containers"
+if [ $(docker ps -aq |wc -l) -gt 0 ]; then
+  docker rm -f $(docker ps -aq)
+fi
+
+echo "--- ghcr login"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
 echo "--- install postgresql"
 sudo yum install -y postgresql
 
@@ -29,13 +37,16 @@ cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
 
-echo "--- Rewrite docker compose for protobuf"
+echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
   python3 gen_pb_compose.py ${case} ${format}
 fi
 
-echo "--- Run Demos"
+echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
 
-echo "--- Check if the ingestion is successful"
+echo "--- check if the ingestion is successful"
 python3 check_data.py ${case}
+
+echo "--- clean Demos"
+python3 clean_demos.py --case ${case}

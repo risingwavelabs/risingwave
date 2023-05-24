@@ -2,29 +2,31 @@ FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
 
-ARG RUST_TOOLCHAIN
-
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \
-    maven zstd -yy \
+    maven zstd libzstd-dev -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 SHELL ["/bin/bash", "-c"]
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain ${RUST_TOOLCHAIN} -y
-
-RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
-    tar -xvzf - -C /usr/local --strip-components 1
 
 RUN mkdir -p /risingwave
 
 WORKDIR /risingwave
 
+COPY rust-toolchain rust-toolchain
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
+
 ENV PATH /root/.cargo/bin/:$PATH
 
+RUN rustup show
+
+RUN curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.4.0/buf-$(uname -s)-$(uname -m).tar.gz" | \
+    tar -xvzf - -C /usr/local --strip-components 1
+
 # install python dependencies
-RUN pip3 install pyarrow
+RUN pip3 install pyarrow pytest
 
 # add required rustup components
 RUN rustup component add rustfmt llvm-tools-preview clippy

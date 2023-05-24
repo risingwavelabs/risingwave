@@ -72,7 +72,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         let info = input.info();
         Ok(TopNExecutorWrapper {
             input,
-            ctx,
+            ctx: ctx.clone(),
             inner: InnerAppendOnlyGroupTopNExecutor::new(
                 info,
                 storage_key,
@@ -82,6 +82,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
                 group_by,
                 state_table,
                 watermark_epoch,
+                ctx,
             )?,
         })
     }
@@ -109,6 +110,8 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
 
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
+
+    ctx: ActorContextRef,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
@@ -124,13 +127,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        ctx: ActorContextRef,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
@@ -146,6 +149,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             group_by,
             caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
+            ctx,
         })
     }
 }
@@ -163,17 +167,27 @@ where
 
         let data_types = self.schema().data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
-
+        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
-
+            self.ctx
+                .streaming_metrics
+                .group_top_n_appendonly_total_query_cache_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
+                self.ctx
+                    .streaming_metrics
+                    .group_top_n_appendonly_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, data_types.clone());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
@@ -192,7 +206,11 @@ where
                 &row_deserializer,
             )?;
         }
-
+        self.ctx
+            .streaming_metrics
+            .group_top_n_appendonly_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, self.schema())
     }
 
@@ -217,6 +235,10 @@ where
 
     fn evict(&mut self) {
         self.caches.evict()
+    }
+
+    fn update_epoch(&mut self, epoch: u64) {
+        self.caches.update_epoch(epoch)
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
