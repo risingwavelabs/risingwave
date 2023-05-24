@@ -292,7 +292,7 @@ macro_rules! impl_system_params_for_test {
                 )*
                 ..Default::default() // `None` for deprecated params
             };
-            ret.data_directory = Some("////".to_string());
+            ret.data_directory = Some("hummock_001".to_string());
             ret.state_store = Some("hummock+memory".to_string());
             ret
         }

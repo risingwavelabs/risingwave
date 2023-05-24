@@ -157,7 +157,7 @@ impl MetaNodeService {
             ));
         }
 
-        cmd.arg("--data-directory").arg("");
+        cmd.arg("--data-directory").arg("hummock_001");
 
         Ok(())
     }
