@@ -113,10 +113,8 @@ message ActorLocation {
 }
 
 message MigrationPlan {
-  // map<old_worker_id, worker_id>, the plan indicates that the actors will be migrated from old worker to the new one.
-  map<uint32, uint32> migration_plan = 1;
   // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
-  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 2;
+  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
 }
 
 message FlushRequest {
