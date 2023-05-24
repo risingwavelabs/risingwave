@@ -136,7 +136,7 @@ impl Aggregator for ApproxCountDistinct {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let array = input.column_at(0).array_ref();
+        let array = input.column_at(0);
         for row_id in start_row_id..end_row_id {
             self.add_datum(array.value_at(row_id));
         }
@@ -176,7 +176,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = I32Array::from_iter(&lhs).into();
+        let col1 = I32Array::from_iter(&lhs).into_ref();
         DataChunk::new(vec![col1], size)
     }
 

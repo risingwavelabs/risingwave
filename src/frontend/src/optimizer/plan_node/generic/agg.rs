@@ -28,6 +28,7 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
@@ -131,6 +132,19 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
             group_key,
             input,
         }
+    }
+}
+
+impl<PlanRef: BatchPlanRef> Agg<PlanRef> {
+    // Check if the input is already sorted on group keys.
+    pub(crate) fn input_provides_order_on_group_keys(&self) -> bool {
+        self.group_key.ones().all(|group_by_idx| {
+            self.input
+                .order()
+                .column_orders
+                .iter()
+                .any(|order| order.column_index == group_by_idx)
+        })
     }
 }
 

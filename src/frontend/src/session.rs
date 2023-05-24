@@ -702,7 +702,7 @@ impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManag
             .map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Not found database name: {}", database),
+                    format!("database \"{}\" does not exist", database),
                 ))
             })?
             .id();

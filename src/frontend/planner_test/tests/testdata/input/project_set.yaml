@@ -1,0 +1,80 @@
+- sql: |
+    select generate_series('2'::INT,'10'::INT,'2'::INT);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select unnest(Array[1,2,3]);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select unnest(Array[Array[1,2,3], Array[4,5,6]]);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t(x int[]);
+    select unnest(x) as unnest from t;
+  expected_outputs:
+  - stream_plan
+  - batch_plan
+- name: table functions used with usual expressions
+  sql: |
+    create table t(x int[]);
+    select unnest(x), 1 from t;
+  expected_outputs:
+  - batch_plan
+- name: multiple table functions
+  sql: |
+    create table t(x int[]);
+    select unnest(x), unnest(Array[1,2]) from t;
+  expected_outputs:
+  - batch_plan
+- name: table functions as parameters of usual functions
+  sql: |
+    create table t(x int);
+    select -generate_series(x,x,x) from t;
+  expected_outputs:
+  - batch_plan
+- name: table functions as parameters of usual functions
+  sql: |
+    create table t(x int[]);
+    select unnest(x) * unnest(x) as a, unnest(x) as b from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: table functions as parameters of table functions
+  sql: |
+    create table t(x int[]);
+    select generate_series(unnest(x),100,1) from t;
+  expected_outputs:
+  - batch_plan
+- name: issue-5284
+  sql: |
+    -- projected_row_id should be hidden in the output
+    create table t(x int[]);
+    select unnest(x) as unnest from t order by unnest limit 1;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: issue-7812
+  sql: |
+    -- projected_row_id should be excluded from distinct
+    create table t(x int[]);
+    select distinct unnest(x) as unnest from t;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t(x int[]);
+    select * from (select unnest(x) as unnest from t) where unnest > 1;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t(x int[]);
+    select * from
+      (select unnest(x) as unnest from t)
+    NATURAL JOIN
+      (select unnest(x) as unnest from t);
+  expected_outputs:
+  - batch_plan
+  - stream_plan

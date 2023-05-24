@@ -213,7 +213,7 @@ pub fn encode_chunk(
 ) -> memcomparable::Result<Vec<Vec<u8>>> {
     let encoded_columns: Vec<_> = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type))
+        .map(|o| encode_array(chunk.column_at(o.column_index), o.order_type))
         .try_collect()?;
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];

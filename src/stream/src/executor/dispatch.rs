@@ -1230,9 +1230,9 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                array.into()
+                array.into_ref()
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         let chunk = StreamChunk::new(ops, columns, None);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
@@ -1261,9 +1261,7 @@ mod tests {
                             .iter()
                             .enumerate()
                             .filter(|(_, vis)| *vis)
-                            .map(|(row_idx, _)| {
-                                real_col.array_ref().as_int32().value_at(row_idx).unwrap()
-                            })
+                            .map(|(row_idx, _)| real_col.as_int32().value_at(row_idx).unwrap())
                             .collect::<Vec<_>>();
                         assert_eq!(real_vals.len(), expect_col.len());
                         assert_eq!(real_vals, *expect_col);

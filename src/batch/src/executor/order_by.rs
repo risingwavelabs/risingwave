@@ -202,9 +202,9 @@ mod tests {
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_int32().value_at(0), Some(3));
-            assert_eq!(col0.array().as_int32().value_at(1), Some(2));
-            assert_eq!(col0.array().as_int32().value_at(2), Some(1));
+            assert_eq!(col0.as_int32().value_at(0), Some(3));
+            assert_eq!(col0.as_int32().value_at(1), Some(2));
+            assert_eq!(col0.as_int32().value_at(2), Some(1));
         }
     }
 
@@ -252,11 +252,11 @@ mod tests {
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_float32().value_at(0), Some(3.3.into()));
-            assert_eq!(col0.array().as_float32().value_at(1), Some(2.2.into()));
-            assert_eq!(col0.array().as_float32().value_at(2), Some(1.1.into()));
-            assert_eq!(col0.array().as_float32().value_at(3), Some((-1.1).into()));
-            assert_eq!(col0.array().as_float32().value_at(4), Some((-2.2).into()));
+            assert_eq!(col0.as_float32().value_at(0), Some(3.3.into()));
+            assert_eq!(col0.as_float32().value_at(1), Some(2.2.into()));
+            assert_eq!(col0.as_float32().value_at(2), Some(1.1.into()));
+            assert_eq!(col0.as_float32().value_at(3), Some((-1.1).into()));
+            assert_eq!(col0.as_float32().value_at(4), Some((-2.2).into()));
         }
     }
 
@@ -302,9 +302,9 @@ mod tests {
         if let Some(res) = res {
             let res = res.unwrap();
             let col0 = res.column_at(0);
-            assert_eq!(col0.array().as_utf8().value_at(0), Some("3.3"));
-            assert_eq!(col0.array().as_utf8().value_at(1), Some("2.2"));
-            assert_eq!(col0.array().as_utf8().value_at(2), Some("1.1"));
+            assert_eq!(col0.as_utf8().value_at(0), Some("3.3"));
+            assert_eq!(col0.as_utf8().value_at(1), Some("2.2"));
+            assert_eq!(col0.as_utf8().value_at(2), Some("1.1"));
         }
     }
 
@@ -325,9 +325,9 @@ mod tests {
         // .   .    .
         let input_chunk = DataChunk::new(
             vec![
-                column! { BoolArray, [Some(false), Some(true), None, None, None] },
-                column! { I32Array, [Some(3), Some(3), None, None, None] },
-                column! { F64Array, [None, None, Some(3.5), Some(-4.3), None] },
+                BoolArray::from_iter([Some(false), Some(true), None, None, None]).into_ref(),
+                I32Array::from_iter([Some(3), Some(3), None, None, None]).into_ref(),
+                F64Array::from_iter([None, None, Some(3.5), Some(-4.3), None]).into_ref(),
             ],
             5,
         );
@@ -338,9 +338,9 @@ mod tests {
         // t   3   .
         let output_chunk = DataChunk::new(
             vec![
-                column! { BoolArray, [None, None, None, Some(false), Some(true)] },
-                column! { I32Array, [None, None, None, Some(3), Some(3)] },
-                column! { F64Array, [Some(-4.3), Some(3.5), None, None, None] },
+                BoolArray::from_iter([None, None, None, Some(false), Some(true)]).into_ref(),
+                I32Array::from_iter([None, None, None, Some(3), Some(3)]).into_ref(),
+                F64Array::from_iter([Some(-4.3), Some(3.5), None, None, None]).into_ref(),
             ],
             5,
         );
@@ -389,14 +389,17 @@ mod tests {
         // b         7     345
         let input_chunk = DataChunk::new(
             vec![
-                column! { Utf8Array, [Some("abc"), Some("b"), Some("abc"), Some("abcdefgh"), Some("b")] },
-                column! { DecimalArray, [None, Some(-3), None, None, Some(7)] },
-                column! { DateArray, [
-                Some(Date::with_days(123).unwrap()),
-                Some(Date::with_days(789).unwrap()),
-                Some(Date::with_days(456).unwrap()),
-                None,
-                Some(Date::with_days(345).unwrap())] },
+                Utf8Array::from_iter(["abc", "b", "abc", "abcdefgh", "b"]).into_ref(),
+                DecimalArray::from_iter([None, Some((-3).into()), None, None, Some(7.into())])
+                    .into_ref(),
+                DateArray::from_iter([
+                    Some(Date::with_days(123).unwrap()),
+                    Some(Date::with_days(789).unwrap()),
+                    Some(Date::with_days(456).unwrap()),
+                    None,
+                    Some(Date::with_days(345).unwrap()),
+                ])
+                .into_ref(),
             ],
             5,
         );
@@ -407,14 +410,17 @@ mod tests {
         // abc       .     456
         let output_chunk = DataChunk::new(
             vec![
-                column! { Utf8Array, [Some("b"), Some("b"), Some("abcdefgh"), Some("abc"), Some("abc")] },
-                column! { DecimalArray, [Some(7), Some(-3), None, None, None] },
-                column! { DateArray, [
-                Some(Date::with_days(345).unwrap()),
-                Some(Date::with_days(789).unwrap()),
-                None,
-                Some(Date::with_days(123).unwrap()),
-                Some(Date::with_days(456).unwrap())] },
+                Utf8Array::from_iter(["b", "b", "abcdefgh", "abc", "abc"]).into_ref(),
+                DecimalArray::from_iter([Some(7.into()), Some((-3).into()), None, None, None])
+                    .into_ref(),
+                DateArray::from_iter([
+                    Some(Date::with_days(345).unwrap()),
+                    Some(Date::with_days(789).unwrap()),
+                    None,
+                    Some(Date::with_days(123).unwrap()),
+                    Some(Date::with_days(456).unwrap()),
+                ])
+                .into_ref(),
             ],
             5,
         );
@@ -463,24 +469,30 @@ mod tests {
         // 7:89  .     .
         let input_chunk = DataChunk::new(
             vec![
-                column! { TimeArray, [
-                None,
-                Some(Time::with_secs_nano(4, 56).unwrap()),
-                None,
-                Some(Time::with_secs_nano(4, 56).unwrap()),
-                Some(Time::with_secs_nano(7, 89).unwrap())] },
-                column! { TimestampArray, [
-                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
-                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
-                Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
-                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
-                None] },
-                column! { IntervalArray, [
-                None,
-                Some(Interval::from_month_day_usec(1, 2, 3)),
-                None,
-                Some(Interval::from_month_day_usec(4, 5, 6)),
-                None] },
+                TimeArray::from_iter([
+                    None,
+                    Some(Time::with_secs_nano(4, 56).unwrap()),
+                    None,
+                    Some(Time::with_secs_nano(4, 56).unwrap()),
+                    Some(Time::with_secs_nano(7, 89).unwrap()),
+                ])
+                .into_ref(),
+                TimestampArray::from_iter([
+                    Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                    Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                    Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
+                    Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                    None,
+                ])
+                .into_ref(),
+                IntervalArray::from_iter([
+                    None,
+                    Some(Interval::from_month_day_usec(1, 2, 3)),
+                    None,
+                    Some(Interval::from_month_day_usec(4, 5, 6)),
+                    None,
+                ])
+                .into_ref(),
             ],
             5,
         );
@@ -491,24 +503,30 @@ mod tests {
         // .     7:89  .
         let output_chunk = DataChunk::new(
             vec![
-                column! { TimeArray, [
-                Some(Time::with_secs_nano(4, 56).unwrap()),
-                Some(Time::with_secs_nano(4, 56).unwrap()),
-                Some(Time::with_secs_nano(7, 89).unwrap()),
-                None,
-                None] },
-                column! { TimestampArray, [
-                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
-                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
-                None,
-                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
-                Some(Timestamp::with_secs_nsecs(7, 89).unwrap())] },
-                column! { IntervalArray, [
-                Some(Interval::from_month_day_usec(4, 5, 6)),
-                Some(Interval::from_month_day_usec(1, 2, 3)),
-                None,
-                None,
-                None] },
+                TimeArray::from_iter([
+                    Some(Time::with_secs_nano(4, 56).unwrap()),
+                    Some(Time::with_secs_nano(4, 56).unwrap()),
+                    Some(Time::with_secs_nano(7, 89).unwrap()),
+                    None,
+                    None,
+                ])
+                .into_ref(),
+                TimestampArray::from_iter([
+                    Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                    Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                    None,
+                    Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                    Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
+                ])
+                .into_ref(),
+                IntervalArray::from_iter([
+                    Some(Interval::from_month_day_usec(4, 5, 6)),
+                    Some(Interval::from_month_day_usec(1, 2, 3)),
+                    None,
+                    None,
+                    None,
+                ])
+                .into_ref(),
             ],
             5,
         );
@@ -593,7 +611,7 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
-                    struct_builder.finish().into()
+                    struct_builder.finish().into_ref()
                 },
                 {
                     list_builder.append(None);
@@ -609,7 +627,7 @@ mod tests {
                         val: &ListValue::new(vec![Some(2i64.to_scalar_value())]),
                     }));
                     list_builder.append(None);
-                    list_builder.finish().into()
+                    list_builder.finish().into_ref()
                 },
             ],
             5,
@@ -655,7 +673,7 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
-                    struct_builder.finish().into()
+                    struct_builder.finish().into_ref()
                 },
                 {
                     list_builder.append(None);
@@ -671,7 +689,7 @@ mod tests {
                     }));
                     list_builder.append(None);
                     list_builder.append(None);
-                    list_builder.finish().into()
+                    list_builder.finish().into_ref()
                 },
             ],
             5,

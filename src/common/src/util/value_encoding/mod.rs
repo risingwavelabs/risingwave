@@ -544,7 +544,7 @@ mod tests {
             0.0,
         );
         for column in chunk.columns() {
-            test_try_get_exact_serialize_datum_size(&column.array());
+            test_try_get_exact_serialize_datum_size(column);
         }
     }
 }

@@ -24,6 +24,7 @@ use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{DefaultOrdered, ToDatumRef};
 
@@ -291,15 +292,54 @@ impl fmt::Display for ColumnOrderDisplay<'_> {
 
 #[derive(Clone, Debug)]
 pub struct HeapElem {
-    pub column_orders: Arc<Vec<ColumnOrder>>,
-    pub chunk: DataChunk,
-    pub chunk_idx: usize,
-    pub elem_idx: usize,
+    column_orders: Arc<Vec<ColumnOrder>>,
+    chunk: DataChunk,
+    chunk_idx: usize,
+    elem_idx: usize,
     /// DataChunk can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.
-    pub encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    estimated_size: usize,
+}
+
+impl HeapElem {
+    pub fn new(
+        column_orders: Arc<Vec<ColumnOrder>>,
+        chunk: DataChunk,
+        chunk_idx: usize,
+        elem_idx: usize,
+        encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    ) -> Self {
+        let estimated_size = encoded_chunk
+            .as_ref()
+            .map(|inner| inner.iter().map(|i| i.capacity()).sum())
+            .unwrap_or(0);
+
+        Self {
+            column_orders,
+            chunk,
+            chunk_idx,
+            elem_idx,
+            encoded_chunk,
+            estimated_size,
+        }
+    }
+
+    #[inline(always)]
+    pub fn chunk_idx(&self) -> usize {
+        self.chunk_idx
+    }
+
+    #[inline(always)]
+    pub fn elem_idx(&self) -> usize {
+        self.elem_idx
+    }
+
+    pub fn chunk(&self) -> &DataChunk {
+        &self.chunk
+    }
 }
 
 impl Ord for HeapElem {
@@ -321,6 +361,12 @@ impl Ord for HeapElem {
             .unwrap()
         };
         ord.reverse()
+    }
+}
+
+impl EstimateSize for HeapElem {
+    fn estimated_heap_size(&self) -> usize {
+        self.estimated_size
     }
 }
 
@@ -387,8 +433,8 @@ pub fn compare_rows_in_chunk(
     column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
     for column_order in column_orders.iter() {
-        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
-        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {

@@ -582,7 +582,7 @@ mod default {
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10
+            30
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -602,7 +602,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 5mi
+            180 // 3mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {

@@ -17,7 +17,6 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
@@ -38,6 +37,8 @@ pub struct BatchSortAgg {
 
 impl BatchSortAgg {
     pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        assert!(logical.input_provides_order_on_group_keys());
+
         let input = logical.input.clone();
         let input_dist = input.distribution();
         let dist = match input_dist {
@@ -55,8 +56,6 @@ impl BatchSortAgg {
                 .cloned()
                 .collect(),
         };
-
-        assert_eq!(input_order.column_orders.len(), logical.group_key.len());
 
         let order = logical
             .i2o_col_mapping()
@@ -114,6 +113,7 @@ impl ToDistributedBatch for BatchSortAgg {
 
 impl ToBatchPb for BatchSortAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let input = self.input();
         NodeBody::SortAgg(SortAggNode {
             agg_calls: self
                 .agg_calls()
@@ -123,7 +123,9 @@ impl ToBatchPb for BatchSortAgg {
             group_key: self
                 .group_key()
                 .ones()
-                .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(idx, DataType::Int32))))
+                .map(|idx| {
+                    ExprImpl::InputRef(InputRef::new(idx, input.schema()[idx].data_type()).into())
+                })
                 .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })

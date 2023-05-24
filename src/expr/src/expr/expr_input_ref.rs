@@ -38,7 +38,7 @@ impl Expression for InputRefExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        Ok(input.column_at(self.idx).clone())
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
@@ -57,7 +57,7 @@ impl InputRefExpression {
     }
 
     pub fn eval_immut(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        Ok(input.column_at(self.idx).clone())
     }
 }
 

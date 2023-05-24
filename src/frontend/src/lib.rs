@@ -74,6 +74,10 @@ use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
+)]
 pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
