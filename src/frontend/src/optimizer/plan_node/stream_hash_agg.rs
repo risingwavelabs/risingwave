@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
@@ -105,13 +106,31 @@ impl StreamHashAgg {
         self.logical.i2o_col_mapping()
     }
 
-    pub fn to_eowc_version(&self) -> Self {
-        Self::new_with_eowc(
-            self.logical.clone(),
-            self.vnode_col_idx,
-            self.row_count_idx,
-            true,
-        )
+    pub fn to_eowc_version(&self) -> Result<Self> {
+        let first_group_key = self
+            .group_key()
+            .ones()
+            .next()
+            .expect("HashAgg must have group key");
+        if self
+            .input()
+            .watermark_columns()
+            .ones()
+            .contains(&first_group_key)
+        {
+            Ok(Self::new_with_eowc(
+                self.logical.clone(),
+                self.vnode_col_idx,
+                self.row_count_idx,
+                true,
+            ))
+        } else {
+            Err(ErrorCode::NotSupported(
+                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
+                "Please put the watermark column at the first place in GROUP BY".to_string(),
+            )
+            .into())
+        }
     }
 }
 
