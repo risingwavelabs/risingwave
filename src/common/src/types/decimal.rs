@@ -21,7 +21,7 @@ use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, Che
 use postgres_types::{ToSql, Type};
 use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::prelude::FromStr;
-use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
+use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
@@ -483,6 +483,20 @@ impl Decimal {
     }
 
     #[must_use]
+    pub fn trunc(&self) -> Self {
+        match self {
+            Self::Normalized(d) => {
+                let mut d = d.trunc();
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                Self::Normalized(d)
+            }
+            d => *d,
+        }
+    }
+
+    #[must_use]
     pub fn round_ties_even(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.round()),
@@ -535,6 +549,33 @@ impl Decimal {
             Self::NaN => Self::NaN,
             Self::PositiveInf => Self::PositiveInf,
             Self::NegativeInf => Self::PositiveInf,
+        }
+    }
+
+    pub fn checked_exp(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_exp().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => Some(Self::zero()),
+        }
+    }
+
+    pub fn checked_ln(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_ln().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
+        }
+    }
+
+    pub fn checked_log10(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_log10().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
         }
     }
 }

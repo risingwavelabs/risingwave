@@ -269,6 +269,7 @@ impl Binder {
                 return self.rewrite_positive(expr);
             }
             UnaryOperator::PGSquareRoot => ExprType::Sqrt,
+            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),

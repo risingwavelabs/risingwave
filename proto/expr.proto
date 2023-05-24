@@ -126,6 +126,10 @@ message ExprNode {
     ACOSH = 265;
     ATANH = 266;
     SINH = 267;
+    TRUNC = 271;
+    LN = 272;
+    LOG10 = 273;
+    CBRT = 274;
 
     // Boolean comparison
     IS_TRUE = 301;
