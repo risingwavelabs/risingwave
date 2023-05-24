@@ -112,7 +112,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             let update_values = values
                 .iter()
                 .filter_map(|row| {
-                    if self.rng.gen_bool(0.2) {
+                    if self.rng.gen_bool(0.1) {
                         let mut updated_row = row.clone();
                         for value_index in &value_indices {
                             let data_type = &data_types[*value_index];
@@ -191,7 +191,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         values
             .iter()
             .filter_map(|row| {
-                if self.rng.gen_bool(0.2) {
+                if self.rng.gen_bool(0.1) {
                     let selection = Some(Self::create_selection_expr(table, &selected, row));
                     Some(Statement::Delete {
                         table_name: ObjectName::from_test_str(&table.name),

@@ -335,7 +335,8 @@ async fn test_stream_queries<R: Rng>(
         for update_statement in update_statements {
             let sql = update_statement.to_string();
             tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-            let _response = client.simple_query(&sql).await;
+            let response = client.simple_query(&sql).await;
+            skipped += validate_response(response)?;
         }
     }
 
@@ -344,6 +345,7 @@ async fn test_stream_queries<R: Rng>(
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         skipped += run_query(client, &sql).await?;
+
         tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }

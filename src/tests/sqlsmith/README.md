@@ -19,9 +19,6 @@ This test will be run as a unit test:
 
 Take a look at [`gen_queries.sh`](scripts/gen_queries.sh).
 
-Caveat: Even with a given snapshot, certain parts of the system are non-determninistic.
-For instance with scheduler errors, the same query may not trigger errors when executed.
-
 ## Running with Madsim
 
 You can check [`ci/scripts/build-simulation.sh`](../../../ci/scripts/build-simulation.sh) 
