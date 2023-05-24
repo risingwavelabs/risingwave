@@ -124,7 +124,7 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
                     }
                 }
             }
-            res.push(needed.into());
+            res.push(needed);
         }
     }
 
