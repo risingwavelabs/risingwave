@@ -728,7 +728,6 @@ impl HummockVersionReader {
         );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
-        let mut overlapping_iter_count = 0;
         let timer = self
             .state_store_metrics
             .iter_fetch_meta_duration
@@ -826,7 +825,6 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
-                    overlapping_iter_count += 1;
                 }
             }
         }
@@ -838,7 +836,7 @@ impl HummockVersionReader {
                 .iter_slow_fetch_meta_cache_unhits
                 .set(local_stats.cache_meta_block_miss as i64);
         }
-        local_stats.overlapping_iter_count = overlapping_iter_count;
+        local_stats.overlapping_iter_count = overlapping_iters.len() as u64;
         local_stats.non_overlapping_iter_count = non_overlapping_iters.len() as u64;
 
         // 3. build user_iterator
