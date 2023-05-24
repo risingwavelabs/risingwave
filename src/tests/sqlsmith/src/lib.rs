@@ -21,9 +21,7 @@ use std::collections::{HashMap, HashSet};
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Statement, TableConstraint,
-};
+use risingwave_sqlparser::ast::{BinaryOperator, ColumnOption, Expr, Join, JoinConstraint, JoinOperator, Statement, TableConstraint};
 use risingwave_sqlparser::parser::Parser;
 
 use crate::sql_gen::SqlGenerator;
@@ -100,6 +98,17 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                 .map(|(i, c)| (&c.name, i))
                 .collect();
             let mut pk_indices = HashSet::new();
+            for (i, column) in columns.iter().enumerate() {
+                let is_primary_key = column.options.iter().any(|option|
+                    match option.option {
+                        ColumnOption::Unique { is_primary: true } => true,
+                        _ => false,
+                    }
+                );
+                if is_primary_key {
+                    pk_indices.insert(i);
+                }
+            }
             for constraint in constraints {
                 if let TableConstraint::Unique {
                     columns,
@@ -137,8 +146,9 @@ pub fn parse_create_table_statements(sql: &str) -> Vec<Table> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use expect_test::{expect, Expect};
+
+    use super::*;
 
     fn check(actual: Vec<Table>, expect: Expect) {
         let actual = format!("{:#?}", actual); // pretty print the output.
@@ -152,7 +162,9 @@ CREATE TABLE t(v1 int);
 CREATE TABLE t2(v1 int, v2 bool);
 CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
         ";
-        check(parse_create_table_statements(test_string), expect![[r#"
+        check(
+            parse_create_table_statements(test_string),
+            expect![[r#"
             [
                 Table {
                     name: "t",
@@ -196,7 +208,8 @@ CREATE TABLE t3(v1 int, v2 bool, v3 smallint);
                     ],
                     pk_indices: [],
                 },
-            ]"#]]);
+            ]"#]],
+        );
     }
 
     #[test]
@@ -207,64 +220,78 @@ CREATE TABLE t2(v1 int, v2 smallint PRIMARY KEY);
 CREATE TABLE t3(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY);
 CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY);
 ";
-        check(parse_create_table_statements(test_string), expect![[r#"
-            [
-                Table {
-                    name: "t",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
-                        },
-                    ],
-                    pk_indices: [],
-                },
-                Table {
-                    name: "t2",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
-                        },
-                        Column {
-                            name: "v2",
-                            data_type: Int16,
-                        },
-                    ],
-                    pk_indices: [],
-                },
-                Table {
-                    name: "t3",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
-                        },
-                        Column {
-                            name: "v2",
-                            data_type: Int16,
-                        },
-                    ],
-                    pk_indices: [],
-                },
-                Table {
-                    name: "t4",
-                    columns: [
-                        Column {
-                            name: "v1",
-                            data_type: Int32,
-                        },
-                        Column {
-                            name: "v2",
-                            data_type: Int16,
-                        },
-                        Column {
-                            name: "v3",
-                            data_type: Boolean,
-                        },
-                    ],
-                    pk_indices: [],
-                },
-            ]"#]]);
+        check(
+            parse_create_table_statements(test_string),
+            expect![[r#"
+                [
+                    Table {
+                        name: "t",
+                        columns: [
+                            Column {
+                                name: "v1",
+                                data_type: Int32,
+                            },
+                        ],
+                        pk_indices: [
+                            0,
+                        ],
+                    },
+                    Table {
+                        name: "t2",
+                        columns: [
+                            Column {
+                                name: "v1",
+                                data_type: Int32,
+                            },
+                            Column {
+                                name: "v2",
+                                data_type: Int16,
+                            },
+                        ],
+                        pk_indices: [
+                            1,
+                        ],
+                    },
+                    Table {
+                        name: "t3",
+                        columns: [
+                            Column {
+                                name: "v1",
+                                data_type: Int32,
+                            },
+                            Column {
+                                name: "v2",
+                                data_type: Int16,
+                            },
+                        ],
+                        pk_indices: [
+                            0,
+                            1,
+                        ],
+                    },
+                    Table {
+                        name: "t4",
+                        columns: [
+                            Column {
+                                name: "v1",
+                                data_type: Int32,
+                            },
+                            Column {
+                                name: "v2",
+                                data_type: Int16,
+                            },
+                            Column {
+                                name: "v3",
+                                data_type: Boolean,
+                            },
+                        ],
+                        pk_indices: [
+                            2,
+                            0,
+                            1,
+                        ],
+                    },
+                ]"#]],
+        );
     }
 }

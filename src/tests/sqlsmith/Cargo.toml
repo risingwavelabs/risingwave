@@ -34,8 +34,8 @@ tracing-subscriber = "0.3.16"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-libtest-mimic = "0.6"
 expect-test = "1"
+libtest-mimic = "0.6"
 
 [[bin]]
 name = "sqlsmith"
