@@ -99,7 +99,7 @@ impl LevelCompactionPicker {
                 self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
-            0,
+            1,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
