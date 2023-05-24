@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use globset::{Glob, GlobMatcher};
 use itertools::Itertools;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
@@ -63,7 +62,7 @@ pub struct S3SplitEnumerator {
     bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
     prefix: Option<String>,
-    matcher: Option<GlobMatcher>,
+    matcher: Option<glob::Pattern>,
     client: Client,
 }
 
@@ -76,14 +75,14 @@ impl SplitEnumerator for S3SplitEnumerator {
         let config = AwsConfigV2::from(HashMap::from(properties.clone()));
         let sdk_config = config.load_config(None).await;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-        let matcher = if let Some(pattern) = properties.match_pattern.as_ref() {
-            let glob = Glob::new(pattern)
+        let (prefix, matcher) = if let Some(pattern) = properties.match_pattern.as_ref() {
+            let prefix = get_prefix(pattern);
+            let matcher = glob::Pattern::new(pattern)
                 .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
-            Some(glob.compile_matcher())
+            (Some(prefix), Some(matcher))
         } else {
-            None
+            (None, None)
         };
-        let prefix = matcher.as_ref().map(|m| get_prefix(m.glob().glob()));
 
         Ok(S3SplitEnumerator {
             bucket_name: properties.bucket_name,
@@ -120,7 +119,7 @@ impl SplitEnumerator for S3SplitEnumerator {
             .filter(|obj| {
                 self.matcher
                     .as_ref()
-                    .map(|m| m.is_match(obj.key().unwrap()))
+                    .map(|m| m.matches(obj.key().unwrap()))
                     .unwrap_or(true)
             })
             .collect_vec();

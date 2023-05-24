@@ -797,3 +797,33 @@
         └─LogicalJoin { type: LeftOuter, on: true, output: [t3.z, t2.x, t2.y] }
           ├─LogicalScan { table: t2, columns: [t2.x, t2.y] }
           └─LogicalScan { table: t3, columns: [t3.z] }
+- name: A correlated subquery contains union
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    create table t3 (e int, f int);
+    select * from t1 where exists (select * from t2 where t2.c = t1.a union all select * from t3 where t3.f = t1.b);
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t1.a, t1.a) AND IsNotDistinctFrom(t1.b, t1.b), output: all }
+    ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+    └─LogicalUnion { all: true }
+      ├─LogicalJoin { type: Inner, on: (t2.c = t1.a), output: [t1.a, t1.b] }
+      | ├─LogicalAgg { group_key: [t1.a, t1.b], aggs: [] }
+      | | └─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+      | └─LogicalScan { table: t2, columns: [t2.c] }
+      └─LogicalJoin { type: Inner, on: (t3.f = t1.b), output: [t1.a, t1.b] }
+        ├─LogicalAgg { group_key: [t1.a, t1.b], aggs: [] }
+        | └─LogicalScan { table: t1, columns: [t1.a, t1.b] }
+        └─LogicalScan { table: t3, columns: [t3.f] }
+- name: A correlated subquery contains distinct on
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    select * from t2 where exists (select distinct on(a) a from t1 where b = d);
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(t2.d, t1.b), output: all }
+    ├─LogicalScan { table: t2, columns: [t2.c, t2.d] }
+    └─LogicalProject { exprs: [t1.b] }
+      └─LogicalDedup { dedup_cols: [t1.b, t1.a] }
+        └─LogicalProject { exprs: [t1.b, t1.a] }
+          └─LogicalScan { table: t1, columns: [t1.a, t1.b], predicate: IsNotNull(t1.b) }

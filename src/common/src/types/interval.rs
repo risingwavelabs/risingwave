@@ -18,14 +18,17 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
+use std::sync::LazyLock;
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
+use regex::Regex;
 use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
+use rust_decimal::prelude::Decimal;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -1007,6 +1010,48 @@ impl Interval {
         };
         format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
     }
+
+    /// Converts str to interval
+    ///
+    /// The input str must have the following format:
+    /// P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
+    ///
+    /// Example
+    /// - P1Y2M3DT4H5M6.78S
+    pub fn from_iso_8601(s: &str) -> Result<Self> {
+        // ISO pattern - PnYnMnDTnHnMnS
+        static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+                .unwrap()
+        });
+        // wrap into a closure to simplify error handling
+        let f = || {
+            let caps = ISO_8601_REGEX.captures(s)?;
+            let years: i32 = caps[1].parse().ok()?;
+            let months: i32 = caps[2].parse().ok()?;
+            let days = caps[3].parse().ok()?;
+            let hours: i64 = caps[4].parse().ok()?;
+            let minutes: i64 = caps[5].parse().ok()?;
+            // usecs = sec * 1000000, use decimal to be exact
+            let usecs: i64 = (Decimal::from_str_exact(&caps[6])
+                .ok()?
+                .checked_mul(Decimal::from_str_exact("1000000").unwrap()))?
+            .try_into()
+            .ok()?;
+            Some(Interval::from_month_day_usec(
+                // months = years * 12 + months
+                years.checked_mul(12)?.checked_add(months)?,
+                days,
+                // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
+                (hours
+                    .checked_mul(3_600)?
+                    .checked_add(minutes.checked_mul(60)?))?
+                .checked_mul(USECS_PER_SEC)?
+                .checked_add(usecs)?,
+            ))
+        };
+        f().ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
+    }
 }
 
 impl Display for Interval {
@@ -1706,5 +1751,14 @@ mod tests {
     fn test_interval_estimate_size() {
         let interval = Interval::MIN;
         assert_eq!(interval.estimated_size(), 16);
+    }
+
+    #[test]
+    fn test_iso_8601() {
+        let iso_8601_str = "P1Y2M3DT4H5M6.789123S";
+        let lhs = Interval::from_month_day_usec(14, 3, 14706789123);
+        let rhs = Interval::from_iso_8601(iso_8601_str).unwrap();
+        assert_eq!(rhs.as_iso_8601().as_str(), iso_8601_str);
+        assert_eq!(lhs, rhs);
     }
 }

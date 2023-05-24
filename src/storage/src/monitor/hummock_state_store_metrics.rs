@@ -78,7 +78,7 @@ impl HummockStateStoreMetrics {
         .unwrap();
 
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
-            "state_bloom_filter_check_counts",
+            "state_store_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
             &["table_id", "type"],
             registry
