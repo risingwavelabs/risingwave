@@ -36,7 +36,7 @@ services:
   mysql:
     image: mysql:8.0
     ports:
-      - "3306:3306"
+      - "8306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=123456
       - MYSQL_USER=mysqluser
@@ -52,7 +52,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: connector-node
-  # Generate lineitem table data
   datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on: 
