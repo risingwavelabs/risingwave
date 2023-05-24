@@ -235,13 +235,15 @@ pub async fn generate_splits(
 pub async fn block_overlap_info(
     compact_task: &CompactTask,
     context: Arc<CompactorContext>,
-) -> HummockResult<(usize, usize)> {
+) -> HummockResult<(usize, usize, u64, u64)> {
     if compact_task.target_level == 0 || compact_task.target_level == compact_task.base_level {
-        return Ok((0, 0));
+        return Ok((0, 0, 0, 0));
     }
     let mut block_meta_vec = vec![vec![]; compact_task.input_ssts.len()];
     let mut total_block_count = 0;
 
+    let mut select_level_size = 0;
+    let mut target_level_size = 0;
     for (idx, input_level) in compact_task.input_ssts.iter().enumerate() {
         for sstable_info in &input_level.table_infos {
             let block_metas = context
@@ -255,6 +257,12 @@ pub async fn block_overlap_info(
 
             total_block_count += block_metas.len();
             block_meta_vec[idx].extend(block_metas);
+
+            if idx == 0 {
+                select_level_size += sstable_info.file_size;
+            } else {
+                target_level_size += sstable_info.file_size;
+            }
         }
 
         let last_key = input_level
@@ -274,7 +282,12 @@ pub async fn block_overlap_info(
 
     let copy_block_count = check_copy_block(&block_meta_vec);
 
-    Ok((copy_block_count, total_block_count))
+    Ok((
+        copy_block_count,
+        total_block_count,
+        select_level_size,
+        target_level_size,
+    ))
 }
 
 fn check_copy_block(block_meta_vec: &Vec<Vec<BlockMeta>>) -> usize {
@@ -372,34 +385,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_block_overlap() {
-        #[derive(Eq)]
-        struct Item<'a> {
-            arr: &'a Vec<BlockMeta>,
-            idx: usize,
-        }
-
-        impl<'a> PartialEq for Item<'a> {
-            fn eq(&self, other: &Self) -> bool {
-                self.arr[self.idx].smallest_key == other.arr[self.idx].smallest_key
-            }
-        }
-
-        impl<'a> PartialOrd for Item<'a> {
-            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-                self.arr[self.idx]
-                    .smallest_key
-                    .partial_cmp(&other.arr[self.idx].smallest_key)
-            }
-        }
-
-        impl<'a> Ord for Item<'a> {
-            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-                self.arr[self.idx]
-                    .smallest_key
-                    .cmp(&other.arr[self.idx].smallest_key)
-            }
-        }
-
         let block_meta_test_data = vec![
             vec![
                 BlockMeta {
@@ -474,10 +459,7 @@ mod tests {
         }
 
         let copy_block_count = check_copy_block(&block_meta_vec);
-
-        println!(
-            "copy_block_count {} total_block_count {}",
-            copy_block_count, total_block_count
-        );
+        assert_eq!(6, copy_block_count);
+        assert_eq!(14, total_block_count);
     }
 }

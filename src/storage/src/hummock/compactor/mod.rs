@@ -176,16 +176,22 @@ impl Compactor {
             compact_task.compression_algorithm,
         );
 
-        let (copy_block_count, total_block_count) =
+        let (copy_block_count, total_block_count, select_level_size, target_level_size) =
             block_overlap_info(&compact_task, context.clone())
                 .await
                 .unwrap();
 
         if total_block_count != 0 {
             tracing::info!(
-                "TRACE: copy_block_count {} total_block_count {} need_quota {} file_counts {}",
+                "TRACE: {}->{} select_level_size {} target_level_size {} compact_ratio {} copy_block_count {} total_block_count {} copy_block_ratio {} need_quota {} file_counts {}",
+                compact_task.input_ssts[0].level_idx,
+                compact_task.target_level,
+                select_level_size,
+                target_level_size,
+                select_level_size as f64 * 100.0 / target_level_size as f64,
                 copy_block_count,
                 total_block_count,
+                copy_block_count as f64 * 100.0 / total_block_count as f64,
                 need_quota,
                 file_counts
             );
