@@ -235,7 +235,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
                 let table_id = distinct_dedup_tables.get(&distinct_col).unwrap().table_id();
                 let metrics_info = MetricsInfo::new(metrics.clone(), table_id, actor_id);
                 let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
-                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics_info.clone());
+                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics_info);
                 (distinct_col, (call_indices, deduplicater))
             })
             .collect();

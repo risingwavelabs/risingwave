@@ -202,9 +202,9 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
-            self.memory_usage_metrics
-                .as_ref()
-                .map(|metrics| metrics.set(self.kv_heap_size as _));
+            if let Some(metrics) = self.memory_usage_metrics.as_ref() {
+                metrics.set(self.kv_heap_size as _);
+            }
             self.last_reported_size_bytes = self.kv_heap_size;
             true
         } else {
@@ -287,9 +287,9 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
-            self.memory_usage_metrics
-                .as_ref()
-                .map(|metrics| metrics.set(*self.total_size as _));
+            if let Some(metrics) = self.memory_usage_metrics.as_ref() {
+                metrics.set(*self.total_size as _);
+            }
             *self.last_reported_size_bytes = *self.total_size;
             true
         } else {
