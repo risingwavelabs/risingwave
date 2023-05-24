@@ -47,8 +47,7 @@ where
         &self,
         request: Request<ClearWorkerNodesRequest>,
     ) -> Result<Response<ClearWorkerNodesResponse>, Status> {
-        assert!(false);
-        // TODO: implement this one
+        assert!(false); // TODO: implement this one
 
         Ok(Response::new(ClearWorkerNodesResponse { status: None }))
     }
