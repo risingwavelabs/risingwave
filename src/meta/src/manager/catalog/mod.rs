@@ -803,10 +803,14 @@ where
                     .await?
                     .internal_table_ids();
 
-                // At most 1 should be used by table scan,
-                // backwards compatible with indexes without backfill state persisted.
-                assert!(internal_table_ids.len() <= 1);
-                index_internal_table_ids.push(internal_table_ids[0]);
+                // 1 should be used by table scan.
+                if internal_table_ids.len() == 1 {
+                    index_internal_table_ids.push(internal_table_ids[0]);
+                } else {
+                    // backwards compatibility with indexes
+                    // without backfill state persisted.
+                    assert_eq!(internal_table_ids.len(), 0);
+                }
             }
 
             if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
@@ -1603,10 +1607,14 @@ where
                         .await?
                         .internal_table_ids();
 
-                    // At most 1 should be used by table scan,
-                    // backwards compatible with indexes without backfill state persisted.
-                    assert!(internal_table_ids.len() <= 1);
-                    index_internal_table_ids.push(internal_table_ids[0]);
+                    // 1 should be used by table scan.
+                    if internal_table_ids.len() == 1 {
+                        index_internal_table_ids.push(internal_table_ids[0]);
+                    } else {
+                        // backwards compatibility with indexes
+                        // without backfill state persisted.
+                        assert_eq!(internal_table_ids.len(), 0);
+                    }
                 }
 
                 if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
