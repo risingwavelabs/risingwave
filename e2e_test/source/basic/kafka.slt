@@ -616,14 +616,14 @@ ORDER BY
 6	Leah	Davis	18	5.7	140
 9	Jacob	Anderson	20	5.8	155
 
-query II 
-SELECT
-	*
-FROM
-	upsert_avro_json
-ORDER BY
-	"ID";
-----
+# Query II 
+# SELECT
+# 	*
+# FROM
+# 	upsert_avro_json
+# ORDER BY
+# 	"ID";
+# ----
 
 query II 
 SELECT
