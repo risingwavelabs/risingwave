@@ -282,13 +282,8 @@ fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64
             "timestamp with time zone +/- interval of days".into(),
         ));
     }
-
-    let result: Option<i64> = try {
-        let delta_usecs = r.usecs();
-        f(l, delta_usecs)?
-    };
-
-    result.ok_or(ExprError::NumericOutOfRange)
+    let delta_usecs = r.usecs();
+    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("multiply(interval, *int) -> interval")]

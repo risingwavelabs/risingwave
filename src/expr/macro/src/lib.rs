@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(lint_reasons)]
+#![feature(let_chains)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -109,9 +110,12 @@ struct FunctionAttr {
     name: String,
     args: Vec<String>,
     ret: String,
+    is_table_function: bool,
     batch_fn: Option<String>,
     state: Option<String>,
     init_state: Option<String>,
+    prebuild: Option<String>,
+    type_infer: Option<String>,
     user_fn: UserFunctionAttr,
 }
 
@@ -148,6 +152,13 @@ impl ReturnType {
 
     fn contains_option(&self) -> bool {
         matches!(self, ReturnType::Option | ReturnType::ResultOption)
+    }
+}
+
+impl FunctionAttr {
+    /// Return a unique name that can be used as an identifier.
+    fn ident_name(&self) -> String {
+        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret).replace("[]", "list")
     }
 }
 

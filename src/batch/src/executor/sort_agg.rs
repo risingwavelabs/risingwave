@@ -145,7 +145,7 @@ impl SortAggExecutor {
                             .iter_mut()
                             .zip_eq_fast(group.into_iter())
                             .for_each(|(builder, datum)| {
-                                builder.append_datum(datum);
+                                builder.append(datum);
                             });
                         Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
                         left_capacity -= 1;
@@ -177,7 +177,7 @@ impl SortAggExecutor {
                 .iter_mut()
                 .zip_eq_fast(group.into_iter())
                 .for_each(|(builder, datum)| {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 });
             Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
             left_capacity -= 1;
