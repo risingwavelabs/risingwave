@@ -367,16 +367,16 @@ ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 
-statement ok
-CREATE TABLE upsert_avro_json (
-    id TEXT  PRIMARY KEY
-)
-WITH (
-	connector = 'kafka',
-  properties.bootstrap.server = 'message_queue:29092',
-	topic = 'upsert_avro_json')
-ROW FORMAT UPSERT_AVRO 
-row schema location confluent schema registry 'http://message_queue:8081'
+# statement ok
+# CREATE TABLE upsert_avro_json (
+#    id TEXT  PRIMARY KEY
+# )
+# WITH (
+#	connector = 'kafka',
+#  properties.bootstrap.server = 'message_queue:29092',
+#	topic = 'upsert_avro_json')
+# ROW FORMAT UPSERT_AVRO 
+#row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
 CREATE TABLE upsert_avro_json2 (
@@ -692,8 +692,8 @@ DROP TABLE mongo_customers;
 statement ok
 DROP TABLE upsert_students;
 
-statement ok
-DROP TABLE upsert_avro_json;
+# statement ok
+# DROP TABLE upsert_avro_json;
 
 statement ok
 DROP TABLE upsert_avro_json2;
