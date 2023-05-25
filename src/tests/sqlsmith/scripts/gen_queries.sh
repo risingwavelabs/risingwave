@@ -41,7 +41,7 @@ echo_err() {
 
 # Get reason for generation crash.
 get_failure_reason() {
-  tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  cat $1 | tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
 }
 
 check_if_failed() {
@@ -87,20 +87,25 @@ extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "$LOGFILE_PREFIX")
   do
     LOGFILE="$LOGDIR/$LOGFILENAME"
+    echo_err "[INFO] Checking $LOGFILE for bugs"
     FAILED=$(check_if_failed < "$LOGFILE")
+    echo_err "[INFO] Checked $LOGFILE for bugs"
     if [[ -n "$FAILED" ]]; then
-      REASON=$(get_failure_reason < "$LOGFILE")
-      echo_err "[INFO] $LOGFILE Encountered bug."
+      echo_err "[WARN] $LOGFILE Encountered bug."
 
-      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
+      REASON=$(get_failure_reason "$LOGFILE")
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
+
       DDL=$(extract_ddl < "$LOGFILE")
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
+      # FIXME(kwannoel): Extract dml for updates too.
       DML=$(extract_dml < "$LOGFILE")
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
       QUERY=$(extract_failing_query < "$LOGFILE")
+
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
+
       echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
@@ -123,6 +128,7 @@ generate_deterministic() {
   echo "" > $LOGDIR/generate_deterministic.stdout.log
   seq "$TEST_NUM" | env_parallel "
     mkdir -p $OUTDIR/{}
+    echo '[INFO] Generating For Seed {}'
     MADSIM_TEST_SEED={} ./$MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{} \
