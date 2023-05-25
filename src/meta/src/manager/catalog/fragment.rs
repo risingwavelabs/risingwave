@@ -36,7 +36,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{commit_meta, MetaSrvEnv};
+use crate::manager::{commit_meta, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
@@ -112,10 +112,9 @@ where
         self.core.read().await
     }
 
-    pub async fn list_table_fragments(&self) -> MetaResult<Vec<TableFragments>> {
+    pub async fn list_table_fragments(&self) -> Vec<TableFragments> {
         let map = &self.core.read().await.table_fragments;
-
-        Ok(map.values().cloned().collect())
+        map.values().cloned().collect()
     }
 
     pub async fn has_any_table_fragments(&self) -> bool {
@@ -180,10 +179,15 @@ where
         if map.contains_key(&table_id) {
             bail!("table_fragment already exist: id={}", table_id);
         }
-
+        let fragment_ids = table_fragment.fragment_ids().collect();
         let mut table_fragments = BTreeMapTransaction::new(map);
         table_fragments.insert(table_id, table_fragment);
-        commit_meta!(self, table_fragments)
+        commit_meta!(self, table_fragments)?;
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::FragmentsAdded(fragment_ids))
+            .await;
+        Ok(())
     }
 
     /// Called after the barrier collection of `CreateStreamingJob` command, which updates the
@@ -387,11 +391,23 @@ where
         }
         commit_meta!(self, table_fragments)?;
 
-        for table_fragments in to_delete_table_fragments {
+        for table_fragments in &to_delete_table_fragments {
             if table_fragments.state() != State::Initial {
-                self.notify_fragment_mapping(&table_fragments, Operation::Delete)
+                self.notify_fragment_mapping(table_fragments, Operation::Delete)
                     .await;
             }
+        }
+        let all_deleted_fragment_ids = to_delete_table_fragments
+            .iter()
+            .flat_map(|t| t.fragment_ids())
+            .collect_vec();
+        if !all_deleted_fragment_ids.is_empty() {
+            self.env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::FragmentsDeleted(
+                    all_deleted_fragment_ids,
+                ))
+                .await;
         }
 
         Ok(())
@@ -441,7 +457,7 @@ where
     /// Used in [`crate::barrier::GlobalBarrierManager`]
     /// migrate actors and update fragments one by one according to the migration plan.
     pub async fn migrate_fragment_actors(&self, migration_plan: &MigrationPlan) -> MetaResult<()> {
-        let table_fragments = self.list_table_fragments().await?;
+        let table_fragments = self.list_table_fragments().await;
         for mut table_fragment in table_fragments {
             let mut updated = false;
             for status in table_fragment.actor_status.values_mut() {

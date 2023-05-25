@@ -599,13 +599,13 @@ profile:
         exporter-port: 1225
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 4
       - use: compute-node
         port: 5686
         exporter-port: 1226
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 8
       - use: frontend
         port: 4565
         exporter-port: 2222

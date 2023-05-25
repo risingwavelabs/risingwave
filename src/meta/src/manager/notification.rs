@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 use tonic::Status;
 
 use crate::manager::cluster::WorkerKey;
-use crate::model::NotificationVersion as Version;
+use crate::model::{FragmentId, NotificationVersion as Version};
 use crate::storage::MetaStore;
 
 pub type MessageStatus = Status;
@@ -39,9 +39,12 @@ pub type NotificationVersion = u64;
 
 #[derive(Clone, Debug)]
 pub enum LocalNotification {
-    WorkerNodeIsDeleted(WorkerNode),
+    WorkerNodeDeleted(WorkerNode),
+    WorkerNodeActivated(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
     SystemParamsChange(SystemParamsReader),
+    FragmentsAdded(Vec<FragmentId>),
+    FragmentsDeleted(Vec<FragmentId>),
 }
 
 #[derive(Debug)]

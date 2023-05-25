@@ -597,7 +597,7 @@ where
 
             Command::RescheduleFragment(reschedules) => {
                 let mut node_dropped_actors = HashMap::new();
-                for table_fragments in self.fragment_manager.list_table_fragments().await? {
+                for table_fragments in self.fragment_manager.list_table_fragments().await {
                     for fragment_id in table_fragments.fragments.keys() {
                         if let Some(reschedule) = reschedules.get(fragment_id) {
                             for actor_id in &reschedule.removed_actors {

@@ -341,7 +341,7 @@ where
         // Index for actor status, including actor's parallel unit
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
-        for table_fragments in self.fragment_manager.list_table_fragments().await? {
+        for table_fragments in self.fragment_manager.list_table_fragments().await {
             fragment_state.extend(
                 table_fragments
                     .fragment_ids()
