@@ -81,7 +81,7 @@ services:
     depends_on:
       - mysql
       - db
-      - source-test-env
+      - message_queue
     volumes:
       - ..:/risingwave
 
