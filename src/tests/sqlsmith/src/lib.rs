@@ -20,6 +20,7 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
+use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
@@ -133,7 +134,8 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
                     }
                 }
             }
-            let pk_indices = pk_indices.into_iter().collect();
+            let mut pk_indices = pk_indices.into_iter().collect_vec();
+            pk_indices.sort_unstable();
             Table::new_with_pk(
                 name.0[0].real_value(),
                 columns.iter().map(|c| c.clone().into()).collect(),
@@ -434,9 +436,9 @@ CREATE TABLE t4(v1 int PRIMARY KEY, v2 smallint PRIMARY KEY, v3 bool PRIMARY KEY
                                 },
                             ],
                             pk_indices: [
-                                2,
-                                1,
                                 0,
+                                1,
+                                2,
                             ],
                         },
                     ],
