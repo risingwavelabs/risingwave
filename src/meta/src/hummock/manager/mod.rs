@@ -1896,6 +1896,10 @@ where
         *self.compaction_resume_notifier.write() = notifier;
     }
 
+    pub fn init_compaction_manager(&self, sched_channel: CompactionRequestChannelRef) {
+        *self.compaction_request_channel.write() = Some(sched_channel);
+    }
+
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
     #[named]
     async fn cancel_unassigned_compaction_task(&self) -> Result<()> {

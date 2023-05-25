@@ -20,6 +20,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
+mod management;
 mod picker;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};

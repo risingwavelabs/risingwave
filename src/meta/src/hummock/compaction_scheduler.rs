@@ -46,7 +46,7 @@ use crate::storage::MetaStore;
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
 
-type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+pub type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
 
 const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
 
