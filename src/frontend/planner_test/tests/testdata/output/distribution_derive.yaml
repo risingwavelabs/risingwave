@@ -34,12 +34,12 @@
     └──  StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 0 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 3
-    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { state table: 1 }
+    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -52,10 +52,6 @@
     Lookup
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
-
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -86,12 +82,12 @@
     └──  StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 0 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 3
-    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { state table: 1 }
+    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -104,10 +100,6 @@
     Lookup
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
-
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -138,12 +130,12 @@
     └──  StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 0 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 3
-    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { state table: 1 }
+    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -156,10 +148,6 @@
     Lookup
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
-
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -190,12 +178,12 @@
     └──  StreamExchange Hash([2, 4, 3]) from 5
 
     Fragment 2
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 0 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 3
-    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) } { state table: 1 }
+    Chain { table: bk1, columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -208,10 +196,6 @@
     Lookup
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
-
-    Table 0 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 1 { columns: [ vnode, k1, b__row_id, bk1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2, 3, 4 ], read pk prefix len hint: 3 }
 
@@ -247,7 +231,6 @@
 
     Fragment 1
     Chain { table: a, columns: [a.k1, a.v, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-    ├── state table: 2
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -264,14 +247,6 @@
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
-
-    Table 2
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, a.k1 ]
@@ -307,7 +282,6 @@
             ├── state tables: [ 0 ]
             ├── distinct tables: []
             └── Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-                ├── state table: 2
                 ├──  Upstream
                 └──  BatchPlanNode
 
@@ -324,14 +298,6 @@
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
-
-    Table 2
-    ├── columns: [ vnode, k1, a__row_id, ak1_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1.k1 ]
@@ -372,7 +338,6 @@
 
     Fragment 1
     Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.v, ak1k2.k2, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-    ├── state table: 2
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -389,14 +354,6 @@
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
-
-    Table 2
-    ├── columns: [ vnode, k1, k2, a__row_id, ak1k2_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1k2.k1 ]
@@ -437,7 +394,6 @@
 
     Fragment 1
     Chain { table: ak1k2, columns: [ak1k2.k2, ak1k2.v, ak1k2.k1, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-    ├── state table: 2
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -454,14 +410,6 @@
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
-
-    Table 2
-    ├── columns: [ vnode, k1, k2, a__row_id, ak1k2_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_v, ak1k2.k2 ]
@@ -494,7 +442,6 @@
     └── StreamProject { exprs: [sum(ak1k2.v), ak1k2.k1, ak1k2.k2] }
         └── StreamHashAgg { group_key: [ak1k2.k1, ak1k2.k2], aggs: [sum(ak1k2.v), count] } { result table: 0, state tables: [], distinct tables: [] }
             └── Chain { table: ak1k2, columns: [ak1k2.k1, ak1k2.k2, ak1k2.v, ak1k2.a._row_id], pk: [ak1k2.a._row_id], dist: UpstreamHashShard(ak1k2.k1, ak1k2.k2) }
-                ├── state table: 1
                 ├──  Upstream
                 └──  BatchPlanNode
 
@@ -504,14 +451,6 @@
     ├── value indices: [ 2, 3 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
-
-    Table 1
-    ├── columns: [ vnode, k1, k2, a__row_id, ak1k2_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3, 4 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ sum_v, ak1k2.k1, ak1k2.k2 ]
@@ -544,7 +483,6 @@
     └── StreamProject { exprs: [sum(ak1.v), ak1.k1, ak1.k2] }
         └── StreamHashAgg { group_key: [ak1.k1, ak1.k2], aggs: [sum(ak1.v), count] } { result table: 0, state tables: [], distinct tables: [] }
             └── Chain { table: ak1, columns: [ak1.k1, ak1.k2, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-                ├── state table: 1
                 ├──  Upstream
                 └──  BatchPlanNode
 
@@ -554,14 +492,6 @@
     ├── value indices: [ 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
-
-    Table 1
-    ├── columns: [ vnode, k1, a__row_id, ak1_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ sum_v, ak1.k1, ak1.k2 ]
@@ -614,7 +544,6 @@
 
     Fragment 1
     Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-    ├── state table: 3
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -638,14 +567,6 @@
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
-
-    Table 3
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1 ]
@@ -713,7 +634,6 @@
 
     Fragment 2
     Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-    ├── state table: 3
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -737,14 +657,6 @@
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
-
-    Table 3
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1 ]
@@ -812,7 +724,6 @@
 
     Fragment 2
     Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
-    ├── state table: 3
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -836,14 +747,6 @@
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
-
-    Table 3
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k2 ]
@@ -889,7 +792,7 @@
                 └──  StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
-    Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) } { state table: 3 }
+    Chain { table: a, columns: [a.k1, a.k2, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -913,14 +816,6 @@
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
-
-    Table 3
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ max_num, a.k1, a.k2 ]
@@ -971,16 +866,16 @@
     ├── materialized table: 4294967294
     └── StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] } { left table: 0, right table: 2, left degree table: 1, right degree table: 3 }
         ├──  StreamExchange Hash([0]) from 1
-        └── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 5, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
             └──  StreamExchange Hash([0]) from 2
 
     Fragment 1
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 4 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) } { state table: 6 }
+    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -992,11 +887,7 @@
 
     Table 3 { columns: [ a_k1, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ vnode, k1, a__row_id, ak1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
-
-    Table 5 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 6 { columns: [ vnode, _row_id, a_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+    Table 4 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4294967294 { columns: [ v, bv, ak1.a._row_id, ak1.k1, a.k1 ], primary key: [ $2 ASC, $4 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 3 ], read pk prefix len hint: 3 }
 
@@ -1049,12 +940,12 @@
         └──  StreamExchange Hash([0]) from 2
 
     Fragment 1
-    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) } { state table: 5 }
+    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) } { state table: 6 }
+    Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -1067,22 +958,6 @@
     Table 3 { columns: [ ak1_k1, ak1_a__row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 5
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
-
-    Table 6
-    ├── columns: [ vnode, k1, a__row_id, ak1_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2, 3 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ v, bv, a.k1, ak1.a._row_id ]
@@ -1149,16 +1024,16 @@
         ├── right degree table: 3
         ├── StreamHashAgg { group_key: [a.k1], aggs: [count] } { result table: 4, state tables: [], distinct tables: [] }
         │   └──  StreamExchange Hash([0]) from 1
-        └── StreamHashAgg { group_key: [b.k1], aggs: [count] } { result table: 6, state tables: [], distinct tables: [] }
+        └── StreamHashAgg { group_key: [b.k1], aggs: [count] } { result table: 5, state tables: [], distinct tables: [] }
             └──  StreamExchange Hash([0]) from 2
 
     Fragment 1
-    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) } { state table: 5 }
+    Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
     Fragment 2
-    Chain { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) } { state table: 7 }
+    Chain { table: b, columns: [b.k1, b._row_id], pk: [b._row_id], dist: UpstreamHashShard(b._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -1172,23 +1047,7 @@
 
     Table 4 { columns: [ a_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5
-    ├── columns: [ vnode, _row_id, a_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
-
-    Table 6 { columns: [ b_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 7
-    ├── columns: [ vnode, _row_id, b_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
+    Table 5 { columns: [ b_k1, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 4294967294
     ├── columns: [ num, bv, a.k1, b.k1 ]
@@ -1224,11 +1083,9 @@
     ├── materialized table: 4294967294
     └── StreamHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.row_id, t1.uid, t1.v, t1.created_at, window_start, window_end, t1._row_id] }
         └── StreamFilter { predicate: IsNotNull(t1.created_at) }
-            └── Chain { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
+            └── Chain { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
                 ├──  Upstream
                 └──  BatchPlanNode
-
-    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ row_id, uid, v, created_at, window_start, window_end, t1._row_id ], primary key: [ $6 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6 ], distribution key: [ 6 ], read pk prefix len hint: 3 }
 

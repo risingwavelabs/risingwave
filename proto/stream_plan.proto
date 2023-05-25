@@ -419,9 +419,6 @@ message ChainNode {
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
 
-  /// The state table used by Backfill operator for persisting internal state
-  catalog.Table state_table = 5;
-
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
 }

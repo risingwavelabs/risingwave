@@ -111,19 +111,11 @@
 
     Fragment 1
     StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [$expr1] }
-    └── Chain { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 2 }
+    └── Chain { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
         ├──  Upstream
         └──  BatchPlanNode
 
     Table 1 { columns: [ $expr1, max(t_b), count ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
-
-    Table 2
-    ├── columns: [ vnode, _row_id, t_backfill_finished ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1, 2 ]
-    ├── distribution key: [ 0 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 0
 
     Table 4294967294 { columns: [ window_start, max ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 

@@ -19,7 +19,6 @@
 
 #![feature(stmt_expr_attributes)]
 #![cfg(madsim)]
-#![feature(lazy_cell)]
 
 mod recovery;
 mod scale;

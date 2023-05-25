@@ -296,7 +296,7 @@ where
         let (version, streaming_job_ids) = match job_id {
             StreamingJobId::MaterializedView(table_id) => {
                 self.catalog_manager
-                    .drop_table(table_id, internal_table_ids, self.fragment_manager.clone())
+                    .drop_table(table_id, internal_table_ids)
                     .await?
             }
             StreamingJobId::Sink(sink_id) => {
@@ -307,19 +307,14 @@ where
                 (version, vec![sink_id.into()])
             }
             StreamingJobId::Table(source_id, table_id) => {
-                self.drop_table_inner(
-                    source_id,
-                    table_id,
-                    internal_table_ids,
-                    self.fragment_manager.clone(),
-                )
-                .await?
+                self.drop_table_inner(source_id, table_id, internal_table_ids)
+                    .await?
             }
             StreamingJobId::Index(index_id) => {
                 let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
                 let version = self
                     .catalog_manager
-                    .drop_index(index_id, index_table_id, internal_table_ids)
+                    .drop_index(index_id, index_table_id)
                     .await?;
                 (version, vec![index_table_id.into()])
             }
@@ -508,7 +503,7 @@ where
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
-                    .finish_create_index_procedure(internal_tables, index, table)
+                    .finish_create_index_procedure(index, table)
                     .await?
             }
         };
@@ -526,7 +521,6 @@ where
         source_id: Option<SourceId>,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-        fragment_manager: FragmentManagerRef<S>,
     ) -> MetaResult<(
         NotificationVersion,
         Vec<risingwave_common::catalog::TableId>,
@@ -536,12 +530,7 @@ where
             // `associated_source_id`. Indexes also need to be dropped atomically.
             let (version, delete_jobs) = self
                 .catalog_manager
-                .drop_table_with_source(
-                    source_id,
-                    table_id,
-                    internal_table_ids,
-                    fragment_manager.clone(),
-                )
+                .drop_table_with_source(source_id, table_id, internal_table_ids)
                 .await?;
             // Unregister source connector worker.
             self.source_manager
@@ -550,7 +539,7 @@ where
             Ok((version, delete_jobs))
         } else {
             self.catalog_manager
-                .drop_table(table_id, internal_table_ids, fragment_manager)
+                .drop_table(table_id, internal_table_ids)
                 .await
         }
     }

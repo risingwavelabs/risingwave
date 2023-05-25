@@ -25,11 +25,6 @@ impl Bitmap {
         self.iter_ones().map(VirtualNode::from_index)
     }
 
-    /// Enumerates the virtual nodes set to 1 in the bitmap.
-    pub fn iter_vnodes_scalar(&self) -> impl Iterator<Item = i16> + '_ {
-        self.iter_vnodes().map(|vnode| vnode.to_scalar())
-    }
-
     /// Returns an iterator which yields the position ranges of continuous virtual nodes set to 1 in
     /// the bitmap.
     pub fn vnode_ranges(&self) -> impl Iterator<Item = RangeInclusive<VirtualNode>> + '_ {
