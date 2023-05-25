@@ -15,7 +15,6 @@
 use std::env;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -96,7 +95,7 @@ async fn create_tables(
     let sql = get_seed_table_sql();
     setup_sql.push_str(&sql);
 
-    let (tables, statements) = parse_create_table_statements(sql);
+    let (mut tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
         let create_sql = s.to_string();
