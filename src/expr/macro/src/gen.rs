@@ -375,9 +375,11 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
+                use risingwave_common::estimate_size::EstimateSize;
+
                 use crate::Result;
 
-                #[derive(Clone)]
+                #[derive(Clone, EstimateSize)]
                 struct Agg {
                     return_type: DataType,
                     state: Option<#state_type>,
@@ -415,6 +417,9 @@ impl FunctionAttr {
                             None => builder.append_null(),
                         }
                         Ok(())
+                    }
+                    fn estimated_size(&self) -> usize {
+                        EstimateSize::estimated_size(self)
                     }
                 }
 

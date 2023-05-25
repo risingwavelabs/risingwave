@@ -149,6 +149,7 @@ lazy_static! {
         vec![
             ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
@@ -231,6 +232,7 @@ lazy_static! {
         vec![
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
             OverWindowToTopNRule::create(),

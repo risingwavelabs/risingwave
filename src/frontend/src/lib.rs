@@ -51,7 +51,7 @@ pub use planner::Planner;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -74,6 +74,10 @@ use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
+)]
 pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.

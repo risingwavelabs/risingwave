@@ -25,7 +25,7 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use risingwave_pb::task_service::GetDataResponse;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
@@ -201,14 +201,6 @@ impl BatchManager {
             }
             tokio::time::sleep(Duration::from_millis(100)).await
         }
-    }
-
-    /// Return the receivers for streaming RPC.
-    pub fn get_task_receiver(
-        &self,
-        task_id: &TaskId,
-    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
-        self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 
     pub fn runtime(&self) -> Arc<BackgroundShutdownRuntime> {

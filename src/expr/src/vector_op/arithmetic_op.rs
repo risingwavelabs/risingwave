@@ -400,6 +400,11 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
     }
 }
 
+#[function("cbrt(float64) -> float64")]
+pub fn cbrt_f64(expr: F64) -> F64 {
+    expr.cbrt()
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
