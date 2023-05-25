@@ -12,23 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::{DataType};
-
-use risingwave_frontend::expr::{ExprType};
+use risingwave_common::types::DataType;
+use risingwave_frontend::expr::ExprType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
-use crate::sql_gen::types::{
-    FUNC_TABLE,
-    IMPLICIT_CAST_TABLE, INVARIANT_FUNC_SET,
-};
+use crate::sql_gen::types::{FUNC_TABLE, IMPLICIT_CAST_TABLE, INVARIANT_FUNC_SET};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {

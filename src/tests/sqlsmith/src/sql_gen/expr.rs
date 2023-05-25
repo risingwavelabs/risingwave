@@ -18,16 +18,10 @@ use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
-
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs};
-use risingwave_sqlparser::ast::{
-    Expr, Ident, OrderByExpr, Value,
-};
+use risingwave_sqlparser::ast::{Expr, Ident, OrderByExpr, Value};
 
-
-use crate::sql_gen::types::{
-    data_type_to_ast_data_type,
-};
+use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 static STRUCT_FIELD_NAMES: [&str; 26] = [
@@ -259,7 +253,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 }
-
 
 pub(crate) fn typed_null(ty: &DataType) -> Expr {
     Expr::Cast {

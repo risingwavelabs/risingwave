@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::{DataType};
+use risingwave_common::types::DataType;
 use risingwave_expr::agg::AggKind;
-
 use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
 };
 
-use crate::sql_gen::types::{
-    AGG_FUNC_TABLE,
-};
+use crate::sql_gen::types::AGG_FUNC_TABLE;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -152,4 +146,3 @@ fn make_agg_func(
         filter,
     }
 }
-
