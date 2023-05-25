@@ -12,29 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::{DataType, DataTypeName, StructType};
-use risingwave_expr::agg::AggKind;
-use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
+use risingwave_common::types::{DataType};
+
+use risingwave_frontend::expr::{ExprType};
 use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName, OrderByExpr,
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
 use crate::sql_gen::types::{
-    data_type_to_ast_data_type, AGG_FUNC_TABLE, EXPLICIT_CAST_TABLE, FUNC_TABLE,
+    FUNC_TABLE,
     IMPLICIT_CAST_TABLE, INVARIANT_FUNC_SET,
 };
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
-
-static STRUCT_FIELD_NAMES: [&str; 26] = [
-    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
-    "t", "u", "v", "w", "x", "y", "z",
-];
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
@@ -234,7 +229,7 @@ fn make_overlay(exprs: Vec<Expr>) -> Expr {
 
 /// Generates simple functions such as `length`, `round`, `to_char`. These operate on datums instead
 /// of columns / rows.
-fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
+pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
     let args = exprs
         .iter()
         .map(|e| FunctionArg::Unnamed(FunctionArgExpr::Expr(e.clone())))
