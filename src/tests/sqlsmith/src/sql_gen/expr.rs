@@ -19,14 +19,14 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::{DataType, DataTypeName, StructType};
 
-use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext};
+use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs};
 use risingwave_sqlparser::ast::{
     Expr, Ident, OrderByExpr, Value,
 };
 
 
 use crate::sql_gen::types::{
-    data_type_to_ast_data_type, EXPLICIT_CAST_TABLE,
+    data_type_to_ast_data_type,
 };
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
@@ -218,40 +218,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
             Expr::Identifier(Ident::new_unchecked(&col_def.name))
         }
-    }
-
-    pub fn gen_explicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        self.gen_explicit_cast_inner(ret, context)
-            .unwrap_or_else(|| self.gen_simple_scalar(ret))
-    }
-
-    /// Generate casts from a cast map.
-    /// TODO: Assign casts have to be tested via `INSERT`.
-    fn gen_explicit_cast_inner(
-        &mut self,
-        ret: &DataType,
-        context: SqlGeneratorContext,
-    ) -> Option<Expr> {
-        let casts = EXPLICIT_CAST_TABLE.get(ret)?;
-        let cast_sig = casts.choose(&mut self.rng).unwrap();
-
-        match cast_sig.context {
-            CastContext::Explicit => {
-                let expr = self.gen_expr(&cast_sig.from_type, context).into();
-                let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
-                Some(Expr::Cast { expr, data_type })
-            }
-
-            // TODO: Generate this when e2e inserts are generated.
-            // T::Assign
-            _ => unreachable!(),
-        }
-    }
-
-    /// NOTE: This can result in ambiguous expressions.
-    /// Should only be used in unambiguous context.
-    pub fn gen_implicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        self.gen_expr(ret, context)
     }
 
     /// Generates `n` expressions of type `ret`.

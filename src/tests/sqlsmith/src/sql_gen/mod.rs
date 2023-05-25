@@ -24,6 +24,7 @@ use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 
 mod agg;
+mod cast;
 mod expr;
 pub use expr::print_function_table;
 
