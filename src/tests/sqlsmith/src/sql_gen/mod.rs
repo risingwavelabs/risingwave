@@ -27,6 +27,7 @@ mod expr;
 pub use expr::print_function_table;
 
 mod dml;
+mod functions;
 mod query;
 mod relation;
 mod scalar;
