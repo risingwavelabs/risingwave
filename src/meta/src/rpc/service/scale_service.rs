@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::reschedule_request::Reschedule;
+use risingwave_pb::common::{ParallelUnit, WorkerType};
+use risingwave_pb::meta::reschedule_request::{self, Reschedule};
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     ClearWorkerNodesRequest, ClearWorkerNodesResponse, GetClusterInfoRequest,
@@ -29,6 +29,7 @@ use crate::manager::{CatalogManagerRef, ClusterManagerRef, FragmentManagerRef};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManagerRef, ParallelUnitReschedule, SourceManagerRef};
+use crate::MetaError;
 
 pub struct ScaleServiceImpl<S: MetaStore> {
     barrier_scheduler: BarrierScheduler<S>,
@@ -93,7 +94,87 @@ where
         // TODO: we also do this in rw cloud. We can move that functionality from cloud to meta
         // see branch arne/scaling/placement-policy meta.go ClearWorkerNode
 
-        let schedule = "";
+        // TODO: how can I do this atomically?
+
+        // TODO: Do I need to retrieve the schedule every time?
+        let schedule = self
+            .get_schedule(Request::new(GetScheduleRequest {}))
+            .await?
+            .into_inner();
+
+        let mut remove_map = std::collections::HashMap::new();
+
+        // TODO: right now this is O(n*m). We can do better than that
+        for target_addr in request.into_inner().host_addresses {
+            // TODO: be fancy and do this with map
+            // Determine worker and parallel units.
+            let mut pu_list: Vec<ParallelUnit> = vec![];
+            let mut found = false;
+            for worker in schedule.get_worker_list() {
+                if *worker.get_host()? != target_addr {
+                    continue;
+                }
+                pu_list = worker.parallel_units.clone();
+                found = true;
+                break;
+            }
+
+            if !found {
+                return Err(Status::from(MetaError::invalid_parameter(format!(
+                    "Worker with address {:?} not found",
+                    target_addr
+                ))));
+            }
+
+            let pu_list = pu_list.iter().map(|pu| pu.id).collect_vec();
+
+            // Determine which fragment uses which PU on the worker.
+
+            for fragment in schedule.get_fragment_list() {
+                // TODO: be fancy and do this with map?
+                let mut remove_list: Vec<u32> = vec![];
+
+                for actor in fragment.get_actor_list() {
+                    // Number of PU o a worker is small, iterating is ok
+                    let pu_id = actor.parallel_units_id;
+                    if pu_list.contains(&pu_id) {
+                        remove_list.push(pu_id);
+                    }
+                }
+                if !remove_list.is_empty() {
+                    remove_map.insert(fragment.id, remove_list);
+                }
+            }
+        }
+
+        // create rescheduling request
+
+        // TODO: import hashMap
+        // TODO: maybe we can remove reschedule func in meta.go from rw-cloud?
+        // TODO: maybe move this into the loop above?
+
+        let mut reschedule_map: std::collections::HashMap<u32, reschedule_request::Reschedule> =
+            std::collections::HashMap::new();
+        for (fragment_id, remove_pus) in remove_map.iter() {
+            match reschedule_map.get_mut(fragment_id) {
+                Some(reschedule) => reschedule.removed_parallel_units = remove_pus.clone(),
+                None => {
+                    reschedule_map.insert(
+                        *fragment_id,
+                        reschedule_request::Reschedule {
+                            added_parallel_units: vec![],
+                            removed_parallel_units: remove_pus.clone(),
+                        },
+                    );
+                }
+            }
+        }
+
+        // request clearing of all nodes at once
+        self.reschedule(Request::new(RescheduleRequest {
+            reschedules: reschedule_map,
+        }))
+        .await?;
 
         Ok(Response::new(ClearWorkerNodesResponse { status: None }))
     }
