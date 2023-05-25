@@ -61,9 +61,6 @@ services:
       - "9092:9092"
       - "9644:9644"
       - "8081:8081"
-    depends_on: []
-    volumes:
-      - "message_queue:/var/lib/redpanda/data"
     environment: {}
     container_name: message_queue
     healthcheck:
