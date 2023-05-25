@@ -1094,7 +1094,7 @@ impl ToStream for LogicalAgg {
         } else if let Some(final_agg) = plan.as_stream_hash_agg() {
             (
                 if eowc {
-                    final_agg.to_eowc_version()?.into()
+                    final_agg.to_eowc_version()?
                 } else {
                     plan.clone()
                 },

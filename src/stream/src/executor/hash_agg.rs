@@ -115,6 +115,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
 
+    /// The watermark column that Emit-On-Window-Close behavior is based on.
+    window_col_idx: usize,
+
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -198,6 +201,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             &args.agg_calls,
             Some(&args.extra.group_key_indices),
         );
+        let window_col_idx = args.result_table.pk_indices()[0];
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -220,6 +224,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
+                window_col_idx,
                 metrics: args.metrics,
             },
         })
@@ -544,7 +549,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            buffer: SortBuffer::new(0, &this.result_table),
+            buffer: SortBuffer::new(this.window_col_idx, &this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
@@ -577,7 +582,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
-                        if group_key_seq == 0 {
+                        if watermark.col_idx == this.window_col_idx {
                             vars.window_watermark = Some(watermark.val.clone());
                         }
                         vars.buffered_watermarks[group_key_seq] =

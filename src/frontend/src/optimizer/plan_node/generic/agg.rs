@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
@@ -124,6 +124,13 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         self.agg_calls
             .iter()
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
+    }
+
+    pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
+        self.group_key
+            .ones()
+            .filter(|&idx| input_watermark_columns.contains(idx))
+            .collect()
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: FixedBitSet, input: PlanRef) -> Self {
@@ -255,16 +262,32 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> (
         TableCatalog,
         Vec<AggCallState>,
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_result_table(me, vnode_col_idx),
-            self.infer_stream_agg_state(me, vnode_col_idx),
-            self.infer_distinct_dedup_tables(me, vnode_col_idx),
+            self.infer_result_table(me, vnode_col_idx, window_col_idx),
+            self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
+            self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
         )
+    }
+
+    fn iter_group_key_window_first(
+        &self,
+        window_col_idx: Option<usize>,
+    ) -> impl Iterator<Item = usize> + '_ {
+        if let Some(window_col_idx) = window_col_idx {
+            assert!(self.group_key.contains(window_col_idx));
+            Either::Left(
+                std::iter::once(window_col_idx)
+                    .chain(self.group_key.ones().filter(move |&i| i != window_col_idx)),
+            )
+        } else {
+            Either::Right(self.group_key.ones())
+        }
     }
 
     /// Infer `AggCallState`s for streaming agg.
@@ -272,6 +295,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
         let in_pks = self.input.logical_pk().to_vec();
@@ -309,7 +333,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 };
 
-            for idx in self.group_key.ones() {
+            for idx in self.iter_group_key_window_first(window_col_idx) {
                 add_column(
                     idx,
                     Some(OrderType::ascending()),
@@ -363,7 +387,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
             let mut included_upstream_indices = vec![];
-            for idx in self.group_key.ones() {
+            for idx in self.iter_group_key_window_first(window_col_idx) {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
                     .add_order_column(tb_column_idx, OrderType::ascending());
@@ -474,20 +498,24 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> TableCatalog {
+        let in_fields = self.input.schema().fields();
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-        let group_key_cardinality = self.group_key.count_ones(..);
-        for field in out_fields.iter() {
-            let tb_column_idx = internal_table_catalog_builder.add_column(field);
-            if tb_column_idx < group_key_cardinality {
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::ascending());
-            }
+        let n_group_key_cols = self.group_key.count_ones(..);
+
+        for idx in self.iter_group_key_window_first(window_col_idx) {
+            let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
+            internal_table_catalog_builder.add_order_column(tb_column_idx, OrderType::ascending());
         }
-        let read_prefix_len_hint = self.group_key.count_ones(..);
+        let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
+
+        for field in out_fields.iter().skip(n_group_key_cols) {
+            internal_table_catalog_builder.add_column(field);
+        }
 
         let mapping = self.i2o_col_mapping();
         let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
@@ -498,7 +526,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         // the result_table is composed of group_key and all agg_call's values, so the value_indices
         // of this table should skip group_key.len().
         internal_table_catalog_builder
-            .set_value_indices((group_key_cardinality..out_fields.len()).collect());
+            .set_value_indices((n_group_key_cols..out_fields.len()).collect());
         internal_table_catalog_builder.build(tb_dist, read_prefix_len_hint)
     }
 
@@ -512,6 +540,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let in_fields = self.input.schema().fields();
@@ -526,15 +555,16 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 let mut table_builder =
                     TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
-                let key_cols = self
-                    .group_key
-                    .ones()
-                    .chain(std::iter::once(distinct_col))
-                    .collect_vec();
-                for &idx in &key_cols {
+                let mut key_cols = vec![];
+                for idx in self.iter_group_key_window_first(window_col_idx) {
+                    key_cols.push(idx);
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
                     table_builder.add_order_column(table_col_idx, OrderType::ascending());
                 }
+                key_cols.push(distinct_col);
+                let table_col_idx = table_builder.add_column(&in_fields[distinct_col]);
+                table_builder.add_order_column(table_col_idx, OrderType::ascending());
+
                 let read_prefix_len_hint = table_builder.get_current_pk_len();
 
                 // Agg calls with same distinct column share the same dedup table, but they may have

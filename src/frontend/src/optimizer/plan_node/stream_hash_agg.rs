@@ -41,6 +41,9 @@ pub struct StreamHashAgg {
 
     /// Whether to emit output only when the window is closed by watermark.
     emit_on_window_close: bool,
+
+    /// The watermark column that Emit-On-Window-Close behavior is based on.
+    window_col_idx: Option<usize>,
 }
 
 impl StreamHashAgg {
@@ -70,10 +73,19 @@ impl StreamHashAgg {
         };
 
         let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
-        // Watermark column(s) must be in group key.
-        for (idx, input_idx) in logical.group_key.ones().enumerate() {
-            if input.watermark_columns().contains(input_idx) {
-                watermark_columns.insert(idx);
+        let mut window_col_idx = None;
+        let mapping = logical.i2o_col_mapping();
+        if emit_on_window_close {
+            let wtmk_group_key = logical.watermark_group_key(input.watermark_columns());
+            assert!(wtmk_group_key.len() == 1); // checked in `to_eowc_version`
+            window_col_idx = Some(wtmk_group_key[0]);
+            // EOWC HashAgg only produce one watermark column, i.e. the window column
+            watermark_columns.insert(mapping.map(wtmk_group_key[0]));
+        } else {
+            for idx in logical.group_key.ones() {
+                if input.watermark_columns().contains(idx) {
+                    watermark_columns.insert(mapping.map(idx));
+                }
             }
         }
 
@@ -91,6 +103,7 @@ impl StreamHashAgg {
             vnode_col_idx,
             row_count_idx,
             emit_on_window_close,
+            window_col_idx,
         }
     }
 
@@ -106,31 +119,26 @@ impl StreamHashAgg {
         self.logical.i2o_col_mapping()
     }
 
-    pub fn to_eowc_version(&self) -> Result<Self> {
-        let first_group_key = self
-            .group_key()
-            .ones()
-            .next()
-            .expect("HashAgg must have group key");
-        if self
-            .input()
-            .watermark_columns()
-            .ones()
-            .contains(&first_group_key)
-        {
-            Ok(Self::new_with_eowc(
-                self.logical.clone(),
-                self.vnode_col_idx,
-                self.row_count_idx,
-                true,
-            ))
-        } else {
-            Err(ErrorCode::NotSupported(
+    pub fn to_eowc_version(&self) -> Result<PlanRef> {
+        let input = self.input();
+        let wtmk_group_key = self.logical.watermark_group_key(input.watermark_columns());
+
+        if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
+            return Err(ErrorCode::NotSupported(
                 "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
-                "Please put the watermark column at the first place in GROUP BY".to_string(),
+                "Please make sure there is one and only one watermark column in GROUP BY"
+                    .to_string(),
             )
-            .into())
+            .into());
         }
+
+        Ok(Self::new_with_eowc(
+            self.logical.clone(),
+            self.vnode_col_idx,
+            self.row_count_idx,
+            true,
+        )
+        .into())
     }
 }
 
@@ -183,7 +191,8 @@ impl StreamNode for StreamHashAgg {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let (result_table, agg_states, distinct_dedup_tables) =
-            self.logical.infer_tables(&self.base, self.vnode_col_idx);
+            self.logical
+                .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
         PbNodeBody::HashAgg(HashAggNode {
             group_key: self.group_key().ones().map(|idx| idx as u32).collect(),
