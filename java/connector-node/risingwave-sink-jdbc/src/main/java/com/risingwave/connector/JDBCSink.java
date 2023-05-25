@@ -32,7 +32,7 @@ import org.slf4j.LoggerFactory;
 
 enum DatabaseType {
     MYSQL,
-    POSTGRES;
+    POSTGRES,
 }
 
 public class JDBCSink extends SinkBase {
@@ -222,6 +222,8 @@ public class JDBCSink extends SinkBase {
                 case INTERVAL:
                     if (targetDbType == DatabaseType.POSTGRES) {
                         stmt.setObject(i + 1, new PGInterval((String) row.get(i)));
+                    } else {
+                        stmt.setObject(i + 1, row.get(i));
                     }
                     break;
                 case JSONB:
@@ -231,8 +233,10 @@ public class JDBCSink extends SinkBase {
                         pgObj.setType("jsonb");
                         pgObj.setValue((String) row.get(i));
                         stmt.setObject(i + 1, pgObj);
-                        break;
+                    } else {
+                        stmt.setObject(i + 1, row.get(i));
                     }
+                    break;
                 default:
                     stmt.setObject(i + 1, row.get(i));
                     break;
