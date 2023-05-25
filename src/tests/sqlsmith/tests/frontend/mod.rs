@@ -26,8 +26,7 @@ use risingwave_frontend::{
 };
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
-    is_permissible_error, mview_sql_gen,
-    parse_create_table_statements, parse_sql, sql_gen, Table,
+    is_permissible_error, mview_sql_gen, parse_create_table_statements, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
