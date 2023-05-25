@@ -322,7 +322,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v.0.num_days_from_ce())
         }
         (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => {
-            json!(v.0.timestamp_millis())
+            json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string())
         }
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
             json!(hex::encode(v))
@@ -330,6 +330,9 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
             json!(v.as_iso_8601())
+        }
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            json!(jsonb_ref.to_string())
         }
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
