@@ -38,7 +38,7 @@ type Result<A> = anyhow::Result<A>;
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
-    let queries = std::fs::read_to_string(queries_path).unwrap();
+    let queries = read_file_contents(queries_path).unwrap();
     let ddl = queries
         .lines()
         .filter(|s| s.starts_with("CREATE"))
@@ -97,6 +97,7 @@ pub async fn generate(
 
     // Generate an update for some inserts, on the corresponding table.
     update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
 
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
@@ -176,16 +177,22 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         client,
         &mut rng,
         tables.clone(),
-        base_tables,
+        base_tables.clone(),
         max_rows_inserted,
     )
     .await;
+
     tracing::info!("Passed sqlsmith tests");
+
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
+
     test_batch_queries(client, &mut rng, tables.clone(), count)
         .await
         .unwrap();
     tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), inserts, count)
+    test_stream_queries(client, &mut rng, tables.clone(), count)
         .await
         .unwrap();
     tracing::info!("Passed stream queries");
@@ -216,9 +223,11 @@ async fn update_base_tables<R: Rng>(
 ) {
     let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
     for update_statement in update_statements {
-        let sql = update_statement.to_string();
-        tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-        client.simple_query(&sql).await.unwrap();
+        if rng.gen_bool(0.5) {
+            let sql = update_statement.to_string();
+            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+            client.simple_query(&sql).await.unwrap();
+        }
     }
 }
 
@@ -269,7 +278,7 @@ async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), vec![], sample_size)
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
         .await
         .unwrap();
     tracing::info!(
@@ -333,34 +342,19 @@ async fn test_batch_queries<R: Rng>(
 }
 
 /// Test stream queries, returns skipped query statistics
-/// 50-50 chance to insert before OR after create stream query
-/// (`insert_updates_before`).
 async fn test_stream_queries<R: Rng>(
     client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    inserts: Vec<Statement>,
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;
-
-    // Generate an update for some inserts, on the corresponding table.
-    let update_statements = generate_update_statements(rng, &tables, &inserts)?;
-    for update_statement in update_statements {
-        if rng.gen_bool(0.5) {
-            let sql = update_statement.to_string();
-            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
-            let response = client.simple_query(&sql).await;
-            skipped += validate_response(response)?;
-        }
-    }
 
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         skipped += run_query(client, &sql).await?;
-
         tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }

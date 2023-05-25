@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter;
-
 use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::Rng;
@@ -65,7 +63,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
         let mut updates = vec![];
         for insert in inserts {
             if self.rng.gen_bool(0.1) {
-                 match insert {
+                match insert {
                     Statement::Insert {
                         table_name, source, ..
                     } => {
@@ -102,10 +100,11 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
             // do delete for a random subset of rows.
             let delete_statements = self.generate_delete_statements(table, values);
             // then insert back some number of rows.
-            let insert_statements = if delete_statements.len() == 0 {
+            let insert_statements = if delete_statements.is_empty() {
                 vec![]
             } else {
-                let insert_statement = self.generate_insert_statement(table, delete_statements.len());
+                let insert_statement =
+                    self.generate_insert_statement(table, delete_statements.len());
                 vec![insert_statement]
             };
             delete_statements
@@ -155,7 +154,7 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
                 Assignment { id, value }
             })
             .collect_vec();
-        assert!(assignments.len() >= 1);
+        assert!(!assignments.is_empty());
         Statement::Update {
             table_name: ObjectName::from_test_str(&table.name),
             assignments,
@@ -165,7 +164,6 @@ impl<'a, R: Rng + 'a> SqlGenerator<'a, R> {
     }
 
     fn create_selection_expr(table: &Table, selected_indices: &[usize], row: &[Expr]) -> Expr {
-        assert!(selected_indices.len() >= 1);
         assert!(!selected_indices.is_empty());
         let match_exprs = selected_indices
             .iter()
