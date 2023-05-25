@@ -56,8 +56,6 @@ pub fn default_opts_for_test() -> StorageOpts {
         meta_cache_capacity_mb: 64,
         high_priority_ratio: 0,
         disable_remote_compactor: false,
-        enable_local_spill: false,
-        local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,

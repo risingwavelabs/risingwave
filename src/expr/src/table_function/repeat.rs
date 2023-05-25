@@ -47,7 +47,7 @@ impl RepeatN {
         let mut value_builder = self.return_type().create_array_builder(0x100);
         for (i, value) in array.iter().enumerate() {
             index_builder.append_n(self.n, Some(i as i64));
-            value_builder.append_datum_n(self.n, value);
+            value_builder.append_n(self.n, value);
         }
         let len = index_builder.len();
         let index_array: ArrayImpl = index_builder.finish().into();

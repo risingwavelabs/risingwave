@@ -52,13 +52,14 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::OverrideConfig;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
+#[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
     vpd_id: Option<String>,

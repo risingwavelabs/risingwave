@@ -46,7 +46,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -461,6 +461,9 @@ impl StageRunner {
                             .await;
                             sent_signal_to_next = true;
                             break;
+                        }
+                        TaskStatusPb::Pending => {
+                            debug!("Receive ping from task {:?}", status.task_id.unwrap());
                         }
                         status => {
                             // The remain possible variant is Failed, but now they won't be pushed

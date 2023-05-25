@@ -64,6 +64,9 @@ pub trait Aggregator: Send + DynClone + 'static {
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
     /// After `output` the aggregator is reset to initial state.
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+
+    /// The estimated size of the state.
+    fn estimated_size(&self) -> usize;
 }
 
 dyn_clone::clone_trait_object!(Aggregator);

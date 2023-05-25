@@ -32,14 +32,17 @@ pub mod server;
 pub mod telemetry;
 
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::AsyncStackTraceOption;
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.

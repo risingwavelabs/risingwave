@@ -266,6 +266,8 @@ impl QueryRewriter<'_> {
             | Expr::IsNotTrue(expr)
             | Expr::IsFalse(expr)
             | Expr::IsNotFalse(expr)
+            | Expr::IsUnknown(expr)
+            | Expr::IsNotUnknown(expr)
             | Expr::InList { expr, .. }
             | Expr::SomeOp(expr)
             | Expr::AllOp(expr)

@@ -17,7 +17,6 @@ use std::collections::{BTreeSet, VecDeque};
 use educe::Educe;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 

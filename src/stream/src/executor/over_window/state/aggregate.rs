@@ -147,7 +147,7 @@ impl BatchAggregatorWrapper<'_> {
         for value in values {
             n_values += 1;
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
 

@@ -19,13 +19,12 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayRef, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::types::{DataType, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::OrderType;
@@ -42,7 +41,6 @@ use crate::executor::over_window::state::{StateEvictHint, StateKey};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
-    Watermark,
 };
 use crate::task::AtomicU64Ref;
 
@@ -150,7 +148,6 @@ struct ExecutorInner<S: StateStore> {
 
 struct ExecutionVars<S: StateStore> {
     partitions: PartitionCache,
-    last_watermark: Option<ScalarImpl>,
     _phantom: PhantomData<S>,
 }
 
@@ -265,7 +262,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     (&row)
                         .project(call.args.val_indices())
                         .into_owned_row()
-                        .into_inner()
+                        .as_inner()
                         .into(),
                 );
             }
@@ -340,7 +337,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     input_row
                         .project(call.args.val_indices())
                         .into_owned_row()
-                        .into_inner()
+                        .as_inner()
                         .into(),
                 );
             }
@@ -371,7 +368,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 }
 
                 // Evict unneeded rows from state table.
@@ -405,7 +402,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             }
         }
 
-        let columns: Vec<Column> = builders.into_iter().map(|b| b.finish().into()).collect();
+        let columns: Vec<ArrayRef> = builders.into_iter().map(|b| b.finish().into()).collect();
         let chunk_size = columns[0].len();
         Ok(if chunk_size > 0 {
             Some(StreamChunk::new(
@@ -427,7 +424,6 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         let mut vars = ExecutionVars {
             partitions: new_unbounded(this.watermark_epoch.clone()),
-            last_watermark: None,
             _phantom: PhantomData::<S>,
         };
 
@@ -443,34 +439,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             let msg = msg?;
             match msg {
                 Message::Watermark(_) => {
-                    // Since we assume the input a `Sort`, we can emit watermarks by ourselves and
-                    // ignore any input watermarks.
                     continue;
                 }
                 Message::Chunk(chunk) => {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                     if let Some(chunk) = output_chunk {
-                        let first_order_key = chunk.columns()[this.order_key_index]
-                            .array_ref()
-                            .datum_at(0)
-                            .expect("order key must not be NULL");
-
-                        if vars.last_watermark.is_none()
-                            || vars
-                                .last_watermark
-                                .as_ref()
-                                .unwrap()
-                                .default_cmp(&first_order_key)
-                                .is_lt()
-                        {
-                            vars.last_watermark = Some(first_order_key.clone());
-                            yield Message::Watermark(Watermark::new(
-                                this.order_key_index,
-                                this.info.schema.fields()[this.order_key_index].data_type(),
-                                first_order_key,
-                            ));
-                        }
-
                         yield Message::Chunk(chunk);
                     }
                 }

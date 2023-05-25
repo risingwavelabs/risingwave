@@ -278,6 +278,10 @@ pub enum Expr {
     IsFalse(Box<Expr>),
     /// `IS NOT FALSE` operator
     IsNotFalse(Box<Expr>),
+    /// `IS UNKNOWN` operator
+    IsUnknown(Box<Expr>),
+    /// `IS NOT UNKNOWN` operator
+    IsNotUnknown(Box<Expr>),
     /// `IS DISTINCT FROM` operator
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
@@ -427,6 +431,8 @@ impl fmt::Display for Expr {
             Expr::IsNotTrue(ast) => write!(f, "{} IS NOT TRUE", ast),
             Expr::IsFalse(ast) => write!(f, "{} IS FALSE", ast),
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
+            Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
+            Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
             Expr::InList {
                 expr,
                 list,

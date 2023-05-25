@@ -1,6 +1,6 @@
 SELECT
     *
 FROM
-    lineitem_count
+    lineitem_rw_count
 LIMIT
     10;

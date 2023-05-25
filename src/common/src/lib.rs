@@ -36,6 +36,7 @@
 #![feature(round_ties_even)]
 #![feature(iter_order_by)]
 #![feature(exclusive_range_pattern)]
+#![feature(binary_heap_into_iter_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 
 #[macro_use]

@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::{
-    parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
-};
+use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{
@@ -579,21 +577,12 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let remote_object_store = parse_remote_object_store(
+                let object_store = parse_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
                 )
                 .await;
-                let object_store = if opts.enable_local_spill {
-                    let local_object_store = parse_local_object_store(
-                        opts.local_object_store.as_str(),
-                        object_store_metrics.clone(),
-                    );
-                    ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
-                } else {
-                    remote_object_store
-                };
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),

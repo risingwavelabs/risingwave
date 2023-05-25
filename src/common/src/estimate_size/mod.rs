@@ -18,6 +18,7 @@ use std::marker::PhantomData;
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
+pub use risingwave_common_proc_macro::EstimateSize;
 use rust_decimal::Decimal as RustDecimal;
 
 use crate::types::DataType;
@@ -51,12 +52,6 @@ impl EstimateSize for String {
     }
 }
 
-impl EstimateSize for () {
-    fn estimated_heap_size(&self) -> usize {
-        0
-    }
-}
-
 impl<T: EstimateSize> EstimateSize for Option<T> {
     fn estimated_heap_size(&self) -> usize {
         if let Some(inner) = self {
@@ -81,6 +76,21 @@ impl EstimateSize for Box<str> {
     }
 }
 
+impl EstimateSize for serde_json::Value {
+    fn estimated_heap_size(&self) -> usize {
+        // FIXME: implement correct size
+        // https://github.com/risingwavelabs/risingwave/issues/9377
+        match self {
+            Self::Null => 0,
+            Self::Bool(_) => 0,
+            Self::Number(_) => 0,
+            Self::String(s) => s.estimated_heap_size(),
+            Self::Array(v) => std::mem::size_of::<Self>() * v.capacity(),
+            Self::Object(map) => std::mem::size_of::<Self>() * map.len(),
+        }
+    }
+}
+
 impl<T1: EstimateSize, T2: EstimateSize> EstimateSize for (T1, T2) {
     fn estimated_heap_size(&self) -> usize {
         self.0.estimated_heap_size() + self.1.estimated_heap_size()
@@ -93,7 +103,7 @@ macro_rules! primitive_estimate_size_impl {
     )*)
 }
 
-primitive_estimate_size_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 bool }
+primitive_estimate_size_impl! { () usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 bool }
 
 pub trait ZeroHeapSize {}
 
