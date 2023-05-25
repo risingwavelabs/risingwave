@@ -231,8 +231,8 @@ public class JDBCSink extends SinkBase {
                         pgObj.setType("jsonb");
                         pgObj.setValue((String) row.get(i));
                         stmt.setObject(i + 1, pgObj);
+                        break;
                     }
-                    break;
                 default:
                     stmt.setObject(i + 1, row.get(i));
                     break;
