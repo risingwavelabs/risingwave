@@ -356,6 +356,39 @@ WITH (
 ROW FORMAT UPSERT_JSON
 
 
+# key schema should be a subset of value schema
+statement error
+CREATE TABLE upsert_avro_json ()
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_avro_json')
+ROW FORMAT UPSERT_AVRO 
+row schema location confluent schema registry 'http://message_queue:8081'
+
+
+statement ok
+CREATE TABLE upsert_avro_json (
+    id TEXT  PRIMARY KEY
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_avro_json')
+ROW FORMAT UPSERT_AVRO 
+row schema location confluent schema registry 'http://message_queue:8081'
+
+statement ok
+CREATE TABLE upsert_avro_json2 (
+    "ID" TEXT  PRIMARY KEY
+)
+WITH (
+	connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+	topic = 'upsert_avro_json')
+ROW FORMAT UPSERT_AVRO 
+row schema location confluent schema registry 'http://message_queue:8081'
+
 statement ok
 flush;
 
@@ -583,6 +616,25 @@ ORDER BY
 6	Leah	Davis	18	5.7	140
 9	Jacob	Anderson	20	5.8	155
 
+query II 
+SELECT
+	*
+FROM
+	upsert_avro_json
+ORDER BY
+	"ID";
+----
+
+query II 
+SELECT
+	*
+FROM
+	upsert_avro_json2
+ORDER BY
+	"ID";
+----
+
+
 statement ok
 drop materialized view source_mv1
 
@@ -639,3 +691,9 @@ DROP TABLE mongo_customers;
 
 statement ok
 DROP TABLE upsert_students;
+
+statement ok
+DROP TABLE upsert_avro_json;
+
+statement ok
+DROP TABLE upsert_avro_json2;
