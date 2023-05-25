@@ -122,7 +122,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         let mut current_watermark =
             Self::get_global_max_watermark(&table, watermark_type.clone()).await?;
 
-        let mut last_checkpoint_watermark = watermark_type.min();
+        let mut last_checkpoint_watermark = watermark_type.min_value();
 
         yield Message::Watermark(Watermark::new(
             event_time_col_idx,
@@ -280,7 +280,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .into_iter()
             .flatten()
             .max_by(DefaultOrd::default_cmp)
-            .unwrap_or_else(|| watermark_type.min());
+            .unwrap_or_else(|| watermark_type.min_value());
 
         Ok(watermark)
     }
@@ -407,7 +407,7 @@ mod tests {
         let watermark = executor.next().await.unwrap().unwrap();
         assert_eq!(
             watermark.into_watermark().unwrap(),
-            watermark!(WATERMARK_TYPE.min()),
+            watermark!(WATERMARK_TYPE.min_value()),
         );
 
         // push the 1st chunk

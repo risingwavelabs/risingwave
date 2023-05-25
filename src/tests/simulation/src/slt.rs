@@ -85,8 +85,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // This depends on session config.
-    "session_timezone.slt",
+    // Drop is not retryable in search path test.
+    "search_path.slt",
 ];
 
 /// Run the sqllogictest files in `glob`.
