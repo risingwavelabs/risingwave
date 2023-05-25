@@ -22,7 +22,7 @@ create connection mock with (
 statement error
 create sink si_kafka_append_only_conn from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-append-only',
     type = 'append-only',
     force_append_only = 'true',
@@ -33,7 +33,7 @@ create sink si_kafka_append_only_conn from t_kafka with (
 statement ok
 create sink si_kafka_append_only_conn from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-append-only',
     type = 'append-only',
     force_append_only = 'true',
@@ -57,7 +57,7 @@ drop connection mock;
 statement error sink cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-append-only',
     type = 'append-only',
 );
@@ -65,7 +65,7 @@ create sink si_kafka_append_only from t_kafka with (
 statement ok
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-append-only',
     type = 'append-only',
     force_append_only = 'true'
@@ -74,7 +74,7 @@ create sink si_kafka_append_only from t_kafka with (
 statement error primary key not defined
 create sink si_kafka_upsert from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-upsert',
     type = 'upsert',
 );
@@ -82,7 +82,7 @@ create sink si_kafka_upsert from t_kafka with (
 statement ok
 create sink si_kafka_upsert from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-upsert',
     type = 'upsert',
     primary_key = 'id',
@@ -91,7 +91,7 @@ create sink si_kafka_upsert from t_kafka with (
 statement ok
 create sink si_kafka_debezium from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id',
@@ -100,7 +100,7 @@ create sink si_kafka_debezium from t_kafka with (
 statement error primary key not defined for debezium kafka sink
 create sink debezium_without_pk from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
 );
@@ -108,7 +108,7 @@ create sink debezium_without_pk from t_kafka with (
 statement ok
 create sink multiple_pk from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id,v_varchar'
@@ -120,7 +120,7 @@ drop sink multiple_pk;
 statement error Sink primary key column not found: invalid.
 create sink invalid_pk_column from t_kafka with (
     connector = 'kafka',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'test-rw-sink-debezium',
     type = 'debezium',
     primary_key = 'id,invalid'
