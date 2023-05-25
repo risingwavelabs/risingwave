@@ -128,7 +128,7 @@
 - sql: |
     select * from generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
-    BatchTableFunction { Generate(2:Int32, 10:Int32, 2:Int32) }
+    BatchTableFunction { GenerateSeries(2:Int32, 10:Int32, 2:Int32) }
 - sql: |
     select * from unnest(Array[1,2,3]);
   batch_plan: |

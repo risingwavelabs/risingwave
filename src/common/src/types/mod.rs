@@ -117,7 +117,9 @@ macro_rules! for_all_type_pairs {
 /// The set of datatypes that are supported in RisingWave.
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 // but without data fields.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
+#[derive(
+    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
+)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
@@ -244,13 +246,6 @@ impl DataTypeName {
 impl From<DataTypeName> for DataType {
     fn from(type_name: DataTypeName) -> Self {
         type_name.to_type().unwrap_or_else(|| panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`."))
-    }
-}
-
-pub fn unnested_list_type(datatype: DataType) -> DataType {
-    match datatype {
-        DataType::List(datatype) => unnested_list_type(*datatype),
-        _ => datatype,
     }
 }
 
@@ -425,7 +420,7 @@ impl DataType {
 
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
-    pub fn min(&self) -> ScalarImpl {
+    pub fn min_value(&self) -> ScalarImpl {
         match self {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
@@ -449,10 +444,24 @@ impl DataType {
                 data_types
                     .fields
                     .iter()
-                    .map(|data_type| Some(data_type.min()))
+                    .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
             DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+        }
+    }
+
+    /// Return a new type that removes the outer list.
+    ///
+    /// ```
+    /// use risingwave_common::types::DataType::*;
+    /// assert_eq!(List(Box::new(Int32)).unnest_list(), Int32);
+    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), Int32);
+    /// ```
+    pub fn unnest_list(&self) -> Self {
+        match self {
+            DataType::List(inner) => inner.unnest_list(),
+            _ => self.clone(),
         }
     }
 }
@@ -971,6 +980,10 @@ macro_rules! impl_scalar_impl_ref_conversion {
                     ), *
                 }
             }
+
+            pub fn as_scalar_ref(&self) -> Self {
+                *self
+            }
         }
     };
 }
@@ -1197,7 +1210,7 @@ mod tests {
             let mut builder = data_type.create_array_builder(6);
             for _ in 0..3 {
                 builder.append_null();
-                builder.append_datum(&datum);
+                builder.append(&datum);
             }
             let array = builder.finish();
 

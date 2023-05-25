@@ -14,16 +14,13 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(let_chains)]
-#![feature(fn_traits)]
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
 #![feature(lazy_cell)]
-#![feature(try_blocks)]
 #![feature(round_ties_even)]
 #![feature(generators)]
-#![feature(iter_from_generator)]
 
 pub mod agg;
 mod error;
