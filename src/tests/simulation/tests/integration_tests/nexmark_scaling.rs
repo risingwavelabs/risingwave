@@ -21,6 +21,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::{sleep, Instant};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate;
@@ -177,50 +178,40 @@ async fn nexmark_scaling_up_down_common(
         sleep(Duration::from_secs(sleep_sec)).await;
     }
     let unregistered_node_task_names = unregistered_nodes
+        .clone()
         .iter()
         .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
         .collect_vec();
     // make sure that we do not unregister the same node multiple times
     assert!(has_unique_elements(unregistered_node_task_names.iter()));
+    println!("all unregistered nodes are uniq"); // TODO: remove line
 
     // question: If I mark CN as DELETING does meta remove fragments from DELETING CN?
     // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
     // end of the workflow
 
-    // get all fragments. For each fragments remove the PUs from the deleted nodes
-    let fragment_ids = cluster
-        .cluster
-        .locate_fragments([predicate::can_reschedule()])
-        .await
-        .expect("failed to retrieve fragments from cluster")
+    // TODO: should I make the interface use HostAddress? Then I do not need to convert here
+    let addrs = unregistered_nodes
         .iter()
-        .map(|f| f.id())
+        .map(|n| {
+            let a = n.get_host().expect("expected worker node to have host");
+            HostAddr {
+                host: a.host.clone(),
+                port: a.port as u16,
+            }
+        })
         .collect_vec();
-    let mut plan = "".to_string();
-    let unregistered_nodes_pu_ids = unregistered_nodes
-        .iter()
-        .map(|node| node.get_parallel_units())
-        .collect_vec()
-        .into_iter()
-        .flatten()
-        .collect_vec()
-        .into_iter()
-        .map(|pu| pu.id)
-        .join(",");
-    let mut chunks = fragment_ids.chunks(1).peekable();
-    while let Some(fragment_id) = chunks.next() {
-        let mut plan_frag = format!("{}-[{}]", fragment_id[0], unregistered_nodes_pu_ids);
-        if chunks.peek().is_some() {
-            plan_frag = format!("{};", plan_frag);
-        }
-        plan = format!("{}{}", plan, plan_frag)
-    }
+    println!("clearing unregisterd nodes"); // TODO: remove line
 
-    println!("removing fragments via plan {}", plan);
     cluster
-        .reschedule(plan)
+        .clear_worker_nodes(addrs)
         .await
-        .expect("expect rescheduling to work");
+        .expect("failed to clear worker nodes");
+
+    // TODO: this should work without sleep
+    sleep(Duration::from_secs(sleep_sec)).await;
+
+    println!("unregistered nodes cleared"); // TODO: remove line
 
     // Notes: use RescheduleRequest. scale_service.rs reschedule
     // I have to generate the new schedule plan myself. Hardcode it here
@@ -232,6 +223,7 @@ async fn nexmark_scaling_up_down_common(
         "Nodes killed. Now compute nodes in cluster {}",
         cluster.get_number_worker_nodes().await
     );
+    // TODO: assert that cluster really has correct number of nodes
 
     println!("run select"); // TODO: remove line
     let select_result = cluster.run(select).await?;
@@ -281,6 +273,10 @@ macro_rules! test {
          }
     };
 }
+// TODO: Why do I sometimes get stuck? Do I maybe scale down the wrong nodes? Am I not allowed to
+// clear some nodes?
+
+// TODO: scale down only?
 
 // TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial

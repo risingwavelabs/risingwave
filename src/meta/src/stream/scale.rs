@@ -547,12 +547,14 @@ where
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
+        println!("in reschedule_actors"); // TODO: remove line
         let mut revert_funcs = vec![];
         if let Err(e) = self
             .reschedule_actors_impl(&mut revert_funcs, reschedules)
             .await
         {
             for revert_func in revert_funcs.into_iter().rev() {
+                println!("awaiting revert_func"); // TODO: remove line
                 revert_func.await;
             }
             return Err(e);
@@ -565,9 +567,12 @@ where
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
+        println!("in reschedule_actors_impl"); // TODO: remove line
+
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
+        println!("after build reschedule context"); // TODO: remove line
 
         let (fragment_actors_to_remove, fragment_actors_to_create) =
             self.arrange_reschedules(&reschedules, &ctx).await?;
@@ -729,6 +734,8 @@ where
                 );
             }
 
+            println!("reschedule actors impl visit downstram"); // TODO: remove line
+
             // Visit downstream fragments recursively.
             if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
                 let no_shuffle_downstreams = downstream_fragments
@@ -818,6 +825,8 @@ where
             }
         }
 
+        println!("reschedule actors impl after mod"); // TODO: remove line
+
         // After modification, for newly created actors, both upstream and downstream actor ids
         // have been modified
         let mut actor_infos_to_broadcast = BTreeMap::new();
@@ -901,6 +910,8 @@ where
         )
         .await?;
 
+        println!("reschedule actors impl stream sources"); // TODO: remove line
+
         // For stream source fragments, we need to reallocate the splits.
         // Because we are in the Pause state, so it's no problem to reallocate
         let mut fragment_stream_source_actor_splits = HashMap::new();
@@ -927,6 +938,8 @@ where
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
             }
         }
+
+        println!("reschedule actors impl Generate fragment reschedule plan"); // TODO: remove line
 
         // Generate fragment reschedule plan
         let mut reschedule_fragment: HashMap<FragmentId, Reschedule> =
@@ -1082,6 +1095,8 @@ where
             );
         }
 
+        println!("fragment created actors"); // TODO: remove line
+
         let mut fragment_created_actors = HashMap::new();
         for (fragment_id, actors_to_create) in &fragment_actors_to_create {
             let mut created_actors = HashMap::new();
@@ -1109,6 +1124,8 @@ where
             fragment_created_actors.insert(*fragment_id, created_actors);
         }
 
+        println!("applied schedules"); // TODO: remove line
+
         let applied_reschedules = self
             .fragment_manager
             .pre_apply_reschedules(fragment_created_actors)
@@ -1121,14 +1138,18 @@ where
                 .cancel_apply_reschedules(applied_reschedules)
                 .await;
         }));
+        println!("source_pause_guard"); // TODO: remove line
 
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
+        println!("barrier scheduler"); // TODO: remove line
 
         self.barrier_scheduler
             .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
             .await?;
+
+        println!("reschedule actors impl done"); // TODO: remove line
 
         Ok(())
     }

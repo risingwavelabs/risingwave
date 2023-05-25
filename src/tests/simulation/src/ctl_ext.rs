@@ -314,15 +314,15 @@ impl Cluster {
         Ok(())
     }
 
-    // TODO: do I need this one?
+    // TODO: do I need this one? Yes. Gets called by the test
     /// remove all fragments from worker node
-    pub async fn clear_worker_node(&self, addr: HostAddr) -> Result<()> {
+    pub async fn clear_worker_nodes(&self, addrs: Vec<HostAddr>) -> Result<()> {
         let _ = self
             .ctl
             .spawn(async move {
-                risingwave_ctl::cmd_impl::meta::clear_worker_node(
+                risingwave_ctl::cmd_impl::meta::clear_worker_nodes(
                     &risingwave_ctl::common::CtlContext::default(),
-                    addr,
+                    addrs,
                 )
                 .await
             })

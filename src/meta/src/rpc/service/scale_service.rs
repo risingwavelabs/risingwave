@@ -84,23 +84,25 @@ where
 
     // Removes all actors from the listed workers.
     // This is required before shutting down the workers.
-    // Not atomic! Will abort on encountering first error, thus partially clearing workers
+    // Atomic operator. All workers are cleared using a single rescheduling plan.
     #[cfg_attr(coverage, no_coverage)]
     async fn clear_workers(
         &self,
         request: Request<ClearWorkerNodesRequest>,
     ) -> Result<Response<ClearWorkerNodesResponse>, Status> {
-        assert!(false);
         // TODO: we also do this in rw cloud. We can move that functionality from cloud to meta
         // see branch arne/scaling/placement-policy meta.go ClearWorkerNode
 
-        // TODO: how can I do this atomically?
+        // TODO: Is this really atomic? How do we execute a single plan?
+
+        println!("called clear_workers"); // TODO: remove println
 
         // TODO: Do I need to retrieve the schedule every time?
         let schedule = self
             .get_schedule(Request::new(GetScheduleRequest {}))
             .await?
             .into_inner();
+        println!("got schedule"); // TODO: remove println
 
         let mut remove_map = std::collections::HashMap::new();
 
@@ -147,6 +149,9 @@ where
             }
         }
 
+        println!("created remove_map"); // TODO: remove println
+        println!("creating rescheduling request"); // TODO: remove println
+
         // create rescheduling request
 
         // TODO: import hashMap
@@ -170,11 +175,14 @@ where
             }
         }
 
+        println!("send rescheduling request"); // TODO: remove println
+
         // request clearing of all nodes at once
         self.reschedule(Request::new(RescheduleRequest {
             reschedules: reschedule_map,
         }))
         .await?;
+        println!("clear_workers done"); // TODO: remove println
 
         Ok(Response::new(ClearWorkerNodesResponse { status: None }))
     }
@@ -271,6 +279,8 @@ where
         request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
+
+        println!("in reschedule"); // TODO: remove line
 
         self.stream_manager
             .reschedule_actors(
