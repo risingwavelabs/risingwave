@@ -37,7 +37,7 @@ static STRUCT_FIELD_NAMES: [&str; 26] = [
 ];
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+    pub fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.gen_bool(0.1) {
             true => self.gen_variadic_func(ret, context),
             false => self.gen_fixed_func(ret, context),
@@ -62,6 +62,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             // TODO: gen_regexpr
             // TODO: gen functions which return list, struct
+        }
+    }
+
+    fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+        let n = self.rng.gen_range(1..4);
+        Expr::Case {
+            operand: None,
+            conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
+            results: self.gen_n_exprs_with_type(n, ret, context),
+            else_result: Some(Box::new(self.gen_expr(ret, context))),
         }
     }
 

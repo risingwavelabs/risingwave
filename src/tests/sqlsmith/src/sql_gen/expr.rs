@@ -221,7 +221,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_explicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+    pub fn gen_explicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         self.gen_explicit_cast_inner(ret, context)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
@@ -251,114 +251,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// NOTE: This can result in ambiguous expressions.
     /// Should only be used in unambiguous context.
-    fn gen_implicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
+    pub fn gen_implicit_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         self.gen_expr(ret, context)
     }
 
-    /// Generates functions with variable arity:
-    /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
-    fn gen_variadic_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        use DataType as T;
-        match ret {
-            T::Varchar => match self.rng.gen_range(0..=3) {
-                0 => self.gen_case(ret, context),
-                1 => self.gen_coalesce(ret, context),
-                2 => self.gen_concat(context),
-                3 => self.gen_concat_ws(context),
-                _ => unreachable!(),
-            },
-            _ => match self.rng.gen_bool(0.5) {
-                true => self.gen_case(ret, context),
-                false => self.gen_coalesce(ret, context),
-            },
-            // TODO: gen_regexpr
-            // TODO: gen functions which return list, struct
-        }
-    }
-
-    fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let n = self.rng.gen_range(1..4);
-        Expr::Case {
-            operand: None,
-            conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
-            results: self.gen_n_exprs_with_type(n, ret, context),
-            else_result: Some(Box::new(self.gen_expr(ret, context))),
-        }
-    }
-
-    fn gen_coalesce(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let non_null = self.gen_expr(ret, context);
-        let position = self.rng.gen_range(0..10);
-        let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
-        args[position] = non_null;
-        Expr::Function(make_simple_func("coalesce", &args))
-    }
-
-    fn gen_concat(&mut self, context: SqlGeneratorContext) -> Expr {
-        Expr::Function(make_simple_func("concat", &self.gen_concat_args(context)))
-    }
-
-    fn gen_concat_ws(&mut self, context: SqlGeneratorContext) -> Expr {
-        let sep = self.gen_expr(&DataType::Varchar, context);
-        let mut args = self.gen_concat_args(context);
-        args.insert(0, sep);
-        Expr::Function(make_simple_func("concat_ws", &args))
-    }
-
-    fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
-        let n = self.rng.gen_range(1..4);
-        (0..n)
-            .map(|_| {
-                if self.rng.gen_bool(0.1) {
-                    self.gen_explicit_cast(&DataType::Varchar, context)
-                } else {
-                    self.gen_expr(&DataType::Varchar, context)
-                }
-            })
-            .collect()
-    }
-
     /// Generates `n` expressions of type `ret`.
-    fn gen_n_exprs_with_type(
+    pub(crate) fn gen_n_exprs_with_type(
         &mut self,
         n: usize,
         ret: &DataType,
         context: SqlGeneratorContext,
     ) -> Vec<Expr> {
         (0..n).map(|_| self.gen_expr(ret, context)).collect()
-    }
-
-    fn gen_fixed_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let funcs = match FUNC_TABLE.get(ret) {
-            None => return self.gen_simple_scalar(ret),
-            Some(funcs) => funcs,
-        };
-        let func = funcs.choose(&mut self.rng).unwrap();
-        let can_implicit_cast = INVARIANT_FUNC_SET.contains(&func.func);
-        let exprs: Vec<Expr> = func
-            .inputs_type
-            .iter()
-            .map(|t| {
-                if let Some(from_tys) = IMPLICIT_CAST_TABLE.get(t)
-                    && can_implicit_cast
-                    && self.flip_coin()
-                {
-                    let from_ty = &from_tys.choose(&mut self.rng).unwrap().from_type;
-                    self.gen_implicit_cast(from_ty, context)
-                } else {
-                    self.gen_expr(t, context)
-                }
-            })
-            .collect();
-        let expr = if exprs.len() == 1 {
-            make_unary_op(func.func, &exprs[0])
-        } else if exprs.len() == 2 {
-            make_bin_op(func.func, &exprs)
-        } else {
-            None
-        };
-        expr.or_else(|| make_general_expr(func.func, exprs))
-            .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
