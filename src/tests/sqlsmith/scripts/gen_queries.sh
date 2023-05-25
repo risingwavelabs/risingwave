@@ -64,8 +64,12 @@ extract_ddl() {
   grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
 }
 
-extract_dml() {
+extract_inserts() {
   grep "\[EXECUTING INSERT\]: " | sed -E 's/^.*\[EXECUTING INSERT\]: (.*)$/\1;/' || true
+}
+
+extract_updates() {
+  grep "\[EXECUTING UPDATES\]: " | sed -E 's/^.*\[EXECUTING UPDATES\]: (.*)$/\1;/' || true
 }
 
 extract_last_session() {
@@ -99,14 +103,20 @@ extract_fail_info_from_logs() {
       DDL=$(extract_ddl < "$LOGFILE")
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
       # FIXME(kwannoel): Extract dml for updates too.
-      DML=$(extract_dml < "$LOGFILE")
+      INSERTS=$(extract_inserts < "$LOGFILE")
+      UPDATES=$(extract_updates < "$LOGFILE")
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
       QUERY=$(extract_failing_query < "$LOGFILE")
 
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
 
-      echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
+      echo -e "$DDL" \
+       "\n\n$GLOBAL_SESSION" \
+       "\n\n$INSERTS" \
+       "\n\n$UPDATES" \
+       "\n\n$TEST_SESSION" \
+       "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
