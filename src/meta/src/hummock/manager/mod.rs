@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::panic;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, LazyLock};
@@ -1410,7 +1410,7 @@ where
             compaction
                 .compaction_statuses
                 .get(&compact_task.compaction_group_id),
-            read_lock!(self, versioning).await.current_version.borrow(),
+            &read_lock!(self, versioning).await.current_version,
             compact_task.compaction_group_id,
         );
 
@@ -1699,7 +1699,6 @@ where
     #[named]
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
-        use std::borrow::Borrow;
         let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         // We don't check `checkpoint` because it's allowed to update its in memory state without
@@ -1726,16 +1725,14 @@ where
                     branched_ssts,
                 )
             };
-        let (mem_state, branched_ssts) =
-            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (mem_state, branched_ssts) = get_state(&compaction_guard, &versioning_guard);
         self.load_meta_store_state_impl(
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
         .await
         .expect("Failed to load state from meta store");
-        let (loaded_state, load_branched_ssts) =
-            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (loaded_state, load_branched_ssts) = get_state(&compaction_guard, &versioning_guard);
         assert_eq!(branched_ssts, load_branched_ssts);
         assert_eq!(
             mem_state, loaded_state,
