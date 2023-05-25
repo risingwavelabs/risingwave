@@ -6,6 +6,7 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
+build = "build.rs"
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack"]
@@ -85,6 +86,9 @@ rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }
 static_assertions = "1"
 tempfile = "3"
+
+[build-dependencies]
+vergen = { version = "8", features = ["build", "git", "gitcl"] }
 
 [features]
 test = []

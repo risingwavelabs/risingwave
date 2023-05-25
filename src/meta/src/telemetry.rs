@@ -27,6 +27,23 @@ use crate::model::ClusterId;
 use crate::storage::MetaStore;
 
 #[derive(Debug, Serialize, Deserialize)]
+struct BuildInfo {
+    build_date: String,
+    git_branch: String,
+    git_sha: String,
+}
+
+impl BuildInfo {
+    fn new() -> Self {
+        Self {
+            build_date: env!("VERGEN_BUILD_DATE").to_string(),
+            git_branch: env!("VERGEN_GIT_BRANCH").to_string(),
+            git_sha: env!("VERGEN_GIT_SHA").to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
     meta_count: u64,
     compute_count: u64,
@@ -41,6 +58,8 @@ pub(crate) struct MetaTelemetryReport {
     node_count: NodeCount,
     // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
+
+    build_info: BuildInfo,
 }
 
 impl TelemetryReport for MetaTelemetryReport {
@@ -107,6 +126,7 @@ impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
                 compactor_count: *node_map.get(&WorkerType::Compactor).unwrap_or(&0),
             },
             meta_backend: self.meta_backend,
+            build_info: BuildInfo::new(),
         })
     }
 
