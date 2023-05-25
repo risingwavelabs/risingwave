@@ -103,9 +103,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
         let key_size = k.estimated_heap_size();
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(key_size + v.estimated_heap_size());
+        self.kv_heap_size_inc(key_size + v.estimated_heap_size());
         let old_val = self.inner.put(k, v);
         if let Some(old_val) = &old_val {
             self.kv_heap_size_dec(key_size + old_val.estimated_heap_size());
@@ -194,15 +192,21 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn kv_heap_size_dec(&mut self, size: usize) {
-        self.kv_heap_size = self.kv_heap_size.saturating_add(size);
+        self.kv_heap_size = self.kv_heap_size.saturating_sub(size);
         self.report_memory_usage();
     }
 
     fn report_memory_usage(&mut self) -> bool {
+        print!(
+            "heap size {} last {}",
+            self.kv_heap_size, self.last_reported_size_bytes
+        );
+
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
             if let Some(metrics) = self.memory_usage_metrics.as_ref() {
+                print!("set kv size {}", self.kv_heap_size);
                 metrics.set(self.kv_heap_size as _);
             }
             self.last_reported_size_bytes = self.kv_heap_size;
@@ -284,10 +288,15 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 
     fn report_memory_usage(&mut self) -> bool {
+        print!(
+            "heap size {} last {}",
+            self.total_size, self.last_reported_size_bytes
+        );
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
             if let Some(metrics) = self.memory_usage_metrics.as_ref() {
+                print!("set kv size {}", self.total_size);
                 metrics.set(*self.total_size as _);
             }
             *self.last_reported_size_bytes = *self.total_size;

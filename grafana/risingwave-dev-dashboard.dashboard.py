@@ -817,12 +817,22 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Actor Memory Usage",
+                    "Actor Memory Usage (TaskLocalAlloc)",
                     "",
                     [
                         panels.target(
                             "rate(actor_memory_usage[$__rate_interval])",
                             "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(stream_memory_usage[$__rate_interval])",
+                            "table {{table_id}} actor {{actor_id}}",
                         ),
                     ],
                 ),
