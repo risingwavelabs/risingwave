@@ -27,8 +27,8 @@ aws-types = { version = "0.51", default-features = false, features = ["hardcoded
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-clap_builder = { version = "4", default-features = false, features = ["color", "env", "help", "std", "suggestions", "usage"] }
+clap = { version = "4", features = ["cargo", "derive", "env"] }
+clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
@@ -110,8 +110,8 @@ base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["serde"] }
-clap = { version = "4", features = ["derive", "env"] }
-clap_builder = { version = "4", default-features = false, features = ["color", "env", "help", "std", "suggestions", "usage"] }
+clap = { version = "4", features = ["cargo", "derive", "env"] }
+clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }

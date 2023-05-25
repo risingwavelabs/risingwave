@@ -14,7 +14,6 @@
 
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef, ScalarRefImpl};
-use risingwave_common_proc_macro::EstimateSize;
 use smallvec::SmallVec;
 
 use super::MInputAggregator;
