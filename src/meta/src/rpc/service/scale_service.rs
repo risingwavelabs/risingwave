@@ -17,9 +17,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, GetScheduleRequest, GetScheduleResponse,
-    PauseRequest, PauseResponse, RescheduleRequest, RescheduleResponse, ResumeRequest,
-    ResumeResponse,
+    ClearWorkerNodesRequest, ClearWorkerNodesResponse, GetClusterInfoRequest,
+    GetClusterInfoResponse, GetScheduleRequest, GetScheduleResponse, PauseRequest, PauseResponse,
+    RescheduleRequest, RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -81,6 +81,23 @@ where
         Ok(Response::new(ResumeResponse {}))
     }
 
+    // Removes all actors from the listed workers.
+    // This is required before shutting down the workers.
+    // Not atomic! Will abort on encountering first error, thus partially clearing workers
+    #[cfg_attr(coverage, no_coverage)]
+    async fn clear_workers(
+        &self,
+        request: Request<ClearWorkerNodesRequest>,
+    ) -> Result<Response<ClearWorkerNodesResponse>, Status> {
+        assert!(false);
+        // TODO: we also do this in rw cloud. We can move that functionality from cloud to meta
+        // see branch arne/scaling/placement-policy meta.go ClearWorkerNode
+
+        let schedule = "";
+
+        Ok(Response::new(ClearWorkerNodesResponse { status: None }))
+    }
+
     #[cfg_attr(coverage, no_coverage)]
     async fn get_cluster_info(
         &self,
@@ -128,7 +145,7 @@ where
 
     async fn get_schedule(
         &self,
-        request: Request<GetScheduleRequest>,
+        _request: Request<GetScheduleRequest>,
     ) -> Result<Response<GetScheduleResponse>, Status> {
         let cluster_info = self
             .get_cluster_info(Request::new(GetClusterInfoRequest {}))
