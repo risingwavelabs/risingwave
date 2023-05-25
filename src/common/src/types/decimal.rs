@@ -606,7 +606,15 @@ impl Num for Decimal {
     type FromStrRadixErr = Error;
 
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
-        RustDecimal::from_str_radix(str, radix).map(Decimal::Normalized)
+        if str.eq_ignore_ascii_case("inf") || str.eq_ignore_ascii_case("infinity") {
+            Ok(Self::PositiveInf)
+        } else if str.eq_ignore_ascii_case("-inf") || str.eq_ignore_ascii_case("-infinity") {
+            Ok(Self::NegativeInf)
+        } else if str.eq_ignore_ascii_case("nan") {
+            Ok(Self::NaN)
+        } else {
+            RustDecimal::from_str_radix(str, radix).map(Decimal::Normalized)
+        }
     }
 }
 
