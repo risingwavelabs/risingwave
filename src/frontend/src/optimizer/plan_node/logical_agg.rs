@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -22,13 +21,12 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
-use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
-use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
@@ -53,25 +51,6 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    /// Infer agg result table for streaming agg.
-    pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        self.core.infer_result_table(&self.base, vnode_col_idx)
-    }
-
-    /// Infer `AggCallState`s for streaming agg.
-    pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
-        self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
-    }
-
-    /// Infer dedup tables for distinct agg calls.
-    pub fn infer_distinct_dedup_tables(
-        &self,
-        vnode_col_idx: Option<usize>,
-    ) -> HashMap<usize, TableCatalog> {
-        self.core
-            .infer_distinct_dedup_tables(&self.base, vnode_col_idx)
-    }
-
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
