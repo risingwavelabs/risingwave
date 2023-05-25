@@ -220,9 +220,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         writer,
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
-        Arc::new(FilterKeyExtractorImpl::FullKey(
-            FullKeyFilterKeyExtractor::default(),
-        )),
+        Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
     );
 
     let mut last_key = FullKey::<B>::default();

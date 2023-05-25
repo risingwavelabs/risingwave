@@ -211,7 +211,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, MonitoredGlobalAlloc>::with_hasher_in(
-            PrecomputedBuildHasher::default(),
+            PrecomputedBuildHasher,
             self.alloc.clone(),
         );
 

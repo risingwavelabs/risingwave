@@ -21,7 +21,6 @@
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
-#![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![feature(lazy_cell)]
@@ -34,6 +33,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(string_leak)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod backup_restore;
 mod barrier;

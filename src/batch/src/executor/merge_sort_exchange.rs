@@ -109,7 +109,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
                 self.mem_ctx.add(new_chunk_size);
                 old
             }
-            None => std::mem::replace(&mut self.source_inputs[source_idx], None),
+            None => std::mem::take(&mut self.source_inputs[source_idx]),
         };
 
         if let Some(chunk) = old {

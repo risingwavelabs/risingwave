@@ -164,7 +164,6 @@ impl<T: EstimateSize> EstimatedVecDeque<T> {
         self.inner.push_back(value)
     }
 
-    #[expect(dead_code)]
     pub fn push_front(&mut self, value: T) {
         self.heap_size = self.heap_size.saturating_add(value.estimated_heap_size());
         self.inner.push_front(value)

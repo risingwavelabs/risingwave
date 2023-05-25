@@ -32,6 +32,7 @@
 #![feature(int_roundings)]
 #![feature(async_fn_in_trait)]
 #![feature(allocator_api)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod error;
 pub mod exchange_source;
