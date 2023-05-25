@@ -36,8 +36,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 # install build tools
 RUN cargo install cargo-quickinstall --locked
 RUN cargo quickinstall cargo-binstall
-RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache cargo-audit \
-    && cargo install sccache --locked \
+RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache cargo-audit sccache \
     && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev dbadddb --bin sqllogictest --locked \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
@@ -47,6 +46,7 @@ RUN cargo uninstall cargo-quickinstall cargo-binstall
 
 ENV RUSTC_WRAPPER=sccache
 ENV SCCACHE_BUCKET=ci-sccache-bucket
+ENV SCCACHE_REGION=us-east-2
 ENV SCCACHE_IDLE_TIMEOUT=0
 ENV CARGO_INCREMENTAL=0
 ENV CARGO_MAKE_PRINT_TIME_SUMMARY=true
