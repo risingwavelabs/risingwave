@@ -21,6 +21,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -339,10 +340,13 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
 
-    let data_directory = system_params_reader.data_directory().to_string();
-    if data_directory.is_empty() || data_directory.ends_with("//") {
+    let data_directory = system_params_reader.data_directory();
+    if !is_correct_data_directory(data_directory) {
         return Err(MetaError::system_param(format!(
-            "The data directory {:?} is misconfigured",
+            "The data directory {:?} is misconfigured. 
+            It is recommended to use English uppercase and lowercase letters and numbers, namely [a-z, A-Z, 0-9] and their combinations.
+            Both the beginning and the end cannot be `/`, and consecutive '/' is also not allowed.
+            Data directory cannot be empty and the length is not greater than 800.",
             data_directory
         )));
     }
@@ -681,4 +685,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await
         .unwrap();
     Ok(())
+}
+
+fn is_correct_data_directory(data_directory: &str) -> bool {
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/]{1,}$").unwrap();
+    if data_directory.is_empty()
+        || !data_directory_regex.is_match(data_directory)
+        || data_directory.ends_with('/')
+        || data_directory.starts_with('/')
+        || data_directory.contains("//")
+        || data_directory.len() > 800
+    {
+        return false;
+    }
+    true
 }

@@ -6262,6 +6262,7 @@ dependencies = [
  "prometheus-http-query",
  "prost",
  "rand",
+ "regex",
  "reqwest",
  "risingwave_backup",
  "risingwave_common",
