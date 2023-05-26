@@ -432,7 +432,12 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
     }
 }
 
-/// Run query
+/// Run query, handle permissible errors
+/// For recovery error, just do bounded retry.
+/// For other errors, validate them accordingly, skipping if they are permitted.
+/// Otherwise just return success.
+///
+/// Returns: Number of skipped queries.
 async fn run_query(client: &Client, query: &str) -> Result<i64> {
     let response = client.simple_query(query).await;
     if let Err(e) = &response
