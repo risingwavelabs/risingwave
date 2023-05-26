@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod state_table;
-mod watermark;
+pub mod serde;
 
-#[cfg(test)]
-pub mod test_state_table;
-#[cfg(test)]
-pub mod test_storage_table;
-#[cfg(test)]
-pub mod test_utils;
+type SeqIdType = i32;
+type RowOpCodeType = i16;
+
+/// Readers truncate the offset at the granularity of epoch
+type ReaderTruncationOffsetType = u64;

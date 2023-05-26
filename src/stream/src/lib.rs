@@ -43,6 +43,7 @@
 #![feature(return_position_impl_trait_in_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(test)]
+#![feature(is_sorted)]
 
 #[macro_use]
 extern crate tracing;
