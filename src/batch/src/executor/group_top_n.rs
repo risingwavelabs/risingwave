@@ -189,7 +189,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         }
         let mut groups =
             HashMap::<K, TopNHeap, PrecomputedBuildHasher, MonitoredGlobalAlloc>::with_hasher_in(
-                PrecomputedBuildHasher::default(),
+                PrecomputedBuildHasher,
                 self.mem_ctx.global_allocator(),
             );
 
