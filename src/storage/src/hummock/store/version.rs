@@ -766,6 +766,7 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
+                    local_stats.non_overlapping_iter_count += 1;
                 } else {
                     let sstable = self
                         .sstable_store
@@ -784,11 +785,17 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
+                    // Since there is only one sst to be included for the current non-overlapping
+                    // level, there is no need to create a ConcatIterator on it.
+                    // We put the SstableIterator in `overlapping_iters` just for convenience since
+                    // it overlaps with SSTs in other levels. In metrics reporting, we still count
+                    // it in `non_overlapping_iter_count`.
                     overlapping_iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
+                    local_stats.non_overlapping_iter_count += 1;
                 }
             } else {
                 let table_infos = prune_overlapping_ssts(
@@ -825,6 +832,7 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
+                    local_stats.overlapping_iter_count += 1;
                 }
             }
         }
@@ -836,8 +844,6 @@ impl HummockVersionReader {
                 .iter_slow_fetch_meta_cache_unhits
                 .set(local_stats.cache_meta_block_miss as i64);
         }
-        local_stats.overlapping_iter_count = overlapping_iters.len() as u64;
-        local_stats.non_overlapping_iter_count = non_overlapping_iters.len() as u64;
 
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
