@@ -147,7 +147,7 @@ public class JsonDeserializer implements Deserializer {
 
     private static Date castDate(Object value) {
         try {
-            Long days = castLong(value);
+            Long days = castLong(value) - 1;
             return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days));
         } catch (RuntimeException e) {
             throw io.grpc.Status.INVALID_ARGUMENT
