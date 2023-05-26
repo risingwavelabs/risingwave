@@ -39,7 +39,7 @@ struct ExprToTimestampConstTmpl {
 #[async_trait::async_trait]
 impl Expression for ExprToTimestampConstTmpl {
     fn return_type(&self) -> DataType {
-        DataType::Varchar
+        DataType::Timestamp
     }
 
     async fn eval(
