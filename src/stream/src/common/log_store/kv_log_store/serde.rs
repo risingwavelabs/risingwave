@@ -25,7 +25,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
