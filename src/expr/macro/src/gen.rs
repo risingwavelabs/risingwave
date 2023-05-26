@@ -516,7 +516,13 @@ impl FunctionAttr {
             .iter()
             .map(|ty| format_ident!("{}Builder", types::array_type(ty)))
             .collect_vec();
-        let return_types = return_types.iter().map(|ty| data_type(ty)).collect_vec();
+        let return_types = if return_types.len() == 1 {
+            vec![quote! { self.return_type.clone() }]
+        } else {
+            (0..return_types.len())
+                .map(|i| quote! { self.return_type.as_struct().fields[#i].clone() })
+                .collect()
+        };
         let const_arg = match &self.prebuild {
             Some(_) => quote! { &self.const_arg },
             None => quote! {},
