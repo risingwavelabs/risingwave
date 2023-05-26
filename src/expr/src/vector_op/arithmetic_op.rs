@@ -164,12 +164,28 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
 
 #[function("pow(float64, float64) -> float64")]
 pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
-    let res = l.powf(r);
-    if res.is_infinite() {
-        Err(ExprError::NumericOutOfRange)
-    } else {
-        Ok(res)
+    if l.is_zero() && r.0 < 0.0 {
+        return Err(ExprError::InvalidParam {
+            name: "rhs",
+            reason: "zero raised to a negative power is undefined".into(),
+        });
     }
+    if l.0 < 0.0 && (r.is_finite() && !r.fract().is_zero()) {
+        return Err(ExprError::InvalidParam {
+            name: "rhs",
+            reason: "a negative number raised to a non-integer power yields a complex result"
+                .into(),
+        });
+    }
+    let res = l.powf(r);
+    if res.is_infinite() && l.is_finite() && r.is_finite() {
+        return Err(ExprError::NumericOverflow);
+    }
+    if res.is_zero() && l.is_finite() && r.is_finite() && !l.is_zero() {
+        return Err(ExprError::NumericUnderflow);
+    }
+
+    Ok(res)
 }
 
 #[inline(always)]

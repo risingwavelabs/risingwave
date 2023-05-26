@@ -43,10 +43,8 @@ select pow(100000, 0);
 ----
 1
 
-query R
+statement error underflow
 select pow(100000, -200000000000000);
-----
-0
 
 statement error QueryError: Expr error: Numeric out of range
 select pow(100000, 200000000000000);
@@ -100,10 +98,8 @@ select 100000 ^ 0;
 ----
 1
 
-query R
+statement error underflow
 select 100000 ^ -200000000000000;
-----
-0
 
 statement error QueryError: Expr error: Numeric out of range
 select 100000 ^ 200000000000000;
@@ -111,6 +107,84 @@ select 100000 ^ 200000000000000;
 
 statement error QueryError: Expr error: Numeric out of range
 select -100000 ^ 200000000000001;
+
+query RRR
+with t(x, y) as (values
+	('1', 'nan'),
+	('0', 'nan'),
+	('nan', '0'),
+	('nan', '-0'),
+	('0', 'inf'),
+	('-0', 'inf'),
+	('-1', 'inf'),
+	('-1', '-inf'),
+	('0.5', 'inf'),
+	('0.5', '-inf'),
+	('2', 'inf'),
+	('2', '-inf'),
+	('-0.5', 'inf'),
+	('-0.5', '-inf'),
+	('-2', 'inf'),
+	('-2', '-inf'),
+	('inf', '0'),
+	('inf', '-0'),
+	('-inf', '0'),
+	('-inf', '-0'),
+	('inf', '0.5'),
+	('inf', '-0.5'),
+	('-inf', '2'),
+	('-inf', '3'),
+	('-inf', '-2'),
+	('-inf', '-3'),
+	('-0', '3'),
+	('-0', '0.5'),
+	('0'::float8, '-0'::float8))
+select x, y, x ^ y from t;
+----
+        1       NaN         1
+        0       NaN       NaN
+      NaN         0         1
+      NaN        -0         1
+        0  Infinity         0
+       -0  Infinity         0
+       -1  Infinity         1
+       -1 -Infinity         1
+      0.5  Infinity         0
+      0.5 -Infinity  Infinity
+        2  Infinity  Infinity
+        2 -Infinity         0
+     -0.5  Infinity         0
+     -0.5 -Infinity  Infinity
+       -2  Infinity  Infinity
+       -2 -Infinity         0
+ Infinity         0         1
+ Infinity        -0         1
+-Infinity         0         1
+-Infinity        -0         1
+ Infinity       0.5  Infinity
+ Infinity      -0.5         0
+-Infinity         2  Infinity
+-Infinity         3 -Infinity
+-Infinity        -2         0
+-Infinity        -3        -0
+       -0         3        -0
+       -0       0.5         0
+        0        -0         1
+
+query RRR
+with t(v) as (
+	values ('-inf'::float8), ('inf'), ('nan')
+) select x, y, x ^ y from t as a(x), t as b(y);
+----
+-Infinity -Infinity        0
+-Infinity  Infinity Infinity
+-Infinity       NaN      NaN
+ Infinity -Infinity        0
+ Infinity  Infinity Infinity
+ Infinity       NaN      NaN
+      NaN -Infinity      NaN
+      NaN  Infinity      NaN
+      NaN       NaN      NaN
 
 query R
 select exp(0.0);
