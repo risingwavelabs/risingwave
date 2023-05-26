@@ -152,13 +152,16 @@ async fn nexmark_scaling_up_down_common(
 
     cluster.run(create).await?;
 
-    println!("adding compute node"); // TODO: remove line
-    cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(sleep_sec)).await;
-    println!(
-        "Now {} compute nodes in cluster",
-        cluster.get_number_worker_nodes().await
-    ); // TODO: remove line
+    // TODO: remove comment
+    // not adding compute nodes does not help
+    // However, when clearing nodes, if we add nodes we may also clear a node without fragments
+    // println!("adding compute node"); // TODO: remove line
+    // cluster.add_compute_node(number_of_nodes);
+    // sleep(Duration::from_secs(sleep_sec)).await;
+    // println!(
+    //     "Now {} compute nodes in cluster",
+    //     cluster.get_number_worker_nodes().await
+    // ); // TODO: remove line
 
     // TODO: reschedule here as well?
 
@@ -203,6 +206,17 @@ async fn nexmark_scaling_up_down_common(
         .collect_vec();
     println!("clearing unregisterd nodes"); // TODO: remove line
 
+    // TODO:remove
+    // clearing one worker after another does not help
+    //  for addr in addrs {
+    //      let mut a: Vec<HostAddr> = vec![];
+    //      a.push(addr);
+    //      cluster
+    //          .clear_worker_nodes(a)
+    //          .await
+    //          .expect("failed to clear worker nodes");
+    //  }
+
     cluster
         .clear_worker_nodes(addrs)
         .await
@@ -226,10 +240,7 @@ async fn nexmark_scaling_up_down_common(
     // TODO: assert that cluster really has correct number of nodes
 
     println!("run select"); // TODO: remove line
-    let select_result = cluster.run(select).await?;
-    println!("Got new result"); // TODO: remove line
-
-    select_result.assert_result_eq(&expected);
+    cluster.run(select).await?.assert_result_eq(&expected);
 
     Ok(())
 }

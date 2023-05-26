@@ -97,6 +97,7 @@ where
 
         println!("called clear_workers"); // TODO: remove println
 
+        // TODO: Does meta call itself via rpc? If so, then bad
         // TODO: Do I need to retrieve the schedule every time?
         let schedule = self
             .get_schedule(Request::new(GetScheduleRequest {}))
@@ -104,16 +105,16 @@ where
             .into_inner();
         println!("got schedule"); // TODO: remove println
 
-        let mut remove_map = std::collections::HashMap::new();
+        let mut pu_list_all: Vec<u32> = vec![];
 
         // TODO: right now this is O(n*m). We can do better than that
-        for target_addr in request.into_inner().host_addresses {
+        for host_address in request.into_inner().host_addresses {
             // TODO: be fancy and do this with map
             // Determine worker and parallel units.
             let mut pu_list: Vec<ParallelUnit> = vec![];
             let mut found = false;
             for worker in schedule.get_worker_list() {
-                if *worker.get_host()? != target_addr {
+                if *worker.get_host()? != host_address {
                     continue;
                 }
                 pu_list = worker.parallel_units.clone();
@@ -124,28 +125,30 @@ where
             if !found {
                 return Err(Status::from(MetaError::invalid_parameter(format!(
                     "Worker with address {:?} not found",
-                    target_addr
+                    host_address
                 ))));
             }
 
-            let pu_list = pu_list.iter().map(|pu| pu.id).collect_vec();
+            let mut pu_list = pu_list.iter().map(|pu| pu.id).collect_vec();
+            pu_list_all.append(&mut pu_list);
+        }
 
-            // Determine which fragment uses which PU on the worker.
+        // Determine which fragment uses which PU on the to be cleared workers.
 
-            for fragment in schedule.get_fragment_list() {
-                // TODO: be fancy and do this with map?
-                let mut remove_list: Vec<u32> = vec![];
+        let mut remove_map = std::collections::HashMap::new();
+        for fragment in schedule.get_fragment_list() {
+            // TODO: be fancy and do this with map?
+            let mut remove_list: Vec<u32> = vec![];
 
-                for actor in fragment.get_actor_list() {
-                    // Number of PU o a worker is small, iterating is ok
-                    let pu_id = actor.parallel_units_id;
-                    if pu_list.contains(&pu_id) {
-                        remove_list.push(pu_id);
-                    }
+            for actor in fragment.get_actor_list() {
+                // Number of PU o a worker is small, iterating is ok
+                let pu_id = actor.parallel_units_id;
+                if pu_list_all.contains(&pu_id) {
+                    remove_list.push(pu_id);
                 }
-                if !remove_list.is_empty() {
-                    remove_map.insert(fragment.id, remove_list);
-                }
+            }
+            if !remove_list.is_empty() {
+                remove_map.insert(fragment.id, remove_list);
             }
         }
 
@@ -160,9 +163,12 @@ where
 
         let mut reschedule_map: std::collections::HashMap<u32, reschedule_request::Reschedule> =
             std::collections::HashMap::new();
-        for (fragment_id, remove_pus) in remove_map.iter() {
+        for (fragment_id, remove_pus) in remove_map.iter_mut() {
             match reschedule_map.get_mut(fragment_id) {
-                Some(reschedule) => reschedule.removed_parallel_units = remove_pus.clone(),
+                Some(reschedule) => {
+                    reschedule.removed_parallel_units.append(remove_pus)
+                    //                     reschedule.removed_parallel_units = remove_pus.clone()
+                }
                 None => {
                     reschedule_map.insert(
                         *fragment_id,
