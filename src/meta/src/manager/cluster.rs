@@ -156,7 +156,8 @@ where
             return Ok(());
         }
         if worker.worker_node.state == State::Deleting as i32 {
-            // TODO: return some error here
+            // TODO: return error here
+            panic!("trying to activate node which is deleting");
         }
         worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
@@ -175,6 +176,8 @@ where
         Ok(())
     }
 
+    // TODO: rename this function into unregister or similar
+    // or maybe mark_node_as_deleting
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let mut worker_ref = core
@@ -196,7 +199,7 @@ where
             self.max_heartbeat_interval.clone(),
         ));
 
-        // Notify frontends to delete compute node.
+        // Notify frontend to delete compute node.
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
@@ -275,6 +278,10 @@ where
                         now,
                     )
                 };
+
+                // maybe we hit an error here, because we try to delete nodes?
+                // No, returning here does not change anything
+
                 // 3. Delete expired workers.
                 for (worker_id, key) in workers_to_delete {
                     match cluster_manager.delete_worker_node(key.clone()).await {
@@ -423,10 +430,15 @@ impl ClusterManagerCore {
         })
     }
 
+    // TODO: undo changes here
     /// If no worker exists, return an error.
     fn get_worker_by_host_checked(&self, host_address: HostAddress) -> MetaResult<Worker> {
-        self.get_worker_by_host(host_address)
-            .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
+        match self.get_worker_by_host(host_address) {
+            None => Err(MetaError::invalid_worker(0)), // TODO: change this
+            Some(w) => Ok(w),
+        }
+
+        // x.ok_or_else(|| anyhow::anyhow!("Worker node does not exist!").into())
     }
 
     pub fn get_worker_by_host(&self, host_address: HostAddress) -> Option<Worker> {
@@ -678,7 +690,7 @@ mod tests {
             }
         });
 
-        tokio::time::sleep(ttl * 2 + check_interval).await;
+        tokio::time::sleep(ttl * 4 + check_interval).await;
 
         // One node has actually expired but still got two, because heartbeat check is not
         // started.
@@ -690,9 +702,16 @@ mod tests {
             2
         );
 
+        // TODO: This fails, because we never actually delete the node?
+        // Meta should still forget that node if it misses multiple heartbeats
+
         let (join_handle, shutdown_sender) =
             ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
-        tokio::time::sleep(ttl * 2 + check_interval).await;
+        //  tokio::time::sleep(ttl * 4 + check_interval).await;
+
+        // TODO: what is the correct time here?
+        // we need to wait until we miss multiple heartbeats. Meta then considers the node dead
+        tokio::time::sleep(Duration::from_secs(50)).await;
 
         // One live node left.
         assert_eq!(
@@ -744,6 +763,7 @@ async fn delete_worker_node_cleanup(
                     first_log_tick = true;
                 }
                 _ = ticker.tick() => {
+                    // This is the error! Code stuck here in endless loop!
                     let mut core = shared_core.write().await;
                     let worker = match core.get_worker_by_host_checked(host_address.clone()) {
                         Ok(w) => w,
@@ -765,14 +785,14 @@ async fn delete_worker_node_cleanup(
                         );
                         return;
                     }
-
+// TODO: cleanup does not block. We start this from the beginning. This does not block anything
                     // delete node if we missed 3 heartbeats
                     let latest_beat = worker.expire_at();
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .expect("Time went backwards")
                         .as_secs();
-                    if now > latest_beat + 3 * max_heartbeat_interval.as_secs() {
+                    if now > latest_beat + 3 * max_heartbeat_interval.as_secs() { // continue
                         tracing::info!(
                             "Cleaning up worker node at {}:{}",
                             host_address.host,
