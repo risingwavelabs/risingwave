@@ -25,7 +25,7 @@ mod parse;
 mod types;
 mod utils;
 
-/// Defining expression from a Rust Function.
+/// Defining the RisingWave SQL function from a Rust function.
 ///
 /// [Online version of this doc.](https://risingwavelabs.github.io/risingwave/risingwave_expr_macro/attr.function.html)
 ///
@@ -43,7 +43,7 @@ mod utils;
 ///     - [Functions Returning Strings](#functions-returning-strings)
 ///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
 /// - [Table Function](#table-function)
-/// - [Function Registration and Invocation](#function-registration-and-invocation)
+/// - [Registration and Invocation](#registration-and-invocation)
 /// - [Appendix: Type Matrix](#appendix-type-matrix)
 ///
 /// The following example demonstrates a simple usage:
@@ -59,9 +59,11 @@ mod utils;
 ///
 /// Each function must have a signature, specified in the `function("...")` part of the macro
 /// invocation. The signature follows this pattern:
-/// ```
+///
+/// ```text
 /// name([arg_types],*) -> [setof] return_type
 /// ```
+///
 /// Where `name` is the function name, which must match the function name defined in `prost`.
 ///
 /// The allowed data types are listed in the `name` column of the appendix's [type matrix].
@@ -101,6 +103,9 @@ mod utils;
 /// #[function("cast(varchar) -> int32")]
 /// #[function("cast(varchar) -> int64")]
 /// ```
+///
+/// Please note the difference between `*` and `any`. `*` will generate a function for each type,
+/// whereas `any` will only generate one function with a dynamic data type `Scalar`.
 ///
 /// ## Automatic Type Inference
 ///
@@ -154,6 +159,7 @@ mod utils;
 /// The `#[function]` macro can handle various types of Rust functions.
 ///
 /// Each argument corresponds to the *reference type* in the [type matrix].
+///
 /// The return value type can be the *reference type* or *owned type* in the [type matrix].
 ///
 /// For instance:
@@ -263,7 +269,7 @@ mod utils;
 /// Currently, table function arguments do not support the `Option` type. That is, the function will
 /// only be invoked when all arguments are not null.
 ///
-/// # Function Registration and Invocation
+/// # Registration and Invocation
 ///
 /// Every function defined by `#[function]` is automatically registered in the global function
 /// table.
@@ -311,7 +317,7 @@ mod utils;
 /// | jsonb       | `jsonb`            | `JsonbVal`    | `JsonbRef<'_>`     | no         |
 /// | list        | `any[]`            | `ListValue`   | `ListRef<'_>`      | no         |
 /// | struct      | `record`           | `StructValue` | `StructRef<'_>`    | no         |
-/// | any         | `any`              | `Scalar`      | `ScalarRef<'_>`    | no         |
+/// | any         | `any`              | `ScalarImpl`  | `ScalarRef<'_>`    | no         |
 ///
 /// [type matrix]: #appendix-type-matrix
 #[proc_macro_attribute]
