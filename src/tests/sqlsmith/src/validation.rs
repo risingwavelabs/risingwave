@@ -93,6 +93,7 @@ fn is_broken_channel_error(db_error: &str) -> bool {
 /// Hence we should retry for some bound.
 pub fn is_recovery_in_progress_error(db_error: &str) -> bool {
     db_error.contains("Barrier read is unavailable for now. Likely the cluster is recovering")
+        || db_error.contains("Service unavailable: The cluster is starting or recovering")
 }
 
 /// Certain errors are permitted to occur. This is because:
