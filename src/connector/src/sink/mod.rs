@@ -439,7 +439,7 @@ mod tests {
             ),
         )
         .unwrap();
-        assert_eq!(ts_value, json!(1000 * 1000));
+        assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
 
         // Represents the number of microseconds past midnigh, io.debezium.time.Time
         let time_value = datum_to_json_object(
