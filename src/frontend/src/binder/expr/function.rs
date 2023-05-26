@@ -417,8 +417,12 @@ impl Binder {
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
+                ("trunc", raw_call(ExprType::Trunc)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
+                ("ln", raw_call(ExprType::Ln)),
+                ("log", raw_call(ExprType::Log10)),
+                ("log10", raw_call(ExprType::Log10)),
                 ("mod", raw_call(ExprType::Modulus)),
                 ("sin", raw_call(ExprType::Sin)),
                 ("cos", raw_call(ExprType::Cos)),
@@ -443,6 +447,7 @@ impl Binder {
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
+                ("cbrt", raw_call(ExprType::Cbrt)),
 
                 (
                     "to_timestamp",
@@ -647,6 +652,7 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.

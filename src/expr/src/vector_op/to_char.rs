@@ -62,6 +62,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
             .ascii_case_insensitive(false)
             .match_kind(aho_corasick::MatchKind::LeftmostLongest)
             .build(PG_PATTERNS)
+            .expect("failed to build an Aho-Corasick automaton")
     });
 
     let mut chrono_tmpl = String::new();

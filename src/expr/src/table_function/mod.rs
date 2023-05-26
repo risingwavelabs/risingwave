@@ -22,9 +22,9 @@ use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder, StructArray,
 };
-use risingwave_common::types::{DataType, DatumRef};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::types::{DataType, DataTypeName, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
+use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
 
 use super::{ExprError, Result};
@@ -36,10 +36,7 @@ mod repeat;
 mod unnest;
 mod user_defined;
 
-use self::generate_series::*;
-use self::regexp_matches::*;
 pub use self::repeat::*;
-use self::unnest::*;
 use self::user_defined::*;
 
 /// Instance of a table function.
@@ -118,14 +115,40 @@ pub type BoxedTableFunction = Box<dyn TableFunction>;
 pub fn build_from_prost(prost: &PbTableFunction, chunk_size: usize) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
 
-    match prost.get_function_type().unwrap() {
-        Generate => new_generate_series::<true>(prost, chunk_size),
-        Unnest => new_unnest(prost, chunk_size),
-        RegexpMatches => new_regexp_matches(prost, chunk_size),
-        Range => new_generate_series::<false>(prost, chunk_size),
-        Udtf => new_user_defined(prost, chunk_size),
-        Unspecified => unreachable!(),
+    if prost.get_function_type().unwrap() == Udtf {
+        return new_user_defined(prost, chunk_size);
     }
+
+    build(
+        prost.get_function_type().unwrap(),
+        prost.get_return_type()?.into(),
+        chunk_size,
+        prost.args.iter().map(expr_build_from_prost).try_collect()?,
+    )
+}
+
+/// Build a table function.
+pub fn build(
+    func: PbType,
+    return_type: DataType,
+    chunk_size: usize,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedTableFunction> {
+    let args = children
+        .iter()
+        .map(|t| t.return_type().into())
+        .collect::<Vec<DataTypeName>>();
+    let desc = crate::sig::table_function::FUNC_SIG_MAP
+        .get(func, &args)
+        .ok_or_else(|| {
+            ExprError::UnsupportedFunction(format!(
+                "{:?}({}) -> setof {:?}",
+                func,
+                args.iter().map(|t| format!("{:?}", t)).join(", "),
+                return_type,
+            ))
+        })?;
+    (desc.build)(return_type, chunk_size, children)
 }
 
 /// See also [`PbProjectSetSelectItem`]
@@ -264,11 +287,11 @@ impl<'a> TableFunctionOutputIter<'a> {
         let chunk = self.stream.next().await.transpose()?;
         self.chunk = chunk.map(|c| {
             let (c1, c2) = c.split_column_at(1);
-            let indexes = c1.column_at(0).array();
+            let indexes = c1.column_at(0).clone();
             let values = if c2.columns().len() > 1 {
                 Arc::new(StructArray::from(c2).into())
             } else {
-                c2.column_at(0).array()
+                c2.column_at(0).clone()
             };
             (indexes, values)
         });

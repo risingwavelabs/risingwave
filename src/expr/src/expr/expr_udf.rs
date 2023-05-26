@@ -63,11 +63,7 @@ impl Expression for UdfExpression {
         }
         let arg_row = OwnedRow::new(columns);
         let chunk = DataChunk::from_rows(std::slice::from_ref(&arg_row), &self.arg_types);
-        let arg_columns = chunk
-            .columns()
-            .iter()
-            .map(|c| c.array_ref().into())
-            .collect();
+        let arg_columns = chunk.columns().iter().map(|c| c.as_ref().into()).collect();
         let output_array = self
             .eval_inner(arg_columns, chunk.vis().to_bitmap())
             .await?;

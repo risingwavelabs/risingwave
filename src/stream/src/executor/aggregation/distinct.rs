@@ -18,8 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Vis, VisRef};
+use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
@@ -53,13 +52,13 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     async fn dedup(
         &mut self,
         ops: &[Op],
-        column: &Column,
+        column: &ArrayRef,
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&OwnedRow>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
-        let column = column.array_ref();
+        let column = column;
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
@@ -245,7 +244,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub async fn dedup_chunk(
         &mut self,
         ops: &[Op],
-        columns: &[Column],
+        columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&OwnedRow>,

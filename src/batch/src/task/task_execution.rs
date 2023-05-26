@@ -294,10 +294,6 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
-    /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponse>>>,
-
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
@@ -333,7 +329,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
             epoch,
-            state_rx: Mutex::new(None),
             context,
             runtime,
             sender,
@@ -509,6 +504,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let mut error = None;
 
         let mut shutdown_rx = self.shutdown_rx.clone();
+        let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(600));
+        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat_interval.reset();
         loop {
             select! {
                 biased;
@@ -577,6 +575,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
+                _ = heartbeat_interval.tick() => {
+                    if let Some(&mut ref mut reporter) = state_tx {
+                        if reporter
+                            .send(TaskInfoResponse {
+                                task_id: Some(self.task_id.to_prost()),
+                                task_status: TaskStatus::Ping.into(),
+                                error_message: "".to_string(),
+                            })
+                            .await.is_err() {
+                            self.abort("ping failed".into());
+                        }
+                    }
+                },
             }
         }
 
@@ -662,13 +673,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .into()),
             _ => Ok(false),
         }
-    }
-
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
-        self.state_rx
-            .lock()
-            .take()
-            .expect("The state receivers must have been inited!")
     }
 
     pub fn mem_usage(&self) -> usize {

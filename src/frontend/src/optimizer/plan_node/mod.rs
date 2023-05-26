@@ -537,7 +537,7 @@ impl dyn PlanNode {
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost();
+            return stream_table_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);

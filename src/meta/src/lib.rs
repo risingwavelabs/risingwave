@@ -21,7 +21,6 @@
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
-#![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![feature(lazy_cell)]
@@ -34,6 +33,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(string_leak)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod backup_restore;
 mod barrier;
@@ -52,13 +52,14 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::OverrideConfig;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
+#[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
     vpd_id: Option<String>,

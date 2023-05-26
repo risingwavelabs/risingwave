@@ -282,13 +282,8 @@ fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64
             "timestamp with time zone +/- interval of days".into(),
         ));
     }
-
-    let result: Option<i64> = try {
-        let delta_usecs = r.usecs();
-        f(l, delta_usecs)?
-    };
-
-    result.ok_or(ExprError::NumericOutOfRange)
+    let delta_usecs = r.usecs();
+    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("multiply(interval, *int) -> interval")]
@@ -403,6 +398,11 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
             reason: "input cannot be negative value".to_string(),
         }),
     }
+}
+
+#[function("cbrt(float64) -> float64")]
+pub fn cbrt_f64(expr: F64) -> F64 {
+    expr.cbrt()
 }
 
 #[cfg(test)]

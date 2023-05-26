@@ -19,6 +19,7 @@
 #![feature(map_many_mut)]
 #![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
 
@@ -239,12 +240,12 @@ impl SstObjectIdRange {
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
-    for i in 0..len - 1 {
-        if ssts[i]
+    for i in 1..len {
+        if ssts[i - 1]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
             return false;

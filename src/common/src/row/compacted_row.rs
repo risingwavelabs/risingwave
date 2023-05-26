@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use risingwave_common_proc_macro::EstimateSize;
 
 use super::{OwnedRow, Row, RowDeserializer};
 use crate::estimate_size::EstimateSize;
