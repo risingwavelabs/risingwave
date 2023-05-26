@@ -344,9 +344,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     if !is_correct_data_directory(data_directory) {
         return Err(MetaError::system_param(format!(
             "The data directory {:?} is misconfigured. 
-            It is recommended to use English uppercase and lowercase letters and numbers, namely [a-z, A-Z, 0-9] and their combinations.
-            Both the beginning and the end cannot be `/`, and consecutive '/' is also not allowed.
-            Data directory cannot be empty and the length is not greater than 800.",
+            Please use a combination of English uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            The string cannot start or end with '/', and consecutive '/' are not allowed.
+            The data directory cannot be empty and its length should not exceed 800 characters.",
             data_directory
         )));
     }
