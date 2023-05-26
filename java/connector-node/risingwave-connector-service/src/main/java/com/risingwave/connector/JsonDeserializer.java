@@ -147,7 +147,7 @@ public class JsonDeserializer implements Deserializer {
     private static Date castDate(Object value) {
         try {
             Long days = castLong(value);
-            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days));
+            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days - 1));
         } catch (RuntimeException e) {
             throw io.grpc.Status.INVALID_ARGUMENT
                     .withDescription("unable to cast into date from " + value.getClass())
@@ -209,6 +209,22 @@ public class JsonDeserializer implements Deserializer {
                             .withDescription("Expected jsonb, got " + value.getClass())
                             .asRuntimeException();
                 }
+                return value;
+            case LIST:
+                if (!(value instanceof java.util.ArrayList<?>)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected list, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                // print the value
+                var array = (java.util.ArrayList<?>) value;
+                System.out.println(
+                        "List value: "
+                                + value
+                                + ": "
+                                + value.getClass()
+                                + ":"
+                                + array.toArray()[0].getClass());
                 return value;
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT

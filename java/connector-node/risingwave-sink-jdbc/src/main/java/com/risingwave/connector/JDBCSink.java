@@ -108,6 +108,7 @@ public class JDBCSink extends SinkBase {
                 String insertStmt =
                         String.format(
                                 INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
+
                 try {
                     return generatePreparedStatement(insertStmt, row, targetDbType);
                 } catch (SQLException e) {
@@ -216,9 +217,10 @@ public class JDBCSink extends SinkBase {
     private PreparedStatement generatePreparedStatement(
             String insertStmt, SinkRow row, DatabaseType targetDbType) throws SQLException {
         PreparedStatement stmt = conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
-        var columnNames = getTableSchema().getColumnNames();
+        var columnDescs = getTableSchema().getColumnDescs();
         for (int i = 0; i < row.size(); i++) {
-            switch (getTableSchema().getColumnType(columnNames[i])) {
+            var column = columnDescs.get(i);
+            switch (column.getDataType().getTypeName()) {
                 case INTERVAL:
                     if (targetDbType == DatabaseType.POSTGRES) {
                         stmt.setObject(i + 1, new PGInterval((String) row.get(i)));
@@ -232,6 +234,14 @@ public class JDBCSink extends SinkBase {
                         pgObj.setValue((String) row.get(i));
                         stmt.setObject(i + 1, pgObj);
                     }
+                    break;
+                case LIST:
+                    var fieldType = column.getDataType().getFieldType(0);
+                    var sqlType =
+                            JdbcUtils.getDbSqlType(
+                                    targetDbType, fieldType.getTypeName(), fieldType);
+                    var list = (java.util.ArrayList<?>) row.get(i);
+                    stmt.setArray(i + 1, conn.createArrayOf(sqlType, list.toArray()));
                     break;
                 default:
                     stmt.setObject(i + 1, row.get(i));

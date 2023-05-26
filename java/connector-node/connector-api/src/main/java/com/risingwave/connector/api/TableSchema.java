@@ -17,7 +17,9 @@ package com.risingwave.connector.api;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,18 +29,21 @@ public class TableSchema {
     private final List<String> columnNames;
     private final Map<String, TypeName> columns;
     private final Map<String, Integer> columnIndices;
+    private List<ColumnDesc> columnDescs;
 
     private final List<String> primaryKeys;
 
     public TableSchema(
-            List<String> columnNames, List<TypeName> typeNames, List<String> primaryKeys) {
+            List<String> columnNames, List<Data.DataType> dataTypes, List<String> primaryKeys) {
         this.columnNames = columnNames;
         this.primaryKeys = primaryKeys;
         this.columns = new HashMap<>();
         this.columnIndices = new HashMap<>();
+        this.columnDescs = new ArrayList<>();
         for (int i = 0; i < columnNames.size(); i++) {
-            columns.put(columnNames.get(i), typeNames.get(i));
+            columns.put(columnNames.get(i), dataTypes.get(i).getTypeName());
             columnIndices.put(columnNames.get(i), i);
+            columnDescs.add(new ColumnDesc(columnNames.get(i), dataTypes.get(i)));
         }
     }
 
@@ -54,6 +59,10 @@ public class TableSchema {
         return columns.get(columnName);
     }
 
+    public ColumnDesc getColumnDesc(int index) {
+        return columnDescs.get(index);
+    }
+
     public Map<String, TypeName> getColumnTypes() {
         return new HashMap<>(columns);
     }
@@ -62,10 +71,16 @@ public class TableSchema {
         return columnNames.toArray(new String[0]);
     }
 
+    public List<ColumnDesc> getColumnDescs() {
+        return columnDescs;
+    }
+
     public static TableSchema getMockTableSchema() {
         return new TableSchema(
                 Lists.newArrayList("id", "name"),
-                Lists.newArrayList(TypeName.INT32, TypeName.VARCHAR),
+                Lists.newArrayList(
+                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build()),
                 Lists.newArrayList("id"));
     }
 
@@ -74,12 +89,18 @@ public class TableSchema {
                 .addColumns(
                         ConnectorServiceProto.TableSchema.Column.newBuilder()
                                 .setName("id")
-                                .setDataType(TypeName.INT32)
+                                .setDataType(
+                                        Data.DataType.newBuilder()
+                                                .setTypeName(TypeName.INT32)
+                                                .build())
                                 .build())
                 .addColumns(
                         ConnectorServiceProto.TableSchema.Column.newBuilder()
                                 .setName("name")
-                                .setDataType(TypeName.VARCHAR)
+                                .setDataType(
+                                        Data.DataType.newBuilder()
+                                                .setTypeName(TypeName.VARCHAR)
+                                                .build())
                                 .build())
                 .addAllPkIndices(List.of(1))
                 .build();
