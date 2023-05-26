@@ -561,14 +561,14 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
-                            // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
-                            // The value will generally be -1 for types that do not need
-                            // `atttypmod`.
-                            Some(ScalarImpl::Int32(-1)),
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
                             Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
                             Some(ScalarImpl::Bool(false)),
+                            // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
+                            // The value will generally be -1 for types that do not need
+                            // `atttypmod`.
+                            Some(ScalarImpl::Int32(-1)),
                         ])
                     })
                 });

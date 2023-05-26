@@ -28,9 +28,9 @@ pub const PG_ATTRIBUTE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "attrelid"),
     (DataType::Varchar, "attname"),
     (DataType::Int32, "atttypid"),
-    (DataType::Int32, "atttypmod"),
     (DataType::Int16, "attlen"),
     (DataType::Int16, "attnum"),
     (DataType::Boolean, "attnotnull"),
     (DataType::Boolean, "attisdropped"),
+    (DataType::Int32, "atttypmod"),
 ];
