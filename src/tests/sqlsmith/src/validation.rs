@@ -78,6 +78,23 @@ fn is_broken_channel_error(db_error: &str) -> bool {
     db_error.contains("failed to finish command: channel closed")
 }
 
+/// Permit recovery error
+/// Suppose Out Of Range Error happens in the following query:
+/// ```sql
+/// SELECT sum0(v1) FROM t;
+/// ```
+/// It would be a valid scenario from Sqlsmith.
+/// In that case we would trigger recovery for the materialized view.
+/// We could encounter this error on subsequent queries:
+/// ```text
+/// Barrier read is unavailable for now. Likely the cluster is recovering
+/// ```
+/// Recovery should be successful after a while.
+/// Hence we should retry for some bound.
+pub fn is_recovery_in_progress_error(db_error: &str) -> bool {
+    db_error.contains("Barrier read is unavailable for now. Likely the cluster is recovering")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
