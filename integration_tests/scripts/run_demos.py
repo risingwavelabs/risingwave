@@ -9,7 +9,7 @@ import argparse
 
 
 def run_sql_file(f: str, dir: str):
-    print("Running SQL file: {}".format(f))
+    print("Running SQL file: {} on RisingWave".format(f))
     # ON_ERROR_STOP=1 will let psql return error code when the query fails.
     # https://stackoverflow.com/questions/37072245/check-return-status-of-psql-command-in-unix-shell-scripting
     proc = subprocess.run(["psql", "-h", "localhost", "-p", "4566",

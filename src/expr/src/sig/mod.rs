@@ -17,3 +17,4 @@
 pub mod agg;
 pub mod cast;
 pub mod func;
+pub mod table_function;

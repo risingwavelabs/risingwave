@@ -113,7 +113,7 @@ impl StreamChunk {
         for (op, row) in rows {
             ops.push(*op);
             for (datum, builder) in row.iter().zip_eq_fast(array_builders.iter_mut()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
 

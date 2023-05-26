@@ -111,7 +111,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
             ValueImpl::Array(array) => array,
             ValueImpl::Scalar { value, capacity } => {
                 let mut builder = self.return_type().create_array_builder(capacity);
-                builder.append_datum_n(capacity, value);
+                builder.append_n(capacity, value);
                 builder.finish().into()
             }
         })
@@ -158,7 +158,7 @@ impl dyn Expression {
                 let datum = self
                     .eval_row_infallible(&row.into_owned_row(), &on_err)
                     .await;
-                array_builder.append_datum(&datum);
+                array_builder.append(&datum);
             } else {
                 array_builder.append_null();
             }
