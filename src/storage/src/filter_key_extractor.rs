@@ -20,7 +20,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::info_in_release;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
@@ -50,7 +50,7 @@ impl FilterKeyExtractorImpl {
         if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
@@ -292,9 +292,7 @@ impl FilterKeyExtractorManagerInner {
             // the table in sst has been deleted
 
             // use full key as default
-            return Ok(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            ));
+            return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         }
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
@@ -402,7 +400,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::types::ScalarImpl::{self};
-    use risingwave_common::util::ordered::OrderedRowSerde;
+    use risingwave_common::util::row_serde::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
     use risingwave_pb::catalog::table::TableType;
@@ -422,13 +420,13 @@ mod tests {
 
     #[test]
     fn test_default_filter_key_extractor() {
-        let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
+        let dummy_filter_key_extractor = DummyFilterKeyExtractor;
         let full_key = "full_key".as_bytes();
         let output_key = dummy_filter_key_extractor.extract(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
-        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
+        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor;
         let output_key = full_key_filter_key_extractor.extract(full_key);
 
         assert_eq!(full_key, output_key);
@@ -619,9 +617,7 @@ mod tests {
 
         filter_key_extractor_manager.update(
             1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(
-                DummyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
         );
 
         let remaining_table_id_set = HashSet::from([1]);

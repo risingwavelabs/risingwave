@@ -15,32 +15,67 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::array::Op;
+use risingwave_common::estimate_size::EstimateSize;
 
 use super::{StateCache, StateCacheFiller};
 
 /// An implementation of [`StateCache`] that uses a [`BTreeMap`] as the underlying cache, with no
 /// capacity limit.
-pub struct OrderedStateCache<K: Ord, V> {
+pub struct OrderedStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     cache: BTreeMap<K, V>,
     synced: bool,
+    kv_heap_size: usize,
 }
 
-impl<K: Ord, V> OrderedStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> EstimateSize for OrderedStateCache<K, V> {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add btreemap internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.kv_heap_size
+    }
+}
+
+impl<K: Ord + EstimateSize, V: EstimateSize> OrderedStateCache<K, V> {
     pub fn new() -> Self {
         Self {
             cache: BTreeMap::new(),
             synced: false,
+            kv_heap_size: 0,
         }
+    }
+
+    fn insert_cache(&mut self, key: K, value: V) -> Option<V> {
+        let key_size = key.estimated_heap_size();
+        self.kv_heap_size = self
+            .kv_heap_size
+            .saturating_add(key_size + value.estimated_heap_size());
+        let old_val = self.cache.insert(key, value);
+        if let Some(old_val) = &old_val {
+            self.kv_heap_size = self
+                .kv_heap_size
+                .saturating_sub(key_size + old_val.estimated_heap_size());
+        }
+        old_val
+    }
+
+    fn delete_cache(&mut self, key: &K) -> Option<V> {
+        let old_val = self.cache.remove(key);
+        if let Some(old_val) = &old_val {
+            self.kv_heap_size = self
+                .kv_heap_size
+                .saturating_sub(key.estimated_heap_size() + old_val.estimated_heap_size());
+        }
+        old_val
     }
 }
 
-impl<K: Ord, V> Default for OrderedStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> Default for OrderedStateCache<K, V> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for OrderedStateCache<K, V> {
     type Filler<'a> = &'a mut Self where Self: 'a;
     type Key = K;
     type Value = V;
@@ -57,7 +92,7 @@ impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
 
     fn insert(&mut self, key: Self::Key, value: Self::Value) -> Option<Self::Value> {
         if self.synced {
-            self.cache.insert(key, value)
+            self.insert_cache(key, value)
         } else {
             None
         }
@@ -65,7 +100,7 @@ impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
 
     fn delete(&mut self, key: &Self::Key) -> Option<Self::Value> {
         if self.synced {
-            self.cache.remove(key)
+            self.delete_cache(key)
         } else {
             None
         }
@@ -102,7 +137,7 @@ impl<K: Ord, V> StateCache for OrderedStateCache<K, V> {
     }
 }
 
-impl<K: Ord, V> StateCacheFiller for &mut OrderedStateCache<K, V> {
+impl<K: Ord + EstimateSize, V: EstimateSize> StateCacheFiller for &mut OrderedStateCache<K, V> {
     type Key = K;
     type Value = V;
 

@@ -242,7 +242,9 @@ fn lexer(input: &str) -> Vec<Token> {
             _ => {
                 let mut literal = String::new();
                 literal.push(c);
-                while let Some(&c) = chars.peek() && !matches!(c, '(' | ')' | ':' | ' ' | '\t' | '\r' | '\n') {
+                while let Some(&c) = chars.peek()
+                    && !matches!(c, '(' | ')' | ':' | ' ' | '\t' | '\r' | '\n')
+                {
                     literal.push(chars.next().unwrap());
                 }
                 Token::Literal(literal)

@@ -51,12 +51,12 @@ impl Planner {
                 LogicalLimit::create(plan, limit, offset)
             } else {
                 // Create a logical top-n if with limit/offset and order-by
-                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties)?
+                LogicalTopN::create(plan, limit, offset, order.clone(), with_ties, vec![])?
             }
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id"  {
+        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id" {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }

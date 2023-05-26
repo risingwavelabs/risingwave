@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::{
-    parse_local_object_store, parse_remote_object_store, ObjectStoreImpl,
-};
+use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{
@@ -225,7 +223,7 @@ macro_rules! dispatch_state_store {
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
-    use std::ops::Deref;
+    use std::ops::{Bound, Deref};
 
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
@@ -339,7 +337,7 @@ pub mod verify {
         fn ingest_batch(
             &self,
             kv_pairs: Vec<(Bytes, StorageValue)>,
-            delete_ranges: Vec<(Bytes, Bytes)>,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
             write_options: WriteOptions,
         ) -> Self::IngestBatchFuture<'_> {
             async move {
@@ -439,7 +437,10 @@ pub mod verify {
             Ok(())
         }
 
-        fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        fn flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        ) -> Self::FlushFuture<'_> {
             async move {
                 if let Some(expected) = &mut self.expected {
                     expected.flush(delete_ranges.clone()).await?;
@@ -576,21 +577,12 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let remote_object_store = parse_remote_object_store(
+                let object_store = parse_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
                 )
                 .await;
-                let object_store = if opts.enable_local_spill {
-                    let local_object_store = parse_local_object_store(
-                        opts.local_object_store.as_str(),
-                        object_store_metrics.clone(),
-                    );
-                    ObjectStoreImpl::hybrid(local_object_store, remote_object_store)
-                } else {
-                    remote_object_store
-                };
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
@@ -699,7 +691,7 @@ impl AsHummockTrait for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Deref, DerefMut};
+    use std::ops::{Bound, Deref, DerefMut};
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -780,7 +772,10 @@ pub mod boxed_state_store {
 
         fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-        async fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> StorageResult<usize>;
+        async fn flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        ) -> StorageResult<usize>;
 
         fn epoch(&self) -> u64;
 
@@ -826,7 +821,10 @@ pub mod boxed_state_store {
             self.delete(key, old_val)
         }
 
-        async fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> StorageResult<usize> {
+        async fn flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        ) -> StorageResult<usize> {
             self.flush(delete_ranges).await
         }
 
@@ -887,7 +885,10 @@ pub mod boxed_state_store {
             self.deref_mut().delete(key, old_val)
         }
 
-        fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        fn flush(
+            &mut self,
+            delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+        ) -> Self::FlushFuture<'_> {
             self.deref_mut().flush(delete_ranges)
         }
 

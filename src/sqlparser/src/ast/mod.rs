@@ -278,6 +278,10 @@ pub enum Expr {
     IsFalse(Box<Expr>),
     /// `IS NOT FALSE` operator
     IsNotFalse(Box<Expr>),
+    /// `IS UNKNOWN` operator
+    IsUnknown(Box<Expr>),
+    /// `IS NOT UNKNOWN` operator
+    IsNotUnknown(Box<Expr>),
     /// `IS DISTINCT FROM` operator
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
@@ -427,6 +431,8 @@ impl fmt::Display for Expr {
             Expr::IsNotTrue(ast) => write!(f, "{} IS NOT TRUE", ast),
             Expr::IsFalse(ast) => write!(f, "{} IS FALSE", ast),
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
+            Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
+            Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
             Expr::InList {
                 expr,
                 list,
@@ -675,7 +681,7 @@ pub struct WindowFrame {
     /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
     /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
     pub end_bound: Option<WindowFrameBound>,
-    // TBD: EXCLUDE
+    pub exclusion: Option<WindowFrameExclusion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -734,6 +740,27 @@ impl fmt::Display for WindowFrameBound {
     }
 }
 
+/// Frame exclusion option of [WindowFrame].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameExclusion {
+    CurrentRow,
+    Group,
+    Ties,
+    NoOthers,
+}
+
+impl fmt::Display for WindowFrameExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW"),
+            WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP"),
+            WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES"),
+            WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddDropSync {
@@ -766,6 +793,7 @@ pub enum ShowObject {
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
+    Indexes { table: ObjectName },
 }
 
 impl fmt::Display for ShowObject {
@@ -798,6 +826,7 @@ impl fmt::Display for ShowObject {
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
+            ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
         }
     }
 }
@@ -990,7 +1019,7 @@ pub enum Statement {
         table_name: ObjectName,
         columns: Vec<OrderByExpr>,
         include: Vec<Ident>,
-        distributed_by: Vec<Ident>,
+        distributed_by: Vec<Expr>,
         unique: bool,
         if_not_exists: bool,
     },

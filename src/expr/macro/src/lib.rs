@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(lint_reasons)]
+#![feature(let_chains)]
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -33,7 +34,9 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
         let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
 
         let mut tokens = item.into_token_stream();
-        tokens.extend(fn_attr.generate_descriptors(false)?);
+        for attr in fn_attr.expand() {
+            tokens.extend(attr.generate_descriptor(false)?);
+        }
         Ok(tokens)
     }
     match inner(attr, item) {
@@ -51,7 +54,9 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
         let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
 
         let mut tokens = item.into_token_stream();
-        tokens.extend(fn_attr.generate_descriptors(true)?);
+        for attr in fn_attr.expand() {
+            tokens.extend(attr.generate_descriptor(true)?);
+        }
         Ok(tokens)
     }
     match inner(attr, item) {
@@ -60,12 +65,57 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
-#[derive(Debug)]
+#[proc_macro_attribute]
+pub fn aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = parse_macro_input!(attr as syn::AttributeArgs);
+    let item = parse_macro_input!(item as syn::ItemFn);
+
+    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
+
+        let mut tokens = item.into_token_stream();
+        for attr in fn_attr.expand() {
+            tokens.extend(attr.generate_agg_descriptor(false)?);
+        }
+        Ok(tokens)
+    }
+    match inner(attr, item) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_attribute]
+pub fn build_aggregate(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = parse_macro_input!(attr as syn::AttributeArgs);
+    let item = parse_macro_input!(item as syn::ItemFn);
+
+    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
+
+        let mut tokens = item.into_token_stream();
+        for attr in fn_attr.expand() {
+            tokens.extend(attr.generate_agg_descriptor(true)?);
+        }
+        Ok(tokens)
+    }
+    match inner(attr, item) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+#[derive(Debug, Clone)]
 struct FunctionAttr {
     name: String,
     args: Vec<String>,
     ret: String,
-    batch: Option<String>,
+    is_table_function: bool,
+    batch_fn: Option<String>,
+    state: Option<String>,
+    init_state: Option<String>,
+    prebuild: Option<String>,
+    type_infer: Option<String>,
     user_fn: UserFunctionAttr,
 }
 
@@ -102,6 +152,13 @@ impl ReturnType {
 
     fn contains_option(&self) -> bool {
         matches!(self, ReturnType::Option | ReturnType::ResultOption)
+    }
+}
+
+impl FunctionAttr {
+    /// Return a unique name that can be used as an identifier.
+    fn ident_name(&self) -> String {
+        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret).replace("[]", "list")
     }
 }
 

@@ -85,8 +85,8 @@ SELECT f.f1, @f.f1 AS abs_f1
    FROM FLOAT8_TBL f;
 
 -- truncate
---@ SELECT f.f1, trunc(f.f1) AS trunc_f1
---@    FROM FLOAT8_TBL f;
+SELECT f.f1, trunc(f.f1) AS trunc_f1
+   FROM FLOAT8_TBL f;
 
 -- round
 SELECT f.f1, round(f.f1) AS round_f1
@@ -158,7 +158,7 @@ SELECT |/ double precision '64' AS eight;
 --@    WHERE f.f1 > '0.0';
 
 -- check edge cases for exp
---@ SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
+SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 
 -- cube root
 --@ SELECT ||/ double precision '27' AS three;
@@ -191,25 +191,25 @@ SELECT * FROM FLOAT8_TBL;
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
 -- tend to produce results that vary in the last place.
---@ SELECT sinh(double precision '1');
---@ SELECT cosh(double precision '1');
---@ SELECT tanh(double precision '1');
---@ SELECT asinh(double precision '1');
---@ SELECT acosh(double precision '2');
---@ SELECT atanh(double precision '0.5');
+SELECT sinh(double precision '1') - 1.1752011936438 < 1e-14;
+SELECT cosh(double precision '1') - 1.54308063481524 < 1e-14;
+SELECT tanh(double precision '1') - 0.761594155955765 < 1e-14;
+SELECT asinh(double precision '1');
+SELECT acosh(double precision '2') - 1.31695789692482 < 1e-14;
+SELECT atanh(double precision '0.5') - 0.549306144334055 < 1e-14;
 -- test Inf/NaN cases for hyperbolic functions
---@ SELECT sinh(double precision 'infinity');
---@ SELECT sinh(double precision '-infinity');
---@ SELECT sinh(double precision 'nan');
---@ SELECT cosh(double precision 'infinity');
---@ SELECT cosh(double precision '-infinity');
---@ SELECT cosh(double precision 'nan');
---@ SELECT tanh(double precision 'infinity');
---@ SELECT tanh(double precision '-infinity');
---@ SELECT tanh(double precision 'nan');
---@ SELECT asinh(double precision 'infinity');
---@ SELECT asinh(double precision '-infinity');
---@ SELECT asinh(double precision 'nan');
+SELECT sinh(double precision 'infinity');
+SELECT sinh(double precision '-infinity');
+SELECT sinh(double precision 'nan');
+SELECT cosh(double precision 'infinity');
+SELECT cosh(double precision '-infinity');
+SELECT cosh(double precision 'nan');
+SELECT tanh(double precision 'infinity');
+SELECT tanh(double precision '-infinity');
+SELECT tanh(double precision 'nan');
+SELECT asinh(double precision 'infinity');
+SELECT asinh(double precision '-infinity');
+SELECT asinh(double precision 'nan');
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
 -- SELECT acosh(double precision 'infinity');
 --@ SELECT acosh(double precision '-infinity');
@@ -248,13 +248,13 @@ SELECT * FROM FLOAT8_TBL;
 
 -- test edge-case coercions to integer
 SELECT '32767.4'::float8::int2 AS int2;
---@ SELECT '32767.6'::float8::int2;
+SELECT '32767.6'::float8::int2;
 SELECT '-32768.4'::float8::int2 AS int2;
---@ SELECT '-32768.6'::float8::int2;
+SELECT '-32768.6'::float8::int2;
 SELECT '2147483647.4'::float8::int4 AS int4;
---@ SELECT '2147483647.6'::float8::int4;
+SELECT '2147483647.6'::float8::int4;
 SELECT '-2147483648.4'::float8::int4 AS int4;
---@ SELECT '-2147483648.6'::float8::int4;
+SELECT '-2147483648.6'::float8::int4;
 SELECT '9223372036854773760'::float8::int8 AS int8;
 SELECT '9223372036854775807'::float8::int8;
 SELECT '-9223372036854775808.5'::float8::int8 AS int8;
@@ -274,15 +274,15 @@ SELECT x,
 FROM (VALUES (0), (60), (90), (120), (180),
       (240), (270), (300), (360)) AS t(x);
 
---@ SELECT x,
---@        tand(x),
---@        tand(x) IN ('-Infinity'::float8,-1,0,
---@                    1,'Infinity'::float8) AS tand_exact,
---@        cotd(x),
---@        cotd(x) IN ('-Infinity'::float8,-1,0,
---@                    1,'Infinity'::float8) AS cotd_exact
---@ FROM (VALUES (0), (45), (90), (135), (180),
---@       (225), (270), (315), (360)) AS t(x);
+SELECT x,
+       tand(x),
+       tand(x) IN ('-Infinity'::float8,-1,0,
+                   1,'Infinity'::float8) AS tand_exact,
+       cotd(x),
+       cotd(x) IN ('-Infinity'::float8,-1,0,
+                   1,'Infinity'::float8) AS cotd_exact
+FROM (VALUES (0), (45), (90), (135), (180),
+      (225), (270), (315), (360)) AS t(x);
 
 --@ SELECT x,
 --@        asind(x),

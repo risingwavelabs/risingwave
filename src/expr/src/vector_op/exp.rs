@@ -12,11 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use num_traits::{Float, Zero};
-use risingwave_common::types::F64;
+use num_traits::Zero;
+use risingwave_common::types::{Decimal, FloatExt, F64};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
+
+fn err_logarithm_input() -> ExprError {
+    ExprError::InvalidParam {
+        name: "input",
+        reason: "cannot take logarithm of zero or a negative number".into(),
+    }
+}
 
 #[function("exp(float64) -> float64")]
 pub fn exp_f64(input: F64) -> Result<F64> {
@@ -44,6 +51,37 @@ pub fn exp_f64(input: F64) -> Result<F64> {
             Ok(res)
         }
     }
+}
+
+#[function("ln(float64) -> float64")]
+pub fn ln_f64(input: F64) -> Result<F64> {
+    if input.0 <= 0.0 {
+        return Err(err_logarithm_input());
+    }
+    Ok(input.ln())
+}
+
+#[function("log10(float64) -> float64")]
+pub fn log10_f64(input: F64) -> Result<F64> {
+    if input.0 <= 0.0 {
+        return Err(err_logarithm_input());
+    }
+    Ok(input.log10())
+}
+
+#[function("exp(decimal) -> decimal")]
+pub fn exp_decimal(input: Decimal) -> Result<Decimal> {
+    input.checked_exp().ok_or(ExprError::NumericOverflow)
+}
+
+#[function("ln(decimal) -> decimal")]
+pub fn ln_decimal(input: Decimal) -> Result<Decimal> {
+    input.checked_ln().ok_or_else(err_logarithm_input)
+}
+
+#[function("log10(decimal) -> decimal")]
+pub fn log10_decimal(input: Decimal) -> Result<Decimal> {
+    input.checked_log10().ok_or_else(err_logarithm_input)
 }
 
 #[cfg(test)]

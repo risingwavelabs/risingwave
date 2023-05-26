@@ -42,6 +42,29 @@ impl RegexpContext {
                 .build()?,
         ))
     }
+
+    pub fn from_pattern(pattern: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Self::new(pattern, "")
+    }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags)
+    }
 }
 
 /// <https://www.postgresql.org/docs/current/functions-matching.html#POSIX-EMBEDDED-OPTIONS-TABLE>
@@ -191,9 +214,7 @@ impl RegexpMatchExpression {
 #[async_trait::async_trait]
 impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -201,9 +222,7 @@ impl Expression for RegexpMatchExpression {
         let text_arr: &Utf8Array = text_arr.as_ref().into();
         let mut output = ListArrayBuilder::with_type(
             input.capacity(),
-            DataType::List {
-                datatype: Box::new(DataType::Varchar),
-            },
+            DataType::List(Box::new(DataType::Varchar)),
         );
 
         for (text, vis) in text_arr.iter().zip_eq_fast(input.vis().iter()) {

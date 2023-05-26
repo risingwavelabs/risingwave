@@ -296,11 +296,11 @@ impl Binder {
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
                 let mut alias_iter = from_alias.columns.into_iter();
-                original_alias.columns = original_alias.columns.into_iter().map(|ident| {
-                    alias_iter
-                        .next()
-                        .unwrap_or(ident)
-                }).collect();
+                original_alias.columns = original_alias
+                    .columns
+                    .into_iter()
+                    .map(|ident| alias_iter.next().unwrap_or(ident))
+                    .collect();
             }
 
             self.bind_table_to_context(
@@ -316,11 +316,18 @@ impl Binder {
 
             // Share the CTE.
             let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
-            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
+            let share_relation = Relation::Share(Box::new(BoundShare {
+                share_id,
+                input: input_relation,
+            }));
             Ok(share_relation)
         } else {
-
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_proctime)
+            self.bind_relation_by_name_inner(
+                schema_name.as_deref(),
+                &table_name,
+                alias,
+                for_system_time_as_of_proctime,
+            )
         }
     }
 
@@ -352,7 +359,9 @@ impl Binder {
         err_msg: &str,
     ) -> Result<Box<InputRef>> {
         if let Some(time_col_arg) = arg
-          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
+            && let Some(ExprImpl::InputRef(time_col)) =
+                self.bind_function_arg(time_col_arg)?.into_iter().next()
+        {
             Ok(time_col)
         } else {
             Err(ErrorCode::BindError(err_msg.to_string()).into())
@@ -439,7 +448,8 @@ impl Binder {
                     .get_function_by_name_args(
                         func_name,
                         &args.iter().map(|arg| arg.return_type()).collect_vec(),
-                    ) && matches!(func.kind, FunctionKind::Table { .. })
+                    )
+                    && matches!(func.kind, FunctionKind::Table { .. })
                 {
                     TableFunction::new_user_defined(func.clone(), args)
                 } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {

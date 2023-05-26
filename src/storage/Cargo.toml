@@ -25,14 +25,15 @@ dyn-clone = "1.0.4"
 enum-as-inner = "0.5"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hex = "0.4"
 itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
-memcomparable = "0.1"
+memcomparable = "0.2"
 minitrace = "0.4"
 minstant = "0.1"
+num-integer = "0.1"
 parking_lot = "0.12"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
@@ -66,10 +67,10 @@ tokio-retry = "0.3"
 tracing = "0.1"
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
-zstd = "0.11.2"
+zstd = { version = "0.12", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.12", default-features = false }
+procfs = { version = "0.14", default-features = false }
 libc = "0.2"
 nix = { version = "0.25", features = ["fs", "mman"] }
 

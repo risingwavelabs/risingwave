@@ -30,7 +30,7 @@ use super::stats::DistributedQueryMetrics;
 use super::QueryExecution;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::{WorkerNodeManagerRef, WorkerNodeSelector};
 use crate::scheduler::{ExecutionContextRef, PinnedHummockSnapshot, SchedulerResult};
 
 pub struct DistributedQueryStream {
@@ -158,11 +158,14 @@ impl QueryManager {
         query: Query,
         pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
-        if let Some(query_limit) = self.disrtibuted_query_limit && self.query_metrics.running_query_num.get() as u64 == query_limit {
+        if let Some(query_limit) = self.disrtibuted_query_limit
+            && self.query_metrics.running_query_num.get() as u64 == query_limit
+        {
             self.query_metrics.rejected_query_counter.inc();
-            return Err(
-                crate::scheduler::SchedulerError::QueryReachLimit(QueryMode::Distributed, query_limit)
-            )
+            return Err(crate::scheduler::SchedulerError::QueryReachLimit(
+                QueryMode::Distributed,
+                query_limit,
+            ));
         }
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
@@ -174,11 +177,15 @@ impl QueryManager {
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
 
+        let worker_node_manager_reader = WorkerNodeSelector::new(
+            self.worker_node_manager.clone(),
+            pinned_snapshot.support_barrier_read(),
+        );
         // Starts the execution of the query.
         let query_result_fetcher = query_execution
             .start(
                 context.clone(),
-                self.worker_node_manager.clone(),
+                worker_node_manager_reader,
                 pinned_snapshot,
                 self.compute_client_pool.clone(),
                 self.catalog_reader.clone(),

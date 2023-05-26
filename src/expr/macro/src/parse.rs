@@ -40,15 +40,10 @@ impl FunctionAttr {
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
-
-        let batch = attr.iter().find_map(|n| {
-            let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
-            if !nv.path.is_ident("batch") {
-                return None;
-            };
-            let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
-            Some(lit_str.value())
-        });
+        let (is_table_function, ret) = match ret.trim_start().strip_prefix("setof") {
+            Some(s) => (true, s),
+            None => (false, ret),
+        };
 
         let user_fn = UserFunctionAttr::parse(item)?;
 
@@ -60,7 +55,12 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
-            batch,
+            is_table_function,
+            batch_fn: find_argument(attr, "batch_fn"),
+            state: find_argument(attr, "state"),
+            init_state: find_argument(attr, "init_state"),
+            prebuild: find_argument(attr, "prebuild"),
+            type_infer: find_argument(attr, "type_infer"),
             user_fn,
         })
     }
@@ -74,7 +74,6 @@ impl UserFunctionAttr {
             arg_option: args_are_all_option(item),
             return_type: return_type(item),
             generic: item.sig.generics.params.len(),
-            // prebuild: extract_prebuild_arg(item),
         })
     }
 }
@@ -82,9 +81,15 @@ impl UserFunctionAttr {
 /// Check if the last argument is `&mut dyn Write`.
 fn last_arg_is_write(item: &syn::ItemFn) -> bool {
     let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
-    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false };
-    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else { return false };
-    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false };
+    let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else {
+        return false;
+    };
+    let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else {
+        return false;
+    };
+    let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else {
+        return false;
+    };
     path.segments.last().map_or(false, |s| s.ident == "Write")
 }
 
@@ -110,19 +115,45 @@ fn return_type(item: &syn::ItemFn) -> ReturnType {
         ReturnType::ResultOption
     } else if return_value_is(item, "Result") {
         ReturnType::Result
-    } else if return_value_is(item, "Option") {
+    } else if return_value_is(item, "Option") || return_value_is(item, "DatumRef") {
         ReturnType::Option
     } else {
         ReturnType::T
     }
 }
 
-/// Check if the return value is `type_`.
+/// Check if the return value is `type_` or `impl Iterator<Item = type_>`.
 fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
+    let ty = match ty.as_ref() {
+        syn::Type::ImplTrait(_) => match iterator_item(ty) {
+            Some(ty) => ty,
+            None => return false,
+        },
+        ty => ty,
+    };
+    let syn::Type::Path(path) = ty else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == type_
+}
+
+/// Extract item from `impl Iterator<Item = ???>`
+fn iterator_item(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::ImplTrait(impl_trait) = ty else { return None; };
+    let syn::TypeParamBound::Trait(trait_bound) = impl_trait.bounds.first()? else { return None; };
+    let segment = trait_bound.path.segments.last().unwrap();
+    if segment.ident != "Iterator" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(angle_bracketed) = &segment.arguments else {
+        return None;
+    };
+    for arg in &angle_bracketed.args {
+        if let syn::GenericArgument::Binding(b) = arg && b.ident == "Item" {
+            return Some(&b.ty);
+        }
+    }
+    None
 }
 
 /// Check if the return value is `Result<Option<T>>`.
@@ -140,21 +171,14 @@ fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
     seg.ident == "Option"
 }
 
-/// Extract `#[prebuild("function_name")]` from arguments.
-fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
-    for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
-        let syn::FnArg::Typed(arg) = arg else { continue };
-        if let Some(idx) = arg
-            .attrs
-            .iter_mut()
-            .position(|att| att.path.is_ident("prebuild"))
-        {
-            let attr = arg.attrs.remove(idx);
-            // XXX: this is a hack to parse a string literal from token stream
-            let s = attr.tokens.to_string();
-            let s = s.trim_start_matches("(\"").trim_end_matches("\")");
-            return Some((i, s.to_string()));
+/// Find argument `#[xxx(.., name = "value")]`.
+fn find_argument(attr: &syn::AttributeArgs, name: &str) -> Option<String> {
+    attr.iter().find_map(|n| {
+        let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
+        if !nv.path.is_ident(name) {
+            return None;
         }
-    }
-    None
+        let syn::Lit::Str(ref lit_str) = nv.lit else { return None };
+        Some(lit_str.value())
+    })
 }

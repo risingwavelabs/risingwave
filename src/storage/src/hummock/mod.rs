@@ -20,7 +20,6 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -193,7 +192,6 @@ impl HummockStorage {
             compactor_metrics.clone(),
             sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
-            CompactorRuntimeConfig::default(),
         ));
 
         let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
@@ -203,6 +201,7 @@ impl HummockStorage {
             event_rx,
             pinned_version,
             compactor_context.clone(),
+            state_store_metrics.clone(),
         );
 
         let instance = Self {
@@ -362,9 +361,14 @@ pub async fn get_from_sstable_info(
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
+    if let Some(hash) = dist_key_hash
+        && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats)
+    {
         if !read_options.ignore_range_tombstone {
-            let delete_epoch = get_min_delete_range_epoch_from_sstable(sstable.value().as_ref(), full_key.user_key);
+            let delete_epoch = get_min_delete_range_epoch_from_sstable(
+                sstable.value().as_ref(),
+                full_key.user_key,
+            );
             if delete_epoch <= full_key.epoch {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }

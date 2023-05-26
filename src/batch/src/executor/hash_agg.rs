@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use futures_async_stream::try_stream;
@@ -21,10 +20,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::function::aggregate::AggCall;
-use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
+use risingwave_expr::agg::{build as build_agg, AggCall, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
@@ -33,7 +32,7 @@ use crate::executor::{
 };
 use crate::task::{BatchTaskContext, TaskId};
 
-type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
+type AggHashMap<K, A> = hashbrown::HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher, A>;
 
 /// A dispatcher to help create specialized hash agg executor.
 impl HashKeyDispatcher for HashAggExecutorBuilder {
@@ -41,13 +40,14 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(
-            self.agg_factories,
+            self.agg_init_states,
             self.group_key_columns,
             self.group_key_types,
             self.schema,
             self.child,
             self.identity,
             self.chunk_size,
+            self.mem_context,
         ))
     }
 
@@ -57,7 +57,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilder {
 }
 
 pub struct HashAggExecutorBuilder {
-    agg_factories: Vec<AggStateFactory>,
+    agg_init_states: Vec<BoxedAggState>,
     group_key_columns: Vec<usize>,
     group_key_types: Vec<DataType>,
     child: BoxedExecutor,
@@ -65,6 +65,7 @@ pub struct HashAggExecutorBuilder {
     task_id: TaskId,
     identity: String,
     chunk_size: usize,
+    mem_context: MemoryContext,
 }
 
 impl HashAggExecutorBuilder {
@@ -74,11 +75,12 @@ impl HashAggExecutorBuilder {
         task_id: TaskId,
         identity: String,
         chunk_size: usize,
+        mem_context: MemoryContext,
     ) -> Result<BoxedExecutor> {
-        let agg_factories: Vec<_> = hash_agg_node
+        let agg_init_states: Vec<_> = hash_agg_node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(AggStateFactory::new))
+            .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(build_agg))
             .try_collect()?;
 
         let group_key_columns = hash_agg_node
@@ -97,12 +99,12 @@ impl HashAggExecutorBuilder {
         let fields = group_key_types
             .iter()
             .cloned()
-            .chain(agg_factories.iter().map(|e| e.get_return_type()))
+            .chain(agg_init_states.iter().map(|e| e.return_type()))
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
         let builder = HashAggExecutorBuilder {
-            agg_factories,
+            agg_init_states,
             group_key_columns,
             group_key_types,
             child,
@@ -110,6 +112,7 @@ impl HashAggExecutorBuilder {
             task_id,
             identity,
             chunk_size,
+            mem_context,
         };
 
         Ok(builder.dispatch())
@@ -129,13 +132,15 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
             NodeBody::HashAgg
         )?;
 
-        let identity = source.plan_node().get_identity().clone();
+        let identity = source.plan_node().get_identity();
+
         Self::deserialize(
             hash_agg_node,
             child,
             source.task_id.clone(),
-            identity,
+            identity.clone(),
             source.context.get_config().developer.chunk_size,
+            source.context.create_executor_mem_context(identity),
         )
     }
 }
@@ -143,7 +148,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub struct HashAggExecutor<K> {
     /// Factories to construct aggregator for each groups
-    agg_factories: Vec<AggStateFactory>,
+    agg_init_states: Vec<BoxedAggState>,
     /// Column indexes that specify a group
     group_key_columns: Vec<usize>,
     /// Data types of group key columns
@@ -153,27 +158,30 @@ pub struct HashAggExecutor<K> {
     child: BoxedExecutor,
     identity: String,
     chunk_size: usize,
+    mem_context: MemoryContext,
     _phantom: PhantomData<K>,
 }
 
 impl<K> HashAggExecutor<K> {
     pub fn new(
-        agg_factories: Vec<AggStateFactory>,
+        agg_init_states: Vec<BoxedAggState>,
         group_key_columns: Vec<usize>,
         group_key_types: Vec<DataType>,
         schema: Schema,
         child: BoxedExecutor,
         identity: String,
         chunk_size: usize,
+        mem_context: MemoryContext,
     ) -> Self {
         HashAggExecutor {
-            agg_factories,
+            agg_init_states,
             group_key_columns,
             group_key_types,
             schema,
             child,
             identity,
             chunk_size,
+            mem_context,
             _phantom: PhantomData,
         }
     }
@@ -197,26 +205,35 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         // hash map for each agg groups
-        let mut groups = AggHashMap::<K>::default();
+        let mut groups = AggHashMap::<K, _>::with_hasher_in(
+            PrecomputedBuildHasher,
+            self.mem_context.global_allocator(),
+        );
 
         // consume all chunks to compute the agg result
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = chunk?.compact();
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
+            let mut memory_usage_diff = 0;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let states: &mut Vec<BoxedAggState> = groups.entry(key).or_insert_with(|| {
-                    self.agg_factories
-                        .iter()
-                        .map(AggStateFactory::create_agg_state)
-                        .collect()
+                let mut new_group = false;
+                let states = groups.entry(key).or_insert_with(|| {
+                    new_group = true;
+                    self.agg_init_states.clone()
                 });
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
-                    state.update_single(&chunk, row_id).await?
+                    if !new_group {
+                        memory_usage_diff -= state.estimated_size() as i64;
+                    }
+                    state.update_single(&chunk, row_id).await?;
+                    memory_usage_diff += state.estimated_size() as i64;
                 }
             }
+            // update memory usage
+            self.mem_context.add(memory_usage_diff);
         }
 
         // generate output data chunks
@@ -230,13 +247,9 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 .collect();
 
             let mut agg_builders: Vec<_> = self
-                .agg_factories
+                .agg_init_states
                 .iter()
-                .map(|agg_factory| {
-                    agg_factory
-                        .get_return_type()
-                        .create_array_builder(cardinality)
-                })
+                .map(|agg| agg.return_type().create_array_builder(cardinality))
                 .collect();
 
             let mut has_next = false;
@@ -268,6 +281,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
 #[cfg(test)]
 mod tests {
+    use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
@@ -282,10 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let t32 = DataType::Int32;
-        let t64 = DataType::Int64;
-
-        let src_exec = MockExecutor::with_chunk(
+        let src_exec = Box::new(MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i i
                  0 1 1
@@ -297,14 +308,12 @@ mod tests {
                  1 1 3
                  0 1 2",
             ),
-            Schema {
-                fields: vec![
-                    Field::unnamed(t32.clone()),
-                    Field::unnamed(t32.clone()),
-                    Field::unnamed(t32.clone()),
-                ],
-            },
-        );
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
 
         let agg_call = AggCall {
             r#type: Type::Sum as i32,
@@ -329,25 +338,19 @@ mod tests {
             agg_calls: vec![agg_call],
         };
 
+        let mem_context = MemoryContext::root(IntGauge::new("memory_usage", " ").unwrap());
         let actual_exec = HashAggExecutorBuilder::deserialize(
             &agg_prost,
-            Box::new(src_exec),
+            src_exec,
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
+            mem_context.clone(),
         )
         .unwrap();
 
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(t32.clone()),
-                Field::unnamed(t32),
-                Field::unnamed(t64),
-            ],
-        };
-
         // TODO: currently the order is fixed unless the hasher is changed
-        let expect_exec = MockExecutor::with_chunk(
+        let expect_exec = Box::new(MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i i I
                  1 0 1
@@ -355,14 +358,20 @@ mod tests {
                  0 1 3
                  1 1 6",
             ),
-            schema,
-        );
-        diff_executor_output(actual_exec, Box::new(expect_exec)).await;
+            Schema::new(vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int64),
+            ]),
+        ));
+        diff_executor_output(actual_exec, expect_exec).await;
+
+        // check estimated memory usage = 4 groups x state size
+        assert_eq!(mem_context.get_bytes_used() as usize, 4 * 72);
     }
 
     #[tokio::test]
     async fn execute_count_star() {
-        let t32 = DataType::Int32;
         let src_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "i
@@ -375,9 +384,7 @@ mod tests {
                  1
                  0",
             ),
-            Schema {
-                fields: vec![Field::unnamed(t32.clone())],
-            },
+            Schema::new(vec![Field::unnamed(DataType::Int32)]),
         );
 
         let agg_call = AggCall {
@@ -403,18 +410,16 @@ mod tests {
             TaskId::default(),
             "HashAggExecutor".to_string(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         )
         .unwrap();
-        let schema = Schema {
-            fields: vec![Field::unnamed(t32)],
-        };
 
         let expect_exec = MockExecutor::with_chunk(
             DataChunk::from_pretty(
                 "I
                  8",
             ),
-            schema,
+            Schema::new(vec![Field::unnamed(DataType::Int64)]),
         );
         diff_executor_output(actual_exec, Box::new(expect_exec)).await;
     }

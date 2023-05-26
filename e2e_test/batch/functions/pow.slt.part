@@ -123,7 +123,7 @@ select exp(0.0::decimal);
 1
 
 query R
-select exp(2.0);
+select exp(2.0::double precision);
 ----
 7.38905609893065
 
@@ -137,3 +137,71 @@ select exp(10000000);
 
 statement error QueryError: Expr error: Numeric out of range: underflow
 select exp(-10000000);
+
+query TRR
+with t(v) as (
+	values ('nan'), ('inf'), ('-inf'), ('-0')
+) select
+	v,
+	exp(v::decimal)::float8, -- display with trailing zeros, use `trim_scale` later
+	exp(v::float8)
+from t;
+----
+nan       NaN      NaN
+inf  Infinity Infinity
+-inf        0        0
+-0          1        1
+
+query TRR
+with t(v) as (
+	values ('nan'), ('inf')
+) select
+	v,
+	ln(v::decimal),
+	ln(v::float8),
+	log(v::decimal),
+	log(v::float8),
+	log10(v::decimal),
+	log10(v::float8)
+from t;
+----
+nan      NaN      NaN      NaN      NaN      NaN      NaN
+inf Infinity Infinity Infinity Infinity Infinity Infinity
+
+statement error zero
+select ln('0'::decimal);
+
+statement error negative
+select ln('-1'::decimal);
+
+statement error negative
+select ln('-inf'::decimal);
+
+statement error zero
+select log10('0'::float8);
+
+statement error negative
+select log10('-1'::float8);
+
+statement error negative
+select log10('-inf'::float8);
+
+query TR
+select
+	pg_typeof(exp(1::decimal)),
+	round(exp(1::decimal), 3);
+----
+numeric 2.718
+
+# rust_decimal overflows very early
+statement error overflow
+select exp(12::decimal);
+
+query RRTR
+select
+	ln(exp(1::float8)),
+	log(10::float8),
+	abs(ln(exp(1::decimal)) - 1) < 1e-9,
+	log(10::decimal)::float8;
+----
+1 1 t 1

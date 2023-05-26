@@ -46,10 +46,20 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
     input.floor()
 }
 
+#[function("trunc(float64) -> float64")]
+pub fn trunc_f64(input: F64) -> F64 {
+    f64::trunc(input.0).into()
+}
+
+#[function("trunc(decimal) -> decimal")]
+pub fn trunc_decimal(input: Decimal) -> Decimal {
+    input.trunc()
+}
+
 // Ties are broken by rounding away from zero
 #[function("round(float64) -> float64")]
 pub fn round_f64(input: F64) -> F64 {
-    f64::round(input.0).into()
+    f64::round_ties_even(input.0).into()
 }
 
 // Ties are broken by rounding away from zero
@@ -94,8 +104,10 @@ mod tests {
         assert_eq!(floor_f64(F64::from(-42.8)), F64::from(-43.0));
 
         assert_eq!(round_f64(F64::from(42.4)), F64::from(42.0));
-        assert_eq!(round_f64(F64::from(42.5)), F64::from(43.0));
-        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-7.0));
+        assert_eq!(round_f64(F64::from(42.5)), F64::from(42.0));
+        assert_eq!(round_f64(F64::from(-6.5)), F64::from(-6.0));
+        assert_eq!(round_f64(F64::from(43.5)), F64::from(44.0));
+        assert_eq!(round_f64(F64::from(-7.5)), F64::from(-8.0));
     }
 
     #[test]

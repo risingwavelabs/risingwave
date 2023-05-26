@@ -19,8 +19,7 @@ use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
-use crate::types::struct_type::StructType;
-use crate::types::DataType;
+use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
 
 /// The field in the schema of the executor's return data
@@ -170,6 +169,29 @@ impl Schema {
             .into_iter()
             .map(|field| field.to_prost())
             .collect()
+    }
+
+    pub fn type_eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (a, b) in self.fields.iter().zip_eq_fast(other.fields.iter()) {
+            if a.data_type != b.data_type {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn all_type_eq<'a>(inputs: impl IntoIterator<Item = &'a Self>) -> bool {
+        let mut iter = inputs.into_iter();
+        if let Some(first) = iter.next() {
+            iter.all(|x| x.type_eq(first))
+        } else {
+            true
+        }
     }
 }
 

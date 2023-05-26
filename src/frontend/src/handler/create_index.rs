@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
@@ -46,7 +47,7 @@ pub(crate) fn gen_create_index_plan(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<(PlanRef, PbTable, PbIndex)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -127,7 +128,7 @@ pub(crate) fn gen_create_index_plan(
     };
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(risingwave_sqlparser::ast::Expr::Identifier(column))?;
+        let expr_impl = binder.bind_expr(column)?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -159,6 +160,7 @@ pub(crate) fn gen_create_index_plan(
         .into_iter()
         .filter(|expr| match expr {
             ExprImpl::InputRef(input_ref) => set.insert(input_ref.index),
+            ExprImpl::FunctionCall(_) => true,
             _ => unreachable!(),
         })
         .collect_vec();
@@ -394,7 +396,7 @@ pub async fn handle_create_index(
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
-    distributed_by: Vec<Ident>,
+    distributed_by: Vec<ast::Expr>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 

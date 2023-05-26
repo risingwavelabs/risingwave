@@ -20,7 +20,7 @@ use chrono::offset::Utc;
 use chrono::DateTime;
 use clap::Args;
 use itertools::Itertools;
-use risingwave_common::types::to_text::ToText;
+use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;

@@ -38,7 +38,7 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
@@ -115,7 +115,7 @@ impl QueryExecution {
     pub async fn start(
         &self,
         context: ExecutionContextRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
@@ -196,7 +196,7 @@ impl QueryExecution {
         &self,
         pinned_snapshot: &PinnedHummockSnapshot,
         context: ExecutionContextRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
     ) -> HashMap<StageId, Arc<StageExecution>> {
@@ -437,6 +437,7 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
+    use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
@@ -451,7 +452,7 @@ pub(crate) mod tests {
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::worker_node_manager::WorkerNodeManager;
+    use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
         QueryExecutionInfo,
@@ -463,6 +464,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
@@ -480,7 +482,7 @@ pub(crate) mod tests {
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
-                worker_node_manager,
+                worker_node_selector,
                 PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
                 compute_client_pool,
                 catalog_reader,
@@ -596,6 +598,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -606,6 +612,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -616,16 +626,22 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
+        worker_node_manager
+            .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new(
-            worker_node_manager,
+            worker_node_selector,
             catalog_reader,
             None,
             batch_exchange_node.clone(),

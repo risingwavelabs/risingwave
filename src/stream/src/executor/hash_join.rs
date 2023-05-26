@@ -25,7 +25,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
@@ -206,7 +206,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         unimplemented!()
     }
 
-    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -913,7 +912,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .entry(side_update.join_key_indices.len() + inequality_index)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             let mut input_watermark = watermark.clone();
-            if *need_offset && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref() {
+            if *need_offset
+                && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref()
+            {
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
@@ -926,7 +927,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             self.ctx.on_compute_error(err, self.identity.as_str());
                         }
                         continue;
-                    },
+                    }
                 }
             };
             if let Some(selected_watermark) = buffers.handle_watermark(side, input_watermark) {
@@ -1069,13 +1070,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 }
                             } else {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row
-                                        .row
-                                        .datum_at(*column_idx)
-                                        .map_or(false, |scalar| {
-                                            scalar < watermark.val.as_scalar_ref_impl()
-                                        })
-                                    {
+                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                        false,
+                                        |scalar| {
+                                            scalar
+                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
+                                                .is_lt()
+                                        },
+                                    ) {
                                         need_state_clean = true;
                                         break;
                                     }
@@ -1119,7 +1121,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         if append_only_optimize && let Some(row) = append_only_matched_row {
                             side_match.ht.delete(key, row);
                         } else if side_update.need_degree_table {
-                            side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
+                            side_update
+                                .ht
+                                .insert(key, JoinRow::new(row, degree))
+                                .await?;
                         } else {
                             side_update.ht.insert_row(key, row).await?;
                         }
@@ -1176,13 +1181,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 }
                             } else {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row
-                                        .row
-                                        .datum_at(*column_idx)
-                                        .map_or(false, |scalar| {
-                                            scalar < watermark.val.as_scalar_ref_impl()
-                                        })
-                                    {
+                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                        false,
+                                        |scalar| {
+                                            scalar
+                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
+                                                .is_lt()
+                                        },
+                                    ) {
                                         need_state_clean = true;
                                         break;
                                     }

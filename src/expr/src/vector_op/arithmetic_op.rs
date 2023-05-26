@@ -16,8 +16,10 @@ use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
-use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Float, Signed, Zero};
-use risingwave_common::types::{CheckedAdd, Date, Decimal, Interval, Time, Timestamp, F64};
+use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
+use risingwave_common::types::{
+    CheckedAdd, Date, Decimal, FloatExt, Interval, Time, Timestamp, F64,
+};
 use risingwave_expr_macro::function;
 use rust_decimal::MathematicalOps;
 
@@ -280,13 +282,8 @@ fn timestamptz_interval_inner(l: i64, r: Interval, f: fn(i64, i64) -> Option<i64
             "timestamp with time zone +/- interval of days".into(),
         ));
     }
-
-    let result: Option<i64> = try {
-        let delta_usecs = r.usecs();
-        f(l, delta_usecs)?
-    };
-
-    result.ok_or(ExprError::NumericOutOfRange)
+    let delta_usecs = r.usecs();
+    f(l, delta_usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("multiply(interval, *int) -> interval")]
@@ -403,13 +400,20 @@ pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
     }
 }
 
+#[function("cbrt(float64) -> float64")]
+pub fn cbrt_f64(expr: F64) -> F64 {
+    expr.cbrt()
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::num256::{Int256, Int256Ref};
+    use num_traits::Float;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Date, Decimal, Interval, Scalar, Timestamp, F32, F64};
+    use risingwave_common::types::{
+        Date, Decimal, Int256, Int256Ref, Interval, Scalar, Timestamp, F32, F64,
+    };
 
     use super::*;
 

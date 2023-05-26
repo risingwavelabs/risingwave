@@ -12,81 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use risingwave_common::array::{Array, ArrayRef, DataChunk, ListArray, ListRef};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::array::ListRef;
+use risingwave_common::types::DatumRef;
+use risingwave_expr_macro::function;
 
 use super::*;
 
-#[derive(Debug)]
-pub struct Unnest {
-    return_type: DataType,
-    list: BoxedExpression,
-    chunk_size: usize,
-}
-
-impl Unnest {
-    fn eval_row(&self, list: ListRef<'_>) -> Result<ArrayRef> {
-        let mut builder = self.return_type.create_array_builder(self.chunk_size);
-        for d in &list.flatten() {
-            builder.append_datum(*d);
-        }
-        Ok(Arc::new(builder.finish()))
-    }
-}
-
-#[async_trait::async_trait]
-impl TableFunction for Unnest {
-    fn return_type(&self) -> DataType {
-        self.return_type.clone()
-    }
-
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_list = self.list.eval_checked(input).await?;
-        let arr_list: &ListArray = ret_list.as_ref().into();
-
-        let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
-
-        match bitmap {
-            Some(bitmap) => {
-                for (list, visible) in arr_list.iter().zip_eq_fast(bitmap.iter()) {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let Some(list) = list {
-                        self.eval_row(list)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-            None => {
-                for list in arr_list.iter() {
-                    let array = if let Some(list) = list {
-                        self.eval_row(list)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-        }
-
-        Ok(output_arrays)
-    }
-}
-
-pub fn new_unnest(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
-    let return_type = DataType::from(prost.get_return_type().unwrap());
-    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-    let [list]: [_; 1] = args.try_into().unwrap();
-
-    Ok(Unnest {
-        return_type,
-        list,
-        chunk_size,
-    }
-    .boxed())
+#[function(
+    "unnest(list) -> setof any",
+    type_infer = "|args| Ok(args[0].unnest_list())"
+)]
+fn unnest(list: ListRef<'_>) -> impl Iterator<Item = DatumRef<'_>> {
+    list.flatten().into_iter()
 }

@@ -114,10 +114,15 @@ impl CreatingStreamingJobInfo {
     async fn cancel_jobs(&self, job_ids: Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         for job_id in job_ids {
-            if let Some(job) = jobs.get_mut(&job_id) && let Some(shutdown_tx) = job.shutdown_tx.take() {
-                let _ = shutdown_tx.send(CreatingState::Canceling).await.inspect_err(|_| {
-                    tracing::warn!("failed to send canceling state");
-                });
+            if let Some(job) = jobs.get_mut(&job_id)
+                && let Some(shutdown_tx) = job.shutdown_tx.take()
+            {
+                let _ = shutdown_tx
+                    .send(CreatingState::Canceling)
+                    .await
+                    .inspect_err(|_| {
+                        tracing::warn!("failed to send canceling state");
+                    });
             }
         }
     }
@@ -542,6 +547,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::meta::add_worker_node_request::Property;
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -709,7 +715,15 @@ mod tests {
             };
             let fake_parallelism = 4;
             cluster_manager
-                .add_worker_node(WorkerType::ComputeNode, host.clone(), fake_parallelism)
+                .add_worker_node(
+                    WorkerType::ComputeNode,
+                    host.clone(),
+                    Property {
+                        worker_node_parallelism: fake_parallelism,
+                        is_streaming: true,
+                        is_serving: true,
+                    },
+                )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
 
@@ -839,7 +853,7 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![])
+                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
                     .await?;
             }
             self.global_stream_manager

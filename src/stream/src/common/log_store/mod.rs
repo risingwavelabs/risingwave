@@ -35,7 +35,7 @@ pub enum LogStoreError {
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 
-    #[error("Valud encoding error: {0}")]
+    #[error("Value encoding error: {0}")]
     ValueEncoding(#[from] ValueEncodingError),
 }
 

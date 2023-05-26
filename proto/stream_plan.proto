@@ -217,7 +217,7 @@ message AggCallState {
 
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
-  // Only used for local simple agg, not used for global simple agg.
+  // Only used for stateless simple agg.
   repeated uint32 distribution_key = 2;
   repeated AggCallState agg_call_states = 3;
   catalog.Table result_table = 4;
@@ -419,6 +419,9 @@ message ChainNode {
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
 
+  /// The state table used by Backfill operator for persisting internal state
+  catalog.Table state_table = 5;
+
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
 }
@@ -546,14 +549,21 @@ message DedupNode {
 
 message NoOpNode {}
 
+message EowcOverWindowNode {
+  repeated expr.WindowFunction calls = 1;
+  repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3; // use `repeated` in case of future extension, now only one column is allowed
+  catalog.Table state_table = 4;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
     ProjectNode project = 101;
     FilterNode filter = 102;
     MaterializeNode materialize = 103;
-    SimpleAggNode local_simple_agg = 104;
-    SimpleAggNode global_simple_agg = 105;
+    SimpleAggNode stateless_simple_agg = 104;
+    SimpleAggNode simple_agg = 105;
     HashAggNode hash_agg = 106;
     TopNNode append_only_top_n = 107;
     HashJoinNode hash_join = 108;
@@ -584,6 +594,7 @@ message StreamNode {
     ValuesNode values = 133;
     DedupNode append_only_dedup = 134;
     NoOpNode no_op = 135;
+    EowcOverWindowNode eowc_over_window = 136;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

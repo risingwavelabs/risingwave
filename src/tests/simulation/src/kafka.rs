@@ -46,6 +46,10 @@ pub async fn create_topics(broker_addr: &str, topics: HashMap<String, i32>) {
 
 /// Create a kafka producer for the topics and data in `datadir`.
 pub async fn producer(broker_addr: &str, datadir: String) {
+    /// Delimiter for key and value in a line.
+    /// equal to `kafkacat -K ^`
+    const KEY_DELIMITER: u8 = b'^';
+
     let admin = ClientConfig::new()
         .set("bootstrap.servers", broker_addr)
         .create::<AdminClient<_>>()
@@ -78,23 +82,32 @@ pub async fn producer(broker_addr: &str, datadir: String) {
             .expect("failed to create topic");
 
         let content = std::fs::read(file.path()).unwrap();
-        let msgs: Box<dyn Iterator<Item = &[u8]> + Send> = if topic.ends_with("bin") {
-            // binary message data, a file is a message
-            Box::new(std::iter::once(content.as_slice()))
-        } else {
-            Box::new(
-                content
-                    .split(|&b| b == b'\n')
-                    .filter(|line| !line.is_empty()),
-            )
-        };
-        for msg in msgs {
+        let msgs: Box<dyn Iterator<Item = (Option<&[u8]>, &[u8])> + Send> =
+            if topic.ends_with("bin") {
+                // binary message data, a file is a message
+                Box::new(std::iter::once((None, content.as_slice())))
+            } else {
+                // text message data, a line is a message
+                Box::new(
+                    content
+                        .split(|&b| b == b'\n')
+                        .filter(|line| !line.is_empty())
+                        .map(|line| match line.iter().position(|&b| b == KEY_DELIMITER) {
+                            Some(pos) => (Some(&line[..pos]), &line[pos + 1..]),
+                            None => (None, line),
+                        }),
+                )
+            };
+        for (key, payload) in msgs {
             loop {
                 let ts = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
                     .as_millis() as i64;
-                let record = BaseRecord::<(), _>::to(topic).payload(msg).timestamp(ts);
+                let mut record = BaseRecord::to(topic).payload(payload).timestamp(ts);
+                if let Some(key) = key {
+                    record = record.key(key);
+                }
                 match producer.send(record) {
                     Ok(_) => break,
                     Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {

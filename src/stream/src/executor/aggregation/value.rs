@@ -16,14 +16,16 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::aggregate::AggCall;
+use risingwave_expr::agg::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use crate::executor::error::StreamExecutorResult;
 
 /// A wrapper around [`StreamingAggImpl`], which maintains aggregation result as a value in memory.
 /// Agg executors will get the result and store it in result state table.
+#[derive(EstimateSize)]
 pub struct ValueState {
     /// Upstream column indices of agg arguments.
     arg_indices: Vec<usize>,
@@ -81,7 +83,7 @@ impl ValueState {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_expr::function::aggregate::{AggArgs, AggKind};
+    use risingwave_expr::agg::{AggArgs, AggKind};
 
     use super::*;
 

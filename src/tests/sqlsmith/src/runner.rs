@@ -73,7 +73,7 @@ pub async fn generate(
     let mut rng = generate_rng(seed);
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
-    let rows_per_table = 10;
+    let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
     populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
@@ -156,7 +156,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
 
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
-    let rows_per_table = 10;
+    let rows_per_table = 50;
     populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
@@ -422,9 +422,7 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
         Ok(_) => Ok(0),
         Err(e) => {
             // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error()
-                && is_permissible_error(&e.to_string())
-            {
+            if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok(1);
             }

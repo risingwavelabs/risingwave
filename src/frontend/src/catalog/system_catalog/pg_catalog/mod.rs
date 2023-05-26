@@ -18,11 +18,14 @@ pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
+pub mod pg_constraint;
 pub mod pg_conversion;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_enum;
 pub mod pg_index;
+pub mod pg_indexes;
+pub mod pg_inherits;
 pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
@@ -46,11 +49,14 @@ pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
+pub use pg_constraint::*;
 pub use pg_conversion::*;
 pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_enum::*;
 pub use pg_index::*;
+pub use pg_indexes::*;
+pub use pg_inherits::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
@@ -75,6 +81,7 @@ use risingwave_pb::user::UserInfo;
 use serde_json::json;
 
 use super::SysCatalogReaderImpl;
+use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::UserId;
 
@@ -523,6 +530,25 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
+    pub(super) fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {
+        let catalog_reader = self.catalog_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema: &SchemaCatalog| {
+                schema.iter_index().map(|index| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(index.primary_table.name.clone().into())),
+                        Some(ScalarImpl::Utf8(index.index_table.name.clone().into())),
+                        None,
+                        Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+
     pub(super) fn read_pg_attribute(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
@@ -643,6 +669,14 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
+    }
+
+    pub(super) fn read_inherits_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_INHERITS_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_CONSTRAINT_DATA_ROWS.clone())
     }
 
     pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {

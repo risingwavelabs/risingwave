@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
+use risingwave_common::types::{
+    DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef, ToOwnedDatum,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
@@ -94,10 +96,9 @@ impl ArrayRemoveExpression {
         match left {
             Some(ScalarRefImpl::List(left)) => Some(
                 ListValue::new(
-                    left.values_ref()
-                        .into_iter()
+                    left.iter()
                         .filter(|x| x != &right)
-                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .map(|x| x.to_owned_datum())
                         .collect(),
                 )
                 .into(),
@@ -125,7 +126,7 @@ impl Expression for ArrayRemoveExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(Self::evaluate(left, right));
+                builder.append(Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))

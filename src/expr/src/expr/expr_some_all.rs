@@ -88,9 +88,7 @@ impl Expression for SomeAllExpression {
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
-        let DataType::List { datatype } = arr_right_inner.data_type() else {
-            unreachable!()
-        };
+        let DataType::List(datatype) = arr_right_inner.data_type() else { unreachable!() };
         let capacity = arr_right_inner
             .iter()
             .flatten()
@@ -112,11 +110,11 @@ impl Expression for SomeAllExpression {
                 let datum_right = right.unwrap();
                 match datum_right {
                     ScalarRefImpl::List(array) => {
-                        let len = array.values_ref().len();
+                        let len = array.iter().len();
                         num_array.push(Some(len));
-                        unfolded_arr_left_builder.append_datum_n(len, left);
-                        for item in array.values_ref() {
-                            unfolded_arr_right_builder.append_datum(item);
+                        unfolded_arr_left_builder.append_n(len, left);
+                        for item in array.iter() {
+                            unfolded_arr_right_builder.append(item);
                         }
                     }
                     _ => unreachable!(),
@@ -219,9 +217,9 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
         let left_expr = build_from_prost(&inner_children[0])?;
         let right_expr = build_from_prost(&inner_children[1])?;
 
-        let DataType::List { datatype: right_expr_return_type } = right_expr.return_type() else {
-        bail!("Expect Array Type");
-    };
+        let DataType::List(right_expr_return_type) = right_expr.return_type() else {
+            bail!("Expect Array Type");
+        };
 
         let eval_func = {
             let left_expr_input_ref = ExprNode {

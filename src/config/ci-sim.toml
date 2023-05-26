@@ -1,0 +1,8 @@
+[server]
+telemetry_enabled = false
+
+[system]
+telemetry_enabled = false
+
+[meta]
+meta_leader_lease_secs = 10

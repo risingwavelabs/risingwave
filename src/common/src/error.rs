@@ -221,6 +221,12 @@ impl From<Infallible> for RwError {
     }
 }
 
+impl From<String> for RwError {
+    fn from(e: String) -> Self {
+        ErrorCode::InternalError(e).into()
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(

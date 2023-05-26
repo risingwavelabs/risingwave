@@ -112,6 +112,11 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
+message MigrationPlan {
+  // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
+  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
+}
+
 message FlushRequest {
   bool checkpoint = 1;
 }
@@ -165,9 +170,15 @@ service StreamManagerService {
 // Below for cluster service.
 
 message AddWorkerNodeRequest {
+  message Property {
+    uint64 worker_node_parallelism = 1;
+    bool is_streaming = 2;
+    bool is_serving = 3;
+  }
   common.WorkerType worker_type = 1;
   common.HostAddress host = 2;
-  uint64 worker_node_parallelism = 3;
+  reserved 3;
+  Property property = 4;
 }
 
 message AddWorkerNodeResponse {

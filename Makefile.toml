@@ -22,11 +22,16 @@ env_scripts = [
   '''
 #!@duckscript
 
+# only duckscript can modify env variables in cargo-make
+
 set_env ENABLE_TELEMETRY "false"
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
+is_release = get_env ENABLE_RELEASE_PROFILE
+is_not_release = not ${is_release}
+is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -47,6 +52,12 @@ if ${is_hdfs_backend}
   set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
 else
   set_env BUILD_HDFS_BACKEND_CMD ""
+end
+
+if ${is_not_release} and ${is_dynamic_linking}
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+else
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
 end
 
 ''',
@@ -329,6 +340,7 @@ echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
+            ${RISINGWAVE_FEATURE_FLAGS} \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
@@ -346,7 +358,7 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" }
 script = '''
 #!/usr/bin/env bash
 
@@ -449,7 +461,11 @@ script = '''
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 \
+cargo run --bin risingwave \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          -- playground
 '''
 
 [tasks.ctl]
@@ -477,7 +493,7 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = ["pre-start-dev"]
-script = "RUST_BACKTRACE=full target/${BUILD_MODE_DIR}/risedev-dev ${@}"
+script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
@@ -850,7 +866,7 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -866,11 +882,11 @@ if [ $# -gt 0 ]; then
   ARGS=("$@")
 
   echo "Applying clippy --fix for $@ (including dirty and staged files)"
-  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+  cargo clippy ${ARGS[@]/#/--package risingwave_} ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
   echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
-  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+  cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 fi
 """
 
@@ -899,7 +915,7 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 

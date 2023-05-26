@@ -30,7 +30,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::ordered::OrderedRowSerde;
+use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
@@ -307,7 +307,7 @@ impl LogStoreRowSerde {
         stream: impl StateStoreReadIterStream,
         start_seq_id: SeqIdType,
         end_seq_id: SeqIdType,
-        expected: u64,
+        expected_epoch: u64,
     ) -> LogStoreResult<StreamChunk> {
         pin_mut!(stream);
         let size_bound = (end_seq_id - start_seq_id + 1) as usize;
@@ -317,11 +317,11 @@ impl LogStoreRowSerde {
         while let Some((_, value)) = stream.try_next().await? {
             match self.deserialize(value)? {
                 (epoch, LogStoreRowOp::Row { op, row }) => {
-                    if epoch != expected {
+                    if epoch != expected_epoch {
                         return Err(LogStoreError::Internal(anyhow!(
                             "decoded epoch {} not match expected epoch {}",
                             epoch,
-                            expected
+                            expected_epoch
                         )));
                     }
                     ops.push(op);

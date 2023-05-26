@@ -107,8 +107,8 @@ impl JsonParser {
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        if let BorrowedValue::Array(ref objects) = value  && matches!(op, Op::Insert) {
-             at_least_one_ok(
+        if let BorrowedValue::Array(ref objects) = value && matches!(op, Op::Insert) {
+            at_least_one_ok(
                 objects
                     .iter()
                     .map(|obj| Self::parse_single_value(obj, &mut writer))
@@ -119,13 +119,10 @@ impl JsonParser {
                 simd_json_parse_value(
                     &SourceFormat::Json,
                     &desc.data_type,
-                    json_object_smart_get_value(&value,desc.name.as_str().into())
+                    json_object_smart_get_value(&value, desc.name.as_str().into()),
                 )
                 .map_err(|e| {
-                    tracing::error!(
-                        "failed to process value: {}",
-                        e
-                    );
+                    tracing::error!("failed to process value: {}", e);
                     e.into()
                 })
             };
@@ -144,11 +141,11 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
+    use risingwave_common::cast::{str_to_date, str_to_timestamp};
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
     use crate::common::UpsertMessage;
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
@@ -385,7 +382,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
-        assert_eq!(row, expected);
+        assert_eq!(row, expected.into());
     }
     #[tokio::test]
     async fn test_json_upsert_parser() {

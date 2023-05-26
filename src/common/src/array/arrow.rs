@@ -20,10 +20,8 @@ use arrow_schema::{Field, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
-use super::column::Column;
 use super::*;
-use crate::types::num256::Int256;
-use crate::types::struct_type::StructType;
+use crate::types::{Int256, StructType};
 use crate::util::iter_util::ZipEqFast;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
@@ -34,7 +32,7 @@ impl From<&DataChunk> for arrow_array::RecordBatch {
             chunk
                 .columns()
                 .iter()
-                .map(|column| ("", column.array_ref().into())),
+                .map(|column| ("", column.as_ref().into())),
         )
         .unwrap()
     }
@@ -46,7 +44,7 @@ impl TryFrom<&arrow_array::RecordBatch> for DataChunk {
     fn try_from(batch: &arrow_array::RecordBatch) -> Result<Self, Self::Error> {
         let mut columns = Vec::with_capacity(batch.num_columns());
         for array in batch.columns() {
-            let column = Column::new(Arc::new(array.try_into()?));
+            let column = Arc::new(array.try_into()?);
             columns.push(column);
         }
         Ok(DataChunk::new(columns, batch.num_rows()))
@@ -124,13 +122,11 @@ impl From<&arrow_schema::DataType> for DataType {
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
+            Struct(field) => Self::Struct(Arc::new(StructType {
                 fields: field.iter().map(|f| f.data_type().into()).collect(),
                 field_names: field.iter().map(|f| f.name().clone()).collect(),
             })),
-            List(field) => Self::List {
-                datatype: Box::new(field.data_type().into()),
-            },
+            List(field) => Self::List(Box::new(field.data_type().into())),
             Decimal128(_, _) => Self::Decimal,
             Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
@@ -165,7 +161,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
@@ -653,8 +649,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::interval::test_utils::IntervalTestExt;
-    use crate::{array, empty_array};
+    use crate::types::test_utils::IntervalTestExt;
 
     #[test]
     fn bool() {
@@ -672,7 +667,7 @@ mod tests {
 
     #[test]
     fn f32() {
-        let array = F32Array::from_iter([None, Some(F32::from(-7.0)), Some(F32::from(25.0))]);
+        let array = F32Array::from_iter([None, Some(-7.0), Some(25.0)]);
         let arrow = arrow_array::Float32Array::from(&array);
         assert_eq!(F32Array::from(&arrow), array);
     }
@@ -819,8 +814,8 @@ mod tests {
         let expected_risingwave_struct_array = StructArray::from_slices_with_field_names(
             &[true, true, true, false],
             vec![
-                array! { BoolArray, [Some(false), Some(false), Some(true), None]}.into(),
-                array! { I32Array, [Some(42), Some(28), Some(19), None] }.into(),
+                BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into(),
+                I32Array::from_iter([Some(42), Some(28), Some(19), None]).into(),
             ],
             vec![DataType::Boolean, DataType::Int32],
             vec![String::from("a"), String::from("b")],
@@ -835,10 +830,10 @@ mod tests {
     fn list() {
         let array = ListArray::from_iter(
             [
-                Some(array! { I32Array, [None, Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([None, Some(-7), Some(25)]).into()),
                 None,
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );

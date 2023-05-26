@@ -28,6 +28,7 @@ aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
+base64 = "0.21"
 bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
@@ -39,9 +40,9 @@ csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
-globset = "0.4.8"
-google-cloud-pubsub = "0.7.0"
+futures-async-stream = { workspace = true }
+glob = "0.3"
+google-cloud-pubsub = "0.14"
 hex = "0.4"
 http = "0.2"
 http-serde = "1.1.0"
@@ -62,15 +63,17 @@ pulsar = { version = "4.2", default-features = false, features = [
     "telemetry",
     "auth-oauth2",
 ] }
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = [
+rdkafka = { workspace = true, features = [
     "cmake-build",
+    # "ssl",
+    # FIXME: temporary workaround before we find an ideal solution.
+    # See why it's needed and why it's not ideal in https://github.com/risingwavelabs/risingwave/issues/9852
     "ssl-vendored",
     "gssapi",
     "zstd",
 ] }
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { path = "../common" }
-risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 rust_decimal = "1"
@@ -104,7 +107,6 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
-wiremock = "0.5"
 
 [[bench]]
 name = "parser"

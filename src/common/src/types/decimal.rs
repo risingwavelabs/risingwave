@@ -17,11 +17,12 @@ use std::io::{Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use bytes::{BufMut, Bytes, BytesMut};
-use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
+use num_traits::{
+    CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Num, One, Signed, Zero,
+};
 use postgres_types::{ToSql, Type};
-use risingwave_common_proc_macro::EstimateSize;
-pub use rust_decimal::prelude::FromStr;
-use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
+use rust_decimal::prelude::FromStr;
+use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, RoundingStrategy};
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
@@ -36,14 +37,14 @@ use crate::types::Decimal::Normalized;
     Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd, EstimateSize,
 )]
 pub enum Decimal {
-    #[display("{0}")]
-    Normalized(RustDecimal),
-    #[display("NaN")]
-    NaN,
-    #[display("Infinity")]
-    PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
+    #[display("{0}")]
+    Normalized(RustDecimal),
+    #[display("Infinity")]
+    PositiveInf,
+    #[display("NaN")]
+    NaN,
 }
 
 impl ToText for Decimal {
@@ -483,6 +484,20 @@ impl Decimal {
     }
 
     #[must_use]
+    pub fn trunc(&self) -> Self {
+        match self {
+            Self::Normalized(d) => {
+                let mut d = d.trunc();
+                if d.is_zero() {
+                    d.set_sign_positive(true);
+                }
+                Self::Normalized(d)
+            }
+            d => *d,
+        }
+    }
+
+    #[must_use]
     pub fn round_ties_even(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.round()),
@@ -535,6 +550,33 @@ impl Decimal {
             Self::NaN => Self::NaN,
             Self::PositiveInf => Self::PositiveInf,
             Self::NegativeInf => Self::PositiveInf,
+        }
+    }
+
+    pub fn checked_exp(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_exp().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => Some(Self::zero()),
+        }
+    }
+
+    pub fn checked_ln(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_ln().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
+        }
+    }
+
+    pub fn checked_log10(&self) -> Option<Decimal> {
+        match self {
+            Self::Normalized(d) => d.checked_log10().map(Self::Normalized),
+            Self::NaN => Some(Self::NaN),
+            Self::PositiveInf => Some(Self::PositiveInf),
+            Self::NegativeInf => None,
         }
     }
 }
@@ -594,6 +636,69 @@ impl Zero for Decimal {
     }
 }
 
+impl One for Decimal {
+    fn one() -> Self {
+        Self::Normalized(RustDecimal::one())
+    }
+}
+
+impl Num for Decimal {
+    type FromStrRadixErr = Error;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        if str.eq_ignore_ascii_case("inf") || str.eq_ignore_ascii_case("infinity") {
+            Ok(Self::PositiveInf)
+        } else if str.eq_ignore_ascii_case("-inf") || str.eq_ignore_ascii_case("-infinity") {
+            Ok(Self::NegativeInf)
+        } else if str.eq_ignore_ascii_case("nan") {
+            Ok(Self::NaN)
+        } else {
+            RustDecimal::from_str_radix(str, radix).map(Decimal::Normalized)
+        }
+    }
+}
+
+impl Signed for Decimal {
+    fn abs(&self) -> Self {
+        self.abs()
+    }
+
+    fn abs_sub(&self, other: &Self) -> Self {
+        if self <= other {
+            Self::zero()
+        } else {
+            *self - *other
+        }
+    }
+
+    fn signum(&self) -> Self {
+        match self {
+            Self::Normalized(d) => Self::Normalized(d.signum()),
+            Self::NaN => Self::NaN,
+            Self::PositiveInf => Self::Normalized(RustDecimal::one()),
+            Self::NegativeInf => Self::Normalized(-RustDecimal::one()),
+        }
+    }
+
+    fn is_positive(&self) -> bool {
+        match self {
+            Self::Normalized(d) => d.is_sign_positive(),
+            Self::NaN => false,
+            Self::PositiveInf => true,
+            Self::NegativeInf => false,
+        }
+    }
+
+    fn is_negative(&self) -> bool {
+        match self {
+            Self::Normalized(d) => d.is_sign_negative(),
+            Self::NaN => false,
+            Self::PositiveInf => false,
+            Self::NegativeInf => true,
+        }
+    }
+}
+
 impl From<RustDecimal> for Decimal {
     fn from(d: RustDecimal) -> Self {
         Self::Normalized(d)
@@ -602,6 +707,7 @@ impl From<RustDecimal> for Decimal {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools as _;
 
     use super::*;
     use crate::util::iter_util::ZipEqFast;
@@ -755,6 +861,21 @@ mod tests {
         assert_eq!(i32::try_from(Decimal::from(1i32)).unwrap(), 1,);
         assert_eq!(u64::try_from(Decimal::from(1u64)).unwrap(), 1,);
         assert_eq!(i64::try_from(Decimal::from(1i64)).unwrap(), 1,);
+    }
+
+    #[test]
+    fn test_order() {
+        let ordered = ["-inf", "-1", "0.00", "0.5", "2", "10", "inf", "nan"]
+            .iter()
+            .map(|s| Decimal::from_str(s).unwrap())
+            .collect_vec();
+        for i in 1..ordered.len() {
+            assert!(ordered[i - 1] < ordered[i]);
+            assert!(
+                memcomparable::Decimal::from(ordered[i - 1])
+                    < memcomparable::Decimal::from(ordered[i])
+            );
+        }
     }
 
     #[test]

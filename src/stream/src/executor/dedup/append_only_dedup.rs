@@ -149,6 +149,8 @@ impl<S: StateStore> AppendOnlyDedupExecutor<S> {
                         }
                     }
 
+                    self.cache.update_epoch(barrier.epoch.curr);
+
                     yield Message::Barrier(barrier);
                 }
 
