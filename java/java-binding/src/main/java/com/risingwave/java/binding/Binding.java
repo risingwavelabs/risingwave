@@ -14,6 +14,8 @@
 
 package com.risingwave.java.binding;
 
+import java.io.ByteArrayInputStream;
+
 public class Binding {
     static {
         System.loadLibrary("risingwave_java_binding");
@@ -64,6 +66,8 @@ public class Binding {
     static native String rowGetIntervalValue(long pointer, int index);
 
     static native String rowGetJsonbValue(long pointer, int index);
+
+    static native ByteArrayInputStream rowGetByteaValue(long pointer, int index);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the row to release the row instance pointed by the pointer.

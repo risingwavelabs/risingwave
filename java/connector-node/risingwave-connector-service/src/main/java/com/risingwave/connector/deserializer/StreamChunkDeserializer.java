@@ -163,6 +163,16 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getJsonb(index);
                             };
                     break;
+
+                case BYTEA:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getBytea(index);
+                            };
+                    break;
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription("unsupported type " + typeName)

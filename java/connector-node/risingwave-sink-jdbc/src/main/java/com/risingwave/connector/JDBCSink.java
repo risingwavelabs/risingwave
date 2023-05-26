@@ -19,6 +19,7 @@ import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
+import java.io.InputStream;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -236,6 +237,9 @@ public class JDBCSink extends SinkBase {
                     } else {
                         stmt.setObject(i + 1, row.get(i));
                     }
+                    break;
+                case BYTEA:
+                    stmt.setBinaryStream(i + 1, (InputStream) row.get(i));
                     break;
                 default:
                     stmt.setObject(i + 1, row.get(i));
