@@ -298,7 +298,6 @@ where
             )
             .await,
         );
-
         // Make sure data dir is not used by another cluster.
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
@@ -307,6 +306,7 @@ where
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
+                env.opts.do_not_config_object_storage_lifecycle,
             )
             .await?;
         }
@@ -2346,6 +2346,7 @@ async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
+    do_not_config_object_storage_lifecycle: bool,
 ) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
@@ -2355,6 +2356,9 @@ async fn write_exclusive_cluster_id(
     let metadata = object_store.list(&cluster_id_dir).await?;
 
     if metadata.is_empty() {
+        if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref() && !do_not_config_object_storage_lifecycle{
+            s3.object_store_inner().configure_bucket_lifecycle().await;
+        }
         object_store
             .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
             .await?;
