@@ -280,11 +280,9 @@ pub async fn handle(
             drop_mode,
         }) => {
             if let AstOption::Some(DropMode::Cascade) = drop_mode {
-                return Err(ErrorCode::NotImplemented(
-                    "DROP CASCADE".to_string(),
-                    None.into(),
-                )
-                .into());
+                return Err(
+                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
+                );
             };
             match object_type {
                 ObjectType::Table => {
