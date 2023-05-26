@@ -586,8 +586,8 @@ where
             match ret {
                 Ok(_) => {
                     info!(
-                        "move state table [{}] from group-{} to group-{:?} success",
-                        table_id, parent_group_id, target_compact_group_id
+                        "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
+                        table_id, parent_group_id, target_compact_group_id, allow_split_by_table
                     );
                     return;
                 }
