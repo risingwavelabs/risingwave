@@ -207,6 +207,10 @@ select pow(0.5::decimal, 2000::decimal)::float8;
 ----
 0
 
+# But rust_decimal is not good at this. Should be 0.
+statement error
+select pow(1e28, -2);
+
 query R
 select exp(0.0);
 ----
