@@ -579,6 +579,80 @@ impl Decimal {
             Self::NegativeInf => None,
         }
     }
+
+    pub fn checked_powd(&self, rhs: &Self) -> Result<Self, PowError> {
+        use std::cmp::Ordering;
+
+        match (self, rhs) {
+            (Decimal::NaN, Decimal::NaN)
+            | (Decimal::PositiveInf, Decimal::NaN)
+            | (Decimal::NegativeInf, Decimal::NaN)
+            | (Decimal::NaN, Decimal::PositiveInf)
+            | (Decimal::NaN, Decimal::NegativeInf) => Ok(Self::NaN),
+            (Normalized(lhs), Decimal::NaN) => match lhs.is_one() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+            (Decimal::NaN, Normalized(rhs)) => match rhs.is_zero() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+
+            (Normalized(lhs), Decimal::PositiveInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+            (Decimal::PositiveInf, Decimal::PositiveInf)
+            | (Decimal::NegativeInf, Decimal::PositiveInf) => Ok(Self::PositiveInf),
+
+            (Normalized(lhs), Decimal::NegativeInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(0.into()),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => match lhs.is_zero() {
+                    true => Err(PowError::ZeroNegative),
+                    false => Ok(Self::PositiveInf),
+                },
+            },
+            (Decimal::PositiveInf, Decimal::NegativeInf)
+            | (Decimal::NegativeInf, Decimal::NegativeInf) => Ok(0.into()),
+
+            (Decimal::PositiveInf, Normalized(rhs)) => match rhs.cmp(&0.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+            (Decimal::NegativeInf, Normalized(rhs)) => match !rhs.fract().is_zero() {
+                true => Err(PowError::NegativeFract),
+                false => match (rhs.cmp(&0.into()), rhs.rem(&2.into()).is_zero()) {
+                    (Ordering::Greater, true) => Ok(Self::PositiveInf),
+                    (Ordering::Greater, false) => Ok(Self::NegativeInf),
+                    (Ordering::Equal, true) => Ok(1.into()),
+                    (Ordering::Equal, false) => unreachable!(),
+                    (Ordering::Less, true) => Ok(0.into()),
+                    (Ordering::Less, false) => Ok(0.into()),
+                },
+            },
+            (Normalized(lhs), Normalized(rhs)) => {
+                if lhs.is_zero() && rhs < &0.into() {
+                    return Err(PowError::ZeroNegative);
+                }
+                if lhs < &0.into() && !rhs.fract().is_zero() {
+                    return Err(PowError::NegativeFract);
+                }
+                match lhs.checked_powd(*rhs) {
+                    Some(d) => Ok(Self::Normalized(d)),
+                    None => Err(PowError::Overflow),
+                }
+            }
+        }
+    }
+}
+
+pub enum PowError {
+    ZeroNegative,
+    NegativeFract,
+    Overflow,
 }
 
 impl From<Decimal> for memcomparable::Decimal {

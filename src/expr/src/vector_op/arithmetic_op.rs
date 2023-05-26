@@ -188,6 +188,24 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
     Ok(res)
 }
 
+#[function("pow(decimal, decimal) -> decimal")]
+pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+    use risingwave_common::types::DecimalPowError as PowError;
+
+    l.checked_powd(&r).map_err(|e| match e {
+        PowError::ZeroNegative => ExprError::InvalidParam {
+            name: "rhs",
+            reason: "zero raised to a negative power is undefined".into(),
+        },
+        PowError::NegativeFract => ExprError::InvalidParam {
+            name: "rhs",
+            reason: "a negative number raised to a non-integer power yields a complex result"
+                .into(),
+        },
+        PowError::Overflow => ExprError::NumericOverflow,
+    })
+}
+
 #[inline(always)]
 fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
 where
