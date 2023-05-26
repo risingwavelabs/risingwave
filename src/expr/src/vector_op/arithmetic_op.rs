@@ -109,11 +109,8 @@ where
     })
 }
 
-#[function("neg(int16) -> int16")]
-#[function("neg(int32) -> int32")]
-#[function("neg(int64) -> int64")]
-#[function("neg(float32) -> float32")]
-#[function("neg(float64) -> float64")]
+#[function("neg(*int) -> auto")]
+#[function("neg(*float) -> auto")]
 #[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
@@ -130,11 +127,8 @@ where
         .ok_or(ExprError::NumericOutOfRange)
 }
 
-#[function("abs(int16) -> int16")]
-#[function("abs(int32) -> int32")]
-#[function("abs(int64) -> int64")]
-#[function("abs(float32) -> float32")]
-#[function("abs(float64) -> float64")]
+#[function("abs(*int) -> auto")]
+#[function("abs(*float) -> auto")]
 pub fn general_abs<T1: Signed + CheckedNeg>(expr: T1) -> Result<T1> {
     if expr.is_negative() {
         general_neg(expr)

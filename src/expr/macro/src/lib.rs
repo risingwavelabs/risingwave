@@ -27,6 +27,25 @@ mod utils;
 
 /// Defining expression from a Rust Function.
 ///
+/// [Online version of this doc.](https://risingwavelabs.github.io/risingwave/risingwave_expr_macro/attr.function.html)
+///
+/// # Table of Contents
+///
+/// - [Function Signature](#function-signature)
+///     - [Multiple Function Definitions](#multiple-function-definitions)
+///     - [Type Expansion](#type-expansion)
+///     - [Automatic Type Inference](#automatic-type-inference)
+///     - [Custom Type Inference Function](#custom-type-inference-function)
+/// - [Rust Function Requirements](#rust-function-requirements)
+///     - [Nullable Arguments](#nullable-arguments)
+///     - [Return Value](#return-value)
+///     - [Optimization](#optimization)
+///     - [Functions Returning Strings](#functions-returning-strings)
+///     - [Preprocessing Constant Arguments](#preprocessing-constant-arguments)
+/// - [Table Function](#table-function)
+/// - [Function Registration and Invocation](#function-registration-and-invocation)
+/// - [Appendix: Type Matrix](#appendix-type-matrix)
+///
 /// The following example demonstrates a simple usage:
 ///
 /// ```ignore
@@ -36,7 +55,7 @@ mod utils;
 /// }
 /// ```
 ///
-/// ## Function Signature
+/// # Function Signature
 ///
 /// Each function must have a signature, specified in the `function("...")` part of the macro
 /// invocation. The signature follows this pattern:
@@ -45,14 +64,14 @@ mod utils;
 /// ```
 /// Where `name` is the function name, which must match the function name defined in `prost`.
 ///
-/// The allowed data types are listed in the `name` column of the appendix's type matrix. Wildcards
-/// or `auto` can also be used, as explained below.
+/// The allowed data types are listed in the `name` column of the appendix's [type matrix].
+/// Wildcards or `auto` can also be used, as explained below.
 ///
 /// When `setof` appears before the return type, this indicates that the function is a set-returning
 /// function (table function), meaning it can return multiple values instead of just one. For more
 /// details, see the section on table functions.
 ///
-/// ### Multiple Function Definitions
+/// ## Multiple Function Definitions
 ///
 /// Multiple `#[function]` macros can be applied to a single generic Rust function to define
 /// multiple SQL functions of different types. For example:
@@ -66,7 +85,7 @@ mod utils;
 /// }
 /// ```
 ///
-/// ### Type Expansion
+/// ## Type Expansion
 ///
 /// Types can be automatically expanded to multiple types using wildcards. Here are some examples:
 ///
@@ -74,16 +93,16 @@ mod utils;
 /// - `*int`: expands to int16, int32, int64.
 /// - `*float`: expands to float32, float64.
 ///
-/// For instance, `#[function("count(*int) -> int64")]` will be expanded to the following three
+/// For instance, `#[function("cast(varchar) -> *int")]` will be expanded to the following three
 /// functions:
 ///
 /// ```ignore
-/// #[function("count(int16) -> int64")]
-/// #[function("count(int32) -> int64")]
-/// #[function("count(int64) -> int64")]
+/// #[function("cast(varchar) -> int16")]
+/// #[function("cast(varchar) -> int32")]
+/// #[function("cast(varchar) -> int64")]
 /// ```
 ///
-/// ### Automatic Type Inference
+/// ## Automatic Type Inference
 ///
 /// Correspondingly, the return type can be denoted as `auto` to be automatically inferred based on
 /// the input types. It will be inferred as the smallest type that can accommodate all input types.
@@ -107,7 +126,7 @@ mod utils;
 /// #[function("neg(int64) -> int64")]
 /// ```
 ///
-/// ### Custom Type Inference Function
+/// ## Custom Type Inference Function
 ///
 /// A few functions might have a return type that dynamically changes based on the input argument
 /// types, such as `unnest`.
@@ -128,14 +147,14 @@ mod utils;
 /// )]
 /// ```
 ///
-/// This function will be invoked at the frontend.
+/// This type inference function will be invoked at the frontend.
 ///
-/// ## Rust Function Requirements
+/// # Rust Function Requirements
 ///
 /// The `#[function]` macro can handle various types of Rust functions.
 ///
-/// Each argument corresponds to the *reference type* in the type matrix.
-/// The return value type can be the *reference type* or *owned type* in the type matrix.
+/// Each argument corresponds to the *reference type* in the [type matrix].
+/// The return value type can be the *reference type* or *owned type* in the [type matrix].
 ///
 /// For instance:
 ///
@@ -144,7 +163,7 @@ mod utils;
 /// fn trim_array(array: ListRef<'_>, n: i32) -> ListValue {...}
 /// ```
 ///
-/// ### Nullable Arguments
+/// ## Nullable Arguments
 ///
 /// The functions above will only be called when all arguments are not null. If null arguments need
 /// to be considered, the `Option` type can be used:
@@ -157,7 +176,7 @@ mod utils;
 /// Note that we currently only support all arguments being either `Option` or non-`Option`. Mixed
 /// cases are not supported.
 ///
-/// ### Return Value
+/// ## Return Value
 ///
 /// Similarly, the return value type can be one of the following:
 ///
@@ -166,13 +185,13 @@ mod utils;
 /// - `Result<T>`: Indicates that an error may occur, but a null value will not be returned.
 /// - `Result<Option<T>>`: Indicates that a null value may be returned, and an error may also occur.
 ///
-/// ### Optimization
+/// ## Optimization
 ///
-/// When all input and output types of the function are *primitive type* (refer to the type matrix)
-/// and do not contain any Option or Result, the `#[function]` macro will automatically generate
-/// SIMD vectorized execution code.
+/// When all input and output types of the function are *primitive type* (refer to the [type
+/// matrix]) and do not contain any Option or Result, the `#[function]` macro will automatically
+/// generate SIMD vectorized execution code.
 ///
-/// ### Functions Returning Strings
+/// ## Functions Returning Strings
 ///
 /// For functions that return varchar types, you can also use the writer style function signature to
 /// avoid memory copying and dynamic memory allocation:
@@ -194,7 +213,7 @@ mod utils;
 /// }
 /// ```
 ///
-/// ### Preprocessing Constant Arguments
+/// ## Preprocessing Constant Arguments
 ///
 /// When some input arguments of the function are constants, they can be preprocessed to avoid
 /// calculations every time the function is called.
@@ -220,7 +239,7 @@ mod utils;
 /// TODO: This macro will support both variable and constant inputs, and automatically optimize the
 /// preprocessing of constants. Currently, it only supports constant inputs.
 ///
-/// ## Table Function
+/// # Table Function
 ///
 /// A table function is a special kind of function that can return multiple values instead of just
 /// one. Its function signature must include the `setof` keyword, and the Rust function should
@@ -244,7 +263,7 @@ mod utils;
 /// Currently, table function arguments do not support the `Option` type. That is, the function will
 /// only be invoked when all arguments are not null.
 ///
-/// ## Function Registration and Invocation
+/// # Function Registration and Invocation
 ///
 /// Every function defined by `#[function]` is automatically registered in the global function
 /// table.
@@ -269,7 +288,7 @@ mod utils;
 /// risingwave_expr::sig::table_function::FUNC_SIG_MAP::get(...)
 /// ```
 ///
-/// ## Appendix: Type Matrix
+/// # Appendix: Type Matrix
 ///
 /// | name        | SQL type           | owned type    | reference type     | primitive? |
 /// | ----------- | ------------------ | ------------- | ------------------ | ---------- |
@@ -292,7 +311,9 @@ mod utils;
 /// | jsonb       | `jsonb`            | `JsonbVal`    | `JsonbRef<'_>`     | no         |
 /// | list        | `any[]`            | `ListValue`   | `ListRef<'_>`      | no         |
 /// | struct      | `record`           | `StructValue` | `StructRef<'_>`    | no         |
-/// | any         | `any`              | `Datum`       | `DatumRef<'_>`     | no         |
+/// | any         | `any`              | `Scalar`      | `ScalarRef<'_>`    | no         |
+///
+/// [type matrix]: #appendix-type-matrix
 #[proc_macro_attribute]
 pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as syn::AttributeArgs);

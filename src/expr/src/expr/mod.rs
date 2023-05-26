@@ -18,10 +18,9 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by functions like [`new_binary_expr`],
-//! which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build()`] function, which returns a [`BoxedExpression`].
 //!
-//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost`]
+//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
 //!
 //! ## Evaluation
