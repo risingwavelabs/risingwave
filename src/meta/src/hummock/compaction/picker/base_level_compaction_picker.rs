@@ -859,18 +859,17 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(2, ret.input_levels.len());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(0, ret.input_levels[1].table_infos.len());
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
 
         // trivial move do not be limited by level0_sub_level_compact_level_count
         ret.add_pending_task(0, &mut levels_handler);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(4, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(2, ret.input_levels.len());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
+        assert!(ret.input_levels[1].table_infos.is_empty());
     }
 
     #[test]
