@@ -22,6 +22,7 @@ import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Time;
@@ -210,6 +211,22 @@ public class JsonDeserializer implements Deserializer {
                             .asRuntimeException();
                 }
                 return value;
+            case BYTEA:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected jsonb, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                String s = (String) value;
+                int len = s.length();
+                byte[] bytes = new byte[len / 2];
+                for (int i = 0; i < len; i += 2) {
+                    bytes[i / 2] =
+                            (byte)
+                                    ((Character.digit(s.charAt(i), 16) << 4)
+                                            + Character.digit(s.charAt(i + 1), 16));
+                }
+                return new ByteArrayInputStream(bytes);
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)

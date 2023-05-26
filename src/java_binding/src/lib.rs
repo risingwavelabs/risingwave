@@ -677,6 +677,41 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimeValue<
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let bytes = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_bytea();
+        let bytes_value = env.byte_array_from_slice(bytes)?;
+        let (ts_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .timestamp_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class("java/io/ByteArrayInputStream")?;
+                let init_method = env.get_method_id(cls, "<init>", "(B[])V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let ts_class = JClass::from(ts_class_ref.as_obj());
+        unsafe {
+            let input_stream_obj = env.new_object_unchecked(
+                ts_class,
+                *constructor,
+                &[JValue::Object(JObject::from_raw(bytes_value))],
+            )?;
+
+            Ok(input_stream_obj)
+        }
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     _env: EnvParam<'a>,
     pointer: Pointer<'a, JavaBindingRow>,

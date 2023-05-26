@@ -208,6 +208,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                     | DataType::Time
                     | DataType::Interval
                     | DataType::Jsonb
+                    | DataType::Bytea
             ) {
                 Ok( Column {
                     name: column.column_desc.name.clone(),
@@ -215,7 +216,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 })
                 } else {
                     Err(SinkError::Remote(format!(
-                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp and Varchar, got {:?}: {:?}",
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Bytea and Varchar, got {:?}: {:?}",
                         column.column_desc.name,
                         column.column_desc.data_type
                     )))
