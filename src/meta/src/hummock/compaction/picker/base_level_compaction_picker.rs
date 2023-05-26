@@ -140,7 +140,7 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if input.total_file_size < target_level_size {
+            if input.total_file_size >= target_level_size {
                 min_write_amp_meet = true;
             }
 
@@ -155,7 +155,9 @@ impl LevelCompactionPicker {
         }
 
         for (input, target_file_size, target_level_files) in input_levels {
-            if min_write_amp_meet && input.total_file_size < target_file_size {
+            if (min_write_amp_meet || l0.total_file_size < self.config.max_bytes_for_level_base)
+                && input.total_file_size < target_file_size
+            {
                 continue;
             }
 
