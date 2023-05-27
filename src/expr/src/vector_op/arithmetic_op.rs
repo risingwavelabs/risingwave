@@ -162,14 +162,47 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
 }
 
+fn err_pow_zero_negative() -> ExprError {
+    ExprError::InvalidParam {
+        name: "rhs",
+        reason: "zero raised to a negative power is undefined".into(),
+    }
+}
+fn err_pow_negative_fract() -> ExprError {
+    ExprError::InvalidParam {
+        name: "rhs",
+        reason: "a negative number raised to a non-integer power yields a complex result".into(),
+    }
+}
+
 #[function("pow(float64, float64) -> float64")]
 pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
-    let res = l.powf(r);
-    if res.is_infinite() {
-        Err(ExprError::NumericOutOfRange)
-    } else {
-        Ok(res)
+    if l.is_zero() && r.0 < 0.0 {
+        return Err(err_pow_zero_negative());
     }
+    if l.0 < 0.0 && (r.is_finite() && !r.fract().is_zero()) {
+        return Err(err_pow_negative_fract());
+    }
+    let res = l.powf(r);
+    if res.is_infinite() && l.is_finite() && r.is_finite() {
+        return Err(ExprError::NumericOverflow);
+    }
+    if res.is_zero() && l.is_finite() && r.is_finite() && !l.is_zero() {
+        return Err(ExprError::NumericUnderflow);
+    }
+
+    Ok(res)
+}
+
+#[function("pow(decimal, decimal) -> decimal")]
+pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+    use risingwave_common::types::DecimalPowError as PowError;
+
+    l.checked_powd(&r).map_err(|e| match e {
+        PowError::ZeroNegative => err_pow_zero_negative(),
+        PowError::NegativeFract => err_pow_negative_fract(),
+        PowError::Overflow => ExprError::NumericOverflow,
+    })
 }
 
 #[inline(always)]
