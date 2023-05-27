@@ -141,16 +141,15 @@ impl ExprRewriter for LikeExprRewriter {
         let (char_wildcard_idx, str_wildcard_idx, unescaped_bytes) =
             Self::cal_index_and_unescape(bytes);
 
-        let Ok(unescaped_y) = String::from_utf8(unescaped_bytes) else {
-            // FIXME: We should definitely treat the argument as UTF-8 string instead of bytes, but currently, we just fallback here.
-            return func_call.into();
-        };
-
         let idx = match (char_wildcard_idx, str_wildcard_idx) {
             (Some(a), Some(b)) => min(a, b),
             (Some(idx), None) => idx,
             (None, Some(idx)) => idx,
             (None, None) => {
+                let Ok(unescaped_y) = String::from_utf8(unescaped_bytes) else {
+                    // FIXME: We should definitely treat the argument as UTF-8 string instead of bytes, but currently, we just fallback here.
+                    return func_call.into();
+                };
                 let inputs = vec![
                     ExprImpl::InputRef(x),
                     ExprImpl::literal_varchar(unescaped_y),
@@ -165,7 +164,7 @@ impl ExprRewriter for LikeExprRewriter {
         }
 
         let (low, high) = {
-            let low = bytes[0..idx].to_owned();
+            let low = unescaped_bytes[0..idx].to_owned();
             if low[idx - 1] == 255 {
                 return func_call.into();
             }
