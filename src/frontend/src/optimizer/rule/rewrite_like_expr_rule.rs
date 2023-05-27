@@ -83,20 +83,20 @@ impl LikeExprRewriter {
 
         let mut in_escape = false;
         const ESCAPE: u8 = b'\\';
-        for i in 0..bytes.len() {
-            if !in_escape && bytes[i] == ESCAPE {
+        for &c in bytes {
+            if !in_escape && c == ESCAPE {
                 in_escape = true;
                 continue;
             }
             if in_escape {
                 in_escape = false;
-                unescaped_bytes.push(bytes[i]);
+                unescaped_bytes.push(c);
                 continue;
             }
-            unescaped_bytes.push(bytes[i]);
-            if bytes[i] == b'_' {
+            unescaped_bytes.push(c);
+            if c == b'_' {
                 char_wildcard_idx.get_or_insert(unescaped_bytes.len() - 1);
-            } else if bytes[i] == b'%' {
+            } else if c == b'%' {
                 str_wildcard_idx.get_or_insert(unescaped_bytes.len() - 1);
             }
         }
@@ -232,6 +232,7 @@ impl RewriteLikeExprRule {
 mod tests {
     #[test]
     fn test_cal_index_and_unescape() {
+        #[expect(clippy::type_complexity, reason = "in testcase")]
         let testcases: [(&str, (Option<usize>, Option<usize>, &str)); 7] = [
             ("testname", (None, None, "testname")),
             ("test_name", (Some(4), None, "test_name")),
