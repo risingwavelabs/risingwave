@@ -1,0 +1,19 @@
+# Begin https://github.com/risingwavelabs/risingwave/issues/10018
+
+statement ok
+create table test_table(name varchar);
+
+statement ok
+insert into test_table values('test_table');
+
+query T
+select * from test_table where name like 'test_table';
+----
+test_table
+
+query T
+select * from test_table where name like 'test\_table';
+----
+test_table
+
+# End

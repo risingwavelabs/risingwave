@@ -374,6 +374,16 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    create table test_table(name varchar);
+    select * from test_table where name like 'test_table';
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table test_table(name varchar);
+    select * from test_table where name like 'test\_table';
+  expected_outputs:
+  - batch_plan
+- sql: |
     create table t1 (k1 int primary key, v1 int);
     create table t2 (k2 int primary key, v2 int);
     select v1 +1 , v2_p1 from t1, (select v2+2 as v2_p1, k2 from t2) where k1 = k2;
