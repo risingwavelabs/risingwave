@@ -565,6 +565,10 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
                             Some(ScalarImpl::Bool(false)),
+                            // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
+                            // The value will generally be -1 for types that do not need
+                            // `atttypmod`.
+                            Some(ScalarImpl::Int32(-1)),
                         ])
                     })
                 });
