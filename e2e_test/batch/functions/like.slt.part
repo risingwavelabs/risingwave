@@ -16,4 +16,7 @@ select * from test_table where name like 'test\_table';
 ----
 test_table
 
+statement ok
+drop table test_table;
+
 # End
