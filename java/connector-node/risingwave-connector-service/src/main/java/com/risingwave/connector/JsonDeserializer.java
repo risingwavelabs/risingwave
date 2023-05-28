@@ -216,15 +216,6 @@ public class JsonDeserializer implements Deserializer {
                             .withDescription("Expected list, got " + value.getClass())
                             .asRuntimeException();
                 }
-                // print the value
-                var array = (java.util.ArrayList<?>) value;
-                System.out.println(
-                        "List value: "
-                                + value
-                                + ": "
-                                + value.getClass()
-                                + ":"
-                                + array.toArray()[0].getClass());
                 return value;
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT

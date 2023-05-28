@@ -25,6 +25,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import org.postgresql.ds.common.PGObjectFactory;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
