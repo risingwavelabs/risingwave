@@ -99,7 +99,6 @@ impl CanalJsonParser {
                         })
                     })
                     .collect::<Vec<Result<_>>>();
-                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             CANAL_UPDATE_EVENT => {
@@ -147,8 +146,6 @@ impl CanalJsonParser {
                         })
                     })
                     .collect::<Vec<Result<_>>>();
-
-                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             CANAL_DELETE_EVENT => {
@@ -174,7 +171,6 @@ impl CanalJsonParser {
                     })
                     .collect::<Vec<Result<_>>>();
 
-                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             other => Err(RwError::from(ProtocolError(format!(
