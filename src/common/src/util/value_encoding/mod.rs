@@ -14,18 +14,12 @@
 
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
-
-use std::marker::{Send, Sync};
-use std::sync::Arc;
-
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
-use itertools::Itertools;
 
 use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
-use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::*;
 
@@ -56,24 +50,9 @@ pub trait ValueRowDeserializer: Clone {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
-/// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
-pub trait ValueRowSerdeNew: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-    fn set_default_columns(&mut self, _default_columns: impl Iterator<Item = (usize, Datum)>) {
-        unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
-    }
-}
-
-/// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
-pub trait ValueRowSerde:
-    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
-{
-    fn kind(&self) -> ValueRowSerdeKind;
-}
-
 /// The type-erased `ValueRowSerde`, used for simplifying the code.
 #[derive(Clone)]
-pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+pub struct EitherSerde(pub Either<BasicSerde, ColumnAwareSerde>);
 
 impl From<BasicSerde> for EitherSerde {
     fn from(value: BasicSerde) -> Self {
@@ -95,18 +74,6 @@ impl ValueRowSerializer for EitherSerde {
 impl ValueRowDeserializer for EitherSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         for_both!(&self.0, s => s.deserialize(encoded_bytes))
-    }
-}
-
-impl ValueRowSerdeNew for EitherSerde {
-    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
-        unreachable!("should construct manually")
-    }
-}
-
-impl ValueRowSerde for EitherSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        for_both!(&self.0, s => s.kind())
     }
 }
 
@@ -133,17 +100,8 @@ impl ValueRowDeserializer for BasicDeserializer {
 /// Wrap of the original `Row` serializing and deserializing function
 #[derive(Clone)]
 pub struct BasicSerde {
-    serializer: BasicSerializer,
-    deserializer: BasicDeserializer,
-}
-
-impl ValueRowSerdeNew for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
-        BasicSerde {
-            serializer: BasicSerializer {},
-            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
-        }
-    }
+    pub serializer: BasicSerializer,
+    pub deserializer: BasicDeserializer,
 }
 
 impl ValueRowSerializer for BasicSerde {
@@ -155,12 +113,6 @@ impl ValueRowSerializer for BasicSerde {
 impl ValueRowDeserializer for BasicSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
-    }
-}
-
-impl ValueRowSerde for BasicSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        ValueRowSerdeKind::Basic
     }
 }
 

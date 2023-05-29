@@ -32,9 +32,10 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
+use risingwave_storage::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};

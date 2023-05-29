@@ -179,7 +179,7 @@ impl Deserializer {
         }
     }
 
-    fn set_default_column_values(
+    pub fn set_default_column_values(
         &mut self,
         default_column_values: impl Iterator<Item = (usize, Datum)>,
     ) {
@@ -258,30 +258,8 @@ fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
 /// `column_ids` and `schema`
 #[derive(Clone)]
 pub struct ColumnAwareSerde {
-    serializer: Serializer,
-    deserializer: Deserializer,
-}
-
-impl ValueRowSerdeNew for ColumnAwareSerde {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
-        if cfg!(debug_assertions) {
-            let duplicates = column_ids.iter().duplicates().collect_vec();
-            if !duplicates.is_empty() {
-                panic!("duplicated column ids: {duplicates:?}");
-            }
-        }
-
-        let serializer = Serializer::new(column_ids);
-        let deserializer = Deserializer::new(column_ids, schema);
-        ColumnAwareSerde {
-            serializer,
-            deserializer,
-        }
-    }
-
-    fn set_default_columns(&mut self, default_columns: impl Iterator<Item = (usize, Datum)>) {
-        self.deserializer.set_default_column_values(default_columns)
-    }
+    pub serializer: Serializer,
+    pub deserializer: Deserializer,
 }
 
 impl ValueRowSerializer for ColumnAwareSerde {
@@ -293,124 +271,5 @@ impl ValueRowSerializer for ColumnAwareSerde {
 impl ValueRowDeserializer for ColumnAwareSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         self.deserializer.deserialize(encoded_bytes)
-    }
-}
-
-impl ValueRowSerde for ColumnAwareSerde {
-    fn kind(&self) -> ValueRowSerdeKind {
-        ValueRowSerdeKind::ColumnAware
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use column_aware_row_encoding;
-
-    use super::*;
-    use crate::catalog::ColumnId;
-    use crate::row::OwnedRow;
-    use crate::types::ScalarImpl::*;
-
-    #[test]
-    fn test_row_encoding() {
-        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
-        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let row2 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
-        let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
-        let rows = vec![row1, row2, row3];
-        let mut array = vec![];
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
-        for row in &rows {
-            let row_bytes = serializer.serialize(row);
-            array.push(row_bytes);
-        }
-        let zero_le_bytes = 0_i32.to_le_bytes();
-        let one_le_bytes = 1_i32.to_le_bytes();
-
-        assert_eq!(
-            array[0],
-            [
-                0b10000001, // flag mid WW mid BB
-                2,
-                0,
-                0,
-                0,                // column nums
-                zero_le_bytes[0], // start id 0
-                zero_le_bytes[1],
-                zero_le_bytes[2],
-                zero_le_bytes[3],
-                one_le_bytes[0], // start id 1
-                one_le_bytes[1],
-                one_le_bytes[2],
-                one_le_bytes[3],
-                0, // offset0: 0
-                2, // offset1: 2
-                5, // i16: 5
-                0,
-                3, // str: abc
-                0,
-                0,
-                0,
-                b'a',
-                b'b',
-                b'c'
-            ]
-        );
-    }
-    #[test]
-    fn test_row_decoding() {
-        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
-        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize(row1);
-        let data_types = vec![DataType::Int16, DataType::Varchar];
-        let deserializer = column_aware_row_encoding::Deserializer::new(
-            &column_ids[..],
-            Arc::from(data_types.into_boxed_slice()),
-        );
-        let decoded = deserializer.deserialize(&row_bytes[..]);
-        assert_eq!(
-            decoded.unwrap(),
-            vec![Some(Int16(5)), Some(Utf8("abc".into()))]
-        );
-    }
-    #[test]
-    fn test_row_hard1() {
-        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
-        let row = OwnedRow::new(vec![Some(Int16(233)); 20000]);
-        let data_types = vec![DataType::Int16; 20000];
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
-        let encoded_bytes = serde.serialize(row);
-        let decoded_row = serde.deserialize(&encoded_bytes);
-        assert_eq!(decoded_row.unwrap(), vec![Some(Int16(233)); 20000]);
-    }
-    #[test]
-    fn test_row_hard2() {
-        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
-        let mut data = vec![Some(Int16(233)); 5000];
-        data.extend(vec![None; 5000]);
-        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 5000]);
-        data.extend(vec![None; 5000]);
-        let row = OwnedRow::new(data.clone());
-        let mut data_types = vec![DataType::Int16; 10000];
-        data_types.extend(vec![DataType::Varchar; 10000]);
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
-        let encoded_bytes = serde.serialize(row);
-        let decoded_row = serde.deserialize(&encoded_bytes);
-        assert_eq!(decoded_row.unwrap(), data);
-    }
-    #[test]
-    fn test_row_hard3() {
-        let column_ids = (0..1000000).map(ColumnId::new).collect_vec();
-        let mut data = vec![Some(Int64(233)); 500000];
-        data.extend(vec![None; 250000]);
-        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 250000]);
-        let row = OwnedRow::new(data.clone());
-        let mut data_types = vec![DataType::Int64; 500000];
-        data_types.extend(vec![DataType::Varchar; 500000]);
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
-        let encoded_bytes = serde.serialize(row);
-        let decoded_row = serde.deserialize(&encoded_bytes);
-        assert_eq!(decoded_row.unwrap(), data);
     }
 }

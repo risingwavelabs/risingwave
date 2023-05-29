@@ -24,8 +24,9 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
+    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
+use risingwave_storage::value_serde::ValueRowSerdeNew;
 
 struct Case {
     name: String,

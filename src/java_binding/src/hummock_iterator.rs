@@ -22,9 +22,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -37,6 +35,7 @@ use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{CachePolicy, SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use risingwave_storage::value_serde::ValueRowSerdeNew;
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;

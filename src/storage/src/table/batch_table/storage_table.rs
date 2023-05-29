@@ -29,12 +29,11 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -51,6 +50,7 @@ use crate::row_serde::row_serde_util::{
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
+use crate::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -433,6 +433,41 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
             .await
             .transpose()
             .map(|r| r.map(|(_pk, row)| row))
+    }
+
+    async fn collect_data_chunk(
+        &mut self,
+        schema: &Schema,
+        chunk_size: Option<usize>,
+    ) -> StorageResult<Option<risingwave_common::array::DataChunk>> {
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next_row().await? {
+                Some(row) => {
+                    for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+                        builder.append_datum(datum);
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = {
+            let columns: Vec<_> = builders
+                .into_iter()
+                .map(|builder| builder.finish().into())
+                .collect();
+            risingwave_common::array::DataChunk::new(columns, row_count)
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
     }
 }
 

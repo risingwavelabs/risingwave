@@ -24,9 +24,7 @@ use risingwave_common::types::ToText;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{
-    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
@@ -39,6 +37,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
+use risingwave_storage::value_serde::ValueRowSerdeNew;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;

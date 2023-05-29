@@ -22,7 +22,6 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -33,6 +32,7 @@ use crate::hummock::utils::{
 };
 use crate::storage_value::StorageValue;
 use crate::store::*;
+use crate::value_serde::ValueRowSerde;
 
 #[derive(Clone, Debug)]
 pub enum KeyOp {
