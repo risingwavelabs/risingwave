@@ -304,21 +304,6 @@ impl AvroParser {
             }
         } else if self.upsert_primary_key_column_name.is_some()
             && matches!(op, Op::Delete)
-            && matches!(
-                avro_key,
-                Some(
-                    Value::Boolean(_)
-                        | Value::String(_)
-                        | Value::Int(_)
-                        | Value::Long(_)
-                        | Value::Float(_)
-                        | Value::Decimal(_)
-                        | Value::Date(_)
-                        | Value::TimestampMillis(_)
-                        | Value::TimestampMicros(_)
-                        | Value::Duration(_)
-                )
-            )
         {
             writer.delete(|desc| {
                 if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
