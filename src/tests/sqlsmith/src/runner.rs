@@ -85,6 +85,9 @@ pub async fn generate(
         .await
         .unwrap();
 
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+
     test_sqlsmith(
         client,
         &mut rng,
@@ -95,8 +98,6 @@ pub async fn generate(
     .await;
     tracing::info!("Passed sqlsmith tests");
 
-    // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
     tracing::info!("Ran updates");
 
     let mut queries = String::with_capacity(10000);
@@ -172,6 +173,10 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         .unwrap();
     tracing::info!("Created tables");
 
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
+
     let max_rows_inserted = rows_per_table * base_tables.len();
     test_sqlsmith(
         client,
@@ -181,12 +186,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         max_rows_inserted,
     )
     .await;
-
     tracing::info!("Passed sqlsmith tests");
-
-    // Generate an update for some inserts, on the corresponding table.
-    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
-    tracing::info!("Ran updates");
 
     test_batch_queries(client, &mut rng, tables.clone(), count)
         .await
