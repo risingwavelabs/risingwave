@@ -17,9 +17,10 @@
 use std::sync::Arc;
 
 use either::for_both;
+use futures::FutureExt;
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnId;
-use risingwave_common::row::RowDeserializer as BasicDeserializer;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::row::{OwnedRow, RowDeserializer as BasicDeserializer};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::{
     ColumnAwareSerde, Deserializer, Serializer,
@@ -29,13 +30,20 @@ use risingwave_common::util::value_encoding::{
     BasicSerde, BasicSerializer, EitherSerde, ValueRowDeserializer, ValueRowSerdeKind,
     ValueRowSerializer,
 };
+use risingwave_expr::expr::build_from_prost;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
 /// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
 pub trait ValueRowSerdeNew: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-    fn set_default_columns(&mut self, _default_columns: impl Iterator<Item = (usize, Datum)>) {
+    fn new(
+        column_ids: &[ColumnId],
+        schema: Arc<[DataType]>,
+        default_columns: impl Iterator<Item = ColumnDesc>,
+    ) -> Self;
+    fn set_default_columns(&mut self, mut _default_columns: impl Iterator<Item = (usize, Datum)>) {
         unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
     }
 }
@@ -48,7 +56,11 @@ pub trait ValueRowSerde:
 }
 
 impl ValueRowSerdeNew for EitherSerde {
-    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
+    fn new(
+        _column_ids: &[ColumnId],
+        _schema: Arc<[DataType]>,
+        _default_columns: impl Iterator<Item = ColumnDesc>,
+    ) -> EitherSerde {
         unreachable!("should construct manually")
     }
 
@@ -58,7 +70,14 @@ impl ValueRowSerdeNew for EitherSerde {
 }
 
 impl ValueRowSerdeNew for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
+    fn new(
+        _column_ids: &[ColumnId],
+        schema: Arc<[DataType]>,
+        mut default_columns: impl Iterator<Item = ColumnDesc>,
+    ) -> BasicSerde {
+        if default_columns.next().is_some() {
+            unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
+        }
         BasicSerde {
             serializer: BasicSerializer {},
             deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
@@ -79,7 +98,11 @@ impl ValueRowSerde for BasicSerde {
 }
 
 impl ValueRowSerdeNew for ColumnAwareSerde {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
+    fn new(
+        column_ids: &[ColumnId],
+        schema: Arc<[DataType]>,
+        table_columns: impl Iterator<Item = ColumnDesc>,
+    ) -> ColumnAwareSerde {
         if cfg!(debug_assertions) {
             let duplicates = column_ids.iter().duplicates().collect_vec();
             if !duplicates.is_empty() {
@@ -87,16 +110,33 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
             }
         }
 
+        let column_with_default = table_columns.enumerate().filter_map(|(i, c)| {
+            if c.is_default() {
+                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                    c.generated_or_default_column.unwrap()
+                {
+                    Some((
+                        i,
+                        build_from_prost(&expr.expect("expr should not be none"))
+                            .expect("build_from_prost error")
+                            .eval_row_infallible(&OwnedRow::empty(), |_err| {})
+                            .now_or_never()
+                            .expect("constant expression should not be async"),
+                    ))
+                } else {
+                    unreachable!()
+                }
+            } else {
+                None
+            }
+        });
+
         let serializer = Serializer::new(column_ids);
-        let deserializer = Deserializer::new(column_ids, schema);
+        let deserializer = Deserializer::new(column_ids, schema, column_with_default);
         ColumnAwareSerde {
             serializer,
             deserializer,
         }
-    }
-
-    fn set_default_columns(&mut self, default_columns: impl Iterator<Item = (usize, Datum)>) {
-        self.deserializer.set_default_column_values(default_columns)
     }
 }
 
@@ -171,6 +211,7 @@ mod tests {
         let deserializer = column_aware_row_encoding::Deserializer::new(
             &column_ids[..],
             Arc::from(data_types.into_boxed_slice()),
+            std::iter::empty(),
         );
         let decoded = deserializer.deserialize(&row_bytes[..]);
         assert_eq!(
@@ -183,7 +224,11 @@ mod tests {
         let column_ids = (0..20000).map(ColumnId::new).collect_vec();
         let row = OwnedRow::new(vec![Some(Int16(233)); 20000]);
         let data_types = vec![DataType::Int16; 20000];
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let serde = ColumnAwareSerde::new(
+            &column_ids,
+            Arc::from(data_types.into_boxed_slice()),
+            std::iter::empty(),
+        );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);
         assert_eq!(decoded_row.unwrap(), vec![Some(Int16(233)); 20000]);
@@ -198,7 +243,11 @@ mod tests {
         let row = OwnedRow::new(data.clone());
         let mut data_types = vec![DataType::Int16; 10000];
         data_types.extend(vec![DataType::Varchar; 10000]);
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let serde = ColumnAwareSerde::new(
+            &column_ids,
+            Arc::from(data_types.into_boxed_slice()),
+            std::iter::empty(),
+        );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);
         assert_eq!(decoded_row.unwrap(), data);
@@ -212,7 +261,11 @@ mod tests {
         let row = OwnedRow::new(data.clone());
         let mut data_types = vec![DataType::Int64; 500000];
         data_types.extend(vec![DataType::Varchar; 500000]);
-        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let serde = ColumnAwareSerde::new(
+            &column_ids,
+            Arc::from(data_types.into_boxed_slice()),
+            std::iter::empty(),
+        );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);
         assert_eq!(decoded_row.unwrap(), data);

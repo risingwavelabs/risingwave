@@ -17,7 +17,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk, Vis};
@@ -32,13 +32,10 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_expr::expr::build_from_prost;
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::DefaultColumnDesc;
 use risingwave_storage::error::StorageError;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -242,35 +239,15 @@ where
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
-        let column_with_default = table_columns
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.is_default())
-            .map(|(i, c)| {
-                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
-                    c.generated_or_default_column.clone().unwrap()
-                {
-                    (
-                        i,
-                        build_from_prost(&expr.expect("expr should not be none"))
-                            .expect("build_from_prost error")
-                            .eval_row_infallible(&OwnedRow::empty(), |_err| {})
-                            .now_or_never()
-                            .expect("constant expression should not be async"),
-                    )
-                } else {
-                    unreachable!()
-                }
-            });
-
-        let mut row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let row_serde = SD::new(
+            &column_ids,
+            Arc::from(data_types.into_boxed_slice()),
+            table_columns.iter().cloned(),
+        );
         assert_eq!(
             row_serde.kind().is_column_aware(),
             table_catalog.version.is_some()
         );
-        if row_serde.kind().is_column_aware() {
-            row_serde.set_default_columns(column_with_default);
-        }
 
         Self {
             table_id,
@@ -447,7 +424,11 @@ where
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
+            row_serde: SD::new(
+                &column_ids,
+                Arc::from(data_types.into_boxed_slice()),
+                std::iter::empty(),
+            ),
             pk_indices,
             dist_key_in_pk_indices,
             prefix_hint_len: 0,

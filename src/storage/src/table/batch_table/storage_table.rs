@@ -21,7 +21,7 @@ use auto_enums::auto_enum;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
@@ -34,11 +34,8 @@ use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_expr::expr::build_from_prost;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::plan_common::DefaultColumnDesc;
 use tracing::trace;
 
 use super::iter_utils;
@@ -241,31 +238,11 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         let row_serde = {
             let schema = Arc::from(data_types.into_boxed_slice());
             if versioned {
-                let column_with_default = table_columns
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, c)| c.is_default())
-                    .map(|(i, c)| {
-                        if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
-                            c.generated_or_default_column.clone().unwrap()
-                        {
-                            (
-                                i,
-                                build_from_prost(&expr.expect("expr should not be none"))
-                                    .expect("build_from_prost error")
-                                    .eval_row_infallible(&OwnedRow::empty(), |_err| {})
-                                    .now_or_never()
-                                    .expect("constant expression should not be async"),
-                            )
-                        } else {
-                            unreachable!()
-                        }
-                    });
-                let mut serde = ColumnAwareSerde::new(&column_ids, schema);
-                serde.set_default_columns(column_with_default);
+                let serde =
+                    ColumnAwareSerde::new(&column_ids, schema, table_columns.iter().cloned());
                 serde.into()
             } else {
-                BasicSerde::new(&column_ids, schema).into()
+                BasicSerde::new(&column_ids, schema, std::iter::empty()).into()
             }
         };
 

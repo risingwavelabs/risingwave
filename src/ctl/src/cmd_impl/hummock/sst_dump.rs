@@ -380,9 +380,9 @@ fn print_table_column(
             .collect_vec();
         let schema = Arc::from(data_types.into_boxed_slice());
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
-            ColumnAwareSerde::new(&column_ids, schema).into()
+            ColumnAwareSerde::new(&column_ids, schema, std::iter::empty()).into()
         } else {
-            BasicSerde::new(&column_ids, schema).into()
+            BasicSerde::new(&column_ids, schema, std::iter::empty()).into()
         };
         let row = row_deserializer.deserialize(user_val)?;
         for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {

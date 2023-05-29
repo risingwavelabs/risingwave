@@ -162,11 +162,15 @@ impl ValueRowSerializer for Serializer {
 pub struct Deserializer {
     needed_column_ids: BTreeMap<i32, usize>,
     schema: Arc<[DataType]>,
-    default_column_values: Arc<[(usize, Datum)]>,
+    default_column_values: Vec<(usize, Datum)>,
 }
 
 impl Deserializer {
-    pub fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self {
+    pub fn new(
+        column_ids: &[ColumnId],
+        schema: Arc<[DataType]>,
+        column_with_default: impl Iterator<Item = (usize, Datum)>,
+    ) -> Self {
         assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
@@ -175,15 +179,8 @@ impl Deserializer {
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<BTreeMap<_, _>>(),
             schema,
-            default_column_values: Arc::from(vec![]),
+            default_column_values: column_with_default.collect(),
         }
-    }
-
-    pub fn set_default_column_values(
-        &mut self,
-        default_column_values: impl Iterator<Item = (usize, Datum)>,
-    ) {
-        self.default_column_values = default_column_values.collect();
     }
 }
 
@@ -236,7 +233,7 @@ impl ValueRowDeserializer for Deserializer {
                 datums[decoded_idx] = data;
             }
         }
-        for (id, datum) in self.default_column_values.iter() {
+        for (id, datum) in &self.default_column_values {
             if !contained_indices.contains(id) && datums[*id].is_none() {
                 datums[*id] = datum.clone()
             }
