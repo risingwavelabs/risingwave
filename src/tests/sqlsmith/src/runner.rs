@@ -14,17 +14,18 @@
 
 //! Provides E2E Test runner functionality.
 
-use anyhow::anyhow;
+use anyhow::{anyhow, bail};
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
+use tokio::time::{sleep, Duration};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
 use crate::utils::read_file_contents;
-use crate::validation::is_permissible_error;
+use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
     create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
     sql_gen, Table,
@@ -50,8 +51,9 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        validate_response(client.simple_query(&sql).await).unwrap();
+        run_query(client, &sql).await.unwrap();
     }
+    tracing::info!("[EXECUTION SUCCESS]");
 }
 
 /// Query Generator
@@ -98,8 +100,8 @@ pub async fn generate(
         test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        let response = client.simple_query(sql.as_str()).await;
-        match validate_response(response) {
+        let result = run_query(client, sql.as_str()).await;
+        match result {
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
@@ -121,8 +123,8 @@ pub async fn generate(
         test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        let response = client.simple_query(&sql).await;
-        match validate_response(response) {
+        let result = run_query(client, sql.as_str()).await;
+        match result {
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
@@ -304,8 +306,7 @@ async fn test_batch_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
-        let response = client.simple_query(sql.as_str()).await;
-        skipped += validate_response(response)?;
+        skipped += run_query(client, &sql).await?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -322,8 +323,7 @@ async fn test_stream_queries<R: Rng>(
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
-        let response = client.simple_query(&sql).await;
-        skipped += validate_response(response)?;
+        skipped += run_query(client, &sql).await?;
         tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
@@ -375,8 +375,7 @@ async fn create_mviews(
         let (create_sql, table) =
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
-        let response = client.simple_query(&create_sql).await;
-        let skip_count = validate_response(response)?;
+        let skip_count = run_query(client, &create_sql).await?;
         if skip_count == 0 {
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
@@ -431,4 +430,32 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
             Err(anyhow!("Encountered unexpected error: {e}"))
         }
     }
+}
+
+/// Run query, handle permissible errors
+/// For recovery error, just do bounded retry.
+/// For other errors, validate them accordingly, skipping if they are permitted.
+/// Otherwise just return success.
+///
+/// Returns: Number of skipped queries.
+async fn run_query(client: &Client, query: &str) -> Result<i64> {
+    let response = client.simple_query(query).await;
+    if let Err(e) = &response
+    && let Some(e) = e.as_db_error() {
+        if is_recovery_in_progress_error(&e.to_string()) {
+            let tries = 5;
+            let interval = 1;
+            for _ in 0..tries { // retry 5 times
+                sleep(Duration::from_millis(interval * 1000)).await;
+                let response = client.simple_query(query).await;
+                if response.is_ok() {
+                    return Ok(0);
+                }
+            }
+            bail!("Failed to recover after {tries} tries with interval {interval}s")
+        } else {
+            return validate_response(response);
+        }
+    }
+    Ok(0)
 }
