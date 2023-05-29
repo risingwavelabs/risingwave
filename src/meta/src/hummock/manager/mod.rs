@@ -306,9 +306,13 @@ where
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
-                env.opts.do_not_config_object_storage_lifecycle,
             )
             .await?;
+
+            // config bucket lifecycle for new cluster.
+            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref() && !env.opts.do_not_config_object_storage_lifecycle{
+            s3.inner().configure_bucket_lifecycle().await;
+        }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -2346,7 +2350,6 @@ async fn write_exclusive_cluster_id(
     state_store_dir: &str,
     cluster_id: ClusterId,
     object_store: ObjectStoreRef,
-    do_not_config_object_storage_lifecycle: bool,
 ) -> Result<()> {
     const CLUSTER_ID_DIR: &str = "cluster_id";
     const CLUSTER_ID_NAME: &str = "0";
@@ -2356,9 +2359,6 @@ async fn write_exclusive_cluster_id(
     let metadata = object_store.list(&cluster_id_dir).await?;
 
     if metadata.is_empty() {
-        if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref() && !do_not_config_object_storage_lifecycle{
-            s3.inner().configure_bucket_lifecycle().await;
-        }
         object_store
             .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
             .await?;
