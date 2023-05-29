@@ -13,7 +13,6 @@
 set -u
 
 export RUST_LOG="info"
-export OUTDIR=$SNAPSHOT_DIR
 export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
@@ -179,7 +178,7 @@ check_failed_to_run_queries() {
 
 setup() {
   set -euo pipefail
-  # -x is too verbose, selectively enable it if needed.
+  export OUTDIR=$SNAPSHOT_DIR
   pushd $RW_HOME
 }
 
@@ -276,8 +275,11 @@ extract() {
     cargo build --bin sqlsmith-reducer
     REDUCER=$RW_HOME/target/debug/sqlsmith-reducer
     if [[ $($REDUCER --input-file "$QUERY_FILE" --output-file "$QUERY_FOLDER") -eq 0 ]]; then
-      echo "[INFO] REDUCED QUERY: $PWD/$QUERY_FILE"
-      echo "[INFO] WROTE TO DIR: $PWD/$QUERY_FOLDER"
+      REDUCED_FILE="$PWD/$QUERY_FOLDER/queries.reduced.sql"
+      echo "[INFO] REDUCED QUERY: $REDUCED_FILE"
+      cp "$REDUCED_FILE" tmp
+      pg_format < tmp > "$REDUCED_FILE"
+      rm tmp
     else
       echo "[INFO] FAILED TO REDUCE QUERY: $QUERY_FILE"
     fi
@@ -288,8 +290,10 @@ main() {
   if [[ $1 == "extract" ]]; then
     echo "[INFO] Extracting queries"
     extract
+    exit 0
   elif [[ $1 == "generate" ]]; then
     generate
+    exit 0
   else
     echo "
 ================================================================
@@ -316,10 +320,11 @@ main() {
     # Generate queries
     SNAPSHOT_DIR=~/projects/sqlsmith-query-snapshots ./gen_queries.sh generate
 
-    # Extract queries from log
+    # Extract queries from logs in current dir: fuzzing-*.log
     ./gen_queries.sh extract
 "
   fi
+  exit 0
 }
 
 main "$1"
