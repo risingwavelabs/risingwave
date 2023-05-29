@@ -99,9 +99,10 @@ impl LogicalOverWindow {
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
             if let ExprImpl::WindowFunction(window) = expr {
-                let (kind, args, partition_by, order_by, frame) = (
+                let (kind, args, return_type, partition_by, order_by, frame) = (
                     window.kind,
                     &window.args,
+                    &window.return_type,
                     &window.partition_by,
                     &window.order_by,
                     &window.frame,
@@ -126,10 +127,12 @@ impl LogicalOverWindow {
                                 args.clone(),
                                 frame.clone(),
                             )?);
-                            let left_ref = InputRef::new(
+                            let left_ref = ExprImpl::from(InputRef::new(
                                 input_len + window_funcs.len() - 1,
                                 window_funcs.last().unwrap().return_type(),
-                            );
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
                             window_funcs.push(WindowFunction::new(
                                 WindowFuncKind::Aggregate(AggKind::Count),
                                 partition_by.clone(),
@@ -137,16 +140,13 @@ impl LogicalOverWindow {
                                 args.clone(),
                                 frame.clone(),
                             )?);
-                            let right_ref = InputRef::new(
+                            let right_ref = ExprImpl::from(InputRef::new(
                                 input_len + window_funcs.len() - 1,
                                 window_funcs.last().unwrap().return_type(),
-                            );
+                            ));
                             let new_expr = ExprImpl::from(
-                                FunctionCall::new(
-                                    ExprType::Divide,
-                                    vec![left_ref.into(), right_ref.into()],
-                                )
-                                .unwrap(),
+                                FunctionCall::new(ExprType::Divide, vec![left_ref, right_ref])
+                                    .unwrap(),
                             );
                             let _ = std::mem::replace(expr, new_expr);
                         }
