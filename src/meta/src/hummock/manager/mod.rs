@@ -2357,7 +2357,7 @@ async fn write_exclusive_cluster_id(
 
     if metadata.is_empty() {
         if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref() && !do_not_config_object_storage_lifecycle{
-            s3.object_store_inner().configure_bucket_lifecycle().await;
+            s3.inner().configure_bucket_lifecycle().await;
         }
         object_store
             .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))

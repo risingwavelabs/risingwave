@@ -460,7 +460,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         self.inner.store_media_type()
     }
 
-    pub fn object_store_inner(&self) -> &OS {
+    pub fn inner(&self) -> &OS {
         &self.inner
     }
 

@@ -130,7 +130,7 @@ pub struct MetaOpts {
     /// The size limit to move a state-table to other group.
     pub move_table_size_limit: u64,
 
-    /// Whether config object storage buckey lifecycle to purge stale data.
+    /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
 }
 
