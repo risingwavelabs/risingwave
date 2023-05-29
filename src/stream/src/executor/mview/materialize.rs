@@ -33,7 +33,6 @@ use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;

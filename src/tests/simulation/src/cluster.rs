@@ -150,6 +150,7 @@ impl Cluster {
         }
 
         net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
+        net.add_dns_record("message_queue", "192.168.11.1".parse().unwrap());
         net.global_ipvs().add_service(
             ServiceAddr::Tcp("192.168.2.0:4566".into()),
             Scheduler::RoundRobin,
@@ -420,7 +421,7 @@ impl Cluster {
             .await
     }
 
-    /// Kill some nodes and restart them in 2s.
+    /// Kill some nodes and restart them in 2s + restart_delay_secs with a probability of 0.1.
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
