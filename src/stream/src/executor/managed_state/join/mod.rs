@@ -14,7 +14,6 @@
 
 mod join_entry_state;
 
-use std::alloc::Global;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -22,7 +21,6 @@ use futures::future::try_join;
 use futures::StreamExt;
 use futures_async_stream::for_await;
 pub(super) use join_entry_state::JoinEntryState;
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -34,6 +32,7 @@ use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use task_local_stats_alloc::StatsAlloc;
 
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
@@ -146,8 +145,7 @@ impl DerefMut for HashValueWrapper {
     }
 }
 
-type JoinHashMapInner<K> =
-    ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, SharedStatsAlloc<Global>>;
+type JoinHashMapInner<K> = ManagedLruCache<K, HashValueWrapper, PrecomputedBuildHasher, StatsAlloc>;
 
 pub struct JoinHashMapMetrics {
     /// Metrics used by join executor
@@ -279,7 +277,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         actor_id: ActorId,
         side: &'static str,
     ) -> Self {
-        let alloc = StatsAlloc::new(Global).shared();
+        let alloc = StatsAlloc::new();
         // TODO: unify pk encoding with state table.
         let pk_data_types = state_pk_indices
             .iter()

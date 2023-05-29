@@ -6626,7 +6626,6 @@ dependencies = [
  "hytra",
  "iter-chunks",
  "itertools",
- "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
@@ -6655,6 +6654,7 @@ dependencies = [
  "serde_yaml",
  "smallvec",
  "static_assertions",
+ "task_local_stats_alloc",
  "task_stats_alloc",
  "thiserror",
  "tokio-metrics",
@@ -7618,6 +7618,14 @@ name = "tagptr"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
+
+[[package]]
+name = "task_local_stats_alloc"
+version = "1.0.0-alpha"
+dependencies = [
+ "madsim-tokio",
+ "workspace-hack",
+]
 
 [[package]]
 name = "task_stats_alloc"

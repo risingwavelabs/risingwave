@@ -45,6 +45,7 @@ members = [
   "src/utils/pgwire",
   "src/utils/runtime",
   "src/utils/sync-point",
+  "src/utils/task_local_stats_alloc",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]

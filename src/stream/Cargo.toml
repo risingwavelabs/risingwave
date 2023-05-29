@@ -31,7 +31,6 @@ futures-async-stream = { workspace = true }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.10"
-local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
 memcomparable = "0.2"
@@ -55,6 +54,7 @@ risingwave_storage = { path = "../storage" }
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
+task_local_stats_alloc = { path = "../utils/task_local_stats_alloc" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

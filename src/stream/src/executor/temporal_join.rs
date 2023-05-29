@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Global;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -20,7 +19,6 @@ use either::Either;
 use futures::stream::{self, PollNext};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -30,6 +28,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
+use task_local_stats_alloc::StatsAlloc;
 
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
@@ -60,7 +59,7 @@ pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
     table_output_indices: Vec<usize>,
-    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
+    cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, StatsAlloc>,
     ctx: ActorContextRef,
 }
 
@@ -207,7 +206,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
             .map(|&idx| schema_fields[idx].clone())
             .collect();
 
-        let alloc = StatsAlloc::new(Global).shared();
+        let alloc = StatsAlloc::new();
 
         let cache = new_with_hasher_in(watermark_epoch, DefaultHasher::default(), alloc);
 
