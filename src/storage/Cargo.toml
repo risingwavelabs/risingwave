@@ -69,10 +69,10 @@ tokio-retry = "0.3"
 tracing = "0.1"
 xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
-zstd = "0.11.2"
+zstd = { version = "0.12", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.12", default-features = false }
+procfs = { version = "0.14", default-features = false }
 libc = "0.2"
 nix = { version = "0.25", features = ["fs", "mman"] }
 

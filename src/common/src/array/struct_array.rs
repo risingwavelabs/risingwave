@@ -100,14 +100,14 @@ impl ArrayBuilder for StructArrayBuilder {
             None => {
                 self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum_n(n, Datum::None);
+                    child.append_n(n, Datum::None);
                 }
             }
             Some(v) => {
                 self.bitmap.append_n(n, true);
                 iter_fields_ref!(v, fields, {
                     for (child, f) in self.children_array.iter_mut().zip_eq_fast(fields) {
-                        child.append_datum_n(n, f);
+                        child.append_n(n, f);
                     }
                 });
             }
@@ -319,15 +319,8 @@ impl From<DataChunk> for StructArray {
     fn from(chunk: DataChunk) -> Self {
         Self::new(
             chunk.vis().to_bitmap(),
-            chunk.columns().iter().map(|c| c.array()).collect(),
-            StructType::unnamed(
-                chunk
-                    .columns()
-                    .iter()
-                    .map(|c| c.array_ref().data_type())
-                    .collect(),
-            )
-            .into(),
+            chunk.columns().to_vec(),
+            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()).into(),
         )
     }
 }
@@ -502,8 +495,8 @@ mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
+    use crate::try_match_expand;
     use crate::types::{F32, F64};
-    use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.
     // `CREATE TYPE foo_empty as ();`, e.g.
@@ -520,8 +513,8 @@ mod tests {
         let arr = StructArray::from_slices(
             &[false, true, false, true],
             vec![
-                array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
-                array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
+                I32Array::from_iter([None, Some(1), None, Some(2)]).into(),
+                F32Array::from_iter([None, Some(3.0), None, Some(4.0)]).into(),
             ],
             vec![DataType::Int32, DataType::Float32],
         );
@@ -567,8 +560,8 @@ mod tests {
         let arr = StructArray::from_slices(
             &[true],
             vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
+                I32Array::from_iter([Some(1)]).into(),
+                F32Array::from_iter([Some(2.0)]).into(),
             ],
             vec![DataType::Int32, DataType::Float32],
         );

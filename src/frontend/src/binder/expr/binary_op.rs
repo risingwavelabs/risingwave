@@ -86,6 +86,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccessInner,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
                 match (bound_left.return_type(), bound_right.return_type()) {
                     // array concatenation

@@ -371,12 +371,9 @@ impl Binder {
                 0,
                 raw(move |binder, _inputs| {
                     binder.ensure_now_function_allowed()?;
-                    // `now()` in batch query will be convert to the binder time.
-                    Ok(if binder.is_for_batch() {
-                        Literal::new(Some(binder.epoch.as_scalar()), DataType::Timestamptz).into()
-                    } else {
-                        Now.into()
-                    })
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
                 }),
             )
         }
@@ -420,8 +417,12 @@ impl Binder {
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
+                ("trunc", raw_call(ExprType::Trunc)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
+                ("ln", raw_call(ExprType::Ln)),
+                ("log", raw_call(ExprType::Log10)),
+                ("log10", raw_call(ExprType::Log10)),
                 ("mod", raw_call(ExprType::Modulus)),
                 ("sin", raw_call(ExprType::Sin)),
                 ("cos", raw_call(ExprType::Cos)),
@@ -435,10 +436,18 @@ impl Binder {
                 ("cosd", raw_call(ExprType::Cosd)),
                 ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
+                ("sinh", raw_call(ExprType::Sinh)),
+                ("cosh", raw_call(ExprType::Cosh)), 
+                ("tanh", raw_call(ExprType::Tanh)), 
+                ("coth", raw_call(ExprType::Coth)), 
+                ("asinh", raw_call(ExprType::Asinh)), 
+                ("acosh", raw_call(ExprType::Acosh)), 
+                ("atanh", raw_call(ExprType::Atanh)), 
                 ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
+                ("cbrt", raw_call(ExprType::Cbrt)),
 
                 (
                     "to_timestamp",
@@ -643,11 +652,12 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),

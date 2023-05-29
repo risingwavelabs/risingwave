@@ -113,7 +113,7 @@ impl ArrayBuilder for ListArrayBuilder {
                             .expect("offset overflow"),
                     );
                     for elem in elems {
-                        self.value.append_datum(elem);
+                        self.value.append(elem);
                     }
                 }
             }
@@ -163,7 +163,7 @@ impl ListArrayBuilder {
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
         self.len += 1;
         for v in row.iter() {
-            self.value.append_datum(v);
+            self.value.append(v);
         }
     }
 }
@@ -280,7 +280,7 @@ impl ListArray {
 
         let mut offsets = vec![0u32];
         offsets.reserve(size_hint);
-        let mut builder = ArrayBuilderImpl::from_type(&value_type, size_hint);
+        let mut builder = ArrayBuilderImpl::with_type(size_hint, value_type.clone());
         let mut bitmap = BitmapBuilder::with_capacity(size_hint);
         for v in values {
             bitmap.append(v.is_some());
@@ -435,6 +435,7 @@ impl<'a> ListRef<'a> {
     }
 
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
+        // XXX: avoid using vector
         iter_elems_ref!(self, it, {
             it.flat_map(|datum_ref| {
                 if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
@@ -583,17 +584,17 @@ mod tests {
     use more_asserts::{assert_gt, assert_lt};
 
     use super::*;
-    use crate::{array, empty_array, try_match_expand};
+    use crate::try_match_expand;
 
     #[test]
     fn test_list_with_values() {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -631,7 +632,7 @@ mod tests {
 
         let part1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
             ],
             DataType::Int32,
@@ -639,8 +640,8 @@ mod tests {
 
         let part2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -658,7 +659,7 @@ mod tests {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [Some(
-                array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
+                F32Array::from_iter([Some(2.0), Some(42.0), Some(1.0)]).into(),
             )],
             DataType::Float32,
         );
@@ -714,23 +715,23 @@ mod tests {
 
         let listarray1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
-                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2)]).into()),
+                Some(I32Array::from_iter([Some(3), Some(4)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(5), Some(6), Some(7)]).into()),
                 None,
-                Some(array! { I32Array, [Some(8)] }.into()),
+                Some(I32Array::from_iter([Some(8)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray3 = ListArray::from_iter(
-            [Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+            [Some(I32Array::from_iter([Some(9), Some(10)]).into())],
             DataType::Int32,
         );
 
@@ -964,9 +965,9 @@ mod tests {
         use crate::types;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2), Some(3)]).into()),
                 None,
-                Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(4), Some(5), Some(6), Some(7)]).into()),
             ],
             DataType::Int32,
         );

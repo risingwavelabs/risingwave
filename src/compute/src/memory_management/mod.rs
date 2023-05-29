@@ -25,6 +25,7 @@ use std::sync::Arc;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::error::Result;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
 /// The minimal memory requirement of computing tasks in megabytes.
@@ -168,6 +169,24 @@ pub fn storage_memory_config(
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
+
+    let total_calculated_mb = block_cache_capacity_mb
+        + meta_cache_capacity_mb
+        + shared_buffer_capacity_mb
+        + file_cache_total_buffer_capacity_mb
+        + compactor_memory_limit_mb;
+    let soft_limit_mb = (non_reserved_memory_bytes as f64
+        * (storage_memory_proportion + compactor_memory_proportion).ceil())
+        as usize
+        >> 20;
+    // + 5 because ceil is used when calculating `total_bytes`.
+    if total_calculated_mb > soft_limit_mb + 5 {
+        tracing::warn!(
+            "The storage memory ({}) exceeds soft limit ({}).",
+            convert((total_calculated_mb << 20) as _),
+            convert((soft_limit_mb << 20) as _)
+        );
+    }
 
     StorageMemoryConfig {
         block_cache_capacity_mb,

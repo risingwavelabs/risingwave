@@ -80,7 +80,7 @@ pub enum Distribution {
     /// [`Distribution::HashShard`], but may have different vnode mapping.
     ///
     /// It exists because the upstream MV can be scaled independently. So we use
-    /// `UpstreamHashShard` to force an exchange is inserted.
+    /// `UpstreamHashShard` to **force an exchange to be inserted**.
     ///
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,

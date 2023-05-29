@@ -31,7 +31,7 @@ pub mod common;
 /// instead of playground mode to use this tool. risectl will read environment variables
 /// `RW_META_ADDR` and `RW_HUMMOCK_URL` to configure itself.
 #[derive(Parser)]
-#[clap(author, version, about, long_about = None)]
+#[clap(version, about = "The DevOps tool that provides internal access to the RisingWave cluster", long_about = None)]
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
 pub struct CliOpts {

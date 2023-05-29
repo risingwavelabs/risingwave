@@ -22,6 +22,7 @@ use std::fs;
 
 use clap::ValueEnum;
 use educe::Educe;
+pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -352,13 +353,6 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
-    #[serde(default = "default::storage::enable_local_spill")]
-    pub enable_local_spill: bool,
-
-    /// Local object store root. We should call `get_local_object_store` to get the object store.
-    #[serde(default = "default::storage::local_object_store")]
-    pub local_object_store: String,
-
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::storage::share_buffer_upload_concurrency")]
     pub share_buffer_upload_concurrency: usize,
@@ -581,7 +575,7 @@ mod default {
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10
+            30
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -601,7 +595,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 5mi
+            180 // 3mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {
@@ -609,7 +603,7 @@ mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            5 * 1024 * 1024 * 1024 // 5GB
+            2 * 1024 * 1024 * 1024 // 2GB
         }
 
         pub fn split_group_size_limit() -> u64 {
@@ -672,14 +666,6 @@ mod default {
 
         pub fn disable_remote_compactor() -> bool {
             false
-        }
-
-        pub fn enable_local_spill() -> bool {
-            true
-        }
-
-        pub fn local_object_store() -> String {
-            "tempdisk".to_string()
         }
 
         pub fn share_buffer_upload_concurrency() -> usize {

@@ -27,7 +27,6 @@ mod approx_count_distinct;
 mod array_agg;
 mod count_star;
 mod general;
-mod general_sorted_grouper;
 mod jsonb_agg;
 mod string_agg;
 
@@ -41,7 +40,6 @@ mod projection;
 pub use self::def::*;
 use self::distinct::Distinct;
 use self::filter::*;
-pub use self::general_sorted_grouper::{create_sorted_grouper, BoxedSortedGrouper, EqGroups};
 use self::orderby::ProjectionOrderBy;
 use self::projection::Projection;
 
@@ -66,6 +64,9 @@ pub trait Aggregator: Send + DynClone + 'static {
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
     /// After `output` the aggregator is reset to initial state.
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+
+    /// The estimated size of the state.
+    fn estimated_size(&self) -> usize;
 }
 
 dyn_clone::clone_trait_object!(Aggregator);

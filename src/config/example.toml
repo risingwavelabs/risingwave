@@ -15,7 +15,7 @@ hummock_version_checkpoint_interval_sec = 30
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
-meta_leader_lease_secs = 10
+meta_leader_lease_secs = 30
 enable_compaction_deterministic = false
 enable_committed_sst_sanity_check = false
 node_num_monitor_interval_sec = 10
@@ -24,7 +24,7 @@ periodic_space_reclaim_compaction_interval_sec = 3600
 periodic_ttl_reclaim_compaction_interval_sec = 1800
 periodic_split_compact_group_interval_sec = 180
 max_compactor_task_multiplier = 2
-move_table_size_limit = 5368709120
+move_table_size_limit = 2147483648
 split_group_size_limit = 21474836480
 
 [batch.developer]
@@ -53,8 +53,6 @@ share_buffer_compaction_worker_threads_number = 4
 imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false
-enable_local_spill = true
-local_object_store = "tempdisk"
 share_buffer_upload_concurrency = 8
 sstable_id_remote_fetch_number = 10
 min_sst_size_for_streaming_upload = 33554432

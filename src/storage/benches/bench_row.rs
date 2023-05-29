@@ -99,7 +99,7 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     if c.column_ids == c.needed_ids {
         for byte in bytes {
             let row = serde.deserialize(byte)?.into_inner();
-            res.push(row);
+            res.push(row.into());
         }
     } else {
         let column_id_to_index = c

@@ -24,7 +24,7 @@ use crate::util::iter_util::ZipEqFast;
 ///    `STRUCT<i INT, j VARCHAR>`.
 /// 2. `field_names.len() == 0`: it represents a struct with unnamed fields, e.g.
 ///    `ROW(1, 2)`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StructType {
     pub fields: Vec<DataType>,
     pub field_names: Vec<String>,

@@ -93,7 +93,7 @@ impl ValueRowSerializer for BasicSerializer {
 
 impl ValueRowDeserializer for BasicDeserializer {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserialize(encoded_bytes)?.into_inner())
+        Ok(self.deserialize(encoded_bytes)?.into_inner().into())
     }
 }
 
@@ -112,7 +112,11 @@ impl ValueRowSerializer for BasicSerde {
 
 impl ValueRowDeserializer for BasicSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
+        Ok(self
+            .deserializer
+            .deserialize(encoded_bytes)?
+            .into_inner()
+            .into())
     }
 }
 
@@ -495,7 +499,7 @@ mod tests {
             0.0,
         );
         for column in chunk.columns() {
-            test_try_get_exact_serialize_datum_size(&column.array());
+            test_try_get_exact_serialize_datum_size(column);
         }
     }
 }
