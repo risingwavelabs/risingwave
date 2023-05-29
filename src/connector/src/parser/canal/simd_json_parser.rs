@@ -12,25 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
-use risingwave_common::cast::{
-    str_to_date, str_to_time, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
+use crate::impl_common_parser_logic;
 use crate::parser::canal::operators::*;
-use crate::parser::common::json_object_smart_get_value;
+use crate::parser::common::{do_parse_simd_json_value, json_object_smart_get_value};
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -104,7 +99,7 @@ impl CanalJsonParser {
                         })
                     })
                     .collect::<Vec<Result<_>>>();
-
+                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             CANAL_UPDATE_EVENT => {
@@ -153,6 +148,7 @@ impl CanalJsonParser {
                     })
                     .collect::<Vec<Result<_>>>();
 
+                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             CANAL_DELETE_EVENT => {
@@ -178,6 +174,7 @@ impl CanalJsonParser {
                     })
                     .collect::<Vec<Result<_>>>();
 
+                println!("results: {:?}", results);
                 at_least_one_ok(results)
             }
             other => Err(RwError::from(ProtocolError(format!(
@@ -195,44 +192,13 @@ fn cannal_simd_json_parse_value(
 ) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
-        Some(v) => Ok(Some(cannal_do_parse_simd_json_value(dtype, v).map_err(
-            |e| {
+        Some(v) => Ok(Some(
+            do_parse_simd_json_value(&SourceFormat::CanalJson, dtype, v).map_err(|e| {
                 tracing::warn!("failed to parse type '{}' from json: {}", dtype, e);
                 anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-            },
-        )?)),
+            })?,
+        )),
     }
-}
-
-#[inline]
-fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
-    let v = match dtype {
-        // mysql use tinyint to represent boolean
-        DataType::Boolean => ScalarImpl::Bool(ensure_rust_type!(v, i16) != 0),
-        DataType::Int16 => ScalarImpl::Int16(ensure_rust_type!(v, i16)),
-        DataType::Int32 => ScalarImpl::Int32(ensure_rust_type!(v, i32)),
-        DataType::Int64 => ScalarImpl::Int64(ensure_rust_type!(v, i64)),
-        DataType::Float32 => ScalarImpl::Float32(ensure_rust_type!(v, f32).into()),
-        DataType::Float64 => ScalarImpl::Float64(ensure_rust_type!(v, f64).into()),
-        // FIXME: decimal should have more precision than f64
-        DataType::Decimal => Decimal::from_str(ensure_str!(v, "string"))
-            .map_err(|_| anyhow!("parse decimal from string err {}", v))?
-            .into(),
-        DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
-        DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestamptz => {
-            str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
-        }
-        _ => {
-            return Err(RwError::from(InternalError(format!(
-                "cannal data source not support type {}",
-                dtype
-            ))))
-        }
-    };
-    Ok(v)
 }
 
 #[cfg(test)]
