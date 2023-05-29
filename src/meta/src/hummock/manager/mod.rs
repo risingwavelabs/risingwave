@@ -310,9 +310,11 @@ where
             .await?;
 
             // config bucket lifecycle for new cluster.
-            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref() && !env.opts.do_not_config_object_storage_lifecycle{
-            s3.inner().configure_bucket_lifecycle().await;
-        }
+            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
+                && !env.opts.do_not_config_object_storage_lifecycle
+            {
+                s3.inner().configure_bucket_lifecycle().await;
+            }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
