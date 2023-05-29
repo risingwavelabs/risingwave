@@ -20,6 +20,7 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
+use risingwave_sqlparser::ast::Statement;
 use tokio::time::{sleep, Duration};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
@@ -27,8 +28,8 @@ use tokio_postgres::Client;
 use crate::utils::read_file_contents;
 use crate::validation::{is_permissible_error, is_recovery_in_progress_error};
 use crate::{
-    create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
-    sql_gen, Table,
+    generate_update_statements, insert_sql_gen, mview_sql_gen, parse_create_table_statements,
+    parse_sql, session_sql_gen, sql_gen, Table,
 };
 
 type PgResult<A> = std::result::Result<A, PgError>;
@@ -37,7 +38,7 @@ type Result<A> = anyhow::Result<A>;
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
-    let queries = std::fs::read_to_string(queries_path).unwrap();
+    let queries = read_file_contents(queries_path).unwrap();
     let ddl = queries
         .lines()
         .filter(|s| s.starts_with("CREATE"))
@@ -77,22 +78,27 @@ pub async fn generate(
 
     let rows_per_table = 50;
     let max_rows_inserted = rows_per_table * base_tables.len();
-    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
         .await
         .unwrap();
 
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        base_tables,
+        base_tables.clone(),
         max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
+
+    tracing::info!("Ran updates");
 
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
@@ -159,7 +165,7 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 50;
-    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let inserts = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
@@ -167,16 +173,21 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
         .unwrap();
     tracing::info!("Created tables");
 
+    // Generate an update for some inserts, on the corresponding table.
+    update_base_tables(client, &mut rng, &base_tables, &inserts).await;
+    tracing::info!("Ran updates");
+
     let max_rows_inserted = rows_per_table * base_tables.len();
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        base_tables,
+        base_tables.clone(),
         max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
+
     test_batch_queries(client, &mut rng, tables.clone(), count)
         .await
         .unwrap();
@@ -204,18 +215,37 @@ fn generate_rng(seed: Option<u64>) -> impl Rng {
     }
 }
 
+async fn update_base_tables<R: Rng>(
+    client: &Client,
+    rng: &mut R,
+    base_tables: &[Table],
+    inserts: &[Statement],
+) {
+    let update_statements = generate_update_statements(rng, base_tables, inserts).unwrap();
+    for update_statement in update_statements {
+        if rng.gen_bool(0.5) {
+            let sql = update_statement.to_string();
+            tracing::info!("[EXECUTING UPDATES]: {}", &sql);
+            client.simple_query(&sql).await.unwrap();
+        }
+    }
+}
+
 async fn populate_tables<R: Rng>(
     client: &Client,
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
-) -> String {
+) -> Vec<Statement> {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
         tracing::info!("[EXECUTING INSERT]: {}", insert);
         client.simple_query(insert).await.unwrap();
     }
-    inserts.into_iter().map(|i| format!("{};\n", i)).collect()
+    inserts
+        .iter()
+        .map(|s| parse_sql(s).into_iter().next().unwrap())
+        .collect_vec()
 }
 
 /// Sanity checks for sqlsmith
@@ -319,6 +349,7 @@ async fn test_stream_queries<R: Rng>(
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;
+
     for _ in 0..sample_size {
         test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
@@ -344,12 +375,8 @@ async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table
     tracing::info!("Preparing tables...");
 
     let sql = get_seed_table_sql(testdata);
-    let statements = parse_sql(sql);
+    let (base_tables, statements) = parse_create_table_statements(sql);
     let mut mvs_and_base_tables = vec![];
-    let base_tables = statements
-        .iter()
-        .map(create_table_statement_to_table)
-        .collect_vec();
     mvs_and_base_tables.extend_from_slice(&base_tables);
 
     for stmt in &statements {
