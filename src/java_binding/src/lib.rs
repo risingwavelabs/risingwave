@@ -232,6 +232,7 @@ pub enum JavaBindingRowInner {
 #[derive(Default)]
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    byte_array_input_stream_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
 
     date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
@@ -692,7 +693,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
         let (ts_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
-            .timestamp_ctor
+            .byte_array_input_stream_ctor
             .get_or_try_init(|| {
                 let cls = env.find_class("java/io/ByteArrayInputStream")?;
                 let init_method = env.get_method_id(cls, "<init>", "(B[])V")?;
