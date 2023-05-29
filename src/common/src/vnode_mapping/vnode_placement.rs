@@ -16,9 +16,10 @@ use std::collections::{BTreeMap, HashMap, HashSet, LinkedList, VecDeque};
 
 use itertools::Itertools;
 use num_integer::Integer;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
+
+use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 
 /// Calculate a new vnode mapping, keeping locality and balance on a best effort basis.
 /// The strategy is similar to `rebalance_actor_vnode` used in meta node, but is modified to
@@ -166,11 +167,11 @@ pub fn place_vnode(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{ParallelUnit, WorkerNode};
 
-    use crate::batch::vnode_placement::place_vnode;
+    use crate::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
+    use crate::vnode_mapping::vnode_placement::place_vnode;
 
     #[test]
     fn test_place_vnode() {

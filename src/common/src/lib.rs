@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
+#![feature(drain_filter)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
@@ -66,6 +67,7 @@ pub mod telemetry;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;
+pub mod vnode_mapping;
 
 pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};

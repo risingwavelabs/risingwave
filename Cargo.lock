@@ -5772,6 +5772,7 @@ dependencies = [
  "madsim-tonic",
  "memcomparable",
  "more-asserts",
+ "num-integer",
  "num-traits",
  "number_prefix",
  "parking_lot 0.12.1",

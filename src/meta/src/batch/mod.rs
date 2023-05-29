@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod vnode_placement;
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, FragmentParallelUnitMappings};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use crate::batch::vnode_placement::place_vnode;
 use crate::manager::{
     ClusterManagerRef, FragmentManager, FragmentManagerRef, LocalNotification,
     NotificationManagerRef,
