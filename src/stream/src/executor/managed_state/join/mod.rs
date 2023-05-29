@@ -307,7 +307,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let metrics_info = MetricsInfo::new(metrics.clone(), join_table_id, actor_id);
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            join_table_id,
+            actor_id,
+            &format!("hash join {}", side),
+        );
 
         let cache =
             new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);

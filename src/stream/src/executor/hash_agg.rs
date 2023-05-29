@@ -537,6 +537,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             this.metrics.clone(),
             this.result_table.table_id(),
             this.actor_ctx.id,
+            "agg result table",
         );
 
         let mut vars = ExecutionVars {

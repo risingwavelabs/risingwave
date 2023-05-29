@@ -210,7 +210,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
 
         let alloc = StatsAlloc::new(Global).shared();
 
-        let metrics_info = MetricsInfo::new(metrics.clone(), table.table_id().table_id, ctx.id);
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            table.table_id().table_id,
+            ctx.id,
+            "temporal join",
+        );
 
         let cache = new_with_hasher_in(
             watermark_epoch,

@@ -629,7 +629,7 @@ impl StreamingMetrics {
         let stream_memory_usage = register_int_gauge_vec_with_registry!(
             "stream_memory_usage",
             "Memory usage for stream executors",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "desc"],
             registry
         )
         .unwrap();

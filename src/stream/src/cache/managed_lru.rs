@@ -53,9 +53,11 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         metrics_info: Option<MetricsInfo>,
     ) -> Self {
         let memory_usage_metrics = metrics_info.map(|info| {
-            info.metrics
-                .stream_memory_usage
-                .with_label_values(&[&info.table_id, &info.actor_id])
+            info.metrics.stream_memory_usage.with_label_values(&[
+                &info.table_id,
+                &info.actor_id,
+                &info.desc,
+            ])
         });
 
         Self {
@@ -197,16 +199,10 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn report_memory_usage(&mut self) -> bool {
-        print!(
-            "heap size {} last {}",
-            self.kv_heap_size, self.last_reported_size_bytes
-        );
-
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
             if let Some(metrics) = self.memory_usage_metrics.as_ref() {
-                print!("set kv size {}", self.kv_heap_size);
                 metrics.set(self.kv_heap_size as _);
             }
             self.last_reported_size_bytes = self.kv_heap_size;
@@ -288,15 +284,10 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 
     fn report_memory_usage(&mut self) -> bool {
-        print!(
-            "heap size {} last {}",
-            self.total_size, self.last_reported_size_bytes
-        );
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
             if let Some(metrics) = self.memory_usage_metrics.as_ref() {
-                print!("set kv size {}", self.total_size);
                 metrics.set(*self.total_size as _);
             }
             *self.last_reported_size_bytes = *self.total_size;

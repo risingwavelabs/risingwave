@@ -844,7 +844,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             "rate(stream_memory_usage[$__rate_interval])",
-                            "table {{table_id}} actor {{actor_id}}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
                 ),

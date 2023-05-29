@@ -22,14 +22,21 @@ pub struct MetricsInfo {
     pub metrics: Arc<StreamingMetrics>,
     pub table_id: String,
     pub actor_id: String,
+    pub desc: String,
 }
 
 impl MetricsInfo {
-    pub fn new(metrics: Arc<StreamingMetrics>, table_id: u32, actor_id: ActorId) -> Self {
+    pub fn new(
+        metrics: Arc<StreamingMetrics>,
+        table_id: u32,
+        actor_id: ActorId,
+        desc: &str,
+    ) -> Self {
         Self {
             metrics,
             table_id: table_id.to_string(),
             actor_id: actor_id.to_string(),
+            desc: desc.to_string(),
         }
     }
 
@@ -38,6 +45,7 @@ impl MetricsInfo {
             metrics: Arc::new(StreamingMetrics::unused()),
             table_id: "table_id test".to_string(),
             actor_id: "actor_id test".to_string(),
+            desc: "desc test".to_string(),
         }
     }
 }
