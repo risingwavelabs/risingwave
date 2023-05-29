@@ -63,7 +63,6 @@ impl LogicalOverWindow {
                 })?;
         }
         let mut input_len = input.schema().len();
-        let mut reserve_cnt = 0;
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
                 if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
@@ -75,7 +74,17 @@ impl LogicalOverWindow {
                             | AggKind::VarSamp
                     )
                 {
-                    reserve_cnt += 1;
+                    let input = window_function.args.iter().exactly_one().unwrap();
+                    let squared_input_expr = ExprImpl::from(
+                        FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()])
+                            .unwrap(),
+                    );
+                    input_len = input_len.max(
+                        input_proj_builder
+                            .add_expr(&squared_input_expr)
+                            .unwrap_or(0)
+                            + 1,
+                    );
                 }
                 let input_idx_in_args: Vec<_> = window_function
                     .args
@@ -108,7 +117,7 @@ impl LogicalOverWindow {
                     .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
             }
         }
-        input_len += reserve_cnt;
+
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
             if let ExprImpl::WindowFunction(window) = expr {
@@ -167,7 +176,7 @@ impl LogicalOverWindow {
                         | AggKind::StddevSamp
                         | AggKind::VarPop
                         | AggKind::VarSamp => {
-                            let input = args.iter().exactly_one().unwrap();
+                            let input = args.first().unwrap();
                             let squared_input_expr = ExprImpl::from(
                                 FunctionCall::new(
                                     ExprType::Multiply,
@@ -175,8 +184,6 @@ impl LogicalOverWindow {
                                 )
                                 .unwrap(),
                             );
-
-                            let _ = input_proj_builder.add_expr(&squared_input_expr).unwrap();
 
                             window_funcs.push(WindowFunction::new(
                                 WindowFuncKind::Aggregate(AggKind::Sum),
