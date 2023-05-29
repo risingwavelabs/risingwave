@@ -124,7 +124,7 @@ impl std::fmt::Debug for WindowFunction {
             }
             builder.finish()
         } else {
-            write!(f, "{}() OVER(", self.kind)?;
+            write!(f, "{}({:?}) OVER(", self.kind, self.args)?;
 
             let mut delim = "";
             if !self.partition_by.is_empty() {
