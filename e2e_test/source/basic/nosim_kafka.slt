@@ -74,7 +74,7 @@ flush;
 sleep 1s
 
 
-Query II 
+Query II
 SELECT
  *
 FROM
@@ -83,7 +83,8 @@ ORDER BY
  "ID";
 ----
 
-Query II 
+
+Query II
 SELECT
  *
 FROM
@@ -92,7 +93,8 @@ ORDER BY
  "ID";
 ----
 
-Query II 
+
+Query II
 SELECT
  *
 FROM
@@ -102,7 +104,7 @@ ORDER BY
 ----
 
 
-query II 
+query II
 SELECT
 	*
 FROM
