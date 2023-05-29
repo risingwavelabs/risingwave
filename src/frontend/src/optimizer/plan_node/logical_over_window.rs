@@ -139,6 +139,7 @@ impl LogicalOverWindow {
                             | AggKind::VarSamp
                     )
                 {
+                    // Refer to LogicalAggBuilder::try_rewrite_agg_call()
                     match agg_kind {
                         AggKind::Avg => {
                             assert_eq!(args.len(), 1);
