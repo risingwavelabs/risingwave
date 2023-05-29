@@ -52,7 +52,7 @@ CREATE SINK s_mysql FROM mv_remote WITH (
 );
 
 statement ok
-CREATE SINK s2_postgres FROM mv_remote WITH (
+CREATE SINK s2_postgres FROM rw_types WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
     table.name='t_types',
@@ -72,7 +72,7 @@ INSERT INTO t_remote VALUES
     (6, 'Frank', 28131, 1233587627, 8492820454814063326, 123358.7627, 58.76, 123358.7627, '2023-03-21 10:18:32');
 
 statement ok
-INSERT INTO data_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, array_column, array_column2) VALUES
+INSERT INTO rw_types (id, varchar_column, text_column, integer_column, smallint_column, bigint_column, decimal_column, real_column, double_column, boolean_column, date_column, time_column, timestamp_column, interval_column, jsonb_column, array_column, array_column2) VALUES
     (1, 'Varcharvalue1', 'Textvalue1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '1 day', '{"key": "value"}', ARRAY['Value 1', 'Value 2'], '{12.345,56.789}'),
     (2, 'Varcharvalue2', 'Textvalue2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2 days', '{"key": "value2"}', ARRAY['Value 3', 'Value 4'], '{43.210,65.432}');
 
@@ -95,10 +95,16 @@ statement ok
 DROP SINK s_mysql
 
 statement ok
+DROP SINK s2_postgres;
+
+statement ok
 DROP MATERIALIZED VIEW mv_remote;
 
 statement ok
 DROP TABLE t_remote;
+
+statement ok
+DROP TABLE rw_types;
 
 statement ok
 FLUSH;
