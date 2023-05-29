@@ -696,7 +696,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
             .byte_array_input_stream_ctor
             .get_or_try_init(|| {
                 let cls = env.find_class("java/io/ByteArrayInputStream")?;
-                let init_method = env.get_method_id(cls, "<init>", "(B[])V")?;
+                let init_method = env.get_method_id(cls, "<init>", "([B)V")?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         let ts_class = JClass::from(ts_class_ref.as_obj());
