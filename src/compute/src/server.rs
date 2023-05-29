@@ -46,7 +46,7 @@ use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter, TieredCacheMetrics};
+use risingwave_storage::hummock::{HummockMemoryCollector, MemoryLimiter};
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -188,7 +188,6 @@ pub async fn compute_node_serve(
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
-        TieredCacheMetrics::new(registry.clone()),
         if config.streaming.enable_jaeger_tracing {
             Arc::new(
                 risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
@@ -201,6 +200,7 @@ pub async fn compute_node_serve(
         },
         storage_metrics.clone(),
         compactor_metrics.clone(),
+        registry.clone(),
     )
     .await
     .unwrap();

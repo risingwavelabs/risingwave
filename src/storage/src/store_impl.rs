@@ -28,7 +28,7 @@ use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
     HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
-    TieredCacheConfig, TieredCacheMetrics,
+    TieredCacheConfig,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -537,7 +537,6 @@ pub mod verify {
 }
 
 impl StateStoreImpl {
-    #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
@@ -545,10 +544,10 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        tiered_cache_metrics: TieredCacheMetrics,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
+        registry: prometheus::Registry,
     ) -> StorageResult<Self> {
         let tiered_cache = if opts.file_cache_dir.is_empty() {
             TieredCache::none()
@@ -558,7 +557,7 @@ impl StateStoreImpl {
                 capacity: opts.file_cache_capacity_mb * 1024 * 1024,
                 max_file_size: opts.file_cache_file_capacity_mb * 1024 * 1024,
             };
-            TieredCache::foyer(config).await?
+            TieredCache::foyer(config, registry).await?
         };
 
         let store = match s {

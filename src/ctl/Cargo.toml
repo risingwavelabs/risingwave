@@ -21,6 +21,7 @@ clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+prometheus = "0.13"
 regex = "1.6.0"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }

@@ -2475,7 +2475,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f44aec1#f44aec15c6e46971a4f4dba7eec5b5bfa366ccc2"
+source = "git+https://github.com/mrcroxx/foyer?rev=8e80c6c#8e80c6c240ff39faff7cf387d902de2a5e3609b7"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2499,7 +2499,7 @@ dependencies = [
 [[package]]
 name = "foyer-utils"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=f44aec1#f44aec15c6e46971a4f4dba7eec5b5bfa366ccc2"
+source = "git+https://github.com/mrcroxx/foyer?rev=8e80c6c#8e80c6c240ff39faff7cf387d902de2a5e3609b7"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5917,6 +5917,7 @@ dependencies = [
  "futures",
  "itertools",
  "madsim-tokio",
+ "prometheus",
  "rand",
  "risingwave_common",
  "risingwave_compactor",
@@ -6076,6 +6077,7 @@ dependencies = [
  "futures",
  "itertools",
  "madsim-tokio",
+ "prometheus",
  "regex",
  "risingwave_common",
  "risingwave_connector",

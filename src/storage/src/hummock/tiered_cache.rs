@@ -78,7 +78,10 @@ pub enum TieredCache {
 }
 
 impl TieredCache {
-    pub async fn foyer(config: TieredCacheConfig) -> HummockResult<Self> {
+    pub async fn foyer(
+        config: TieredCacheConfig,
+        registry: prometheus::Registry,
+    ) -> HummockResult<Self> {
         let policy_config = TinyLfuConfig {
             window_to_cache_size_ratio: FOYER_TINYLFU_WINDOW_TO_CACHE_SIZE_RATIO,
             tiny_lru_capacity_ratio: FOYER_TINYLFU_TINY_LRU_CAPACITY_RATIO,
@@ -100,7 +103,7 @@ impl TieredCache {
             policy_config,
             store_config,
         };
-        let cache = TinyLfuReadOnlyFileStoreCache::open(cache_config)
+        let cache = TinyLfuReadOnlyFileStoreCache::open_with_registry(cache_config, registry)
             .await
             .map_err(HummockError::tiered_cache)?;
         Ok(Self::Foyer(Arc::new(cache)))

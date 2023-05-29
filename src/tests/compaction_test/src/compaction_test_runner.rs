@@ -36,7 +36,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetrics};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -718,10 +718,10 @@ pub async fn create_hummock_store_with_metrics(
         )),
         metrics.state_store_metrics.clone(),
         metrics.object_store_metrics.clone(),
-        TieredCacheMetrics::default(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         metrics.storage_metrics.clone(),
         metrics.compactor_metrics.clone(),
+        prometheus::Registry::new(),
     )
     .await?;
 
