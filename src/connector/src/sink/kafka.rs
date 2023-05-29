@@ -450,7 +450,7 @@ fn pk_to_json(
     for idx in pk_indices {
         let field = &schema[*idx];
         let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx))
+        let value = datum_to_json_object(field, row.datum_at(*idx), false)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
