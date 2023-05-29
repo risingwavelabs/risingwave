@@ -1234,6 +1234,7 @@ impl Parser {
             Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
+            Token::Prefix => Some(BinaryOperator::Prefix),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
             Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
@@ -1313,6 +1314,10 @@ impl Parser {
                         Ok(Expr::IsFalse(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::FALSE]) {
                         Ok(Expr::IsNotFalse(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::UNKNOWN) {
+                        Ok(Expr::IsUnknown(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::UNKNOWN]) {
+                        Ok(Expr::IsNotUnknown(Box::new(expr)))
                     } else if self.parse_keyword(Keyword::NULL) {
                         Ok(Expr::IsNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
@@ -1532,6 +1537,7 @@ impl Parser {
             | Token::ExclamationMarkTilde
             | Token::ExclamationMarkTildeAsterisk
             | Token::Concat
+            | Token::Prefix
             | Token::Arrow
             | Token::LongArrow
             | Token::HashArrow

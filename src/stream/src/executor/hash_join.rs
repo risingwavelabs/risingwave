@@ -206,7 +206,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         unimplemented!()
     }
 
-    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),

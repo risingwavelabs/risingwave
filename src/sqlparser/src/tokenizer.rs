@@ -115,6 +115,8 @@ pub enum Token {
     Pipe,
     /// Caret `^`
     Caret,
+    /// Prefix `^@`
+    Prefix,
     /// Left brace `{`
     LBrace,
     /// Right brace `}`
@@ -196,6 +198,7 @@ impl fmt::Display for Token {
             Token::RBracket => f.write_str("]"),
             Token::Ampersand => f.write_str("&"),
             Token::Caret => f.write_str("^"),
+            Token::Prefix => f.write_str("^@"),
             Token::Pipe => f.write_str("|"),
             Token::LBrace => f.write_str("{"),
             Token::RBrace => f.write_str("}"),
@@ -692,7 +695,13 @@ impl<'a> Tokenizer<'a> {
                 '[' => self.consume_and_return(chars, Token::LBracket),
                 ']' => self.consume_and_return(chars, Token::RBracket),
                 '&' => self.consume_and_return(chars, Token::Ampersand),
-                '^' => self.consume_and_return(chars, Token::Caret),
+                '^' => {
+                    chars.next();
+                    match chars.peek() {
+                        Some('@') => self.consume_and_return(chars, Token::Prefix),
+                        _ => Ok(Some(Token::Caret)),
+                    }
+                }
                 '{' => self.consume_and_return(chars, Token::LBrace),
                 '}' => self.consume_and_return(chars, Token::RBrace),
                 '~' => {

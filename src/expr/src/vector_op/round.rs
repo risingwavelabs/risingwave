@@ -46,6 +46,16 @@ pub fn floor_decimal(input: Decimal) -> Decimal {
     input.floor()
 }
 
+#[function("trunc(float64) -> float64")]
+pub fn trunc_f64(input: F64) -> F64 {
+    f64::trunc(input.0).into()
+}
+
+#[function("trunc(decimal) -> decimal")]
+pub fn trunc_decimal(input: Decimal) -> Decimal {
+    input.trunc()
+}
+
 // Ties are broken by rounding away from zero
 #[function("round(float64) -> float64")]
 pub fn round_f64(input: F64) -> F64 {

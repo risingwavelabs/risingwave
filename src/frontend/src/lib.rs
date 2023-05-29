@@ -30,9 +30,9 @@
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]
-#![feature(is_some_and)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![recursion_limit = "256"]
 
 #[macro_use]

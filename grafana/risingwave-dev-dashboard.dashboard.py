@@ -595,6 +595,8 @@ def section_object_storage(outer_panels):
 
 
 def section_streaming(panels):
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -663,11 +665,21 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink per second.",
+            "The figure shows the number of rows output by each sink executor actor per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
-                    "sink={{sink_name}} {{sink_id}} @ {{instance}}",
+                    f"rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])",
+                    "sink={{executor_identity}} {{actor_id}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Materialized View Throughput(rows/s)",
+            "The figure shows the number of rows written into each materialized executor actor per second.",
+            [
+                panels.target(
+                    f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
+                    "MV={{executor_identity}} {{actor_id}} @ {{instance}}",
                 ),
             ],
         ),
@@ -800,7 +812,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "{{actor_id}}->{{executor_id}}",
+                            "{{actor_id}}->{{executor_identity}}",
                         ),
                     ],
                 ),

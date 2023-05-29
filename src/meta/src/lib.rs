@@ -21,7 +21,6 @@
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
-#![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![feature(lazy_cell)]
@@ -34,6 +33,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(string_leak)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod backup_restore;
 mod barrier;
@@ -62,7 +62,7 @@ use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 #[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
-    vpd_id: Option<String>,
+    vpc_id: Option<String>,
 
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
@@ -244,7 +244,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
-                vpc_id: opts.vpd_id,
+                vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 periodic_space_reclaim_compaction_interval_sec: config

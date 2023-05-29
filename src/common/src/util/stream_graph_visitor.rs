@@ -178,6 +178,11 @@ fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "Sort");
             }
 
+            // Chain
+            NodeBody::Chain(node) => {
+                always!(node.state_table, "Chain")
+            }
+
             // Note: add internal tables for new nodes here.
             NodeBody::Materialize(node) if !internal_tables_only => {
                 always!(node.table, "Materialize")
