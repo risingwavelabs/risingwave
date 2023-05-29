@@ -22,12 +22,12 @@ use std::sync::atomic::AtomicUsize;
 
 use atomic::Ordering;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct StatsAlloc;
 
 impl StatsAlloc {
     pub fn new() -> Self {
-        Self
+        Self {}
     }
 
     pub fn bytes_in_use(&self) -> usize {
