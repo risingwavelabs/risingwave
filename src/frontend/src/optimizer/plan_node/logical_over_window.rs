@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -150,9 +150,160 @@ impl LogicalOverWindow {
                             );
                             let _ = std::mem::replace(expr, new_expr);
                         }
-                        _ => {
-                            unimplemented!("unsupported agg kind in over window: {:?}", agg_kind);
+                        AggKind::StddevPop
+                        | AggKind::StddevSamp
+                        | AggKind::VarPop
+                        | AggKind::VarSamp => {
+                            let input = args.iter().exactly_one().unwrap();
+                            println!("input: {:?}", input);
+                            let squared_input_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Multiply,
+                                    vec![input.clone(), input.clone()],
+                                )
+                                .unwrap(),
+                            );
+
+                            let _ = input_proj_builder.add_expr(&squared_input_expr).unwrap();
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                vec![squared_input_expr],
+                                frame.clone(),
+                            )?);
+
+                            let sum_of_squares_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let sum_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Count),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let count_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ));
+
+                            // we start with variance
+
+                            // sum * sum
+                            let square_of_sum_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Multiply,
+                                    vec![sum_expr.clone(), sum_expr],
+                                )
+                                .unwrap(),
+                            );
+
+                            // sum_sq - sum * sum / count
+                            let numerator_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Subtract,
+                                    vec![
+                                        sum_of_squares_expr,
+                                        ExprImpl::from(
+                                            FunctionCall::new(
+                                                ExprType::Divide,
+                                                vec![square_of_sum_expr, count_expr.clone()],
+                                            )
+                                            .unwrap(),
+                                        ),
+                                    ],
+                                )
+                                .unwrap(),
+                            );
+
+                            // count or count - 1
+                            let denominator_expr = match agg_kind {
+                                AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
+                                AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
+                                    FunctionCall::new(
+                                        ExprType::Subtract,
+                                        vec![
+                                            count_expr.clone(),
+                                            ExprImpl::from(Literal::new(
+                                                Datum::from(ScalarImpl::Int64(1)),
+                                                DataType::Int64,
+                                            )),
+                                        ],
+                                    )
+                                    .unwrap(),
+                                ),
+                                _ => unreachable!(),
+                            };
+
+                            let mut target_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Divide,
+                                    vec![numerator_expr, denominator_expr],
+                                )
+                                .unwrap(),
+                            );
+
+                            // stddev = sqrt(variance)
+                            if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
+                                target_expr = ExprImpl::from(
+                                    FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
+                                );
+                            }
+
+                            match agg_kind {
+                                AggKind::VarPop | AggKind::StddevPop => {
+                                    let _ = std::mem::replace(expr, target_expr);
+                                }
+                                AggKind::StddevSamp | AggKind::VarSamp => {
+                                    let less_than_expr = ExprImpl::from(
+                                        FunctionCall::new(
+                                            ExprType::LessThanOrEqual,
+                                            vec![
+                                                count_expr,
+                                                ExprImpl::from(Literal::new(
+                                                    Datum::from(ScalarImpl::Int64(1)),
+                                                    DataType::Int64,
+                                                )),
+                                            ],
+                                        )
+                                        .unwrap(),
+                                    );
+                                    let null_expr =
+                                        ExprImpl::from(Literal::new(None, return_type.clone()));
+
+                                    let case_expr = ExprImpl::from(
+                                        FunctionCall::new(
+                                            ExprType::Case,
+                                            vec![less_than_expr, null_expr, target_expr],
+                                        )
+                                        .unwrap(),
+                                    );
+                                    let _ = std::mem::replace(expr, case_expr);
+                                }
+                                _ => unreachable!(),
+                            }
                         }
+                        _ => unreachable!(),
                     }
                 } else {
                     let new_expr =
@@ -164,6 +315,7 @@ impl LogicalOverWindow {
                     window_funcs.push(*f);
                 }
             }
+            println!("new expr: {:?}", expr);
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
                     format!("window function in expression: {:?}", expr),
@@ -172,6 +324,7 @@ impl LogicalOverWindow {
                 .into());
             }
         }
+        println!("window_funcs: {:?}", window_funcs);
         for f in &window_funcs {
             if f.kind.is_rank() {
                 if f.order_by.sort_exprs.is_empty() {
@@ -278,6 +431,11 @@ impl LogicalOverWindow {
                 }
             }),
         };
+
+        args.iter().for_each(|e| {
+            println!("expr: {:?}", e);
+            let _ = input_proj_builder.expr_index(&e).unwrap();
+        });
 
         let args = args
             .into_iter()
