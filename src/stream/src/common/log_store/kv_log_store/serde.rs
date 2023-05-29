@@ -28,13 +28,14 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
-    BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
+    BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
+use risingwave_storage::value_serde::ValueRowSerdeNew;
 
 use crate::common::log_store::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,
@@ -123,7 +124,11 @@ impl LogStoreRowSerde {
 
         let payload_schema = data_types[PREDEFINED_COLUMNS_TYPES.len()..].to_vec();
 
-        let row_serde = BasicSerde::new(&[], Arc::from(data_types.into_boxed_slice()));
+        let row_serde = BasicSerde::new(
+            &[],
+            Arc::from(data_types.into_boxed_slice()),
+            std::iter::empty(),
+        );
 
         let vnodes = match vnodes {
             Some(vnodes) => vnodes,

@@ -424,7 +424,7 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
             match self.next_row().await? {
                 Some(row) => {
                     for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
-                        builder.append_datum(datum);
+                        builder.append(datum);
                     }
                     row_count += 1;
                 }
