@@ -302,9 +302,7 @@ impl AvroParser {
                 Op::Insert => writer.insert(fill),
                 Op::Delete => writer.delete(fill),
             }
-        } else if self.upsert_primary_key_column_name.is_some()
-            && matches!(op, Op::Delete)
-        {
+        } else if self.upsert_primary_key_column_name.is_some() && matches!(op, Op::Delete) {
             writer.delete(|desc| {
                 if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
                     Ok(None)
