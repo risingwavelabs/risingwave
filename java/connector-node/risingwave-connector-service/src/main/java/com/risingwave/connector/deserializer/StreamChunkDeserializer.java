@@ -163,9 +163,17 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getJsonb(index);
                             };
                     break;
+                case LIST:
+                    ret[i] = row -> {
+                        if (row.isNull(index)) {
+                            return null;
+                        }
+                        return row.getList(index);
+                    };
+
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("unsupported type " + typeName)
+                            .withDescription("stream_chunk: unsupported data type " + typeName)
                             .asRuntimeException();
             }
         }

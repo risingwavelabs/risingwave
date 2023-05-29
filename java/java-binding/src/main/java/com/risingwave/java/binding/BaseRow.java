@@ -81,6 +81,10 @@ public class BaseRow implements AutoCloseable {
         return Binding.rowGetJsonbValue(pointer, index);
     }
 
+    public java.util.ArrayList<?> getArray(int index) {
+        return Binding.rowGetArrayValue(pointer, index);
+    }
+
     @Override
     public void close() {
         if (!isClosed) {
