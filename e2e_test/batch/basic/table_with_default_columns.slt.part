@@ -59,6 +59,8 @@ select * from t1;
 0 5 3 4
 1 5 3 4
 233 233 NULL 4
+
+statement ok
 create table t2 (v1 int, v2 int default 1.5);
 
 statement ok
