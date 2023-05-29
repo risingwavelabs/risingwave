@@ -2475,7 +2475,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=e38ad6a#e38ad6ad7f81b16bc20bcfbbc77e01976e3ec301"
+source = "git+https://github.com/mrcroxx/foyer?rev=f44aec1#f44aec15c6e46971a4f4dba7eec5b5bfa366ccc2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2490,6 +2490,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
+ "rand",
  "thiserror",
  "tokio",
  "twox-hash",
@@ -2498,7 +2499,7 @@ dependencies = [
 [[package]]
 name = "foyer-utils"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=e38ad6a#e38ad6ad7f81b16bc20bcfbbc77e01976e3ec301"
+source = "git+https://github.com/mrcroxx/foyer?rev=f44aec1#f44aec15c6e46971a4f4dba7eec5b5bfa366ccc2"
 dependencies = [
  "async-trait",
  "bytes",
