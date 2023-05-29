@@ -14,7 +14,33 @@
 
 //! Metadata of expressions.
 
+use itertools::Itertools;
+use risingwave_common::types::DataTypeName;
+
 pub mod agg;
 pub mod cast;
 pub mod func;
 pub mod table_function;
+
+/// Utility struct for debug printing of function signature.
+pub(crate) struct FuncSigDebug<'a, T> {
+    pub func: T,
+    pub inputs_type: &'a [DataTypeName],
+    pub ret_type: DataTypeName,
+    pub set_returning: bool,
+}
+
+impl<'a, T: std::fmt::Display> std::fmt::Debug for FuncSigDebug<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = format!(
+            "{}({:?}) -> {}{:?}",
+            self.func,
+            self.inputs_type.iter().format(","),
+            if self.set_returning { "setof " } else { "" },
+            self.ret_type
+        )
+        .to_ascii_lowercase();
+
+        f.write_str(&s)
+    }
+}
