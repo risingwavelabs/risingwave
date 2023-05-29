@@ -35,7 +35,7 @@ impl<'a, T: std::fmt::Display> std::fmt::Debug for FuncSigDebug<'a, T> {
         let s = format!(
             "{}({:?}) -> {}{:?}",
             self.func,
-            self.inputs_type.iter().format(","),
+            self.inputs_type.iter().format(", "),
             if self.set_returning { "setof " } else { "" },
             self.ret_type
         )

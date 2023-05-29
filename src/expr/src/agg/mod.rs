@@ -89,7 +89,7 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
                 FuncSigDebug {
                     func: agg.kind,
                     inputs_type: &args,
-                    ret_type: ret_type,
+                    ret_type,
                     set_returning: false
                 }
             ))
