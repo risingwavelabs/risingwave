@@ -63,8 +63,20 @@ impl LogicalOverWindow {
                 })?;
         }
         let mut input_len = input.schema().len();
+        let mut reserve_cnt = 0;
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
+                if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
+                    && matches!(
+                        agg_kind,
+                        AggKind::StddevPop
+                            | AggKind::StddevSamp
+                            | AggKind::VarPop
+                            | AggKind::VarSamp
+                    )
+                {
+                    reserve_cnt += 1;
+                }
                 let input_idx_in_args: Vec<_> = window_function
                     .args
                     .iter()
@@ -96,6 +108,7 @@ impl LogicalOverWindow {
                     .max(*input_idx_in_partition_by.iter().max().unwrap_or(&0) + 1);
             }
         }
+        input_len += reserve_cnt;
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
             if let ExprImpl::WindowFunction(window) = expr {
