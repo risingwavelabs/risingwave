@@ -155,7 +155,6 @@ impl LogicalOverWindow {
                         | AggKind::VarPop
                         | AggKind::VarSamp => {
                             let input = args.iter().exactly_one().unwrap();
-                            println!("input: {:?}", input);
                             let squared_input_expr = ExprImpl::from(
                                 FunctionCall::new(
                                     ExprType::Multiply,
@@ -207,9 +206,6 @@ impl LogicalOverWindow {
                                 window_funcs.last().unwrap().return_type(),
                             ));
 
-                            // we start with variance
-
-                            // sum * sum
                             let square_of_sum_expr = ExprImpl::from(
                                 FunctionCall::new(
                                     ExprType::Multiply,
@@ -218,7 +214,6 @@ impl LogicalOverWindow {
                                 .unwrap(),
                             );
 
-                            // sum_sq - sum * sum / count
                             let numerator_expr = ExprImpl::from(
                                 FunctionCall::new(
                                     ExprType::Subtract,
@@ -236,7 +231,6 @@ impl LogicalOverWindow {
                                 .unwrap(),
                             );
 
-                            // count or count - 1
                             let denominator_expr = match agg_kind {
                                 AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
                                 AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
@@ -263,7 +257,6 @@ impl LogicalOverWindow {
                                 .unwrap(),
                             );
 
-                            // stddev = sqrt(variance)
                             if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
                                 target_expr = ExprImpl::from(
                                     FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
@@ -315,7 +308,6 @@ impl LogicalOverWindow {
                     window_funcs.push(*f);
                 }
             }
-            println!("new expr: {:?}", expr);
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
                     format!("window function in expression: {:?}", expr),
@@ -324,7 +316,6 @@ impl LogicalOverWindow {
                 .into());
             }
         }
-        println!("window_funcs: {:?}", window_funcs);
         for f in &window_funcs {
             if f.kind.is_rank() {
                 if f.order_by.sort_exprs.is_empty() {
@@ -431,11 +422,6 @@ impl LogicalOverWindow {
                 }
             }),
         };
-
-        args.iter().for_each(|e| {
-            println!("expr: {:?}", e);
-            let _ = input_proj_builder.expr_index(&e).unwrap();
-        });
 
         let args = args
             .into_iter()
