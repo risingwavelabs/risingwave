@@ -156,16 +156,6 @@ pub fn storage_memory_config(
             .ceil() as usize)
             >> 20,
     );
-    let file_cache_total_buffer_capacity_mb = storage_config
-        .file_cache
-        .total_buffer_capacity_mb
-        .unwrap_or(
-            ((non_reserved_memory_bytes as f64
-                * storage_memory_proportion
-                * STORAGE_FILE_CACHE_MEMORY_PROPORTION)
-                .ceil() as usize)
-                >> 20,
-        );
     let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
@@ -173,7 +163,6 @@ pub fn storage_memory_config(
     let total_calculated_mb = block_cache_capacity_mb
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
-        + file_cache_total_buffer_capacity_mb
         + compactor_memory_limit_mb;
     let soft_limit_mb = (non_reserved_memory_bytes as f64
         * (storage_memory_proportion + compactor_memory_proportion).ceil())
@@ -192,7 +181,6 @@ pub fn storage_memory_config(
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }
@@ -227,19 +215,16 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
         assert_eq!(memory_config.meta_cache_capacity_mb, 860);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 122);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
         storage_config.block_cache_capacity_mb = Some(512);
         storage_config.meta_cache_capacity_mb = Some(128);
         storage_config.shared_buffer_capacity_mb = Some(1024);
-        storage_config.file_cache.total_buffer_capacity_mb = Some(128);
         storage_config.compactor_memory_limit_mb = Some(512);
         let memory_config = storage_memory_config(0, true, &storage_config);
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
-        assert_eq!(memory_config.file_cache_total_buffer_capacity_mb, 128);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 }

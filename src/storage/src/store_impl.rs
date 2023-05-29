@@ -28,7 +28,7 @@ use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
     HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
-    TieredCacheMetricsBuilder,
+    TieredCacheConfig, TieredCacheMetrics,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -545,34 +545,20 @@ impl StateStoreImpl {
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
-        tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
+        tiered_cache_metrics: TieredCacheMetrics,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
-        #[cfg(not(target_os = "linux"))]
-        let tiered_cache = TieredCache::none();
-
-        #[cfg(target_os = "linux")]
         let tiered_cache = if opts.file_cache_dir.is_empty() {
             TieredCache::none()
         } else {
-            use crate::hummock::file_cache::cache::FileCacheOptions;
-            use crate::hummock::HummockError;
-
-            let options = FileCacheOptions {
-                dir: opts.file_cache_dir.to_string(),
+            let config = TieredCacheConfig {
+                dir: opts.file_cache_dir.clone(),
                 capacity: opts.file_cache_capacity_mb * 1024 * 1024,
-                total_buffer_capacity: opts.file_cache_total_buffer_capacity_mb * 1024 * 1024,
-                cache_file_fallocate_unit: opts.file_cache_file_fallocate_unit_mb * 1024 * 1024,
-                cache_meta_fallocate_unit: opts.file_cache_meta_fallocate_unit_mb * 1024 * 1024,
-                cache_file_max_write_size: opts.file_cache_file_max_write_size_mb * 1024 * 1024,
-                flush_buffer_hooks: vec![],
+                max_file_size: opts.file_cache_file_capacity_mb * 1024 * 1024,
             };
-            let metrics = Arc::new(tiered_cache_metrics_builder.file());
-            TieredCache::file(options, metrics)
-                .await
-                .map_err(HummockError::tiered_cache)?
+            TieredCache::foyer(config).await?
         };
 
         let store = match s {

@@ -59,10 +59,7 @@ pub struct StorageOpts {
 
     pub file_cache_dir: String,
     pub file_cache_capacity_mb: usize,
-    pub file_cache_total_buffer_capacity_mb: usize,
-    pub file_cache_file_fallocate_unit_mb: usize,
-    pub file_cache_meta_fallocate_unit_mb: usize,
-    pub file_cache_file_max_write_size_mb: usize,
+    pub file_cache_file_capacity_mb: usize,
 
     /// The storage url for storing backups.
     pub backup_storage_url: String,
@@ -107,10 +104,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             file_cache_dir: c.storage.file_cache.dir.clone(),
             file_cache_capacity_mb: c.storage.file_cache.capacity_mb,
-            file_cache_total_buffer_capacity_mb: s.file_cache_total_buffer_capacity_mb,
-            file_cache_file_fallocate_unit_mb: c.storage.file_cache.cache_file_fallocate_unit_mb,
-            file_cache_meta_fallocate_unit_mb: c.storage.file_cache.cache_meta_fallocate_unit_mb,
-            file_cache_file_max_write_size_mb: c.storage.file_cache.cache_file_max_write_size_mb,
+            file_cache_file_capacity_mb: c.storage.file_cache.file_capacity_mb,
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),

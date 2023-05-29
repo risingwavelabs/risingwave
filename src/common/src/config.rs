@@ -397,17 +397,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
-    #[serde(default)]
-    pub total_buffer_capacity_mb: Option<usize>,
-
-    #[serde(default = "default::file_cache::cache_file_fallocate_unit_mb")]
-    pub cache_file_fallocate_unit_mb: usize,
-
-    #[serde(default = "default::file_cache::cache_meta_fallocate_unit_mb")]
-    pub cache_meta_fallocate_unit_mb: usize,
-
-    #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
-    pub cache_file_max_write_size_mb: usize,
+    #[serde(default = "default::file_cache::file_capacity_mb")]
+    pub file_capacity_mb: usize,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -730,20 +721,8 @@ mod default {
             1024
         }
 
-        pub fn total_buffer_capacity_mb() -> usize {
+        pub fn file_capacity_mb() -> usize {
             128
-        }
-
-        pub fn cache_file_fallocate_unit_mb() -> usize {
-            512
-        }
-
-        pub fn cache_meta_fallocate_unit_mb() -> usize {
-            16
-        }
-
-        pub fn cache_file_max_write_size_mb() -> usize {
-            4
         }
     }
 
@@ -835,7 +814,6 @@ pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub file_cache_total_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
@@ -853,11 +831,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let file_cache_total_buffer_capacity_mb = s
-        .storage
-        .file_cache
-        .total_buffer_capacity_mb
-        .unwrap_or(default::file_cache::total_buffer_capacity_mb());
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
@@ -871,7 +844,6 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        file_cache_total_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }

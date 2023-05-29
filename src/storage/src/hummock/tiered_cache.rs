@@ -12,204 +12,121 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hash};
-use std::marker::PhantomData;
+use std::path::PathBuf;
+use std::sync::Arc;
 
-use risingwave_common::cache::CacheableEntry;
+use bytes::{Buf, BufMut};
+use foyer::{
+    Index, Metrics, ReadOnlyFileStoreConfig, TinyLfuConfig, TinyLfuReadOnlyFileStoreCache,
+    TinyLfuReadOnlyFileStoreCacheConfig,
+};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
-pub trait HashBuilder = BuildHasher + Clone + Send + Sync + 'static;
-
-pub trait TieredCacheKey: Eq + Send + Sync + Hash + Clone + 'static + std::fmt::Debug {
-    fn encoded_len() -> usize;
-
-    fn encode(&self, buf: &mut [u8]);
-
-    fn decode(buf: &[u8]) -> Self;
-}
-
-#[expect(clippy::len_without_is_empty)]
-pub trait TieredCacheValue: Send + Sync + Clone + 'static {
-    fn len(&self) -> usize;
-
-    fn encoded_len(&self) -> usize;
-
-    fn encode(&self, buf: &mut [u8]);
-
-    fn decode(buf: Vec<u8>) -> Self;
-}
-
-pub enum TieredCacheEntry<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    Cache(CacheableEntry<K, V>),
-    Owned(Box<V>),
-}
-
-pub struct TieredCacheEntryHolder<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    handle: TieredCacheEntry<K, V>,
-    value: *const V,
-}
-
-impl<K, V> TieredCacheEntryHolder<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    pub fn from_cached_value(entry: CacheableEntry<K, V>) -> Self {
-        let ptr = entry.value() as *const _;
-        Self {
-            handle: TieredCacheEntry::Cache(entry),
-            value: ptr,
-        }
-    }
-
-    pub fn from_owned_value(value: V) -> Self {
-        let value = Box::new(value);
-        let ptr = value.as_ref() as *const _;
-        Self {
-            handle: TieredCacheEntry::Owned(value),
-            value: ptr,
-        }
-    }
-
-    pub fn into_inner(self) -> TieredCacheEntry<K, V> {
-        self.handle
-    }
-
-    pub fn into_owned(self) -> V {
-        match self.handle {
-            // TODO(MrCroxx): There is a copy here, eliminate it by erase the entry later.
-            TieredCacheEntry::Cache(entry) => entry.value().clone(),
-            TieredCacheEntry::Owned(value) => *value,
-        }
-    }
-}
-
-impl<K, V> std::ops::Deref for TieredCacheEntryHolder<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    type Target = V;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &(*self.value) }
-    }
-}
-
-unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Send for TieredCacheEntryHolder<K, V> {}
-unsafe impl<K: TieredCacheKey, V: TieredCacheValue> Sync for TieredCacheEntryHolder<K, V> {}
-
-#[cfg(target_os = "linux")]
-pub use super::file_cache;
+use super::{HummockError, HummockResult};
 
 #[derive(thiserror::Error, Debug)]
-pub enum TieredCacheError {
-    #[cfg(target_os = "linux")]
-    #[error("file cache error: {0}")]
-    FileCache(#[from] file_cache::error::Error),
+pub enum Error {
+    #[error("foyer error: {0}")]
+    FoyerError(#[from] foyer::Error),
 }
 
-pub type Result<T> = core::result::Result<T, TieredCacheError>;
-
-pub struct TieredCacheMetricsBuilder(Option<prometheus::Registry>);
-
-impl TieredCacheMetricsBuilder {
-    pub fn new(registry: prometheus::Registry) -> Self {
-        Self(Some(registry))
-    }
-
-    pub fn unused() -> Self {
-        Self(None)
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn file(self) -> file_cache::metrics::FileCacheMetrics {
-        file_cache::metrics::FileCacheMetrics::new(self.0.unwrap())
-    }
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash, Debug)]
+pub struct SstableBlockIndex {
+    pub sst_id: HummockSstableObjectId,
+    pub block_index: usize,
 }
 
-pub enum TieredCache<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    NoneCache(PhantomData<(K, V)>),
-    #[cfg(target_os = "linux")]
-    FileCache(file_cache::cache::FileCache<K, V>),
-}
+impl Index for SstableBlockIndex {
+    fn size() -> usize {
+        16
+    }
 
-impl<K, V> Clone for TieredCache<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    fn clone(&self) -> Self {
-        match self {
-            TieredCache::NoneCache(_) => TieredCache::NoneCache(PhantomData),
-            #[cfg(target_os = "linux")]
-            TieredCache::FileCache(file_cache) => TieredCache::FileCache(file_cache.clone()),
+    fn write(&self, mut buf: &mut [u8]) {
+        buf.put_u64(self.sst_id);
+        buf.put_u64(self.block_index as u64);
+    }
+
+    fn read(mut buf: &[u8]) -> Self {
+        let sst_id = buf.get_u64();
+        let block_index = buf.get_u64() as usize;
+        Self {
+            sst_id,
+            block_index,
         }
     }
 }
 
-impl<K, V> TieredCache<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
+const FOYER_POOL_COUNT_BITS: usize = 5;
+const FOYER_POOLS: usize = 1 << FOYER_POOL_COUNT_BITS;
+const FOYER_TINYLFU_WINDOW_TO_CACHE_SIZE_RATIO: usize = 10;
+const FOYER_TINYLFU_TINY_LRU_CAPACITY_RATIO: f64 = 0.01;
+const FOYER_TRIGGER_RECLAIM_GARBAGE_RATIO: f64 = 0.5;
+const FOYER_TRIGGER_RECLAIM_CAPACITY_RATION: f64 = 0.8;
+const FOYER_TRIGGER_RANDOM_DROP_RATIO: f64 = 0.9;
+const FOYER_RANDOM_DROP_RATIO: f64 = 0.2;
+
+pub struct TieredCacheConfig {
+    pub dir: String,
+    pub capacity: usize,
+    pub max_file_size: usize,
+}
+
+#[derive(Clone)]
+pub enum TieredCache {
+    Foyer(Arc<TinyLfuReadOnlyFileStoreCache<SstableBlockIndex, Vec<u8>>>),
+    None,
+}
+
+impl TieredCache {
+    pub async fn foyer(config: TieredCacheConfig) -> HummockResult<Self> {
+        let policy_config = TinyLfuConfig {
+            window_to_cache_size_ratio: FOYER_TINYLFU_WINDOW_TO_CACHE_SIZE_RATIO,
+            tiny_lru_capacity_ratio: FOYER_TINYLFU_TINY_LRU_CAPACITY_RATIO,
+        };
+
+        let store_config = ReadOnlyFileStoreConfig {
+            dir: PathBuf::from(config.dir),
+            capacity: config.capacity / FOYER_POOLS,
+            max_file_size: config.max_file_size,
+            trigger_reclaim_garbage_ratio: FOYER_TRIGGER_RECLAIM_GARBAGE_RATIO,
+            trigger_reclaim_capacity_ratio: FOYER_TRIGGER_RECLAIM_CAPACITY_RATION,
+            trigger_random_drop_ratio: FOYER_TRIGGER_RANDOM_DROP_RATIO,
+            random_drop_ratio: FOYER_RANDOM_DROP_RATIO,
+        };
+
+        let cache_config = TinyLfuReadOnlyFileStoreCacheConfig {
+            capacity: config.capacity,
+            pool_count_bits: FOYER_POOL_COUNT_BITS,
+            policy_config,
+            store_config,
+        };
+        let cache = TinyLfuReadOnlyFileStoreCache::open(cache_config)
+            .await
+            .map_err(HummockError::tiered_cache)?;
+        Ok(Self::Foyer(Arc::new(cache)))
+    }
+
     pub fn none() -> Self {
-        Self::NoneCache(PhantomData)
+        Self::None
     }
 
-    #[cfg(target_os = "linux")]
-    pub async fn file(
-        options: file_cache::cache::FileCacheOptions,
-        metrics: file_cache::metrics::FileCacheMetricsRef,
-    ) -> Result<Self> {
-        let cache = file_cache::cache::FileCache::open(options, metrics).await?;
-        Ok(Self::FileCache(cache))
-    }
-
-    #[allow(unused_variables)]
-    pub fn insert(&self, key: K, value: V) -> Result<()> {
+    pub async fn insert(&self, index: SstableBlockIndex, data: Vec<u8>) -> HummockResult<()> {
         match self {
-            TieredCache::NoneCache(_) => Ok(()),
-            #[cfg(target_os = "linux")]
-            TieredCache::FileCache(file_cache) => {
-                file_cache.insert(key, value)?;
-                Ok(())
-            }
+            Self::Foyer(cache) => cache
+                .insert(index, data)
+                .await
+                .map(|_| ())
+                .map_err(HummockError::tiered_cache),
+            Self::None => Ok(()),
         }
     }
 
-    #[allow(unused_variables)]
-    pub fn erase(&self, key: &K) -> Result<()> {
+    pub async fn get(&self, index: &SstableBlockIndex) -> HummockResult<Option<Vec<u8>>> {
         match self {
-            TieredCache::NoneCache(_) => Ok(()),
-            #[cfg(target_os = "linux")]
-            TieredCache::FileCache(file_cache) => {
-                file_cache.erase(key)?;
-                Ok(())
-            }
-        }
-    }
-
-    #[allow(unused_variables, clippy::unused_async)]
-    pub async fn get(&self, key: &K) -> Result<Option<TieredCacheEntryHolder<K, V>>> {
-        match self {
-            TieredCache::NoneCache(_) => Ok(None),
-            #[cfg(target_os = "linux")]
-            TieredCache::FileCache(file_cache) => {
-                let holder = file_cache.get(key).await?;
-                Ok(holder)
-            }
+            Self::Foyer(cache) => cache.get(index).await.map_err(HummockError::tiered_cache),
+            Self::None => Ok(None),
         }
     }
 }
+
+pub type TieredCacheMetrics = Metrics;

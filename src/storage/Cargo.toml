@@ -24,6 +24,7 @@ dashmap = { version = "5", default-features = false }
 dyn-clone = "1.0.4"
 enum-as-inner = "0.5"
 fail = "0.5"
+foyer = { git = "https://github.com/mrcroxx/foyer", rev = "e38ad6a" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"

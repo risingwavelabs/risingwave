@@ -1430,6 +1430,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmsketch"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "467e460587e81453bf9aeb43cd534e9c5ad670042023bd6c3f377c23b76cc2f0"
+dependencies = [
+ "paste",
+]
+
+[[package]]
 name = "coarsetime"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2461,6 +2470,51 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9c384f161156f5260c24a097c56119f9be8c798586aecc13afbcbe7b7e26bf8"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "foyer"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=e38ad6a#e38ad6ad7f81b16bc20bcfbbc77e01976e3ec301"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cmsketch",
+ "crossbeam",
+ "foyer-utils",
+ "futures",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "prometheus",
+ "thiserror",
+ "tokio",
+ "twox-hash",
+]
+
+[[package]]
+name = "foyer-utils"
+version = "0.1.0"
+source = "git+https://github.com/mrcroxx/foyer?rev=e38ad6a#e38ad6ad7f81b16bc20bcfbbc77e01976e3ec301"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "cmsketch",
+ "crossbeam",
+ "futures",
+ "itertools",
+ "libc",
+ "memoffset 0.8.0",
+ "nix 0.26.2",
+ "parking_lot 0.12.1",
+ "paste",
+ "prometheus",
+ "thiserror",
+ "tokio",
+ "twox-hash",
 ]
 
 [[package]]
@@ -3745,6 +3799,15 @@ dependencies = [
 
 [[package]]
 name = "memoffset"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "memoffset"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d61c719bcfbcf5d62b3a09efa6088de8c54bc0bfcd3ea7ae39fcc186108b8de1"
@@ -3951,6 +4014,8 @@ dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
+ "memoffset 0.7.1",
+ "pin-utils",
  "static_assertions",
 ]
 
@@ -6559,6 +6624,7 @@ dependencies = [
  "enum-as-inner",
  "fail",
  "fiemap",
+ "foyer",
  "futures",
  "futures-async-stream",
  "hex",
@@ -8863,6 +8929,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "multimap",
+ "nix 0.26.2",
  "num",
  "num-bigint",
  "num-integer",
