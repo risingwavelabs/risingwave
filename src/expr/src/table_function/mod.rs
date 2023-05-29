@@ -29,6 +29,7 @@ use risingwave_pb::expr::{PbProjectSetSelectItem, PbTableFunction};
 
 use super::{ExprError, Result};
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::sig::FuncSigDebug;
 
 mod generate_series;
 mod regexp_matches;
@@ -142,10 +143,13 @@ pub fn build(
         .get(func, &args)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}({}) -> setof {:?}",
-                func,
-                args.iter().map(|t| format!("{:?}", t)).join(", "),
-                return_type,
+                "{:?}",
+                FuncSigDebug {
+                    func: func.as_str_name(),
+                    inputs_type: &args,
+                    ret_type: (&return_type).into(),
+                    set_returning: true,
+                }
             ))
         })?;
     (desc.build)(return_type, chunk_size, children)
