@@ -607,7 +607,7 @@ mod default {
         }
 
         pub fn split_group_size_limit() -> u64 {
-            20 * 1024 * 1024 * 1024 // 20GB
+            16 * 1024 * 1024 * 1024 // 16GB
         }
     }
 

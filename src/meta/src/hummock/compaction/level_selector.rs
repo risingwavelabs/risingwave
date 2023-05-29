@@ -110,7 +110,7 @@ impl DynamicLevelSelectorCore {
             Box::new(MinOverlappingPicker::new(
                 select_level,
                 target_level,
-                self.config.max_bytes_for_level_base,
+                self.config.max_bytes_for_level_base / 2,
                 self.config.split_by_state_table,
                 overlap_strategy,
             ))
@@ -242,7 +242,10 @@ impl DynamicLevelSelectorCore {
                 let non_overlapping_level_score = non_overlapping_level_count as u64 * SCORE_BASE
                     / self.config.level0_sub_level_compact_level_count as u64;
 
-                std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
+                std::cmp::max(
+                    non_overlapping_size_score / 2,
+                    non_overlapping_level_score / 2,
+                )
             };
 
             // Reduce the level num of l0 non-overlapping sub_level

@@ -928,15 +928,11 @@ where
                     "l0_trivial_move".to_string()
                 } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
                     "l0_overlapping".to_string()
-                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                } else if compact_task.target_level == 0 {
                     "l0_intra".to_string()
                 } else {
-                    let is_trivial_move = if compact_task
-                        .input_ssts
-                        .last()
-                        .unwrap()
-                        .table_infos
-                        .is_empty()
+                    let is_trivial_move = if compact_task.input_ssts.len() == 2
+                        && compact_task.input_ssts[1].table_infos.is_empty()
                     {
                         "trivial-move"
                     } else {

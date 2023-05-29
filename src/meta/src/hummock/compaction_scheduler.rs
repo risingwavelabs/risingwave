@@ -487,6 +487,7 @@ where
         history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
     ) {
         const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 5;
+        const WEIGHT_SPLIT_BY_VNODE: u32 = 32;
         let mut group_infos = self
             .hummock_manager
             .calculate_compaction_group_statistic()
@@ -515,6 +516,7 @@ where
         table_infos.sort_by(|a, b| b.2.cmp(&a.2));
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let mut split_weight_by_vnode = WEIGHT_SPLIT_BY_VNODE;
         for (table_id, parent_group_id, parent_group_size) in table_infos {
             let table_info = history_table_infos.get(&table_id).unwrap();
             let table_size = *table_info.back().unwrap();
@@ -571,6 +573,7 @@ where
                         target_compact_group_id = Some(group.group_id);
                     }
                     allow_split_by_table = true;
+                    split_weight_by_vnode = 1;
                 }
             }
 
@@ -581,6 +584,7 @@ where
                     &[table_id],
                     target_compact_group_id,
                     allow_split_by_table,
+                    split_weight_by_vnode,
                 )
                 .await;
             match ret {

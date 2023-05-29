@@ -428,7 +428,7 @@ impl<S: MetaStore> HummockManager<S> {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false)
+        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
             .await
     }
 
@@ -441,6 +441,7 @@ impl<S: MetaStore> HummockManager<S> {
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
         allow_split_by_table: bool,
+        weight_split_by_vnode: u32,
     ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
             return Ok(parent_group_id);
@@ -546,6 +547,10 @@ impl<S: MetaStore> HummockManager<S> {
                     .await
                     .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
+                if !allow_split_by_table {
+                    config.max_bytes_for_level_base *= 4;
+                    config.split_weight_by_vnode = weight_split_by_vnode;
+                }
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,

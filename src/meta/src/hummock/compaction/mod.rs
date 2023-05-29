@@ -334,6 +334,10 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
+    } else if input.target_level == base_level {
+        // to reduce time of compaction task during l0 to base-level, we hope they overlap with
+        // small data in base-level.
+        compaction_config.target_file_size_base / 4
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;

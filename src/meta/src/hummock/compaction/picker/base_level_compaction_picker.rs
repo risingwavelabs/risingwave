@@ -91,6 +91,15 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
+        let level0_sub_level_compact_level_count =
+            self.config.level0_sub_level_compact_level_count as u64;
+        let min_depth = if self.config.max_bytes_for_level_base
+            > self.config.sub_level_max_compaction_bytes * level0_sub_level_compact_level_count
+        {
+            level0_sub_level_compact_level_count
+        } else {
+            1
+        };
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
@@ -99,7 +108,7 @@ impl LevelCompactionPicker {
                 self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
-            1,
+            min_depth as usize,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
@@ -108,6 +117,7 @@ impl LevelCompactionPicker {
         let l0_select_tables_vec = non_overlap_sub_level_picker
             .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
         if l0_select_tables_vec.is_empty() {
+            stats.skip_by_pending_files += 1;
             return None;
         }
 
