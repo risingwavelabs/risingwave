@@ -143,8 +143,8 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
-/// Extension trait to convert the protobuf presentation to a boxed expression, with a concrete
-/// expression type.
+/// Extension trait to convert the protobuf representation to a boxed [`Expression`], with a
+/// concrete expression type.
 #[easy_ext::ext(TryFromExprNodeBoxed)]
 impl<'a, T> T
 where
