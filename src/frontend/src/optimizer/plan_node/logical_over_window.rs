@@ -119,12 +119,34 @@ impl LogicalOverWindow {
                     match agg_kind {
                         AggKind::Avg => {
                             assert_eq!(args.len(), 1);
-                            window_funcs.push(WindowFunction::new(WindowFuncKind::Aggregate(AggKind::Sum), partition_by.clone(), order_by.clone(), args.clone(), frame.clone())?);
-                            let left_ref = InputRef::new(input_len + window_funcs.len() - 1, window_funcs.last().unwrap().return_type());
-                            window_funcs.push(WindowFunction::new(WindowFuncKind::Aggregate(AggKind::Count), partition_by.clone(), order_by.clone(), args.clone(), frame.clone())?);
-                            let right_ref = InputRef::new(input_len + window_funcs.len() - 1, window_funcs.last().unwrap().return_type());
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let left_ref = InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            );
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Count),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let right_ref = InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            );
                             let new_expr = ExprImpl::from(
-                                FunctionCall::new(ExprType::Divide, vec![left_ref.into(), right_ref.into()]).unwrap(),
+                                FunctionCall::new(
+                                    ExprType::Divide,
+                                    vec![left_ref.into(), right_ref.into()],
+                                )
+                                .unwrap(),
                             );
                             let _ = std::mem::replace(expr, new_expr);
                         }
