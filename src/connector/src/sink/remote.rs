@@ -304,7 +304,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
                 for (op, row_ref) in chunk.rows() {
-                    let map = record_to_json(row_ref, &self.schema.fields)?;
+                    let map = record_to_json(row_ref, &self.schema.fields, true)?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

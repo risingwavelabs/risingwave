@@ -259,11 +259,15 @@ impl From<SinkError> for RwError {
     }
 }
 
-pub fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, Value>> {
+pub fn record_to_json(
+    row: RowRef<'_>,
+    schema: &[Field],
+    timestamp_handling_string: bool,
+) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
         let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, true)
+        let value = datum_to_json_object(field, datum_ref, timestamp_handling_string)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }

@@ -256,7 +256,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row, &schema.fields)?,
+                        "after": record_to_json(row, &schema.fields, false)?,
                         "op": "c",
                         "ts_ms": ts_ms,
                         "source": source_field,
@@ -265,7 +265,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields)?,
+                        "before": record_to_json(row, &schema.fields, false)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -273,7 +273,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields)?);
+                    update_cache = Some(record_to_json(row, &schema.fields, false)?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -282,7 +282,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row, &schema.fields)?,
+                                "after": record_to_json(row, &schema.fields, false)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
                                 "source": source_field,
@@ -324,15 +324,15 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
             let event_object = match op {
-                Op::Insert => Some(Value::Object(record_to_json(row, &schema.fields)?)),
+                Op::Insert => Some(Value::Object(record_to_json(row, &schema.fields, false)?)),
                 Op::Delete => Some(Value::Null),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields)?);
+                    update_cache = Some(record_to_json(row, &schema.fields, false)?);
                     continue;
                 }
                 Op::UpdateInsert => {
                     if update_cache.take().is_some() {
-                        Some(Value::Object(record_to_json(row, &schema.fields)?))
+                        Some(Value::Object(record_to_json(row, &schema.fields, false)?))
                     } else {
                         warn!(
                             "not found UpdateDelete in prev row, skipping, row index {:?}",
@@ -360,7 +360,8 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
-                let record = Value::Object(record_to_json(row, &self.schema.fields)?).to_string();
+                let record =
+                    Value::Object(record_to_json(row, &self.schema.fields, false)?).to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
@@ -460,7 +461,7 @@ fn pk_to_json(
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(row, &schema.fields)?);
+        let record = Value::Object(record_to_json(row, &schema.fields, false)?);
         records.push(record.to_string());
     }
 
