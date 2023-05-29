@@ -43,9 +43,6 @@ pub trait ValueRowSerdeNew: Clone {
         schema: Arc<[DataType]>,
         default_columns: impl Iterator<Item = ColumnDesc>,
     ) -> Self;
-    fn set_default_columns(&mut self, mut _default_columns: impl Iterator<Item = (usize, Datum)>) {
-        unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
-    }
 }
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
@@ -63,21 +60,14 @@ impl ValueRowSerdeNew for EitherSerde {
     ) -> EitherSerde {
         unreachable!("should construct manually")
     }
-
-    fn set_default_columns(&mut self, _default_columns: impl Iterator<Item = (usize, Datum)>) {
-        unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
-    }
 }
 
 impl ValueRowSerdeNew for BasicSerde {
     fn new(
         _column_ids: &[ColumnId],
         schema: Arc<[DataType]>,
-        mut default_columns: impl Iterator<Item = ColumnDesc>,
+        _default_columns: impl Iterator<Item = ColumnDesc>,
     ) -> BasicSerde {
-        if default_columns.next().is_some() {
-            unimplemented!("set_default_columns should only be called on ColumnAwareSerde")
-        }
         BasicSerde {
             serializer: BasicSerializer {},
             deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
