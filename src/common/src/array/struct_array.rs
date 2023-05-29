@@ -100,14 +100,14 @@ impl ArrayBuilder for StructArrayBuilder {
             None => {
                 self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum_n(n, Datum::None);
+                    child.append_n(n, Datum::None);
                 }
             }
             Some(v) => {
                 self.bitmap.append_n(n, true);
                 iter_fields_ref!(v, fields, {
                     for (child, f) in self.children_array.iter_mut().zip_eq_fast(fields) {
-                        child.append_datum_n(n, f);
+                        child.append_n(n, f);
                     }
                 });
             }

@@ -19,6 +19,7 @@
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -31,10 +32,9 @@ pub mod server;
 pub mod telemetry;
 
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::AsyncStackTraceOption;
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
