@@ -23,13 +23,16 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
-      RUST_BACKTRACE: "1"
+      - RUST_BACKTRACE="1"
+      - S3_COMPATIBLE_REGION=your_region
+      - S3_COMPATIBLE_ENDPOINT=your_endpoint
+      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
+      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      - ENABLE_TELEMETRY=${ENABLE_TELEMETRY:-true}
     container_name: compactor-0
     healthcheck:
       test:
@@ -64,13 +67,15 @@ services:
     ports: []
     depends_on:
       - meta-node-0
-      - minio-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
-      RUST_BACKTRACE: "1"
+      - RUST_BACKTRACE="1"
+      - S3_COMPATIBLE_REGION=your_region
+      - S3_COMPATIBLE_ENDPOINT=your_endpoint
+      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
+      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: compute-node-0
     healthcheck:
       test:
@@ -152,8 +157,6 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -208,7 +211,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
+      - "hummock+s3-compatible://risingwave-cos-wcy-1314496003"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
@@ -225,9 +228,13 @@ services:
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
-      RUST_BACKTRACE: "1"
+      - RUST_BACKTRACE="1"
+      - S3_COMPATIBLE_REGION=your_region
+      - S3_COMPATIBLE_ENDPOINT=your_endpoint
+      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
+      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
       # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      - ENABLE_TELEMETRY=${ENABLE_TELEMETRY:-true}
     container_name: meta-node-0
     healthcheck:
       test:
@@ -235,51 +242,6 @@ services:
         - printf
         - ""
         - /dev/tcp/127.0.0.1/5690
-      interval: 1s
-      timeout: 5s
-      retries: 5
-  minio-0:
-    image: "quay.io/minio/minio:latest"
-    command:
-      - server
-      - "--address"
-      - "0.0.0.0:9301"
-      - "--console-address"
-      - "0.0.0.0:9400"
-      - /data
-    expose:
-      - "9301"
-      - "9400"
-    ports:
-      - "9301:9301"
-      - "9400:9400"
-    depends_on: []
-    volumes:
-      - "minio-0:/data"
-    entrypoint: "
-
-      /bin/sh -c '
-
-      set -e
-
-      mkdir -p \"/data/hummock001\"
-
-      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
-
-      '"
-    environment:
-      MINIO_CI_CD: "1"
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-      MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
-      MINIO_ROOT_PASSWORD: hummockadmin
-      MINIO_ROOT_USER: hummockadmin
-    container_name: minio-0
-    healthcheck:
-      test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9301
       interval: 1s
       timeout: 5s
       retries: 5
@@ -364,8 +326,6 @@ volumes:
   etcd-0:
     external: false
   grafana-0:
-    external: false
-  minio-0:
     external: false
   prometheus-0:
     external: false
