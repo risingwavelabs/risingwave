@@ -17,13 +17,13 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
 use super::agg_impl::AppendOnlyStreamingApproxCountDistinct;
+use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::executor::StreamExecutorResult;
 
@@ -32,13 +32,13 @@ pub trait TableStateImpl<S: StateStore>: EstimateSize + Send + Sync + 'static {
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()>;
 
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()>;
 
     fn apply_batch(
@@ -72,7 +72,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn new(
         agg_call: &AggCall,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Self> {
         let mut this = Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
@@ -111,7 +111,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()> {
         self.inner
             .flush_state_if_needed(state_table, group_key)

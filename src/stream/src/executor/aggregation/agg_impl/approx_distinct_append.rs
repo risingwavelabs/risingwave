@@ -18,7 +18,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_common_proc_macro::EstimateSize;
@@ -29,6 +29,7 @@ use super::approx_distinct_utils::{
 };
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::table::TableStateImpl;
+use crate::executor::aggregation::GroupKey;
 use crate::executor::StreamExecutorResult;
 
 #[derive(Clone, Debug)]
@@ -116,11 +117,11 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
             let data_iter = state_table
-                .iter_with_pk_prefix(&group_key, Default::default())
+                .iter_with_pk_prefix(group_key.map(GroupKey::table_pk), Default::default())
                 .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
@@ -130,7 +131,10 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             }
         };
         if let Some(state_row) = state_row {
-            if let ScalarImpl::List(list) = state_row[group_key.len()].as_ref().unwrap() {
+            if let ScalarImpl::List(list) = state_row[group_key.map(GroupKey::len).unwrap_or(0)]
+                .as_ref()
+                .unwrap()
+            {
                 let state = deserialize_buckets_from_list(list.values());
                 for (idx, bucket) in self.registers_mut().iter_mut().enumerate() {
                     if state[idx] != 0 {
@@ -147,7 +151,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<()> {
         let list = Some(ScalarImpl::List(ListValue::new(
             serialize_buckets(
@@ -161,11 +165,11 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
             .map(|x| Some(ScalarImpl::Int64(x as i64)))
             .collect_vec(),
         )));
-        let current_row = group_key.chain(row::once(list));
+        let current_row = group_key.map(GroupKey::table_row).chain(row::once(list));
 
         let state_row = {
             let data_iter = state_table
-                .iter_with_pk_prefix(&group_key, Default::default())
+                .iter_with_pk_prefix(group_key.map(GroupKey::table_pk), Default::default())
                 .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {

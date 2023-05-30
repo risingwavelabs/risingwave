@@ -275,6 +275,19 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         )
     }
 
+    fn get_ordered_group_key(&self, window_col_idx: Option<usize>) -> Vec<usize> {
+        if let Some(window_col_idx) = window_col_idx {
+            assert!(self.group_key.contains(window_col_idx));
+            Either::Left(
+                std::iter::once(window_col_idx)
+                    .chain(self.group_key.ones().filter(move |&i| i != window_col_idx)),
+            )
+        } else {
+            Either::Right(self.group_key.ones())
+        }
+        .collect()
+    }
+
     /// Add group key columns to table builder.
     ///
     /// # Returns
@@ -286,6 +299,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         table_builder: &mut TableCatalogBuilder,
         window_col_idx: Option<usize>,
     ) -> (Vec<usize>, BTreeMap<usize, usize>) {
+        // add group key column to table builder
         let mut included_upstream_indices = vec![];
         let mut column_mapping = BTreeMap::new();
         let in_fields = self.input.schema().fields();
@@ -295,17 +309,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             column_mapping.insert(idx, tbl_col_idx);
         }
 
-        let group_key_window_first = if let Some(window_col_idx) = window_col_idx {
-            assert!(self.group_key.contains(window_col_idx));
-            Either::Left(
-                std::iter::once(window_col_idx)
-                    .chain(self.group_key.ones().filter(move |&i| i != window_col_idx)),
-            )
-        } else {
-            Either::Right(self.group_key.ones())
-        };
-
-        for idx in group_key_window_first {
+        // configure state table primary key (ordering)
+        let ordered_group_key = self.get_ordered_group_key(window_col_idx);
+        for idx in ordered_group_key {
             table_builder.add_order_column(column_mapping[&idx], OrderType::ascending());
         }
 

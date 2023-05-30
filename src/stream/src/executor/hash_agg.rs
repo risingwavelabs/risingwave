@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
-    OnlyOutputIfHasInput,
+    GroupKey, OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
 use super::{
@@ -82,6 +82,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
+
+    // TODO()
+    group_key_table_pk_projection: Arc<[usize]>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -198,6 +201,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             &args.agg_calls,
             Some(&args.extra.group_key_indices),
         );
+        // NOTE: we assume the prefix of table pk is exactly the group key
+        let group_key_table_pk_projection = args.result_table.pk_indices()
+            [..args.extra.group_key_indices.len()]
+            .to_vec()
+            .into();
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -211,6 +219,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
+                group_key_table_pk_projection,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -269,7 +278,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         // Create `AggGroup` for the current group if not exists. This will
                         // fetch previous agg result from the result table.
                         let agg_group = AggGroup::create(
-                            Some(key.deserialize(group_key_types)?),
+                            Some(GroupKey::new(
+                                key.deserialize(group_key_types)?,
+                                Some(this.group_key_table_pk_projection.clone()),
+                            )),
                             &this.agg_calls,
                             &this.storages,
                             &this.result_table,
