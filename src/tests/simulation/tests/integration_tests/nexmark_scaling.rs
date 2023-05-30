@@ -127,6 +127,13 @@ async fn nexmark_scaling_up_down_common(
     drop: &str,
     number_of_nodes: usize,
 ) -> Result<()> {
+    // TODO: remove this
+    tokio::task::spawn(async move {
+        sleep(Duration::from_secs(45)).await;
+        println!("max runtime is 45 secs");
+        assert!(false);
+    });
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -284,6 +291,7 @@ macro_rules! test {
          }
     };
 }
+
 // TODO: Why do I sometimes get stuck? Do I maybe scale down the wrong nodes? Am I not allowed to
 // clear some nodes?
 
@@ -306,3 +314,30 @@ test!(q3);
 // test!(q103);
 // test!(q104);
 // test!(q105);
+
+// new requirement:
+// Tool for open source users to scale clusters
+// add to risectl cmd line tool
+// cordan node -> K8s naming. No new scheduling done on this node
+// Do we have an issue for it?
+// also provide uncordon command: Mark a DELETING node as non-deleting
+// Discuss
+
+// SQL interface for actors and nodes and so on
+
+// Maybe split up my PR in small PRs?
+// E.g. one PR with cordon only
+
+// debug approaches
+// maybe provide commands above and run against real cluster
+// madsim only uses one thread. May get stuck
+// runji madsim turn on debugging traces
+
+// Think: Workflow maybe Arne?
+// Maybe he has no time
+
+// Mit Peng Chen sprechen
+
+// wg-scaling-compute-node update geben
+
+// https://github.com/risingwavelabs/risingwave-operator/pull/448 review
