@@ -1108,13 +1108,28 @@ impl GrpcMetaClientCore {
     }
 }
 
+// Used to manipulate the behavior of the MetaMemberMonitor loop, implementing a graceful shutdown.
+#[derive(Debug)]
+enum MemberMonitorEvent {
+    Refresh(oneshot::Sender<Result<()>>),
+    Shutdown,
+}
+
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    force_refresh_sender: mpsc::Sender<oneshot::Sender<Result<()>>>,
+    member_monitor_event_sender: mpsc::Sender<MemberMonitorEvent>,
     core: Arc<RwLock<GrpcMetaClientCore>>,
+}
+
+impl Drop for GrpcMetaClient {
+    fn drop(&mut self) {
+        let _ = self
+            .member_monitor_event_sender
+            .try_send(MemberMonitorEvent::Shutdown);
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1265,7 +1280,7 @@ impl GrpcMetaClient {
         &self,
         init_leader_addr: String,
         members: Either<MetaMemberClient, MetaMemberGroup>,
-        force_refresh_receiver: Receiver<Sender<Result<()>>>,
+        force_refresh_receiver: Receiver<MemberMonitorEvent>,
         meta_config: MetaConfig,
     ) -> Result<()> {
         let core_ref = self.core.clone();
@@ -1287,7 +1302,7 @@ impl GrpcMetaClient {
             let mut ticker = time::interval(MetaMemberManagement::META_MEMBER_REFRESH_PERIOD);
 
             loop {
-                let result_sender: Option<Sender<Result<()>>> = if enable_period_tick {
+                let event: Option<MemberMonitorEvent> = if enable_period_tick {
                     tokio::select! {
                         _ = ticker.tick() => None,
                         result_sender = force_refresh_receiver.recv() => result_sender,
@@ -1296,12 +1311,16 @@ impl GrpcMetaClient {
                     force_refresh_receiver.recv().await
                 };
 
+                if let Some(MemberMonitorEvent::Shutdown) = event {
+                    break;
+                }
+
                 let tick_result = member_management.refresh_members().await;
                 if let Err(e) = tick_result.as_ref() {
                     tracing::warn!("refresh meta member client failed {}", e);
                 }
 
-                if let Some(sender) = result_sender {
+                if let Some(MemberMonitorEvent::Refresh(sender)) = event {
                     // ignore resp
                     let _resp = sender.send(tick_result);
                 }
@@ -1314,8 +1333,8 @@ impl GrpcMetaClient {
     async fn force_refresh_leader(&self) -> Result<()> {
         let (sender, receiver) = oneshot::channel();
 
-        self.force_refresh_sender
-            .send(sender)
+        self.member_monitor_event_sender
+            .send(MemberMonitorEvent::Refresh(sender))
             .await
             .map_err(|e| anyhow!(e))?;
 
@@ -1332,7 +1351,7 @@ impl GrpcMetaClient {
         }?;
         let (force_refresh_sender, force_refresh_receiver) = mpsc::channel(1);
         let client = GrpcMetaClient {
-            force_refresh_sender,
+            member_monitor_event_sender: force_refresh_sender,
             core: Arc::new(RwLock::new(GrpcMetaClientCore::new(channel))),
         };
 
@@ -1521,7 +1540,11 @@ impl GrpcMetaClient {
         ) {
             tracing::debug!("matching tonic code {}", code);
             let (result_sender, result_receiver) = oneshot::channel();
-            if self.force_refresh_sender.try_send(result_sender).is_ok() {
+            if self
+                .member_monitor_event_sender
+                .try_send(MemberMonitorEvent::Refresh(result_sender))
+                .is_ok()
+            {
                 if let Ok(Err(e)) = result_receiver.await {
                     tracing::warn!("force refresh meta client failed {}", e);
                 }
