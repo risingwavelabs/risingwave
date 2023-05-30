@@ -688,7 +688,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 }
 
 fn is_correct_data_directory(data_directory: &str) -> bool {
-    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/]{1,}$").unwrap();
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/_-]{1,}$").unwrap();
     if data_directory.is_empty()
         || !data_directory_regex.is_match(data_directory)
         || data_directory.ends_with('/')
