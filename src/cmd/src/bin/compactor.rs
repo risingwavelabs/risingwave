@@ -14,17 +14,4 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use risingwave_common::enable_jemalloc_on_unix;
-
-enable_jemalloc_on_unix!();
-
-#[cfg_attr(coverage, no_coverage)]
-fn main() {
-    use clap::Parser;
-
-    let opts = risingwave_compactor::CompactorOpts::parse();
-
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-
-    risingwave_rt::main_okk(risingwave_compactor::start(opts))
-}
+risingwave_cmd::main!(compactor);
