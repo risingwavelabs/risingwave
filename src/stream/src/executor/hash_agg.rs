@@ -41,6 +41,7 @@ use super::{
     Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
@@ -547,13 +548,26 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let window_col_idx_in_group_key = this.result_table.pk_indices()[0];
         let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
 
+        let agg_group_cache_metrics_info = MetricsInfo::new(
+            this.metrics.clone(),
+            this.result_table.table_id(),
+            this.actor_ctx.id,
+            "agg result table",
+        );
+
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
+            agg_group_cache: new_with_hasher(
+                this.watermark_epoch.clone(),
+                agg_group_cache_metrics_info,
+                PrecomputedBuildHasher,
+            ),
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
                 this.metrics.clone(),
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],

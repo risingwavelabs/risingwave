@@ -19,7 +19,6 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common_proc_macro::EstimateSize;
 
 use super::StreamingAggImpl;
 use crate::executor::error::StreamExecutorResult;

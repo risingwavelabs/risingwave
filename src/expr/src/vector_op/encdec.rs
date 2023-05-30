@@ -15,9 +15,9 @@
 use std::fmt::Write;
 
 use hex;
+use risingwave_common::cast::{parse_bytes_hex, parse_bytes_traditional};
 use risingwave_expr_macro::function;
 
-use crate::vector_op::cast::{parse_bytes_hex, parse_bytes_traditional};
 use crate::{ExprError, Result};
 
 const PARSE_BASE64_INVALID_END: &str = "invalid base64 end sequence";
@@ -63,8 +63,12 @@ pub fn encode(data: &[u8], format: &str, writer: &mut dyn Write) -> Result<()> {
 pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
     match format {
         "base64" => Ok(parse_bytes_base64(data)?.into()),
-        "hex" => Ok(parse_bytes_hex(data)?.into()),
-        "escape" => Ok(parse_bytes_traditional(data)?.into()),
+        "hex" => Ok(parse_bytes_hex(data)
+            .map_err(|err| ExprError::Parse(err.into()))?
+            .into()),
+        "escape" => Ok(parse_bytes_traditional(data)
+            .map_err(|err| ExprError::Parse(err.into()))?
+            .into()),
         _ => Err(ExprError::InvalidParam {
             name: "format",
             reason: format!("unrecognized encoding: \"{}\"", format),

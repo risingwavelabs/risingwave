@@ -21,7 +21,6 @@ use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_common::row::RowExt;
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_storage::StateStore;
 
 use super::approx_distinct_utils::{
