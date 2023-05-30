@@ -110,6 +110,7 @@ criterion = "0.4"
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
+rusty-fork = "0.3"
 tempfile = "3"
 
 [[bench]]

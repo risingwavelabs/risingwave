@@ -69,3 +69,52 @@ pub impl<F: Future> F {
 pub fn is_catching_unwind() -> bool {
     CATCH_UNWIND.try_with(|_| ()).is_ok()
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::disallowed_methods)]
+
+    use rusty_fork::rusty_fork_test;
+
+    use super::*;
+
+    /// Simulates the behavior of `risingwave_rt::set_panic_hook`.
+    fn set_panic_hook() {
+        let old = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            old(info);
+
+            if !is_catching_unwind() {
+                std::process::abort();
+            }
+        }))
+    }
+
+    rusty_fork_test! {
+        #[test]
+        #[should_panic] // `rusty_fork` asserts that the forked process succeeds, so this should panic.
+        fn test_sync_not_work() {
+            set_panic_hook();
+
+            let _result = std::panic::catch_unwind(|| panic!());
+        }
+
+        #[test]
+        fn test_sync_rw() {
+            set_panic_hook();
+
+            let result = rw_catch_unwind(|| panic!());
+            assert!(result.is_err());
+        }
+
+        #[test]
+        fn test_async_rw() {
+            set_panic_hook();
+
+            let fut = async { panic!() }.rw_catch_unwind();
+
+            let result = tokio::runtime::Runtime::new().unwrap().block_on(fut);
+            assert!(result.is_err());
+        }
+    }
+}
