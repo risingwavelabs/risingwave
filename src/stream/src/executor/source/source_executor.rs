@@ -501,6 +501,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .unwrap()
                                 .source_name
                                 .as_ref(),
+                            self.ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);

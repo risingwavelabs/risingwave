@@ -428,6 +428,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         .with_label_values(&[
                             self.stream_source_core.source_identify.as_str(),
                             self.stream_source_core.source_name.as_ref(),
+                            self.ctx.id.to_string().as_str(),
                         ])
                         .inc_by(chunk.cardinality() as u64);
                     yield Message::Chunk(chunk);
