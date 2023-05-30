@@ -577,6 +577,7 @@ impl MetaClient {
 
     /// Unregister the current node to the cluster.
     pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+        // TODO: rename this request into UnregisterWorkerNodeRequest or similar
         let request = DeleteWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };

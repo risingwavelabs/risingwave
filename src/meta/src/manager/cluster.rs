@@ -180,22 +180,28 @@ where
     // or maybe mark_node_as_deleting
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
-        let worker_ref = core
+        let worker = core
             .workers
             .get_mut(&WorkerKey(host_address.clone()))
             .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!"))?;
-        let worker_type = worker_ref.worker_type();
-        let worker_node = worker_ref.to_protobuf();
-        
+        let mut core = self.core.write().await;
+        let worker_node = worker.to_protobuf();
+        let worker_type = worker.worker_type();
+
         // TODO: write this as match statement
         if worker_type == WorkerType::ComputeNode {
-            worker_ref.worker_node.state = State::Deleting as i32;
-            Worker::insert(&worker_ref, self.env.meta_store()).await?;
-            
+            // abort if node is already marked as deleting
+            if worker.worker_node.state == State::Deleting as i32 {
+                return Ok(worker_type.clone());
+            }
+
+            worker.worker_node.state = State::Deleting as i32;
+            Worker::insert(&worker, self.env.meta_store()).await?;
+
             // delete node marked as deleted if we missed 3 heartbeats
             tokio::task::spawn(delete_worker_node_cleanup(
                 self.core.clone(),
-                worker_ref.worker_id(),
+                worker.worker_id(),
                 host_address.clone(),
                 self.max_heartbeat_interval.clone(),
             ));
@@ -206,9 +212,11 @@ where
                 .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
                 .await;
         } else {
-            let mut core = self.core.write().await; 
+            // Persist deletion.
             Worker::delete(self.env.meta_store(), &host_address).await?;
-            core.delete_worker_node(worker_ref.clone());
+
+            // Update core.
+            core.delete_worker_node(worker.clone());
         }
 
         // Notify local subscribers.
@@ -276,7 +284,10 @@ where
                     (
                         workers
                             .values()
-                            .filter(|worker| worker.expire_at() < now)
+                            .filter(|worker| {
+                                worker.expire_at() < now
+                                    && worker.worker_node.state != State::Deleting as i32
+                            })
                             .map(|worker| (worker.worker_id(), worker.key().unwrap()))
                             .collect_vec(),
                         now,
@@ -765,23 +776,16 @@ async fn delete_worker_node_cleanup(
                 _ = ticker.tick() => {
                     // This is the error! Code stuck here in endless loop!
                     let mut core = shared_core.write().await;
-                    let worker = core.get_worker_by_host_checked(host_address.clone()); 
-                    if worker.is_err() {
-                        tracing::warn!("not found"); // TODO: remove line
-                        return; 
-                    }
-                    let worker = worker.unwrap();
-                    
-                    // TODO: not sure if this is the error
-                   //   {
-                   //      Ok(w) => w,
-                   //      Err(_) => {
-                   //          tracing::warn!(
-                   //              "Unable to retrieve deleting worker node at address {:#?}",
-                   //              host_address.clone()
-                   //          );
-                   //       }
-                   //  };
+                    let worker = match core.get_worker_by_host_checked(host_address.clone()) {
+                        Ok(w) => w,
+                        Err(_) => {
+                            tracing::warn!(
+                                "Unable to retrieve deleting worker node at address {:#?}",
+                                host_address.clone()
+                            );
+                            return; // TODO: does this return work?
+                         }
+                    };
 
                     if worker.worker_node.state != State::Deleting as i32 || worker.worker_node.id != node_id  {
                         tracing::warn!(

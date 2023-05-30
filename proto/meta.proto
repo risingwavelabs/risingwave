@@ -205,7 +205,7 @@ message ClearWorkerNodesResponse {
   common.Status status = 1;
 }
 
-// TODO: Rename this Retire, Deactivate, Drop, Discontinue, forget 
+// Rename this as Cordon like https://jamesdefabia.github.io/docs/user-guide/kubectl/kubectl_cordon/
 // Not drain, since we are not only draining, but also unscheduling 
 // This is not deleting the node, it just removes fragments from it and makes it unschedulable 
 message DeleteWorkerNodeRequest {

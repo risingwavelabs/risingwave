@@ -27,6 +27,7 @@ pub async fn unregister_worker_node(context: &CtlContext, addr: HostAddr) -> any
 /// remove all fragments from worker node
 pub async fn clear_worker_nodes(context: &CtlContext, addrs: Vec<HostAddr>) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
+    // TODO: rename to clear_worker_nodes?
     meta_client.clear_workers(addrs).await?;
     Ok(())
 }

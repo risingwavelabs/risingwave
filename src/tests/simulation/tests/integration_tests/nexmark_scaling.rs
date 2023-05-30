@@ -127,13 +127,6 @@ async fn nexmark_scaling_up_down_common(
     drop: &str,
     number_of_nodes: usize,
 ) -> Result<()> {
-    // TODO: remove this
-    tokio::task::spawn(async move {
-        sleep(Duration::from_secs(45)).await;
-        println!("max runtime is 45 secs");
-        assert!(false);
-    });
-
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
