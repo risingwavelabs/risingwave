@@ -56,10 +56,6 @@ workspace-hack = { path = "../workspace-hack" }
 nix = { version = "0.25", features = ["fs", "mman"] }
 
 [[bin]]
-name = "file-cache-bench"
-path = "file_cache_bench/main.rs"
-
-[[bin]]
 name = "s3-bench"
 path = "s3_bench/main.rs"
 
