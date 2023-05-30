@@ -14,8 +14,6 @@
 
 package com.risingwave.java.binding;
 
-import java.lang.reflect.Array;
-
 public class BaseRow implements AutoCloseable {
     protected final long pointer;
     private boolean isClosed;
@@ -83,19 +81,16 @@ public class BaseRow implements AutoCloseable {
         return Binding.rowGetJsonbValue(pointer, index);
     }
 
-    // Only supports one-dimensional array right now
+    /**
+     * Only supports one-dimensional array right now
+     *
+     * @return an Object[] which will be used in java.sql.Connection#createArrayOf(String typeName,
+     *     Object[] elements)
+     */
     public <T> Object[] getArray(int index, Class<T> clazz) {
         var val = Binding.rowGetArrayValue(pointer, index, clazz);
-        if (val instanceof Object[]) {
-            return (Object[]) val;
-        }
-        // convert primitive array to object array
-        int len = Array.getLength(val);
-        Object[] arr = new Object[len];
-        for (int i = 0; i < len; i++) {
-            arr[i] = Array.get(val, i);
-        }
-        return arr;
+        assert (val instanceof Object[]);
+        return (Object[]) val;
     }
 
     @Override

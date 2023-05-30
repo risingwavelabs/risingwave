@@ -196,6 +196,9 @@ public class StreamChunkDeserializer implements Deserializer {
                                     case INT64:
                                         objArray = row.getArray(index, Long.class);
                                         break;
+                                    case FLOAT:
+                                        objArray = row.getArray(index, Float.class);
+                                        break;
                                     case DOUBLE:
                                         objArray = row.getArray(index, Double.class);
                                         break;
