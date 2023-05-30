@@ -27,7 +27,6 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{

@@ -54,4 +54,8 @@ impl Aggregator for Projection {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         self.inner.output(builder)
     }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.inner.estimated_size()
+    }
 }

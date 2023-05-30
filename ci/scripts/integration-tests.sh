@@ -46,7 +46,15 @@ echo "--- run Demos"
 python3 run_demos.py --case ${case} --format ${format}
 
 echo "--- check if the ingestion is successful"
-python3 check_data.py ${case}
+# extract the type of upstream source,e.g. mysql,postgres,etc
+upstream=$(echo ${case} | cut -d'-' -f 1)
+if [ "${upstream}" == "mysql" ]; then
+  echo "install mysql"
+  sudo yum install -y mysql
+fi
+
+export PGPASSWORD=123456
+python3 check_data.py ${case} ${upstream}
 
 echo "--- clean Demos"
 python3 clean_demos.py --case ${case}

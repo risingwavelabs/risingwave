@@ -56,8 +56,6 @@ pub fn default_opts_for_test() -> StorageOpts {
         meta_cache_capacity_mb: 64,
         high_priority_ratio: 0,
         disable_remote_compactor: false,
-        enable_local_spill: false,
-        local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
@@ -220,9 +218,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         writer,
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
-        Arc::new(FilterKeyExtractorImpl::FullKey(
-            FullKeyFilterKeyExtractor::default(),
-        )),
+        Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
     );
 
     let mut last_key = FullKey::<B>::default();

@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::vec::Vec;
 
 use futures_async_stream::try_stream;
+use hashbrown::HashMap;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::memory::MemoryContext;
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -50,6 +50,7 @@ pub struct GroupTopNExecutor<K: HashKey> {
     schema: Schema,
     identity: String,
     chunk_size: usize,
+    mem_ctx: MemoryContext,
     _phantom: PhantomData<K>,
 }
 
@@ -63,6 +64,7 @@ pub struct GroupTopNExecutorBuilder {
     with_ties: bool,
     identity: String,
     chunk_size: usize,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for GroupTopNExecutorBuilder {
@@ -78,6 +80,7 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
             self.group_key,
             self.identity,
             self.chunk_size,
+            self.mem_ctx,
         ))
     }
 
@@ -116,6 +119,8 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             .map(|x| child_schema.fields[*x].data_type())
             .collect();
 
+        let identity = source.plan_node().get_identity().clone();
+
         let builder = Self {
             child,
             column_orders,
@@ -124,8 +129,9 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             group_key,
             group_key_types,
             with_ties: top_n_node.get_with_ties(),
-            identity: source.plan_node().get_identity().clone(),
+            identity: identity.clone(),
             chunk_size: source.context.get_config().developer.chunk_size,
+            mem_ctx: source.context().create_executor_mem_context(&identity),
         };
 
         Ok(builder.dispatch())
@@ -142,6 +148,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         group_key: Vec<usize>,
         identity: String,
         chunk_size: usize,
+        mem_ctx: MemoryContext,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
@@ -154,6 +161,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             schema,
             identity,
             chunk_size,
+            mem_ctx,
             _phantom: PhantomData,
         }
     }
@@ -179,7 +187,11 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut groups: HashMap<K, TopNHeap> = HashMap::new();
+        let mut groups =
+            HashMap::<K, TopNHeap, PrecomputedBuildHasher, MonitoredGlobalAlloc>::with_hasher_in(
+                PrecomputedBuildHasher,
+                self.mem_ctx.global_allocator(),
+            );
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -196,7 +208,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
                         self.limit,
                         self.offset,
                         self.with_ties,
-                        MemoryContext::none(),
+                        self.mem_ctx.clone(),
                     )
                 });
                 heap.push(HeapElem::new(encoded_row, chunk.row_at(row_id).0));
@@ -275,6 +287,7 @@ mod tests {
             group_key_types: vec![DataType::Int32],
             identity: "GroupTopNExecutor".to_string(),
             chunk_size: CHUNK_SIZE,
+            mem_ctx: MemoryContext::none(),
         })
         .dispatch();
 

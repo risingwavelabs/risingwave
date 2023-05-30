@@ -28,15 +28,19 @@
 
     Fragment 1
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
-    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+    └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 0 }
         ├──  Upstream
         └──  BatchPlanNode
 
     Fragment 2
     StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
-    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 1 }
         ├──  Upstream
         └──  BatchPlanNode
+
+    Table 0 { columns: [ vnode, _row_id, t1_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 1 { columns: [ vnode, _row_id, t2_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
     Table 4294967294 { columns: [ a, b, c, t1._row_id, null:Serial, 0:Int32 ], primary key: [ $3 ASC, $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 3, 4, 5 ], read pk prefix len hint: 3 }
 
@@ -89,12 +93,14 @@
     Fragment 2
     StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Serial, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        ├── state table: 1
         ├──  Upstream
         └──  BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t2.a, t2.b, t2.c, null:Serial, t2._row_id, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+        ├── state table: 2
         ├──  Upstream
         └──  BatchPlanNode
 
@@ -104,6 +110,22 @@
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
+    Table 1
+    ├── columns: [ vnode, _row_id, t1_backfill_finished ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 2
+    ├── columns: [ vnode, _row_id, t2_backfill_finished ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a, b, c ]
@@ -161,12 +183,14 @@
     Fragment 2
     StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
+        ├── state table: 1
         ├──  Upstream
         └──  BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
+        ├── state table: 2
         ├──  Upstream
         └──  BatchPlanNode
 
@@ -176,6 +200,22 @@
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
+    Table 1
+    ├── columns: [ vnode, a, t1_backfill_finished ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 2
+    ├── columns: [ vnode, a, t2_backfill_finished ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
 
     Table 4294967294
     ├── columns: [ a, b, c ]

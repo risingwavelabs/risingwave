@@ -25,6 +25,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 ctor = "0.1"
 dyn-clone = "1"
+easy-ext = "1"
 either = "1"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
