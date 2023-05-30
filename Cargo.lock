@@ -6405,6 +6405,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pprof",
+ "risingwave_common",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -8825,7 +8826,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
- "arrayvec",
  "auto_enums",
  "aws-sdk-s3",
  "aws-smithy-client",

@@ -20,11 +20,12 @@ use std::sync::Arc;
 #[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
@@ -401,7 +402,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             if let Some(batch_metrics) = batch_metrics {
                 let monitor = TaskMonitor::new();
                 let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
-                if let Err(error) = instrumented_task.catch_unwind().await {
+                if let Err(error) = instrumented_task.rw_catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
@@ -431,7 +432,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone())).catch_unwind().await
+            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
+                .rw_catch_unwind()
+                .await
             {
                 error!("Batch task {:?} panic: {:?}", task_id, error);
             }
