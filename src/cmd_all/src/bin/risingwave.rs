@@ -104,6 +104,7 @@ impl Component {
     }
 }
 
+#[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
     let risingwave = || {
         command!(BINARY_NAME)

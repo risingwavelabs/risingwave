@@ -12,4 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(coverage, feature(no_coverage))]
+
 risingwave_cmd::main!(compactor);
