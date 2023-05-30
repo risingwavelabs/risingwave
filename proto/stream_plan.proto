@@ -158,6 +158,8 @@ message SinkDesc {
 
 message SinkNode {
   SinkDesc sink_desc = 1;
+  // A sink with a kv log store should have a table.
+  catalog.Table table = 2;
 }
 
 message ProjectNode {

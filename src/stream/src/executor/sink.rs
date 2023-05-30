@@ -89,7 +89,7 @@ fn force_append_only(chunk: StreamChunk, data_types: Vec<DataType>) -> Option<St
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        materialize_executor: BoxedExecutor,
+        input: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
         config: SinkConfig,
         executor_id: u64,
@@ -112,7 +112,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         )
         .await?;
         Ok(Self {
-            input: materialize_executor,
+            input,
             metrics,
             sink,
             config,

@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Fi
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{FragmentId, TableCatalog, TableId};
+use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::utils::WithOptions;
 
 #[derive(Default)]
@@ -62,11 +62,26 @@ impl TableCatalogBuilder {
         self.avoid_duplicate_col_name(&mut column_desc);
 
         self.columns.push(ColumnCatalog {
-            column_desc: column_desc.clone(),
+            column_desc,
             // All columns in internal table are invisible to batch query.
             is_hidden: false,
         });
         column_idx
+    }
+
+    /// Extend the columns with column ids reset. This method does not change the column names and
+    /// does not perform duplicate column name check.
+    ///
+    /// Returns the indices of the extended columns.
+    pub fn extend_columns(&mut self, columns: &[ColumnCatalog]) -> Vec<usize> {
+        let base_idx = self.columns.len();
+        columns.iter().enumerate().for_each(|(i, col)| {
+            let mut new_col = col.clone();
+            // Reset the column id for the columns.
+            new_col.column_desc.column_id = ColumnId::new((base_idx + i) as _);
+            self.columns.push(new_col);
+        });
+        Vec::from_iter(base_idx..(base_idx + columns.len()))
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in

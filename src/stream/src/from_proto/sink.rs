@@ -33,7 +33,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
+        let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
@@ -55,9 +55,12 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         }
         let config = SinkConfig::from_hashmap(properties).map_err(StreamExecutorError::from)?;
 
+        // TODO: For sink executor with a state table, a kv log store should be created.
+        let factory = BoundedInMemLogStoreFactory::new(1);
+
         Ok(Box::new(
             SinkExecutor::new(
-                materialize_executor,
+                input_executor,
                 stream.streaming_metrics.clone(),
                 config,
                 params.executor_id,
@@ -67,7 +70,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 sink_type,
                 sink_id,
                 params.actor_context,
-                BoundedInMemLogStoreFactory::new(1),
+                factory,
             )
             .await?,
         ))

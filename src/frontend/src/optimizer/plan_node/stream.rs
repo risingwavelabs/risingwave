@@ -723,6 +723,7 @@ pub fn to_stream_prost_body(
         }),
         Node::Sink(me) => PbNodeBody::Sink(SinkNode {
             sink_desc: Some(me.sink_desc.to_proto()),
+            table: None, // TODO: Refactor sink to have a generic core.
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;

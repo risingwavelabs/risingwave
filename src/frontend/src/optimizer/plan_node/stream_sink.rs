@@ -18,8 +18,13 @@ use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE, ROW_OP_COLUMN_NAME,
+    ROW_OP_COLUMN_TYPE, SEQ_ID_COLUMN_INDEX, SEQ_ID_COLUMN_NAME, SEQ_ID_COLUMN_TYPE,
+};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -30,12 +35,12 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::IndicesDisplay;
+use super::utils::{IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
+use crate::{TableCatalog, WithOptions};
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -241,6 +246,37 @@ impl StreamSink {
             }
         }
     }
+
+    fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
+        let mut table_catalog_builder =
+            TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
+
+        // There are three pre-defined columns in the table: `epoch`, `seq_id` and `row_op`.
+        table_catalog_builder.add_column(&Field::with_name(EPOCH_COLUMN_TYPE, EPOCH_COLUMN_NAME));
+        table_catalog_builder.add_column(&Field::with_name(SEQ_ID_COLUMN_TYPE, SEQ_ID_COLUMN_NAME));
+        table_catalog_builder.add_column(&Field::with_name(ROW_OP_COLUMN_TYPE, ROW_OP_COLUMN_NAME));
+        let predefined_column_len = table_catalog_builder.columns().len();
+
+        // The table's pk is composed of `epoch` and `seq_id`.
+        table_catalog_builder.add_order_column(EPOCH_COLUMN_INDEX, OrderType::ascending());
+        table_catalog_builder
+            .add_order_column(SEQ_ID_COLUMN_INDEX, OrderType::ascending_nulls_last());
+        let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+        let value_indices = table_catalog_builder.extend_columns(&self.sink_desc().columns);
+        table_catalog_builder.set_value_indices(value_indices);
+
+        // Modify distribution key indices based on the pre-defined columns.
+        let dist_key = self
+            .input
+            .distribution()
+            .dist_column_indices()
+            .iter()
+            .map(|idx| idx + predefined_column_len)
+            .collect_vec();
+
+        table_catalog_builder.build(dist_key, read_prefix_len_hint)
+    }
 }
 
 impl PlanTreeNodeUnary for StreamSink {
@@ -296,11 +332,17 @@ impl fmt::Display for StreamSink {
 }
 
 impl StreamNode for StreamSink {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
+
+        // We need to create a table for sink with a kv log store.
+        let table = self
+            .infer_kv_log_store_table_catalog()
+            .with_id(state.gen_table_id_wrapped());
 
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
+            table: Some(table.to_internal_table_prost()),
         })
     }
 }

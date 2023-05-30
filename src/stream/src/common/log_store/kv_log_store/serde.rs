@@ -21,6 +21,10 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::constants::log_store::{
+    EPOCH_COLUMN_INDEX, EPOCH_COLUMN_TYPE, ROW_OP_COLUMN_INDEX, ROW_OP_COLUMN_TYPE,
+    SEQ_ID_COLUMN_INDEX, SEQ_ID_COLUMN_TYPE,
+};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -41,15 +45,11 @@ use crate::common::log_store::kv_log_store::{
 };
 use crate::common::log_store::{LogStoreError, LogStoreResult};
 
-/// `epoch`, `seq_id`, `op`
-const PREDEFINED_COLUMNS_TYPES: [DataType; 3] = [DataType::Int64, DataType::Int32, DataType::Int16];
-const EPOCH_INDEX: usize = 0;
-const SEQ_ID_INDEX: usize = 1;
-const ROW_OP_INDEX: usize = 2;
+/// `epoch`, `seq_id`, `row_op`
+const PREDEFINED_COLUMNS_TYPES: [DataType; 3] =
+    [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE, ROW_OP_COLUMN_TYPE];
 /// `epoch`, `seq_id`
-const PK_TYPES: [DataType; 2] = [DataType::Int64, DataType::Int32];
-/// epoch
-const EPOCH_TYPES: [DataType; 1] = [DataType::Int64];
+const PK_TYPES: [DataType; 2] = [EPOCH_COLUMN_TYPE, SEQ_ID_COLUMN_TYPE];
 
 const INSERT_OP_CODE: RowOpCodeType = 1;
 const DELETE_OP_CODE: RowOpCodeType = 2;
@@ -139,7 +139,7 @@ impl LogStoreRowSerde {
         );
 
         let epoch_serde =
-            OrderedRowSerde::new(Vec::from(EPOCH_TYPES), vec![OrderType::ascending()]);
+            OrderedRowSerde::new(vec![EPOCH_COLUMN_TYPE], vec![OrderType::ascending()]);
 
         Self {
             pk_serde,
@@ -260,8 +260,8 @@ impl LogStoreRowSerde {
         let row_data = self.row_serde.deserialize(&value_bytes)?;
 
         let payload_row = OwnedRow::new(row_data[PREDEFINED_COLUMNS_TYPES.len()..].to_vec());
-        let epoch = Self::decode_epoch(*row_data[EPOCH_INDEX].as_ref().unwrap().as_int64());
-        let row_op_code = *row_data[ROW_OP_INDEX].as_ref().unwrap().as_int16();
+        let epoch = Self::decode_epoch(*row_data[EPOCH_COLUMN_INDEX].as_ref().unwrap().as_int64());
+        let row_op_code = *row_data[ROW_OP_COLUMN_INDEX].as_ref().unwrap().as_int16();
 
         let op = match row_op_code {
             INSERT_OP_CODE => LogStoreRowOp::Row {
@@ -281,13 +281,13 @@ impl LogStoreRowSerde {
                 row: payload_row,
             },
             BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_INDEX].is_none());
+                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: false,
                 }
             }
             CHECKPOINT_BARRIER_OP_CODE => {
-                assert!(row_data[SEQ_ID_INDEX].is_none());
+                assert!(row_data[SEQ_ID_COLUMN_INDEX].is_none());
                 LogStoreRowOp::Barrier {
                     is_checkpoint: true,
                 }
