@@ -200,6 +200,10 @@ impl ObjectName {
             .collect::<Vec<_>>()
             .join(".")
     }
+
+    pub fn from_test_str(s: &str) -> Self {
+        ObjectName::from(vec![s.into()])
+    }
 }
 
 impl fmt::Display for ObjectName {

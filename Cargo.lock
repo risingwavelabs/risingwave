@@ -6507,6 +6507,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 4.2.7",
+ "expect-test",
  "itertools",
  "libtest-mimic",
  "madsim-tokio",
