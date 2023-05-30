@@ -142,7 +142,7 @@ def test_sink(type, prop, input_file):
 
 
 def test_sink_stream_chunk(type, prop, input_file):
-    sink_input = load_binary_input(input_file)
+    sink_input=load_binary_input(input_file)
     with grpc.insecure_channel('localhost:50051') as channel:
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         request_list = [
@@ -156,17 +156,16 @@ def test_sink_stream_chunk(type, prop, input_file):
             ))]
         epoch = 0
         batch_id = 1
-        for batch in sink_input:
-            request_list.append(connector_service_pb2.SinkStreamRequest(
-                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
-            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
-                stream_chunk_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(binary_data=sink_input),
-                batch_id=batch_id,
-                epoch=epoch
-            )))
-            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
-            epoch += 1
-            batch_id += 1
+        request_list.append(connector_service_pb2.SinkStreamRequest(
+            start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
+        request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
+            stream_chunk_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(binary_data=sink_input),
+            batch_id=batch_id,
+            epoch=epoch
+        )))
+        request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
+        epoch += 1
+        batch_id += 1
 
         response_iter = stub.SinkStream(iter(request_list))
         for req in request_list:
@@ -191,7 +190,6 @@ def test_jdbc_sink(input_file):
     # validate results
     validate_jdbc_sink(input_file)
 
-
 def validate_jdbc_sink(input_file):
     conn = psycopg2.connect("dbname=test user=test password=connector host=localhost port=5432")
     cur = conn.cursor()
@@ -211,13 +209,6 @@ def validate_jdbc_sink(input_file):
                     "Integration test failed: expected {} at row {}, column {}, but got {}".format(expected[i][j], i, j,
                                                                                                    rows[i][j]))
                 exit(1)
-
-
-def test_print_sink(input_file):
-    test_sink("print", {}, input_file)
-
-def test_print_stream_chunk_sink(input_file):
-    test_sink_stream_chunk("print", {}, input_file)
 
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
@@ -251,12 +242,14 @@ def test_deltalake_sink(input_file):
               },
               input_file)
 
+def test_stream_chunk_sink(input_binary_file):
+    test_sink_stream_chunk("file", {"output.path": "/tmp/connector",}, input_binary_file)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--file_sink', action='store_true', help="run file sink test")
     parser.add_argument('--jdbc_sink', action='store_true', help="run jdbc sink test")
-    parser.add_argument('--print_sink', action='store_true', help="run print sink test")
-    parser.add_argument('--print_stream_chunk_sink', action='store_true', help="run print stream chunk sink test")
+    parser.add_argument('--stream_chunk_sink', action='store_true', help="run print stream chunk sink test")
     parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
     parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
     parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
@@ -267,10 +260,8 @@ if __name__ == "__main__":
         test_file_sink(args.input_file)
     if args.jdbc_sink:
         test_jdbc_sink(args.input_file)
-    if args.print_sink:
-        test_print_sink(args.input_file)
-    if args.print_stream_chunk_sink:
-        test_print_stream_chunk_sink(args.input_binary_file)
+    if args.stream_chunk_sink:
+        test_stream_chunk_sink(args.input_binary_file)
     if args.iceberg_sink:
         test_iceberg_sink(args.input_file)
     if args.upsert_iceberg_sink:

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::io::Write;
+use std::env;
 
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
@@ -45,7 +46,13 @@ fn build_row(index: usize) -> OwnedRow {
 }
 
 fn main() {
-    let row_count = 30000;
+    let args: Vec<String> = env::args().collect();
+    let mut flag = false;
+    let mut row_count = 30000;
+    if args.len() > 1 &&  &args[1] == "unit-test"{
+        flag = true;
+        row_count = 30;
+    }
     let data_types = vec![
         DataType::Int16,
         DataType::Int32,
@@ -65,7 +72,8 @@ fn main() {
             builder.append_one_row(build_row(i)).is_none(),
             "should not finish"
         );
-        if i % 2 == 0 {
+        // In unit test, it does not support delete operation
+        if flag || i % 2 == 0 {
             ops.push(Op::Insert);
         } else {
             ops.push(Op::Delete);
