@@ -52,7 +52,7 @@ if __name__ == '__main__':
             else:
                 parts = line.split("^")
                 if len(parts) > 1:
-                    if len(parts[1]) > 0:
+                    if len(parts[1].strip()) > 0:
                         producer.produce(topic=topic, partition=0,
                             key=key_serializer(json.loads(parts[0]) ,SerializationContext(topic, MessageField.KEY)),
                             value=value_serializer(
