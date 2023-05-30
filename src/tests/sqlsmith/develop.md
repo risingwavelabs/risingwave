@@ -9,7 +9,7 @@ There isn't a clear-cut way for these.
 Typically, to add them you would do the following:
 1. Identify which part of the AST these are from.
 2. Look where this part of AST it is generated.
-   The section on [`Query Generation`] should help.
+   The section on [[Query Generation]] should help.
    The generation process roughly mirrors the structure of the AST.
 3. Add it to that part of the AST.
 
