@@ -32,14 +32,14 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 public class JDBCSinkTest {
-    enum TestType {
+    private enum TestType {
         TestPg,
         TestMySQL,
-    };
+    }
 
-    static final String pgCreateStmt =
+    private static final String pgCreateStmt =
             "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSONB, v_bytea BYTEA)";
-    static final String mysqlCreateStmt =
+    private static final String mysqlCreateStmt =
             "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb BLOB, v_bytea BLOB)";
 
     static void createMockTable(String jdbcUrl, String tableName, TestType testType)
