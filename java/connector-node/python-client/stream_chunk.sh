@@ -7,7 +7,7 @@ DATA_FILE=${PYTHON_DIRECTORY}/data/stream_chunk_data
 
 # # Launch the service
 
-# # compile conenctor-node amd java-binding
+# # compile connector-node amd java-binding
 # cd $JAVA_ROOT && mvn clean package -DskipTests=true
 
 # # unpack the tar file, the file name might vary depending on the version

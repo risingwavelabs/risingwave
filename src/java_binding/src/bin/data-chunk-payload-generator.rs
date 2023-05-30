@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Write;
 use std::env;
+use std::io::Write;
 
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
@@ -49,7 +49,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let mut flag = false;
     let mut row_count = 30000;
-    if args.len() > 1 &&  &args[1] == "unit-test"{
+    if args.len() > 1 && &args[1] == "unit-test" {
         flag = true;
         row_count = 30;
     }
