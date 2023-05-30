@@ -124,7 +124,7 @@ impl AvroParserConfig {
             Ok(fields)
         } else {
             Err(RwError::from(InternalError(
-                "schema invalid, record required".into(),
+                "Kafka message key schema is invalid. Record type is required, or specify a primary key column to bypass the primary key detection.".into(),
             )))
         }
     }
@@ -179,6 +179,7 @@ impl AvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        #[derive(Debug)]
         enum Op {
             Insert,
             Delete,
@@ -265,10 +266,14 @@ impl AvroParser {
             let fill = |column: &SourceColumnDesc| {
                 let tuple = match fields.iter().find(|val| column.name.eq(&val.0)) {
                     None => {
-                        if self.upsert_primary_key_column_name.as_ref() == Some(&column.name)
-                            && avro_key.is_some()
-                            && self.key_schema.is_some()
-                        {
+                        if self.upsert_primary_key_column_name.as_ref() == Some(&column.name) {
+                            if !(avro_key.is_some() && self.key_schema.is_some()) {
+                                tracing::error!(
+                                    upsert_primary_key_column_name =
+                                        self.upsert_primary_key_column_name,
+                                    "Upsert mode is enabled, but key or key schema is absent.",
+                                );
+                            }
                             return from_avro_value(
                                 avro_key.as_ref().unwrap().clone(),
                                 self.key_schema.as_ref().unwrap(),
@@ -312,7 +317,8 @@ impl AvroParser {
                         self.key_schema.as_deref().unwrap(),
                     )
                     .map_err(|e| {
-                        tracing::error!(
+                        tracing::error!(upsert_primary_key_column_name=self.upsert_primary_key_column_name,
+                            ?avro_value,op=?op,
                             "failed to process value ({}): {}",
                             String::from_utf8_lossy(&payload),
                             e
