@@ -151,11 +151,20 @@ pub struct TableStreamReader {
 
 impl TableStreamReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream(mut self) {
+    pub async fn into_stream_for_source_reader_test(mut self) {
         while let Some((chunk, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             _ = notifier.send(chunk.cardinality());
             yield chunk.into();
+        }
+    }
+
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    pub async fn into_stream(mut self) {
+        while let Some((chunk, notifier)) = self.rx.recv().await {
+            // Notify about that we've taken the chunk.
+            _ = notifier.send(chunk.cardinality());
+            yield chunk;
         }
     }
 }
@@ -202,7 +211,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await.unwrap()?, chunk => {
-                    assert_eq!(chunk.chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }

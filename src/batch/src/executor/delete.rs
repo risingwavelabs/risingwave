@@ -248,21 +248,15 @@ mod tests {
         // Read
         let chunk = reader.next().await.unwrap()?;
 
-        assert_eq!(chunk.chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
         assert_eq!(
-            chunk.chunk.columns()[0]
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
         assert_eq!(
-            chunk.chunk.columns()[1]
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 

@@ -346,18 +346,12 @@ mod tests {
         let chunk = reader.next().await.unwrap()?;
 
         assert_eq!(
-            chunk.chunk.columns()[0]
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
         );
 
         assert_eq!(
-            chunk.chunk.columns()[1]
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
+            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
@@ -371,7 +365,7 @@ mod tests {
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .into();
-        assert_eq!(*chunk.chunk.columns()[2], array);
+        assert_eq!(*chunk.columns()[2], array);
 
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);

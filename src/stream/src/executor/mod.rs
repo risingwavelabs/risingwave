@@ -61,6 +61,7 @@ mod chain;
 mod dedup;
 mod dispatch;
 pub mod dml;
+mod dml_reader;
 mod dynamic_filter;
 mod error;
 mod expand;

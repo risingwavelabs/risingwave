@@ -62,6 +62,9 @@ enum Inner {
     #[error("Connector error: {0}")]
     ConnectorError(BoxedError),
 
+    #[error("Dml error: {0}")]
+    DmlError(BoxedError),
+
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
 
@@ -88,6 +91,10 @@ impl StreamExecutorError {
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
         Inner::NotImplemented(error.into(), issue.into()).into()
+    }
+
+    pub fn dml_error(error: impl Error) -> Self {
+        Inner::DmlError(error.into()).into()
     }
 }
 

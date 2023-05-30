@@ -19,56 +19,48 @@ use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
+use risingwave_common::array::StreamChunk;
+use risingwave_connector::source::BoxStreamChunkStream;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Message;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
-type StreamReaderData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
-type ReaderArm = BoxStream<'static, StreamReaderData>;
-type StreamReaderWithPauseInner =
-    SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
 
-/// [`StreamReaderWithPause`] merges two streams, with one receiving barriers (and maybe other types
-/// of messages) and the other receiving data only (no barrier). The merged stream can be paused
-/// (`StreamReaderWithPause::pause_stream`) and resumed (`StreamReaderWithPause::resume_stream`).
+type DmlReaderData = StreamExecutorResult<Either<Message, StreamChunk>>;
+type DmlReaderArm = BoxStream<'static, DmlReaderData>;
+type DmlReaderWithPauseInner =
+    SelectWithStrategy<DmlReaderArm, DmlReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
+
+/// [`DmlReaderWithPause`] merges two streams, with one receiving barriers (and maybe other types
+/// of messages) and the other receiving dml data only (no barrier). The merged stream can be paused
+/// (`DmlReaderWithPause::pause_stream`) and resumed (`DmlReaderWithPause::resume_stream`).
 /// A paused stream will not receive any data from either original stream until a barrier arrives
-/// and the stream is resumed.
-///
-/// ## Priority
-///
-/// If `BIASED` is `true`, the left-hand stream (the one receiving barriers) will get a higher
-/// priority over the right-hand one. Otherwise, the two streams will be polled in a round robin
-/// fashion.
-pub(super) struct StreamReaderWithPause<const BIASED: bool> {
-    inner: StreamReaderWithPauseInner,
+/// and the stream is resumed. The two streams will be polled in a round robin fashion.
+pub(super) struct DmlReaderWithPause {
+    inner: DmlReaderWithPauseInner,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
-    /// Receive chunks and states from the reader. Hang up on error.
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn data_stream(stream: BoxSourceWithStateStream) {
+impl DmlReaderWithPause {
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
+    async fn data_stream(stream: BoxStreamChunkStream) {
         // TODO: support stack trace for Stream
         #[for_await]
         for chunk in stream {
             match chunk {
                 Ok(chunk) => yield chunk,
                 Err(err) => {
-                    return Err(StreamExecutorError::connector_error(err));
+                    return Err(StreamExecutorError::dml_error(err));
                 }
             }
         }
     }
 
-    /// Construct a `StreamReaderWithPause` with one stream receiving barrier messages (and maybe
+    /// Construct a `DmlReaderWithPause` with one stream receiving barrier messages (and maybe
     /// other types of messages) and the other receiving data only (no barrier).
-    pub fn new(
-        message_stream: ExecutorMessageStream,
-        data_stream: BoxSourceWithStateStream,
-    ) -> Self {
+    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxStreamChunkStream) -> Self {
         let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
         let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
         let inner = Self::new_inner(message_stream_arm, data_stream_arm);
@@ -78,30 +70,12 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
         }
     }
 
-    fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> StreamReaderWithPauseInner {
-        let strategy = if BIASED {
-            |_: &mut PollNext| PollNext::Left
-        } else {
-            // The poll strategy is not biased: we poll the two streams in a round robin way.
-            |last: &mut PollNext| last.toggle()
-        };
+    fn new_inner(
+        message_stream: DmlReaderArm,
+        data_stream: DmlReaderArm,
+    ) -> DmlReaderWithPauseInner {
+        let strategy = |last: &mut PollNext| last.toggle();
         select_with_strategy(message_stream, data_stream, strategy)
-    }
-
-    /// Replace the data stream with a new one for given `stream`. Used for split change.
-    pub fn replace_data_stream(&mut self, data_stream: BoxSourceWithStateStream) {
-        // Take the barrier receiver arm.
-        let barrier_receiver_arm = std::mem::replace(
-            self.inner.get_mut().0,
-            futures::stream::once(async { unreachable!("placeholder") }).boxed(),
-        );
-
-        // Note: create a new `SelectWithStrategy` instead of replacing the source stream arm here,
-        // to ensure the internal state of the `SelectWithStrategy` is reset. (#6300)
-        self.inner = Self::new_inner(
-            barrier_receiver_arm,
-            Self::data_stream(data_stream).map_ok(Either::Right).boxed(),
-        );
     }
 
     /// Pause the data stream.
@@ -117,8 +91,8 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
     }
 }
 
-impl<const BIASED: bool> Stream for StreamReaderWithPause<BIASED> {
-    type Item = StreamReaderData;
+impl Stream for DmlReaderWithPause {
+    type Item = DmlReaderData;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -153,12 +127,10 @@ mod tests {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let table_dml_handle = TableDmlHandle::new(vec![]);
-        let source_stream = table_dml_handle
-            .stream_reader()
-            .into_stream_for_source_reader_test();
+        let source_stream = table_dml_handle.stream_reader().into_stream();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
-        let stream = StreamReaderWithPause::<true>::new(barrier_stream, source_stream);
+        let stream = DmlReaderWithPause::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {
