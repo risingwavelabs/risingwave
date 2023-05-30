@@ -32,3 +32,4 @@ pub mod vector_op;
 
 pub use error::{ExprError, Result};
 use risingwave_common::{bail, ensure};
+pub use risingwave_expr_macro::*;

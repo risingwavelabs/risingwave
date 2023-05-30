@@ -579,6 +579,92 @@ impl Decimal {
             Self::NegativeInf => None,
         }
     }
+
+    pub fn checked_powd(&self, rhs: &Self) -> Result<Self, PowError> {
+        use std::cmp::Ordering;
+
+        match (self, rhs) {
+            // A. Handle `nan`, where `1 ^ nan == 1` and `nan ^ 0 == 1`
+            (Decimal::NaN, Decimal::NaN)
+            | (Decimal::PositiveInf, Decimal::NaN)
+            | (Decimal::NegativeInf, Decimal::NaN)
+            | (Decimal::NaN, Decimal::PositiveInf)
+            | (Decimal::NaN, Decimal::NegativeInf) => Ok(Self::NaN),
+            (Normalized(lhs), Decimal::NaN) => match lhs.is_one() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+            (Decimal::NaN, Normalized(rhs)) => match rhs.is_zero() {
+                true => Ok(1.into()),
+                false => Ok(Self::NaN),
+            },
+
+            // B. Handle `b ^ inf`
+            (Normalized(lhs), Decimal::PositiveInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+            // Simply special case of `abs(b) > 1`.
+            // Also consistent with `inf ^ p` and `-inf ^ p` below where p is not fractional or odd.
+            (Decimal::PositiveInf, Decimal::PositiveInf)
+            | (Decimal::NegativeInf, Decimal::PositiveInf) => Ok(Self::PositiveInf),
+
+            // C. Handle `b ^ -inf`, which is `(1/b) ^ inf`
+            (Normalized(lhs), Decimal::NegativeInf) => match lhs.abs().cmp(&1.into()) {
+                Ordering::Greater => Ok(0.into()),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => match lhs.is_zero() {
+                    // Fun fact: ISO 9899 is removing this error to follow IEEE 754 2008.
+                    true => Err(PowError::ZeroNegative),
+                    false => Ok(Self::PositiveInf),
+                },
+            },
+            (Decimal::PositiveInf, Decimal::NegativeInf)
+            | (Decimal::NegativeInf, Decimal::NegativeInf) => Ok(0.into()),
+
+            // D. Handle `inf ^ p`
+            (Decimal::PositiveInf, Normalized(rhs)) => match rhs.cmp(&0.into()) {
+                Ordering::Greater => Ok(Self::PositiveInf),
+                Ordering::Equal => Ok(1.into()),
+                Ordering::Less => Ok(0.into()),
+            },
+
+            // E. Handle `-inf ^ p`. Finite `p` can be fractional, odd, or even.
+            (Decimal::NegativeInf, Normalized(rhs)) => match !rhs.fract().is_zero() {
+                // Err in PostgreSQL. No err in ISO 9899 which treats fractional as non-odd below.
+                true => Err(PowError::NegativeFract),
+                false => match (rhs.cmp(&0.into()), rhs.rem(&2.into()).abs().is_one()) {
+                    (Ordering::Greater, true) => Ok(Self::NegativeInf),
+                    (Ordering::Greater, false) => Ok(Self::PositiveInf),
+                    (Ordering::Equal, true) => unreachable!(),
+                    (Ordering::Equal, false) => Ok(1.into()),
+                    (Ordering::Less, true) => Ok(0.into()), // no `-0` in PostgreSQL decimal
+                    (Ordering::Less, false) => Ok(0.into()),
+                },
+            },
+
+            // F. Finite numbers
+            (Normalized(lhs), Normalized(rhs)) => {
+                if lhs.is_zero() && rhs < &0.into() {
+                    return Err(PowError::ZeroNegative);
+                }
+                if lhs < &0.into() && !rhs.fract().is_zero() {
+                    return Err(PowError::NegativeFract);
+                }
+                match lhs.checked_powd(*rhs) {
+                    Some(d) => Ok(Self::Normalized(d)),
+                    None => Err(PowError::Overflow),
+                }
+            }
+        }
+    }
+}
+
+pub enum PowError {
+    ZeroNegative,
+    NegativeFract,
+    Overflow,
 }
 
 impl From<Decimal> for memcomparable::Decimal {
