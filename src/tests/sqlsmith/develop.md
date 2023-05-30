@@ -62,6 +62,10 @@ Then we have the function / aggregate call, or the cast expression generated suc
 
 You may start from `query.rs` and trace the code for further details.
 
+## Subquery generation
+
+This section is WIP.
+
 ## Table and Column name generation
 
 For setup phase, only `CREATE MATERIALIZED VIEW` requires table name generation. We prefix them with `m{id}`, where `id` is unique for each materialized view.
