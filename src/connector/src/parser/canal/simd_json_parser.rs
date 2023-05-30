@@ -221,6 +221,7 @@ mod tests {
             SourceColumnDesc::simple("time", DataType::Time, 3.into()),
             SourceColumnDesc::simple("timestamp", DataType::Timestamp, 4.into()),
             SourceColumnDesc::simple("char", DataType::Varchar, 5.into()),
+            SourceColumnDesc::simple("binary", DataType::Bytea, 6.into()),
         ];
         let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
 
@@ -260,6 +261,12 @@ mod tests {
         assert_eq!(
             row.datum_at(5).to_owned_datum(),
             Some(ScalarImpl::Utf8(Box::from("Kathleen".to_string())))
+        );
+        assert_eq!(
+            row.datum_at(6).to_owned_datum(),
+            Some(ScalarImpl::Bytea(Box::from(
+                "Joseph\u{0}\u{0}\u{0}\u{0}".as_bytes()
+            )))
         );
     }
 
