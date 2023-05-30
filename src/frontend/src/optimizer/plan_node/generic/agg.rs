@@ -288,17 +288,26 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         .collect()
     }
 
-    /// Add group key columns to table builder.
+    /// Create a new table builder with group key columns added.
     ///
     /// # Returns
     ///
+    /// - table builder with group key columns added
     /// - included upstream indices
     /// - column mapping from upstream to table
-    fn table_builder_add_group_key(
+    fn create_table_builder(
         &self,
-        table_builder: &mut TableCatalogBuilder,
+        ctx: OptimizerContextRef,
         window_col_idx: Option<usize>,
-    ) -> (Vec<usize>, BTreeMap<usize, usize>) {
+    ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
+        // NOTE: this function should be called to get a table builder, so that all state tables
+        // created for Agg node have the same group key columns and pk ordering.
+        let mut table_builder =
+            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
+
+        assert!(table_builder.columns().is_empty());
+        assert_eq!(table_builder.get_current_pk_len(), 0);
+
         // add group key column to table builder
         let mut included_upstream_indices = vec![];
         let mut column_mapping = BTreeMap::new();
@@ -315,7 +324,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             table_builder.add_order_column(column_mapping[&idx], OrderType::ascending());
         }
 
-        (included_upstream_indices, column_mapping)
+        (table_builder, included_upstream_indices, column_mapping)
     }
 
     /// Infer `AggCallState`s for streaming agg.
@@ -333,11 +342,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
-            let mut table_builder =
-                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-
-            let (mut included_upstream_indices, mut column_mapping) =
-                self.table_builder_add_group_key(&mut table_builder, window_col_idx);
+            let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
+                self.create_table_builder(me.ctx(), window_col_idx);
             let read_prefix_len_hint = table_builder.get_current_pk_len();
 
             let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
@@ -387,11 +393,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         };
 
         let gen_table_state = |agg_kind: AggKind| -> TableState {
-            let mut table_builder =
-                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-
-            let (included_upstream_indices, _) =
-                self.table_builder_add_group_key(&mut table_builder, window_col_idx);
+            let (mut table_builder, included_upstream_indices, _) =
+                self.create_table_builder(me.ctx(), window_col_idx);
             let read_prefix_len_hint = table_builder.get_current_pk_len();
 
             match agg_kind {
@@ -500,11 +503,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     ) -> TableCatalog {
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
-        let mut table_builder =
-            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
         let n_group_key_cols = self.group_key.count_ones(..);
 
-        self.table_builder_add_group_key(&mut table_builder, window_col_idx);
+        let (mut table_builder, _, _) = self.create_table_builder(me.ctx(), window_col_idx);
         let read_prefix_len_hint = table_builder.get_current_pk_len();
 
         for field in out_fields.iter().skip(n_group_key_cols) {
@@ -545,11 +546,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .into_group_map_by(|(_, call)| call.inputs[0].index) // one table per distinct column
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
-                let mut table_builder =
-                    TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-
-                let (mut key_cols, _) =
-                    self.table_builder_add_group_key(&mut table_builder, window_col_idx);
+                let (mut table_builder, mut key_cols, _) =
+                    self.create_table_builder(me.ctx(), window_col_idx);
                 let table_col_idx = table_builder.add_column(&in_fields[distinct_col]);
                 table_builder.add_order_column(table_col_idx, OrderType::ascending());
                 key_cols.push(distinct_col);
