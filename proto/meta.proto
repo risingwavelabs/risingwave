@@ -231,7 +231,6 @@ service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
-  rpc ClearWorkers(ClearWorkerNodesRequest) returns (ClearWorkerNodesResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 
@@ -366,6 +365,7 @@ service ScaleService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc GetSchedule(GetScheduleRequest) returns (GetScheduleResponse);
+  rpc ClearWorkers(ClearWorkerNodesRequest) returns (ClearWorkerNodesResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
 }
 
