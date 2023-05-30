@@ -28,6 +28,7 @@ import java.sql.Date;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.Map;
 
 public class JsonDeserializer implements Deserializer {
@@ -221,15 +222,7 @@ public class JsonDeserializer implements Deserializer {
                             .withDescription("Expected bytea, got " + value.getClass())
                             .asRuntimeException();
                 }
-                String s = (String) value;
-                int len = s.length();
-                byte[] bytes = new byte[len / 2];
-                for (int i = 0; i < len; i += 2) {
-                    bytes[i / 2] =
-                            (byte)
-                                    ((Character.digit(s.charAt(i), 16) << 4)
-                                            + Character.digit(s.charAt(i + 1), 16));
-                }
+                byte[] bytes = Base64.getDecoder().decode((String) value);
                 return new ByteArrayInputStream(bytes);
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT

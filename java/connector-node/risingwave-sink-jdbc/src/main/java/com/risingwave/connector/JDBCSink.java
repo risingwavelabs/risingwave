@@ -63,7 +63,7 @@ public class JDBCSink extends SinkBase {
             this.targetDbType = DatabaseType.POSTGRES;
         } else {
             throw Status.INVALID_ARGUMENT
-                    .withDescription("Unsupported jdbc url")
+                    .withDescription("Unsupported jdbc url: " + jdbcUrl)
                     .asRuntimeException();
         }
 

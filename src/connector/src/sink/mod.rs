@@ -21,6 +21,8 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use base64::engine::general_purpose;
+use base64::Engine as _;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
@@ -340,7 +342,7 @@ fn datum_to_json_object(
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         },
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(hex::encode(v))
+            json!(general_purpose::STANDARD_NO_PAD.encode(v))
         }
         // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
