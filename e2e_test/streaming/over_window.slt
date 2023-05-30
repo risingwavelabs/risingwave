@@ -39,6 +39,34 @@ select * from mv;
 3 5 4 3
 
 statement ok
+insert into t values (1, 6), (2, 8), (3, 12);
+
+query IIII rowsort
+select * from mv;
+----
+1 1 24 3
+1 2 24 3
+1 3 24 6
+1 3 24 6
+1 4 24 3
+1 5 24 3
+1 6 24 1
+2 1 11 3
+2 2 11 3
+2 3 11 6
+2 3 11 6
+2 4 11 3
+2 5 11 3
+2 8 11 1
+3 1 8 3
+3 12 8 1
+3 2 8 3
+3 3 8 6
+3 3 8 6
+3 4 8 3
+3 5 8 3
+
+statement ok
 drop materialized view mv;
 
 statement ok
