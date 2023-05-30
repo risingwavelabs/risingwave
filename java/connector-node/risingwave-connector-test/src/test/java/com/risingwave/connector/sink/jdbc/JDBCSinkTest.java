@@ -40,7 +40,7 @@ public class JDBCSinkTest {
     private static final String pgCreateStmt =
             "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSONB, v_bytea BYTEA)";
     private static final String mysqlCreateStmt =
-            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb BLOB, v_bytea BLOB)";
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSON, v_bytea BLOB)";
 
     static void createMockTable(String jdbcUrl, String tableName, TestType testType)
             throws SQLException {
@@ -92,8 +92,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
 
@@ -114,8 +113,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
         stmt = conn.createStatement();
@@ -150,8 +148,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes())),
                         new ArraySinkRow(
                                 Op.INSERT,
@@ -160,8 +157,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes())),
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
@@ -170,8 +166,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes())),
                         new ArraySinkRow(
                                 Op.UPDATE_INSERT,
@@ -180,8 +175,7 @@ public class JDBCSinkTest {
                                 new Date(2000000000),
                                 new Time(2000000000),
                                 new Timestamp(2000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
                                 new ByteArrayInputStream("I want to eat".getBytes())),
                         new ArraySinkRow(
                                 Op.DELETE,
@@ -190,8 +184,7 @@ public class JDBCSinkTest {
                                 new Date(1000000000),
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
-                                new String(
-                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
 
@@ -206,9 +199,8 @@ public class JDBCSinkTest {
         assertEquals(new Time(2000000000).toString(), rs.getTime(4).toString());
         assertEquals(new Timestamp(2000000000), rs.getTimestamp(5));
         assertEquals(
-                new String("{\"key\": \"password\", \"value\": \"Singularity123123123123\"}"),
-                rs.getString(6));
-        assertEquals(new String("I want to eat"), new String(rs.getBytes(7)));
+                "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}", rs.getString(6));
+        assertEquals("I want to eat", new String(rs.getBytes(7)));
         assertFalse(rs.next());
 
         sink.sync();

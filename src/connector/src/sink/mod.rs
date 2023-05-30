@@ -356,11 +356,8 @@ fn datum_to_json_object(
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
             for sub_datum_ref in elems {
-                let value = datum_to_json_object(
-                    &inner_field,
-                    sub_datum_ref,
-                    TimestampHandlingMode::String,
-                )?;
+                let value =
+                    datum_to_json_object(&inner_field, sub_datum_ref, timestamp_handling_mode)?;
                 vec.push(value);
             }
             json!(vec)
@@ -374,7 +371,7 @@ fn datum_to_json_object(
                     .map(|(dt, name)| Field::with_name(dt.clone(), name)),
             ) {
                 let value =
-                    datum_to_json_object(&sub_field, sub_datum_ref, TimestampHandlingMode::String)?;
+                    datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
@@ -453,6 +450,20 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
+
+        let ts_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Timestamp,
+                ..mock_field.clone()
+            },
+            Some(
+                ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
+                    .as_scalar_ref_impl(),
+            ),
+            TimestampHandlingMode::Milli,
+        )
+        .unwrap();
+        assert_eq!(ts_value, json!(1000 * 1000));
 
         let ts_value = datum_to_json_object(
             &Field {
