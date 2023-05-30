@@ -61,6 +61,8 @@ impl LogicalProjectSet {
 
     /// `create` will analyze select exprs with table functions and construct a plan.
     ///
+    /// When there is no table functions in the select list, it will return a simple LogicalProject.
+    ///
     /// When table functions are used as arguments of a table function or a usual function, the
     /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
     /// `Project` or `ProjectSet`. The plan is like:
@@ -71,6 +73,13 @@ impl LogicalProjectSet {
     ///
     /// Otherwise it will be a simple `ProjectSet`.
     pub fn create(input: PlanRef, select_list: Vec<ExprImpl>) -> PlanRef {
+        if select_list
+            .iter()
+            .all(|e: &ExprImpl| !e.has_table_function())
+        {
+            return LogicalProject::create(input, select_list);
+        }
+
         /// Rewrites a `FunctionCall` or `TableFunction` whose args contain table functions into one
         /// using `InputRef` as args.
         struct Rewriter {
@@ -248,7 +257,7 @@ impl ColPrunable for LogicalProjectSet {
             .collect();
 
         // Reconstruct the LogicalProjectSet
-        let new_node: PlanRef = LogicalProjectSet::new(new_input, select_list).into();
+        let new_node: PlanRef = LogicalProjectSet::create(new_input, select_list);
         if new_node.schema().len() == required_cols.len() {
             // current schema perfectly fit the required columns
             new_node
