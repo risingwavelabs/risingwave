@@ -29,7 +29,7 @@ CREATE TABLE rw_types (
     interval_column INTERVAL,
     jsonb_column JSONB,
     array_column VARCHAR[],
-    array_column2 DECIMAL[]
+    array_column2 FLOAT[]
 );
 
 statement ok
