@@ -757,11 +757,19 @@ pub async fn parse_remote_object_store(
                 .monitored(metrics),
         ),
         "memory" => {
-            tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            if ident == "Meta Backup" {
+                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in production environment.", ident);
+            } else {
+                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            }
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
-            tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            if ident == "Meta Backup" {
+                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in production environment.", ident);
+            } else {
+                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         other => {
