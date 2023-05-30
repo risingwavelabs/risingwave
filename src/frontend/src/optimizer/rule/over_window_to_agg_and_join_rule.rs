@@ -43,6 +43,7 @@ impl Rule for OverWindowToAggAndJoinRule {
         }) {
             return None;
         }
+        // This rule should be applied after OverWindowSplitByWindowRule.
         let group_exprs: Vec<ExprImpl> = window_functions[0]
             .partition_by
             .iter()
@@ -72,7 +73,7 @@ impl Rule for OverWindowToAggAndJoinRule {
         }
         let common_input = LogicalShare::create(over_window.input());
         let (agg, ..) =
-	            LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone()).ok()?;
+            LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone()).ok()?;
         let on_clause = window_functions[0].partition_by.iter().enumerate().fold(
             Condition::true_cond(),
             |on_clause, (idx, x)| {
