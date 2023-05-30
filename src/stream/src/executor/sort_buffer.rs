@@ -222,7 +222,7 @@ impl<S: StateStore> SortBuffer<S> {
         #[for_await]
         for kv in stream::select_all(streams) {
             // NOTE: The rows may not appear in order.
-            let row = fix_row(kv?, buffer_table)?;
+            let row = key_value_to_full_row(kv?, buffer_table)?;
             let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);
             filler.insert_unchecked(key, row);
         }
@@ -232,7 +232,9 @@ impl<S: StateStore> SortBuffer<S> {
     }
 }
 
-fn fix_row<S: StateStore>(
+/// Merge the key part and value part of a row into a full row. This is needed for state table with
+/// non-None value indices.
+fn key_value_to_full_row<S: StateStore>(
     (key, value): (Bytes, OwnedRow),
     table: &StateTable<S>,
 ) -> StreamExecutorResult<OwnedRow> {
