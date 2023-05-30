@@ -382,7 +382,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
-        assert_eq!(row, expected);
+        assert_eq!(row, expected.into());
     }
     #[tokio::test]
     async fn test_json_upsert_parser() {

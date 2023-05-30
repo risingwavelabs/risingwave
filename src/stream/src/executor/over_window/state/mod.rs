@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
+use educe::Educe;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
@@ -28,7 +30,7 @@ mod lag;
 mod lead;
 
 /// Unique and ordered identifier for a row in internal states.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
 pub(super) struct StateKey {
     pub order_key: DefaultOrdered<ScalarImpl>,
     pub encoded_pk: MemcmpEncoded,
@@ -99,7 +101,7 @@ impl StateEvictHint {
     }
 }
 
-pub(super) trait WindowState {
+pub(super) trait WindowState: EstimateSize {
     // TODO(rc): may append rows in batch like in `hash_agg`.
     /// Append a new input row to the state. The `key` is expected to be increasing.
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>);
@@ -133,4 +135,64 @@ pub(super) fn create_window_state(
         Lead => Box::new(lead::LeadState::new(&call.frame)),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
     })
+}
+
+#[derive(Educe)]
+#[educe(Default)]
+pub struct EstimatedVecDeque<T: EstimateSize> {
+    inner: VecDeque<T>,
+    heap_size: usize,
+}
+
+impl<T: EstimateSize> EstimatedVecDeque<T> {
+    #[expect(dead_code)]
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.inner
+            .pop_back()
+            .inspect(|v| self.heap_size = self.heap_size.saturating_sub(v.estimated_heap_size()))
+    }
+
+    pub fn pop_front(&mut self) -> Option<T> {
+        self.inner
+            .pop_front()
+            .inspect(|v| self.heap_size = self.heap_size.saturating_sub(v.estimated_heap_size()))
+    }
+
+    pub fn push_back(&mut self, value: T) {
+        self.heap_size = self.heap_size.saturating_add(value.estimated_heap_size());
+        self.inner.push_back(value)
+    }
+
+    pub fn push_front(&mut self, value: T) {
+        self.heap_size = self.heap_size.saturating_add(value.estimated_heap_size());
+        self.inner.push_front(value)
+    }
+
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.inner.get(index)
+    }
+
+    pub fn front(&self) -> Option<&T> {
+        self.inner.front()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<T: EstimateSize> std::ops::Index<usize> for EstimatedVecDeque<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.inner[index]
+    }
+}
+
+impl<T: EstimateSize> EstimateSize for EstimatedVecDeque<T> {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add `VecDeque` internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.heap_size
+    }
 }

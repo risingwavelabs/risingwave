@@ -168,6 +168,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add lru cache internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
         self.kv_heap_size
     }
 }

@@ -22,6 +22,7 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -389,6 +390,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             shutdown_rx: source.shutdown_rx.clone(),
         };
 
+        let identity = source.plan_node().get_identity().clone();
         Ok(LocalLookupJoinExecutorArgs {
             join_type,
             condition,
@@ -404,7 +406,9 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             chunk_size,
-            identity: source.plan_node().get_identity().clone(),
+            identity: identity.clone(),
+            shutdown_rx: Some(source.shutdown_rx.clone()),
+            mem_ctx: source.context.create_executor_mem_context(&identity),
         }
         .dispatch())
     }
@@ -426,6 +430,8 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -448,6 +454,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
             identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
+            mem_ctx: self.mem_ctx,
             _phantom: PhantomData,
         }))
     }
@@ -462,7 +470,7 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::memory::MonitoredGlobalAlloc;
+    use risingwave_common::memory::MemoryContext;
     use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -549,6 +557,8 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
+            shutdown_rx: None,
+            mem_ctx: MemoryContext::none(),
         }
         .dispatch()
     }
@@ -570,7 +580,7 @@ mod tests {
             column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
-            MonitoredGlobalAlloc::for_test(),
+            MemoryContext::none(),
         ))
     }
 

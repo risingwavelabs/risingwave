@@ -3,6 +3,9 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+export LOGDIR=.risingwave/log
+export RUST_LOG=info
+
 if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
     echo "--- Run sqlsmith frontend tests"
      NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test" 2> >(tee);
@@ -40,10 +43,13 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     cargo make ci-start ci-3cn-1fe
 
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
-    timeout 20m RUST_LOG=info ./target/debug/sqlsmith test \
+    timeout 20m ./target/debug/sqlsmith test \
       --count "$SQLSMITH_COUNT" \
       --testdata ./src/tests/sqlsmith/tests/testdata \
       2>"$LOGDIR/fuzzing.log" && rm "$LOGDIR/fuzzing.log"
+    # Sqlsmith does not write to stdout, so we need this to ensure buildkite
+    # shows the right timing.
+    echo "fuzzing complete"
 
     # Using `kill` instead of `ci-kill` avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.

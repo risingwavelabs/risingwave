@@ -18,8 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Vis, VisRef};
+use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
@@ -27,39 +26,41 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
-use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, StreamExecutorResult};
+use crate::task::ActorId;
 
 type DedupCache = ManagedLruCache<CompactedRow, Box<[i64]>>;
 
 /// Deduplicater for one distinct column.
 struct ColumnDeduplicater<S: StateStore> {
     cache: DedupCache,
+    metrics_info: MetricsInfo,
     _phantom: PhantomData<S>,
-    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ColumnDeduplicater<S> {
-    fn new(watermark_epoch: &Arc<AtomicU64>, metrics: Arc<StreamingMetrics>) -> Self {
+    fn new(watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
         Self {
-            cache: new_unbounded(watermark_epoch.clone()),
+            cache: new_unbounded_with_metrics(watermark_epoch.clone(), metrics_info.clone()),
+            metrics_info,
             _phantom: PhantomData,
-            metrics,
         }
     }
 
     async fn dedup(
         &mut self,
         ops: &[Op],
-        column: &Column,
+        column: &ArrayRef,
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&OwnedRow>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
-        let column = column.array_ref();
+        let column = column;
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
@@ -80,7 +81,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             let key = group_key.chain(row::once(datum));
             let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
 
-            self.metrics
+            self.metrics_info
+                .metrics
                 .agg_distinct_total_cache_count
                 .with_label_values(&[&table_id_str, &actor_id_str])
                 .inc();
@@ -89,7 +91,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             let mut counts = if self.cache.contains(&compacted_key) {
                 self.cache.get_mut(&compacted_key).unwrap()
             } else {
-                self.metrics
+                self.metrics_info
+                    .metrics
                     .agg_distinct_cache_miss_count
                     .with_label_values(&[&table_id_str, &actor_id_str])
                     .inc();
@@ -187,7 +190,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         // `self.cache.evict()` too.
         let actor_id_str = ctx.id.to_string();
         let table_id_str = dedup_table.table_id().to_string();
-        self.metrics
+        self.metrics_info
+            .metrics
             .agg_distinct_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str])
             .set(self.cache.len() as i64);
@@ -217,6 +221,8 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub fn new(
         agg_calls: &[AggCall],
         watermark_epoch: &Arc<AtomicU64>,
+        distinct_dedup_tables: &HashMap<usize, StateTable<S>>,
+        actor_id: ActorId,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let deduplicaters: HashMap<_, _> = agg_calls
@@ -226,8 +232,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             .into_group_map_by(|(_, call)| call.args.val_indices()[0])
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
+                let table_id = distinct_dedup_tables.get(&distinct_col).unwrap().table_id();
+                let metrics_info =
+                    MetricsInfo::new(metrics.clone(), table_id, actor_id, "distinct dedup");
                 let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
-                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics.clone());
+                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics_info);
                 (distinct_col, (call_indices, deduplicater))
             })
             .collect();
@@ -245,7 +254,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub async fn dedup_chunk(
         &mut self,
         ops: &[Op],
-        columns: &[Column],
+        columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&OwnedRow>,
@@ -418,6 +427,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
             Arc::new(StreamingMetrics::unused()),
         );
 
@@ -524,6 +535,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
             Arc::new(StreamingMetrics::unused()),
         );
 
@@ -624,6 +637,8 @@ mod tests {
         let mut deduplicater = DistinctDeduplicater::new(
             &agg_calls,
             &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
             Arc::new(StreamingMetrics::unused()),
         );
 

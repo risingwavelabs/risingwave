@@ -18,8 +18,6 @@ mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
-pub mod column;
-mod column_proto_readers;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal_array;
@@ -28,9 +26,9 @@ pub mod interval_array;
 mod iterator;
 mod jsonb_array;
 pub mod list_array;
-mod macros;
 mod num256_array;
 mod primitive_array;
+mod proto_reader;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod stream_record;
@@ -58,7 +56,7 @@ pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 pub use num256_array::*;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::{PbArray, PbArrayType};
+use risingwave_pb::data::PbArray;
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
@@ -84,6 +82,9 @@ pub type I16ArrayBuilder = PrimitiveArrayBuilder<i16>;
 pub type F64ArrayBuilder = PrimitiveArrayBuilder<F64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<F32>;
 pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
+
+// alias for expr macros
+pub type ArrayImplBuilder = ArrayBuilderImpl;
 
 /// The hash source for `None` values when hashing an item.
 pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
@@ -290,6 +291,11 @@ pub trait Array:
     }
 
     fn data_type(&self) -> DataType;
+
+    /// Converts the array into an [`ArrayRef`].
+    fn into_ref(self) -> ArrayRef {
+        Arc::new(self.into())
+    }
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -495,6 +501,10 @@ for_all_variants! { array_builder_impl_enum }
 macro_rules! impl_array_builder {
     ($({ $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         impl ArrayBuilderImpl {
+            pub fn with_type(capacity: usize, ty: DataType) -> Self {
+                ty.create_array_builder(capacity)
+            }
+
             pub fn append_array(&mut self, other: &ArrayImpl) {
                 match self {
                     $( Self::$variant_name(inner) => inner.append_array(other.into()), )*
@@ -509,7 +519,7 @@ macro_rules! impl_array_builder {
 
             /// Append a [`Datum`] or [`DatumRef`] multiple times,
             /// panicking if the datum's type does not match the array builder's type.
-            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
+            pub fn append_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {
                         $( Self::$variant_name(inner) => inner.append_n(n, None), )*
@@ -526,8 +536,8 @@ macro_rules! impl_array_builder {
             }
 
             /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
-                self.append_datum_n(1, datum);
+            pub fn append(&mut self, datum: impl ToDatumRef) {
+                self.append_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
@@ -680,6 +690,10 @@ macro_rules! impl_array {
                     $( Self::$variant_name(inner) => inner.data_type(), )*
                 }
             }
+
+            pub fn into_ref(self) -> ArrayRef {
+                Arc::new(self)
+            }
         }
     }
 }
@@ -703,50 +717,6 @@ for_all_variants! { impl_array_estimate_size }
 impl ArrayImpl {
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
-    }
-
-    pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {
-        use self::column_proto_readers::*;
-        use crate::array::value_reader::*;
-        let array = match array.array_type() {
-            PbArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
-            PbArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
-            PbArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
-            PbArrayType::Serial => {
-                read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
-            }
-            PbArrayType::Float32 => read_numeric_array::<F32, F32ValueReader>(array, cardinality)?,
-            PbArrayType::Float64 => read_numeric_array::<F64, F64ValueReader>(array, cardinality)?,
-            PbArrayType::Bool => read_bool_array(array, cardinality)?,
-            PbArrayType::Utf8 => {
-                read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
-            }
-            PbArrayType::Decimal => {
-                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
-            }
-            PbArrayType::Date => read_date_array(array, cardinality)?,
-            PbArrayType::Time => read_time_array(array, cardinality)?,
-            PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
-            PbArrayType::Interval => read_interval_array(array, cardinality)?,
-            PbArrayType::Jsonb => {
-                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
-            }
-            PbArrayType::Struct => StructArray::from_protobuf(array)?,
-            PbArrayType::List => ListArray::from_protobuf(array)?,
-            PbArrayType::Unspecified => unreachable!(),
-            PbArrayType::Bytea => {
-                read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
-            }
-            PbArrayType::Int256 => Int256Array::from_protobuf(array, cardinality)?,
-        };
-        Ok(array)
-    }
-}
-
-impl ArrayBuilderImpl {
-    /// Create an array builder from given type.
-    pub fn from_type(datatype: &DataType, capacity: usize) -> Self {
-        datatype.create_array_builder(capacity)
     }
 }
 

@@ -77,16 +77,16 @@ SELECT f.f1, f.f1 - '-10' AS x
    FROM FLOAT8_TBL f
    WHERE f.f1 > '0.0';
 
---@ SELECT f.f1 ^ '2.0' AS square_f1
---@    FROM FLOAT8_TBL f where f.f1 = '1004.3';
+SELECT f.f1 ^ '2.0' AS square_f1
+   FROM FLOAT8_TBL f where f.f1 = '1004.3';
 
 -- absolute value
 SELECT f.f1, @f.f1 AS abs_f1
    FROM FLOAT8_TBL f;
 
 -- truncate
---@ SELECT f.f1, trunc(f.f1) AS trunc_f1
---@    FROM FLOAT8_TBL f;
+SELECT f.f1, trunc(f.f1) AS trunc_f1
+   FROM FLOAT8_TBL f;
 
 -- round
 SELECT f.f1, round(f.f1) AS round_f1
@@ -115,42 +115,42 @@ SELECT |/ double precision '64' AS eight;
 --@    WHERE f.f1 > '0.0';
 
 -- power
---@ SELECT power(double precision '144', double precision '0.5');
---@ SELECT power(double precision 'NaN', double precision '0.5');
---@ SELECT power(double precision '144', double precision 'NaN');
---@ SELECT power(double precision 'NaN', double precision 'NaN');
---@ SELECT power(double precision '-1', double precision 'NaN');
---@ SELECT power(double precision '1', double precision 'NaN');
---@ SELECT power(double precision 'NaN', double precision '0');
---@ SELECT power(double precision 'inf', double precision '0');
---@ SELECT power(double precision '-inf', double precision '0');
---@ SELECT power(double precision '0', double precision 'inf');
---@ SELECT power(double precision '0', double precision '-inf');
---@ SELECT power(double precision '1', double precision 'inf');
---@ SELECT power(double precision '1', double precision '-inf');
---@ SELECT power(double precision '-1', double precision 'inf');
---@ SELECT power(double precision '-1', double precision '-inf');
---@ SELECT power(double precision '0.1', double precision 'inf');
---@ SELECT power(double precision '-0.1', double precision 'inf');
---@ SELECT power(double precision '1.1', double precision 'inf');
---@ SELECT power(double precision '-1.1', double precision 'inf');
---@ SELECT power(double precision '0.1', double precision '-inf');
---@ SELECT power(double precision '-0.1', double precision '-inf');
---@ SELECT power(double precision '1.1', double precision '-inf');
---@ SELECT power(double precision '-1.1', double precision '-inf');
---@ SELECT power(double precision 'inf', double precision '-2');
---@ SELECT power(double precision 'inf', double precision '2');
---@ SELECT power(double precision 'inf', double precision 'inf');
---@ SELECT power(double precision 'inf', double precision '-inf');
+SELECT power(double precision '144', double precision '0.5');
+SELECT power(double precision 'NaN', double precision '0.5');
+SELECT power(double precision '144', double precision 'NaN');
+SELECT power(double precision 'NaN', double precision 'NaN');
+SELECT power(double precision '-1', double precision 'NaN');
+SELECT power(double precision '1', double precision 'NaN');
+SELECT power(double precision 'NaN', double precision '0');
+SELECT power(double precision 'inf', double precision '0');
+SELECT power(double precision '-inf', double precision '0');
+SELECT power(double precision '0', double precision 'inf');
+SELECT power(double precision '0', double precision '-inf');
+SELECT power(double precision '1', double precision 'inf');
+SELECT power(double precision '1', double precision '-inf');
+SELECT power(double precision '-1', double precision 'inf');
+SELECT power(double precision '-1', double precision '-inf');
+SELECT power(double precision '0.1', double precision 'inf');
+SELECT power(double precision '-0.1', double precision 'inf');
+SELECT power(double precision '1.1', double precision 'inf');
+SELECT power(double precision '-1.1', double precision 'inf');
+SELECT power(double precision '0.1', double precision '-inf');
+SELECT power(double precision '-0.1', double precision '-inf');
+SELECT power(double precision '1.1', double precision '-inf');
+SELECT power(double precision '-1.1', double precision '-inf');
+SELECT power(double precision 'inf', double precision '-2');
+SELECT power(double precision 'inf', double precision '2');
+SELECT power(double precision 'inf', double precision 'inf');
+SELECT power(double precision 'inf', double precision '-inf');
 -- Intel's icc misoptimizes the code that controls the sign of this result,
 -- even with -mp1.  Pending a fix for that, only test for "is it zero".
---@ SELECT power(double precision '-inf', double precision '-2') = '0';
---@ SELECT power(double precision '-inf', double precision '-3');
---@ SELECT power(double precision '-inf', double precision '2');
---@ SELECT power(double precision '-inf', double precision '3');
---@ SELECT power(double precision '-inf', double precision '3.5');
---@ SELECT power(double precision '-inf', double precision 'inf');
---@ SELECT power(double precision '-inf', double precision '-inf');
+SELECT power(double precision '-inf', double precision '-2') = '0';
+SELECT power(double precision '-inf', double precision '-3');
+SELECT power(double precision '-inf', double precision '2');
+SELECT power(double precision '-inf', double precision '3');
+SELECT power(double precision '-inf', double precision '3.5');
+SELECT power(double precision '-inf', double precision 'inf');
+SELECT power(double precision '-inf', double precision '-inf');
 
 -- take exp of ln(f.f1)
 --@ SELECT f.f1, exp(ln(f.f1)) AS exp_ln_f1
@@ -158,7 +158,7 @@ SELECT |/ double precision '64' AS eight;
 --@    WHERE f.f1 > '0.0';
 
 -- check edge cases for exp
---@ SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
+SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 
 -- cube root
 --@ SELECT ||/ double precision '27' AS three;
@@ -176,7 +176,7 @@ UPDATE FLOAT8_TBL
 
 SELECT f.f1 ^ '1e200' from FLOAT8_TBL f;
 
---@ SELECT 0 ^ 0 + 0 ^ 1 + 0 ^ 0.0 + 0 ^ 0.5;
+SELECT 0 ^ 0 + 0 ^ 1 + 0 ^ 0.0 + 0 ^ 0.5;
 
 SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 = '0.0' ;
 
@@ -191,25 +191,25 @@ SELECT * FROM FLOAT8_TBL;
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
 -- tend to produce results that vary in the last place.
---@ SELECT sinh(double precision '1');
---@ SELECT cosh(double precision '1');
---@ SELECT tanh(double precision '1');
---@ SELECT asinh(double precision '1');
---@ SELECT acosh(double precision '2');
---@ SELECT atanh(double precision '0.5');
+SELECT sinh(double precision '1') - 1.1752011936438 < 1e-14;
+SELECT cosh(double precision '1') - 1.54308063481524 < 1e-14;
+SELECT tanh(double precision '1') - 0.761594155955765 < 1e-14;
+SELECT asinh(double precision '1');
+SELECT acosh(double precision '2') - 1.31695789692482 < 1e-14;
+SELECT atanh(double precision '0.5') - 0.549306144334055 < 1e-14;
 -- test Inf/NaN cases for hyperbolic functions
---@ SELECT sinh(double precision 'infinity');
---@ SELECT sinh(double precision '-infinity');
---@ SELECT sinh(double precision 'nan');
---@ SELECT cosh(double precision 'infinity');
---@ SELECT cosh(double precision '-infinity');
---@ SELECT cosh(double precision 'nan');
---@ SELECT tanh(double precision 'infinity');
---@ SELECT tanh(double precision '-infinity');
---@ SELECT tanh(double precision 'nan');
---@ SELECT asinh(double precision 'infinity');
---@ SELECT asinh(double precision '-infinity');
---@ SELECT asinh(double precision 'nan');
+SELECT sinh(double precision 'infinity');
+SELECT sinh(double precision '-infinity');
+SELECT sinh(double precision 'nan');
+SELECT cosh(double precision 'infinity');
+SELECT cosh(double precision '-infinity');
+SELECT cosh(double precision 'nan');
+SELECT tanh(double precision 'infinity');
+SELECT tanh(double precision '-infinity');
+SELECT tanh(double precision 'nan');
+SELECT asinh(double precision 'infinity');
+SELECT asinh(double precision '-infinity');
+SELECT asinh(double precision 'nan');
 -- acosh(Inf) should be Inf, but some mingw versions produce NaN, so skip test
 -- SELECT acosh(double precision 'infinity');
 --@ SELECT acosh(double precision '-infinity');

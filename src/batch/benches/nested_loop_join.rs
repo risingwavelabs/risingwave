@@ -54,6 +54,9 @@ fn create_nested_loop_join_executor(
         "NestedLoopJoinExecutor".into(),
         CHUNK_SIZE,
         MemoryContext::none(),
+        // TODO: In practice this `shutdown_rx` will be constantly poll in execution, may need to
+        // use it in bench too.
+        None,
     ))
 }
 

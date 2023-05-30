@@ -105,61 +105,114 @@ impl<S: StateStore> SourceExecutor<S> {
             .map_err(StreamExecutorError::connector_error)
     }
 
+    fn check_split_is_migration(&self, actor_splits: &HashMap<ActorId, Vec<SplitImpl>>) -> bool {
+        let core = self.stream_source_core.as_ref().unwrap();
+
+        let mut revert_index = HashMap::new();
+
+        for (actor_id, splits) in actor_splits {
+            for split in splits {
+                assert!(revert_index.insert(split.id(), actor_id).is_none());
+            }
+        }
+
+        for split_id in core.state_cache.keys() {
+            if let Some(actor_id) = revert_index.remove(split_id) {
+                if self.ctx.id != *actor_id {
+                    tracing::warn!(
+                        "split {} migration detected, from {} to {}",
+                        split_id,
+                        self.ctx.id,
+                        actor_id
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     async fn apply_split_change<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
         stream: &mut StreamReaderWithPause<BIASED>,
-        mapping: &HashMap<ActorId, Vec<SplitImpl>>,
-    ) -> StreamExecutorResult<()> {
-        if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
-            if let Some(target_state) = self.get_diff(Some(target_splits)).await? {
+        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+    ) -> StreamExecutorResult<Option<Vec<SplitImpl>>> {
+        if let Some(target_splits) = split_assignment.get(&self.ctx.id).cloned() {
+            if let Some(target_state) = self.update_state_if_changed(Some(target_splits)).await? {
                 tracing::info!(
                     actor_id = self.ctx.id,
                     state = ?target_state,
                     "apply split change"
                 );
 
-                self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
-                    .await?;
+                self.replace_stream_reader_with_target_state(
+                    source_desc,
+                    stream,
+                    target_state.clone(),
+                )
+                .await?;
+
+                return Ok(Some(target_state));
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
-    // Note: `get_diff` will modify `state_cache`
-    // `rhs` can not be None because we do not support split number reduction
-    async fn get_diff(&mut self, rhs: ConnectorState) -> StreamExecutorResult<ConnectorState> {
+    // Note: `update_state_if_changed` will modify `state_cache`
+    async fn update_state_if_changed(
+        &mut self,
+        state: ConnectorState,
+    ) -> StreamExecutorResult<ConnectorState> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let split_change = rhs.unwrap();
-        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(split_change.len());
-        let mut no_change_flag = true;
-        for sc in &split_change {
-            if let Some(s) = core.state_cache.get(&sc.id()) {
+        let target_splits: HashMap<_, _> = state
+            .unwrap()
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
+
+        let mut target_state: Vec<SplitImpl> = Vec::with_capacity(target_splits.len());
+
+        let mut split_changed = false;
+
+        for (split_id, split) in &target_splits {
+            if let Some(s) = core.state_cache.get(split_id) {
+                // existing split, no change, clone from cache
                 target_state.push(s.clone())
             } else {
-                no_change_flag = false;
+                split_changed = true;
                 // write new assigned split to state cache. snapshot is base on cache.
 
-                let state = if let Some(recover_state) = core
+                let initial_state = if let Some(recover_state) = core
                     .split_state_store
-                    .try_recover_from_state_store(sc)
+                    .try_recover_from_state_store(split)
                     .await?
                 {
                     recover_state
                 } else {
-                    sc.clone()
+                    split.clone()
                 };
 
                 core.state_cache
-                    .entry(sc.id())
-                    .or_insert_with(|| state.clone());
-                target_state.push(state);
+                    .entry(split.id())
+                    .or_insert_with(|| initial_state.clone());
+
+                target_state.push(initial_state);
             }
         }
 
-        Ok((!no_change_flag).then_some(target_state))
+        // state cache may be stale
+        for existing_split_id in core.stream_source_splits.keys() {
+            if !target_splits.contains_key(existing_split_id) {
+                tracing::info!("split dropping detected: {}", existing_split_id);
+                split_changed = true;
+            }
+        }
+
+        Ok(split_changed.then_some(target_state))
     }
 
     async fn replace_stream_reader_with_target_state<const BIASED: bool>(
@@ -178,15 +231,8 @@ impl<S: StateStore> SourceExecutor<S> {
         let reader = self
             .build_stream_source_reader(source_desc, Some(target_state.clone()))
             .await?;
-        stream.replace_data_stream(reader);
 
-        self.stream_source_core
-            .as_mut()
-            .unwrap()
-            .stream_source_splits = target_state
-            .into_iter()
-            .map(|split| (split.id(), split))
-            .collect();
+        stream.replace_data_stream(reader);
 
         Ok(())
     }
@@ -194,14 +240,39 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn take_snapshot_and_clear_cache(
         &mut self,
         epoch: EpochPair,
+        target_state: Option<Vec<SplitImpl>>,
+        should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
 
-        let cache = core
+        let mut cache = core
             .state_cache
             .values()
             .map(|split_impl| split_impl.to_owned())
             .collect_vec();
+
+        if let Some(target_splits) = target_state {
+            let target_split_ids: HashSet<_> =
+                target_splits.iter().map(|split| split.id()).collect();
+
+            cache.drain_filter(|split| !target_split_ids.contains(&split.id()));
+
+            let dropped_splits = core
+                .stream_source_splits
+                .drain_filter(|split_id, _| !target_split_ids.contains(split_id))
+                .map(|(_, split)| split)
+                .collect_vec();
+
+            if should_trim_state && !dropped_splits.is_empty() {
+                // trim dropped splits' state
+                core.split_state_store.trim_state(&dropped_splits).await?;
+            }
+
+            core.stream_source_splits = target_splits
+                .into_iter()
+                .map(|split| (split.id(), split))
+                .collect();
+        }
 
         if !cache.is_empty() {
             tracing::debug!(actor_id = self.ctx.id, state = ?cache, "take snapshot");
@@ -314,33 +385,45 @@ impl<S: StateStore> SourceExecutor<S> {
                 Either::Left(msg) => match &msg {
                     Message::Barrier(barrier) => {
                         last_barrier_time = Instant::now();
+
                         if self_paused {
                             stream.resume_stream();
                             self_paused = false;
                         }
+
                         let epoch = barrier.epoch;
+
+                        let mut target_state = None;
+                        let mut should_trim_state = false;
 
                         if let Some(ref mutation) = barrier.mutation.as_deref() {
                             match mutation {
-                                Mutation::SourceChangeSplit(actor_splits) => {
-                                    self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                        .await?
-                                }
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
+                                Mutation::SourceChangeSplit(actor_splits) => {
+                                    // In the context of split changes, we do not allow split
+                                    // migration because it can lead to inconsistent states.
+                                    // Therefore, all split migration must be done via update
+                                    // mutation and pause/resume
+                                    assert!(!self.check_split_is_migration(actor_splits));
+
+                                    target_state = self
+                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?;
+                                    should_trim_state = true;
+                                }
+
                                 Mutation::Update { actor_splits, .. } => {
-                                    self.apply_split_change(
-                                        &source_desc,
-                                        &mut stream,
-                                        actor_splits,
-                                    )
-                                    .await?;
+                                    target_state = self
+                                        .apply_split_change(&source_desc, &mut stream, actor_splits)
+                                        .await?;
                                 }
                                 _ => {}
                             }
                         }
 
-                        self.take_snapshot_and_clear_cache(epoch).await?;
+                        self.take_snapshot_and_clear_cache(epoch, target_state, should_trim_state)
+                            .await?;
 
                         self.metrics
                             .source_row_per_barrier
@@ -493,9 +576,9 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-
     use std::time::Duration;
 
+    use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
@@ -670,28 +753,20 @@ mod tests {
         });
         barrier_tx.send(init_barrier).unwrap();
 
-        (handler.next().await.unwrap().unwrap())
+        // Consume barrier.
+        handler
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
             .into_barrier()
             .unwrap();
 
         let mut ready_chunks = handler.ready_chunks(10);
-        let chunks = (ready_chunks.next().await.unwrap())
-            .into_iter()
-            .map(|msg| msg.unwrap().into_chunk().unwrap())
-            .collect();
-        let chunk_1 = StreamChunk::concat(chunks);
-        assert_eq!(
-            chunk_1,
-            StreamChunk::from_pretty(
-                " i
-                + 11
-                + 14
-                + 17
-                + 20",
-            )
-        );
 
-        let new_assignments = vec![
+        let _ = ready_chunks.next().await.unwrap();
+
+        let new_assignment = vec![
             SplitImpl::Datagen(DatagenSplit {
                 split_index: 0,
                 split_num: 3,
@@ -711,7 +786,7 @@ mod tests {
 
         let change_split_mutation =
             Barrier::new_test_barrier(2).with_mutation(Mutation::SourceChangeSplit(hashmap! {
-                ActorId::default() => new_assignments.clone()
+                ActorId::default() => new_assignment.clone()
             }));
 
         barrier_tx.send(change_split_mutation).unwrap();
@@ -726,23 +801,60 @@ mod tests {
         // there must exist state for new add partition
         source_state_handler.init_epoch(EpochPair::new_test_epoch(2));
         source_state_handler
-            .get(new_assignments[1].id())
+            .get(new_assignment[1].id())
             .await
             .unwrap()
             .unwrap();
 
         tokio::time::sleep(Duration::from_millis(100)).await;
-        let chunks = (ready_chunks.next().await.unwrap())
-            .into_iter()
-            .map(|msg| msg.unwrap().into_chunk().unwrap())
-            .collect();
-        let chunk_2 = StreamChunk::concat(chunks).sort_rows();
-        assert_eq!(chunk_2.cardinality(), 10,);
+
+        let _ = ready_chunks.next().await.unwrap();
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();
 
         let barrier = Barrier::new_test_barrier(4).with_mutation(Mutation::Resume);
         barrier_tx.send(barrier).unwrap();
+
+        // receive all
+        ready_chunks.next().await.unwrap();
+
+        let prev_assignment = new_assignment;
+        let new_assignment = vec![prev_assignment[2].clone()];
+
+        let drop_split_mutation =
+            Barrier::new_test_barrier(5).with_mutation(Mutation::SourceChangeSplit(hashmap! {
+                ActorId::default() => new_assignment.clone()
+            }));
+
+        barrier_tx.send(drop_split_mutation).unwrap();
+
+        ready_chunks.next().await.unwrap(); // barrier
+
+        let mut source_state_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            mem_state_store.clone(),
+        )
+        .await;
+
+        source_state_handler.init_epoch(EpochPair::new_test_epoch(5));
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[0])
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[1])
+            .await
+            .unwrap()
+            .is_none());
+
+        assert!(source_state_handler
+            .try_recover_from_state_store(&prev_assignment[2])
+            .await
+            .unwrap()
+            .is_some());
     }
 }

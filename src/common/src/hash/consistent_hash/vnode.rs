@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::ScalarRefImpl;
+use crate::types::{DataType, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -64,6 +64,9 @@ pub type AllVirtualNodeIter = std::iter::Map<std::ops::Range<usize>, fn(usize) -
 impl VirtualNode {
     /// The maximum value of the virtual node.
     pub const MAX: VirtualNode = VirtualNode::from_index(Self::COUNT - 1);
+    /// We may use `VirtualNode` as a datum in a stream, or store it as a column.
+    /// Hence this reifies it as a RW datatype.
+    pub const RW_TYPE: DataType = DataType::Int16;
     /// The minimum (zero) value of the virtual node.
     pub const ZERO: VirtualNode = VirtualNode::from_index(0);
 
@@ -114,7 +117,7 @@ impl VirtualNode {
     // and directly extract the `VirtualNode` from `RowId`.
     pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
         if let Ok(idx) = keys.iter().exactly_one()
-            && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref()
+            && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
             return serial_array
                 .iter()
@@ -129,8 +132,8 @@ impl VirtualNode {
             .collect()
     }
 
-    // `compute_row` is used to calculate the `VirtualNode` for the corresponding column in a `Row`.
-    // Similar to `compute_chunk`, it also contains special handling for serial columns.
+    // `compute_row` is used to calculate the `VirtualNode` for the corresponding columns in a
+    // `Row`. Similar to `compute_chunk`, it also contains special handling for serial columns.
     pub fn compute_row(row: impl Row, indices: &[usize]) -> VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {

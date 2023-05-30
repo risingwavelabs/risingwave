@@ -418,7 +418,7 @@ mod test {
                 ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
                 ExprImpl::TableFunction(Box::new(
                     TableFunction::new(
-                        crate::expr::TableFunctionType::Generate,
+                        crate::expr::TableFunctionType::GenerateSeries,
                         vec![
                             ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
                             ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),

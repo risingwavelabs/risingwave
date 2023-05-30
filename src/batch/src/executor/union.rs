@@ -135,7 +135,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 4);
             assert_eq!(col1.value_at(0), Some(1));
@@ -144,7 +144,7 @@ mod tests {
             assert_eq!(col1.value_at(3), Some(4));
 
             let col2 = res.column_at(1);
-            let array = col2.array();
+            let array = col2;
             let col2 = array.as_int32();
             assert_eq!(col2.len(), 4);
             assert_eq!(col2.value_at(0), Some(10));
@@ -157,7 +157,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 4);
             assert_eq!(col1.value_at(0), Some(5));
@@ -166,7 +166,7 @@ mod tests {
             assert_eq!(col1.value_at(3), Some(8));
 
             let col2 = res.column_at(1);
-            let array = col2.array();
+            let array = col2;
             let col2 = array.as_int32();
             assert_eq!(col2.len(), 4);
             assert_eq!(col2.value_at(0), Some(50));

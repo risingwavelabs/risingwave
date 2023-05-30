@@ -89,6 +89,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::SplitPart
             | expr_node::Type::Ceil
             | expr_node::Type::Floor
+            | expr_node::Type::Trunc
             | expr_node::Type::ToChar
             | expr_node::Type::Md5
             | expr_node::Type::CharLength
@@ -101,6 +102,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpMatch
             | expr_node::Type::Pow
             | expr_node::Type::Exp
+            | expr_node::Type::Ln
+            | expr_node::Type::Log10
             | expr_node::Type::Chr
             | expr_node::Type::StartsWith
             | expr_node::Type::Initcap
@@ -120,6 +123,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Atan
             | expr_node::Type::Atan2
             | expr_node::Type::Sqrt
+            | expr_node::Type::Cbrt
             | expr_node::Type::Degrees
             | expr_node::Type::Radians
             | expr_node::Type::IsTrue
@@ -155,6 +159,13 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
             | expr_node::Type::Asind
+            | expr_node::Type::Sinh
+            | expr_node::Type::Cosh
+            | expr_node::Type::Coth
+            | expr_node::Type::Tanh
+            | expr_node::Type::Atanh
+            | expr_node::Type::Asinh
+            | expr_node::Type::Acosh
             | expr_node::Type::Decode
             | expr_node::Type::Encode
             | expr_node::Type::Sha1

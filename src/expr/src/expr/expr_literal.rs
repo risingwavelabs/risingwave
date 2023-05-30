@@ -101,7 +101,6 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I32Array, StructValue};
-    use risingwave_common::array_nonnull;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{Decimal, Interval, IntoOrdered, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum;
@@ -230,7 +229,7 @@ mod tests {
     async fn test_literal_eval_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
         let result = literal.eval(&DataChunk::new_dummy(1)).await.unwrap();
-        assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
+        assert_eq!(*result, I32Array::from_iter([1]).into());
     }
 
     #[tokio::test]
