@@ -135,6 +135,10 @@ impl GroupKey {
         self.row_prefix.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.row_prefix.is_empty()
+    }
+
     /// Get the group key for state table row prefix.
     pub fn table_row(&self) -> &OwnedRow {
         &self.row_prefix
