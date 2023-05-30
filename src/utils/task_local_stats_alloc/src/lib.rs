@@ -17,8 +17,8 @@
 
 use std::alloc::{Allocator, Global};
 use std::future::Future;
-use std::sync::atomic;
 use std::sync::atomic::AtomicUsize;
+use std::sync::{atomic, Arc};
 
 use atomic::Ordering;
 
@@ -118,11 +118,11 @@ unsafe impl Allocator for StatsAlloc {
 }
 
 tokio::task_local! {
-    static TASK_LOCAL_ALLOCATED_BYTES: AtomicUsize;
+    static TASK_LOCAL_ALLOCATED_BYTES: Arc::<AtomicUsize>;
 }
 
 /// Provides the given size in the task local storage for the scope of the given future.
-pub async fn scope<F>(size: AtomicUsize, f: F) -> F::Output
+pub async fn scope<F>(size: Arc<AtomicUsize>, f: F) -> F::Output
 where
     F: Future,
 {

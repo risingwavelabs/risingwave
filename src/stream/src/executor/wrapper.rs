@@ -23,6 +23,7 @@ use super::{
 };
 use crate::task::ActorId;
 
+mod alloc_provide;
 mod epoch_check;
 mod epoch_provide;
 mod schema_check;
@@ -131,6 +132,8 @@ impl WrapperExecutor {
 
         // Epoch provide
         let stream = epoch_provide::epoch_provide(stream);
+        // Allocated bytes provide
+        let stream = alloc_provide::alloc_provide(stream);
 
         if cfg!(debug_assertions) {
             Self::wrap_debug(enable_executor_row_count, info, extra, stream).boxed()
