@@ -310,7 +310,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q5
   before:
   - create_sources
@@ -1171,7 +1171,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q16
   before:
   - create_sources
@@ -1249,7 +1249,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q17
   before:
   - create_sources
@@ -1318,7 +1318,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q18
   before:
   - create_sources
@@ -1729,7 +1729,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q102
   before:
   - create_sources
@@ -1890,7 +1890,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q103
   before:
   - create_sources
@@ -1994,7 +1994,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q104
   before:
   - create_sources
@@ -2098,7 +2098,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q105
   before:
   - create_sources
@@ -2218,7 +2218,7 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
 - id: nexmark_q106
   before:
   - create_sources
@@ -2352,4 +2352,4 @@
 
   eowc_stream_error: |-
     Not supported: The query cannot be executed in Emit-On-Window-Close mode.
-    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+    HINT: Please make sure there is one and only one watermark column in GROUP BY
