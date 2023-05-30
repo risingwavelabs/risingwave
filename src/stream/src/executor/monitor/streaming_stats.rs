@@ -132,7 +132,7 @@ impl StreamingMetrics {
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
-            &["source_id", "source_name"],
+            &["source_id", "source_name", "actor_id"],
             registry
         )
         .unwrap();
