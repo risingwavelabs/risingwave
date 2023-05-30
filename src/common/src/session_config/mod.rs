@@ -287,7 +287,7 @@ type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
-type EnableJoinReorder = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
+type EnableJoinOrdering = ConfigBool<RW_ENABLE_JOIN_ORDERING, true>;
 
 #[derive(Educe)]
 #[educe(Default)]
@@ -351,8 +351,8 @@ pub struct ConfigMap {
     /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
 
-    /// Enable join reorder for streaming and batch queries. Defaults to true.
-    enable_join_ordering: EnableJoinReorder,
+    /// Enable join ordering for streaming and batch queries. Defaults to true.
+    enable_join_ordering: EnableJoinOrdering,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
@@ -416,7 +416,7 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(EnableJoinReorder::entry_name()) {
+        } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
@@ -476,7 +476,7 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
-        } else if key.eq_ignore_ascii_case(EnableJoinReorder::entry_name()) {
+        } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
@@ -576,9 +576,9 @@ impl ConfigMap {
                 description: String::from("Enable bushy join in streaming queries.")
             },
             VariableInfo{
-                name : EnableJoinReorder::entry_name().to_lowercase(),
+                name : EnableJoinOrdering::entry_name().to_lowercase(),
                 setting : self.enable_join_ordering.to_string(),
-                description: String::from("Enable join reorder for streaming and batch queries.")
+                description: String::from("Enable join ordering for streaming and batch queries.")
             },
             VariableInfo{
                 name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
