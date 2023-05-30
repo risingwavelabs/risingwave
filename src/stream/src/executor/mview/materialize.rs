@@ -442,21 +442,13 @@ pub struct MaterializeCache<SD> {
     table_id: String,
 }
 
-#[derive(EnumAsInner)]
+#[derive(EnumAsInner, EstimateSize)]
 pub enum CacheValue {
     Overwrite(Option<CompactedRow>),
     Ignore(Option<EmptyValue>),
 }
 
 type EmptyValue = ();
-
-impl EstimateSize for CacheValue {
-    fn estimated_heap_size(&self) -> usize {
-        // FIXME: implement correct size
-        // https://github.com/risingwavelabs/risingwave/issues/8957
-        0
-    }
-}
 
 impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(

@@ -34,11 +34,16 @@ tracing-subscriber = "0.3.16"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+expect-test = "1"
 libtest-mimic = "0.6"
 
 [[bin]]
 name = "sqlsmith"
 path = "src/bin/main.rs"
+
+[[bin]]
+name = "sqlsmith-reducer"
+path = "src/bin/reducer.rs"
 
 [features]
 enable_sqlsmith_unit_test = []

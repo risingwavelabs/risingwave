@@ -41,6 +41,7 @@ use super::{
     Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
@@ -115,7 +116,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Should emit on window close according to watermark?
     emit_on_window_close: bool,
 
-    _metrics: Arc<StreamingMetrics>,
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
@@ -220,7 +221,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 extreme_cache_size: args.extreme_cache_size,
                 chunk_size: args.extra.chunk_size,
                 emit_on_window_close: args.extra.emit_on_window_close,
-                _metrics: args.extra.metrics,
+                metrics: args.metrics,
             },
         })
     }
@@ -371,6 +372,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     visibilities,
                     &mut this.distinct_dedup_tables,
                     agg_group.group_key(),
+                    this.actor_ctx.clone(),
                 )
                 .await?;
             agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
@@ -522,7 +524,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         }
 
         // Flush distinct dedup state.
-        vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+        vars.distinct_dedup
+            .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
         // Evict cache to target capacity.
         vars.agg_group_cache.evict();
@@ -535,11 +538,28 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: mut this,
         } = self;
 
+        let agg_group_cache_metrics_info = MetricsInfo::new(
+            this.metrics.clone(),
+            this.result_table.table_id(),
+            this.actor_ctx.id,
+            "agg result table",
+        );
+
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
+            agg_group_cache: new_with_hasher(
+                this.watermark_epoch.clone(),
+                agg_group_cache_metrics_info,
+                PrecomputedBuildHasher,
+            ),
             group_change_set: HashSet::new(),
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
+            distinct_dedup: DistinctDeduplicater::new(
+                &this.agg_calls,
+                &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
+                this.metrics.clone(),
+            ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),

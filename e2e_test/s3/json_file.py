@@ -77,7 +77,7 @@ def do_test(client, config, N,  prefix):
 if __name__ == "__main__":
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     run_id = str(random.randint(1000, 9999))
-    N = 100
+    N = 1080
 
     for i in range(N):
         with open(f"data_{i}.json", "w") as f:

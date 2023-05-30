@@ -49,6 +49,13 @@ create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_
 statement ok
 create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
 
+statement ok
+create function jsonb_array_identity(jsonb[]) returns jsonb[] language python as jsonb_array_identity using link 'http://localhost:8815';
+
+statement ok
+create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
+language python as jsonb_array_struct_identity using link 'http://localhost:8815';
+
 query TTTTT rowsort
 show functions
 ----
@@ -59,6 +66,8 @@ gcd integer, integer, integer integer python http://localhost:8815
 hex_to_dec varchar numeric python http://localhost:8815
 int_42 (empty) integer python http://localhost:8815
 jsonb_access jsonb, integer jsonb python http://localhost:8815
+jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
+jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
 jsonb_concat jsonb[] jsonb python http://localhost:8815
 series integer integer python http://localhost:8815
 series2 integer struct<x integer,y varchar> python http://localhost:8815
@@ -101,6 +110,16 @@ select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb
 ----
 [null, 1, "str", {}]
 
+query T
+select jsonb_array_identity(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+----
+{NULL,1,"\"str\"","{}"}
+
+query T
+select jsonb_array_struct_identity(ROW(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+----
+({NULL,1,"\"str\"","{}"},4)
+
 query I
 select series(5);
 ----
@@ -123,6 +142,32 @@ select series2(3);
 (0,#0)
 (1,#1)
 (2,#2)
+
+query II
+select x, series(x) from series(4) t(x);
+----
+1 0
+2 0
+2 1
+3 0
+3 1
+3 2
+
+query IT
+select x, series2(x) from series(4) t(x);
+----
+1 (0,#0)
+2 (0,#0)
+2 (1,#1)
+3 (0,#0)
+3 (1,#1)
+3 (2,#2)
+
+# test large output for table function
+query I
+select count(*) from series(1000000);
+----
+1000000
 
 # TODO: support argument implicit cast for UDF
 # e.g. extract_tcp_info(E'\\x45');

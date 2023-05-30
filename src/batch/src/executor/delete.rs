@@ -15,7 +15,9 @@
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -134,7 +136,7 @@ impl DeleteExecutor {
             array_builder.append(Some(rows_deleted as i64));
 
             let array = array_builder.finish();
-            let ret_chunk = DataChunk::new(vec![array.into()], 1);
+            let ret_chunk = DataChunk::new(vec![array.into_ref()], 1);
 
             yield ret_chunk
         }
@@ -238,12 +240,7 @@ mod tests {
             let result = stream.next().await.unwrap().unwrap();
 
             assert_eq!(
-                result
-                    .column_at(0)
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
                 vec![Some(5)] // deleted rows
             );
         });
@@ -255,7 +252,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[0]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -264,7 +260,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[1]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),

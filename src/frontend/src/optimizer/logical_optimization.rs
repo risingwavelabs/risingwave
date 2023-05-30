@@ -16,6 +16,8 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::error::{ErrorCode, Result};
 
+use super::plan_node::RewriteExprsRecursive;
+use crate::expr::InlineNowProcTime;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
@@ -145,12 +147,14 @@ lazy_static! {
     static ref GENERAL_UNNESTING_PUSH_DOWN_APPLY: OptimizationStage = OptimizationStage::new(
         "General Unnesting(Push Down Apply)",
         vec![
+            ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
+            ApplyUnionTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -220,14 +224,18 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
+    // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+    // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+    // 2. should be after merge the multiple projects
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
         "Convert Window Function",
         vec![
-            OverWindowToTopNRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -348,6 +356,24 @@ impl LogicalOptimizer {
         plan
     }
 
+    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+        // FIXME: This may differ from the snapshot we use for actual execution. We should instead
+        // use a pinned snapshot consistently during optimization and execution.
+        let epoch = ctx
+            .session_ctx()
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch();
+
+        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline Now and ProcTime:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -424,14 +450,15 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -451,6 +478,9 @@ impl LogicalOptimizer {
             ctx.trace("Begin:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        // Inline `NOW()` and `PROCTIME()`, only for batch queries.
+        plan = Self::inline_now_proc_time(plan, &ctx);
 
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
@@ -485,6 +515,9 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
@@ -493,8 +526,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 

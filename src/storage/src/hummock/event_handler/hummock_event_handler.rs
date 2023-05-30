@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -22,6 +21,7 @@ use await_tree::InstrumentAwait;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
+use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -45,6 +45,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
 };
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -52,27 +53,37 @@ use crate::store::SyncResult;
 pub struct BufferTracker {
     flush_threshold: usize,
     global_buffer: Arc<MemoryLimiter>,
-    global_upload_task_size: Arc<AtomicUsize>,
+    global_upload_task_size: GenericGauge<AtomicU64>,
 }
 
 impl BufferTracker {
-    pub fn from_storage_opts(config: &StorageOpts) -> Self {
+    pub fn from_storage_opts(
+        config: &StorageOpts,
+        global_upload_task_size: GenericGauge<AtomicU64>,
+    ) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
-        Self::new(capacity, flush_threshold)
+        Self::new(capacity, flush_threshold, global_upload_task_size)
     }
 
-    pub fn new(capacity: usize, flush_threshold: usize) -> Self {
+    pub fn new(
+        capacity: usize,
+        flush_threshold: usize,
+        global_upload_task_size: GenericGauge<AtomicU64>,
+    ) -> Self {
         assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
             global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
-            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
+            global_upload_task_size,
         }
     }
 
     pub fn for_test() -> Self {
-        Self::from_storage_opts(&StorageOpts::default())
+        Self::from_storage_opts(
+            &StorageOpts::default(),
+            GenericGauge::new("test", "test").unwrap(),
+        )
     }
 
     pub fn get_buffer_size(&self) -> usize {
@@ -83,15 +94,14 @@ impl BufferTracker {
         &self.global_buffer
     }
 
-    pub fn global_upload_task_size(&self) -> &Arc<AtomicUsize> {
+    pub fn global_upload_task_size(&self) -> &GenericGauge<AtomicU64> {
         &self.global_upload_task_size
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// flush threshold.
     pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size()
-            > self.flush_threshold + self.global_upload_task_size.load(Ordering::Relaxed)
+        self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
     }
 }
 
@@ -138,12 +148,16 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
-        let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
+        let buffer_tracker = BufferTracker::from_storage_opts(
+            &compactor_context.storage_opts,
+            state_store_metrics.uploader_uploading_task_size.clone(),
+        );
         let max_preload_wait_time_mill = compactor_context.storage_opts.max_preload_wait_time_mill;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
@@ -152,6 +166,7 @@ impl HummockEventHandler {
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
+            state_store_metrics,
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
                 spawn(flush_imms(

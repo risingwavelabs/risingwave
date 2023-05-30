@@ -198,7 +198,6 @@ impl FrontendEnv {
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
         let mut join_handles = vec![heartbeat_join_handle];
@@ -655,11 +654,12 @@ impl SessionImpl {
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
+                const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
                 loop {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            target: "risingwave_frontend_slow_query_log",
+                            target: SLOW_QUERY_LOG,
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
@@ -702,7 +702,7 @@ impl SessionManager<PgResponseStream, PrepareStatement, Portal> for SessionManag
             .map_err(|_| {
                 Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    format!("Not found database name: {}", database),
+                    format!("database \"{}\" does not exist", database),
                 ))
             })?
             .id();

@@ -153,6 +153,30 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     }
 }
 
+impl FromIterator<Option<f32>> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = Option<f32>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F32::from)).collect()
+    }
+}
+
+impl FromIterator<Option<f64>> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = Option<f64>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F64::from)).collect()
+    }
+}
+
+impl FromIterator<f32> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
+        iter.into_iter().map(F32::from).collect()
+    }
+}
+
+impl FromIterator<f64> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = f64>>(iter: I) -> Self {
+        iter.into_iter().map(F64::from).collect()
+    }
+}
+
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     /// Build a [`PrimitiveArray`] from iterator and bitmap.
     ///
@@ -266,6 +290,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 
     fn pop(&mut self) -> Option<()> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn len(&self) -> usize {
+        self.bitmap.len()
     }
 
     fn finish(self) -> PrimitiveArray<T> {

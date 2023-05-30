@@ -103,8 +103,8 @@ impl ArrayConcatExpression {
             (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
-                    left.iter_elems_ref()
-                        .chain(right.iter_elems_ref())
+                    left.iter()
+                        .chain(right.iter())
                         .map(|x| x.to_owned_datum())
                         .collect(),
                 )
@@ -152,7 +152,7 @@ impl ArrayConcatExpression {
             (left, None) => left.to_owned_datum(),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.iter_elems_ref()
+                    left.iter()
                         .chain(std::iter::once(right))
                         .map(|x| x.to_owned_datum())
                         .collect(),
@@ -196,7 +196,7 @@ impl ArrayConcatExpression {
             (None, right) => Some(ListValue::new(vec![right.to_owned_datum()]).into()),
             (Some(ScalarRefImpl::List(left)), right) => Some(
                 ListValue::new(
-                    left.iter_elems_ref()
+                    left.iter()
                         .chain(std::iter::once(right))
                         .map(|x| x.to_owned_datum())
                         .collect(),
@@ -246,7 +246,7 @@ impl ArrayConcatExpression {
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.iter_elems_ref())
+                        .chain(right.iter())
                         .map(|x| x.to_owned_datum())
                         .collect(),
                 )
@@ -290,7 +290,7 @@ impl ArrayConcatExpression {
             (left, Some(ScalarRefImpl::List(right))) => Some(
                 ListValue::new(
                     std::iter::once(left)
-                        .chain(right.iter_elems_ref())
+                        .chain(right.iter())
                         .map(|x| x.to_owned_datum())
                         .collect(),
                 )
@@ -327,7 +327,7 @@ impl Expression for ArrayConcatExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(&self.evaluate(left, right));
+                builder.append(&self.evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))

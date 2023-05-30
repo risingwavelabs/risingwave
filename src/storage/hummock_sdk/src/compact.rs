@@ -101,40 +101,6 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     }
 }
 
-/// Config that is updatable when compactor is running.
-#[derive(Clone, Default)]
-pub struct CompactorRuntimeConfig {
-    pub max_concurrent_task_number: u64,
-}
-
-impl From<risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
-    fn from(value: risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<&risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
-    fn from(value: &risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
-        Self {
-            max_concurrent_task_number: value.max_concurrent_task_number,
-        }
-    }
-}
-
-impl From<CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
-    fn from(value: CompactorRuntimeConfig) -> Self {
-        (&value).into()
-    }
-}
-
-impl From<&CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
-    fn from(value: &CompactorRuntimeConfig) -> Self {
-        risingwave_pb::compactor::CompactorRuntimeConfig {
-            max_concurrent_task_number: value.max_concurrent_task_number,
-        }
-    }
-}
-
 pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
     let mut total_memory_size = 0;
     let mut total_file_count = 0;

@@ -26,7 +26,7 @@ fi
 
 # test debezium kafka sink
 echo "testing debezium kafka sink"
-(./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --from-beginning --max-messages 10 | sort) > ./e2e_test/sink/kafka/debezium1.tmp.result 2> /dev/null
+(./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --property print.key=true --from-beginning --max-messages 10 | sort) > ./e2e_test/sink/kafka/debezium1.tmp.result 2> /dev/null
 python3 e2e_test/sink/kafka/debezium.py e2e_test/sink/kafka/debezium1.result e2e_test/sink/kafka/debezium1.tmp.result
 if [ $? -ne 0 ]; then
   echo "The output for debezium sink is not as expected."
@@ -60,7 +60,7 @@ fi
 
 # test debezium kafka sink after update
 echo "testing debezium kafka sink after updating data"
-(./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --from-beginning --max-messages 11 | sort) > ./e2e_test/sink/kafka/debezium2.tmp.result 2> /dev/null
+(./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --property print.key=true --from-beginning --max-messages 11 | sort) > ./e2e_test/sink/kafka/debezium2.tmp.result 2> /dev/null
 python3 e2e_test/sink/kafka/debezium.py e2e_test/sink/kafka/debezium2.result e2e_test/sink/kafka/debezium2.tmp.result
 if [ $? -ne 0 ]; then
   echo "The output for debezium sink after update is not as expected."
@@ -70,6 +70,30 @@ else
   rm e2e_test/sink/kafka/debezium2.tmp.result
 fi
 
+# delete sink data
+echo "deleting sink data"
+psql -h localhost -p 4566 -d dev -U root -c "delete from t_kafka where id = 1;" > /dev/null
+
+# test upsert kafka sink after delete
+echo "testing upsert kafka sink after deleting data"
+diff ./e2e_test/sink/kafka/upsert3.result \
+<((./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-upsert --from-beginning --property print.key=true --max-messages 12 | sort) 2> /dev/null)
+if [ $? -ne 0 ]; then
+  echo "The output for upsert sink after update is not as expected."
+  exit 1
+fi
+
+# test debezium kafka sink after delete
+echo "testing debezium kafka sink after deleting data"
+(./.risingwave/bin/kafka/bin/kafka-console-consumer.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-debezium --property print.key=true --from-beginning --max-messages 13 | sort) > ./e2e_test/sink/kafka/debezium3.tmp.result 2> /dev/null
+python3 e2e_test/sink/kafka/debezium.py e2e_test/sink/kafka/debezium3.result e2e_test/sink/kafka/debezium3.tmp.result
+if [ $? -ne 0 ]; then
+  echo "The output for debezium sink after delete is not as expected."
+  rm e2e_test/sink/kafka/debezium3.tmp.result
+  exit 1
+else
+  rm e2e_test/sink/kafka/debezium3.tmp.result
+fi
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
 ./.risingwave/bin/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:29092 --topic test-rw-sink-append-only --delete > /dev/null 2>&1

@@ -25,7 +25,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, ToOwnedDatum};
+use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
@@ -206,7 +206,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         unimplemented!()
     }
 
-    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -821,10 +820,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             .join_cached_entries
                             .with_label_values(&[&actor_id_str, side])
                             .set(ht.entry_count() as i64);
-                        // self.metrics
-                        //     .join_cached_estimated_size
-                        //     .with_label_values(&[&actor_id_str, side])
-                        //     .set(ht.estimated_size() as i64);
                     }
 
                     self.metrics
@@ -1071,13 +1066,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 }
                             } else {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row
-                                        .row
-                                        .datum_at(*column_idx)
-                                        .map_or(false, |scalar| {
-                                            scalar < watermark.val.as_scalar_ref_impl()
-                                        })
-                                    {
+                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                        false,
+                                        |scalar| {
+                                            scalar
+                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
+                                                .is_lt()
+                                        },
+                                    ) {
                                         need_state_clean = true;
                                         break;
                                     }
@@ -1181,13 +1177,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 }
                             } else {
                                 for (column_idx, watermark) in &useful_state_clean_columns {
-                                    if matched_row
-                                        .row
-                                        .datum_at(*column_idx)
-                                        .map_or(false, |scalar| {
-                                            scalar < watermark.val.as_scalar_ref_impl()
-                                        })
-                                    {
+                                    if matched_row.row.datum_at(*column_idx).map_or(
+                                        false,
+                                        |scalar| {
+                                            scalar
+                                                .default_cmp(&watermark.val.as_scalar_ref_impl())
+                                                .is_lt()
+                                        },
+                                    ) {
                                         need_state_clean = true;
                                         break;
                                     }

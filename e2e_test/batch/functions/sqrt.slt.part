@@ -24,3 +24,48 @@ query T
 SELECT abs(sqrt(82416.3252::decimal) - 287.08243624436518286386154499) < 1e-15;
 ----
 t
+
+query TTTT
+select
+	pg_typeof(sqrt(null::decimal)),
+	pg_typeof(sqrt(null::int)),
+	pg_typeof(cbrt(null::decimal)),
+	pg_typeof(cbrt(null::int));
+----
+numeric double precision double precision double precision
+
+query TRRR
+with t(v) as (
+	values ('nan'), ('inf'), ('-0')
+) select
+	v,
+	|/ v::decimal,
+	|/ v::float8,
+	||/ v::float8
+from t;
+----
+nan      NaN      NaN      NaN
+inf Infinity Infinity Infinity
+-0         0       -0       -0
+
+query RTRTR
+select
+	||/ 125,
+	abs(0.5 - ||/ 0.125) < 1e-15,
+	||/ -125,
+	abs(-0.5 - ||/ -0.125) < 1e-15,
+	||/ '-inf';
+----
+5 t -5 t -Infinity
+
+statement error negative
+select |/ '-inf'::float8;
+
+statement error negative
+select |/ '-1'::float8;
+
+statement error negative
+select |/ '-inf'::decimal;
+
+statement error negative
+select |/ '-1'::decimal;

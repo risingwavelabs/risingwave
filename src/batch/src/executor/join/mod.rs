@@ -150,7 +150,7 @@ fn convert_datum_refs_to_chunk(
         .collect();
     for _i in 0..num_tuples {
         for (builder, datum_ref) in output_array_builders.iter_mut().zip_eq_fast(datum_refs) {
-            builder.append_datum(*datum_ref);
+            builder.append(*datum_ref);
         }
     }
 
@@ -176,7 +176,7 @@ fn convert_row_to_chunk(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
+    use risingwave_common::array::{Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -194,7 +194,7 @@ mod tests {
                 builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(arr.into())
+            columns.push(arr.into_ref())
         }
         let chunk1: DataChunk = DataChunk::new(columns.clone(), length);
         let bool_vec = vec![true, false, true, false, false];

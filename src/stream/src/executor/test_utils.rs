@@ -25,6 +25,24 @@ use super::{
     StreamExecutorResult, Watermark,
 };
 
+pub mod prelude {
+    pub use std::sync::atomic::AtomicU64;
+    pub use std::sync::Arc;
+
+    pub use risingwave_common::array::StreamChunk;
+    pub use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    pub use risingwave_common::test_prelude::StreamChunkTestExt;
+    pub use risingwave_common::types::DataType;
+    pub use risingwave_common::util::sort_util::OrderType;
+    pub use risingwave_expr::expr::build_from_pretty;
+    pub use risingwave_storage::memory::MemoryStateStore;
+    pub use risingwave_storage::StateStore;
+
+    pub use crate::common::table::state_table::StateTable;
+    pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+    pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
+}
+
 pub struct MockSource {
     schema: Schema,
     pk_indices: PkIndices,
@@ -431,12 +449,12 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
+            metrics: Arc::new(StreamingMetrics::unused()),
 
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
                 emit_on_window_close,
-                metrics: Arc::new(StreamingMetrics::unused()),
             },
         })
         .unwrap()
@@ -493,7 +511,7 @@ pub mod agg_executor {
             result_table,
             distinct_dedup_tables: Default::default(),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
-
+            metrics: Arc::new(StreamingMetrics::unused()),
             extra: SimpleAggExecutorExtraArgs {},
         })
         .unwrap()

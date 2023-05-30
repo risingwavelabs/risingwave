@@ -96,7 +96,7 @@ impl ArrayRemoveExpression {
         match left {
             Some(ScalarRefImpl::List(left)) => Some(
                 ListValue::new(
-                    left.iter_elems_ref()
+                    left.iter()
                         .filter(|x| x != &right)
                         .map(|x| x.to_owned_datum())
                         .collect(),
@@ -126,7 +126,7 @@ impl Expression for ArrayRemoveExpression {
             if !vis {
                 builder.append_null();
             } else {
-                builder.append_datum(Self::evaluate(left, right));
+                builder.append(Self::evaluate(left, right));
             }
         }
         Ok(Arc::new(builder.finish()))

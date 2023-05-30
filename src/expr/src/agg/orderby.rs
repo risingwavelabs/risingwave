@@ -15,6 +15,7 @@
 use anyhow::anyhow;
 use futures_util::FutureExt;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, RowRef};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -34,9 +35,10 @@ pub struct ProjectionOrderBy {
     order_col_indices: Vec<usize>,
     order_types: Vec<OrderType>,
     unordered_values: Vec<(OrderKey, OwnedRow)>,
+    unordered_values_estimated_heap_size: usize,
 }
 
-type OrderKey = Vec<u8>;
+type OrderKey = Box<[u8]>;
 
 impl ProjectionOrderBy {
     pub fn new(
@@ -56,6 +58,7 @@ impl ProjectionOrderBy {
             order_col_indices,
             order_types,
             unordered_values: vec![],
+            unordered_values_estimated_heap_size: 0,
         }
     }
 
@@ -63,8 +66,11 @@ impl ProjectionOrderBy {
         let key =
             memcmp_encoding::encode_row(row.project(&self.order_col_indices), &self.order_types)
                 .map_err(|e| ExprError::Internal(anyhow!("failed to encode row, error: {}", e)))?;
-        self.unordered_values
-            .push((key, row.project(&self.arg_indices).to_owned_row()));
+        let projected_row = row.project(&self.arg_indices).to_owned_row();
+
+        self.unordered_values_estimated_heap_size +=
+            key.len() + projected_row.estimated_heap_size();
+        self.unordered_values.push((key.into(), projected_row));
         Ok(())
     }
 }
@@ -93,6 +99,7 @@ impl Aggregator for ProjectionOrderBy {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         // sort
+        self.unordered_values_estimated_heap_size = 0;
         let mut rows = std::mem::take(&mut self.unordered_values);
         rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
         // build chunk
@@ -112,5 +119,12 @@ impl Aggregator for ProjectionOrderBy {
                 .expect("todo: support async aggregation with orderby")?;
         }
         self.inner.output(builder)
+    }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<Self>()
+            + self.inner.estimated_size()
+            + self.unordered_values.capacity() * std::mem::size_of::<(OrderKey, OwnedRow)>()
+            + self.unordered_values_estimated_heap_size
     }
 }

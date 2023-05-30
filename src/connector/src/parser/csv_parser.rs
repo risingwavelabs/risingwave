@@ -37,7 +37,7 @@ pub struct CsvParserConfig {
     pub has_header: bool,
 }
 
-/// Parser for JSON format
+/// Parser for CSV format
 #[derive(Debug)]
 pub struct CsvParser {
     rw_columns: Vec<SourceColumnDesc>,

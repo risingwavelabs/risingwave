@@ -51,15 +51,18 @@ impl FunctionAttr {
     ///
     /// The types of arguments and return value should not contain wildcard.
     pub fn generate_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+        if self.is_table_function {
+            return self.generate_table_function_descriptor(build_fn);
+        }
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type(ty));
+            args.push(data_type_name(ty));
         }
-        let ret = data_type(&self.ret);
+        let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
@@ -260,7 +263,6 @@ impl FunctionAttr {
             |return_type, children| {
                 use risingwave_common::array::*;
                 use risingwave_common::types::*;
-                use risingwave_pb::expr::expr_node::RexNode;
 
                 crate::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
@@ -279,12 +281,12 @@ impl FunctionAttr {
 
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type(ty));
+            args.push(data_type_name(ty));
         }
-        let ret = data_type(&self.ret);
+        let ret = data_type_name(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}", self.ident_name());
         let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
@@ -319,7 +321,7 @@ impl FunctionAttr {
             let array = format_ident!("a{i}");
             let variant: TokenStream2 = types::variant(arg).parse().unwrap();
             quote! {
-                let ArrayImpl::#variant(#array) = input.column_at(#i).array_ref() else {
+                let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
                     bail!("input type mismatch. expect: {}", stringify!(#variant));
                 };
             }
@@ -373,9 +375,11 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::bail;
                 use risingwave_common::buffer::Bitmap;
+                use risingwave_common::estimate_size::EstimateSize;
+
                 use crate::Result;
 
-                #[derive(Clone)]
+                #[derive(Clone, EstimateSize)]
                 struct Agg {
                     return_type: DataType,
                     state: Option<#state_type>,
@@ -408,11 +412,15 @@ impl FunctionAttr {
                         let ArrayBuilderImpl::#ret_variant(builder) = builder else {
                             bail!("output type mismatch. expect: {}", stringify!(#ret_variant));
                         };
+                        #[allow(clippy::mem_replace_option_with_none)]
                         match std::mem::replace(&mut self.state, #init_state) {
                             Some(state) => builder.append(Some(<#ret_owned>::from(state).as_scalar_ref())),
                             None => builder.append_null(),
                         }
                         Ok(())
+                    }
+                    fn estimated_size(&self) -> usize {
+                        EstimateSize::estimated_size(self)
                     }
                 }
 
@@ -423,9 +431,188 @@ impl FunctionAttr {
             }
         })
     }
+
+    /// Generate a descriptor of the table function.
+    ///
+    /// The types of arguments and return value should not contain wildcard.
+    fn generate_table_function_descriptor(&self, build_fn: bool) -> Result<TokenStream2> {
+        let name = self.name.clone();
+        let mut args = Vec::with_capacity(self.args.len());
+        for ty in &self.args {
+            args.push(data_type_name(ty));
+        }
+        let ret = data_type_name(&self.ret);
+
+        let pb_type = format_ident!("{}", utils::to_camel_case(&name));
+        let ctor_name = format_ident!("{}", self.ident_name());
+        let descriptor_type = quote! { crate::sig::table_function::FuncSign };
+        let build_fn = if build_fn {
+            let name = format_ident!("{}", self.user_fn.name);
+            quote! { #name }
+        } else {
+            self.generate_build_table_function()?
+        };
+        let type_infer_fn = if let Some(func) = &self.type_infer {
+            func.parse().unwrap()
+        } else {
+            if matches!(self.ret.as_str(), "any" | "list" | "struct") {
+                return Err(Error::new(
+                    Span::call_site(),
+                    format!("type inference function is required for {}", self.ret),
+                ));
+            }
+            let ty = data_type(&self.ret);
+            quote! { |_| Ok(#ty) }
+        };
+        Ok(quote! {
+            #[ctor::ctor]
+            fn #ctor_name() {
+                unsafe { crate::sig::table_function::_register(#descriptor_type {
+                    func: risingwave_pb::expr::table_function::Type::#pb_type,
+                    inputs_type: &[#(#args),*],
+                    ret_type: #ret,
+                    build: #build_fn,
+                    type_infer: #type_infer_fn,
+                }) };
+            }
+        })
+    }
+
+    fn generate_build_table_function(&self) -> Result<TokenStream2> {
+        let num_args = self.args.len();
+        let fn_name = format_ident!("{}", self.user_fn.name);
+        let struct_name = format_ident!("{}", self.ident_name());
+        let ids = (0..num_args)
+            .filter(|i| match &self.prebuild {
+                Some(s) => !s.contains(&format!("${i}")),
+                None => true,
+            })
+            .collect_vec();
+        let const_ids = (0..num_args).filter(|i| match &self.prebuild {
+            Some(s) => s.contains(&format!("${i}")),
+            None => false,
+        });
+        let elems: Vec<_> = ids.iter().map(|i| format_ident!("v{i}")).collect();
+        let all_child: Vec<_> = (0..num_args).map(|i| format_ident!("child{i}")).collect();
+        let const_child: Vec<_> = const_ids.map(|i| format_ident!("child{i}")).collect();
+        let child: Vec<_> = ids.iter().map(|i| format_ident!("child{i}")).collect();
+        let array_refs: Vec<_> = ids.iter().map(|i| format_ident!("array{i}")).collect();
+        let arrays: Vec<_> = ids.iter().map(|i| format_ident!("a{i}")).collect();
+        let arg_arrays = self
+            .args
+            .iter()
+            .map(|t| format_ident!("{}", types::array_type(t)));
+        let array_builder = format_ident!("{}Builder", types::array_type(&self.ret));
+        let const_arg = match &self.prebuild {
+            Some(_) => quote! { &self.const_arg },
+            None => quote! {},
+        };
+        let const_arg_type = match &self.prebuild {
+            Some(s) => s.split("::").next().unwrap().parse().unwrap(),
+            None => quote! { () },
+        };
+        let const_arg_value = match &self.prebuild {
+            Some(s) => s
+                .replace('$', "child")
+                .parse()
+                .expect("invalid prebuild syntax"),
+            None => quote! { () },
+        };
+        let value = match self.user_fn.return_type {
+            ReturnType::T => quote! { Some(value) },
+            ReturnType::Option => quote! { value },
+            ReturnType::Result => quote! { Some(value?) },
+            ReturnType::ResultOption => quote! { value? },
+        };
+
+        Ok(quote! {
+            |return_type, chunk_size, children| {
+                use risingwave_common::array::*;
+                use risingwave_common::types::*;
+                use risingwave_common::buffer::Bitmap;
+                use risingwave_common::util::iter_util::ZipEqFast;
+                use itertools::multizip;
+
+                crate::ensure!(children.len() == #num_args);
+                let mut iter = children.into_iter();
+                #(let #all_child = iter.next().unwrap();)*
+                #(let #const_child = #const_child.eval_const()?;)*
+
+                #[derive(Debug)]
+                struct #struct_name {
+                    return_type: DataType,
+                    chunk_size: usize,
+                    #(#child: BoxedExpression,)*
+                    const_arg: #const_arg_type,
+                }
+                #[async_trait::async_trait]
+                impl crate::table_function::TableFunction for #struct_name {
+                    fn return_type(&self) -> DataType {
+                        self.return_type.clone()
+                    }
+                    async fn eval<'a>(&'a self, input: &'a DataChunk) -> BoxStream<'a, Result<DataChunk>> {
+                        self.eval_inner(input)
+                    }
+                }
+                impl #struct_name {
+                    #[try_stream(boxed, ok = DataChunk, error = ExprError)]
+                    async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
+                        #(
+                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #arrays: &#arg_arrays = #array_refs.as_ref().into();
+                        )*
+
+                        let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
+                        let mut value_builder = #array_builder::with_type(self.chunk_size, self.return_type.clone());
+
+                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                            if let (#(Some(#elems),)*) = row && visible {
+                                for value in #fn_name(#(#elems,)* #const_arg) {
+                                    index_builder.append(Some(i as i64));
+                                    match #value {
+                                        Some(v) => value_builder.append(Some(v.as_scalar_ref())),
+                                        None => value_builder.append_null(),
+                                    }
+
+                                    if index_builder.len() == self.chunk_size {
+                                        let index_array = std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish();
+                                        let value_array = std::mem::replace(&mut value_builder, #array_builder::with_type(self.chunk_size, self.return_type.clone())).finish();
+                                        yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], self.chunk_size);
+                                    }
+                                }
+                            }
+                        }
+
+                        if index_builder.len() > 0 {
+                            let len = index_builder.len();
+                            let index_array = index_builder.finish();
+                            let value_array = value_builder.finish();
+                            yield DataChunk::new(vec![index_array.into_ref(), value_array.into_ref()], len);
+                        }
+                    }
+                }
+
+                Ok(Box::new(#struct_name {
+                    return_type,
+                    chunk_size,
+                    #(#child,)*
+                    const_arg: #const_arg_value,
+                }))
+            }
+        })
+    }
+}
+
+fn data_type_name(ty: &str) -> TokenStream2 {
+    let variant = format_ident!("{}", types::data_type(ty));
+    quote! { risingwave_common::types::DataTypeName::#variant }
 }
 
 fn data_type(ty: &str) -> TokenStream2 {
+    if let Some(ty) = ty.strip_suffix("[]") {
+        let inner_type = data_type(ty);
+        return quote! { risingwave_common::types::DataType::List(Box::new(#inner_type)) };
+    }
     let variant = format_ident!("{}", types::data_type(ty));
-    quote! { risingwave_common::types::DataTypeName::#variant }
+    quote! { risingwave_common::types::DataType::#variant }
 }

@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use anyhow::Context;
 use async_trait::async_trait;
 use aws_sdk_s3::client::Client;
-use globset::{Glob, GlobMatcher};
 use itertools::Itertools;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
@@ -63,7 +62,7 @@ pub struct S3SplitEnumerator {
     bucket_name: String,
     // prefix is used to reduce the number of objects to be listed
     prefix: Option<String>,
-    matcher: Option<GlobMatcher>,
+    matcher: Option<glob::Pattern>,
     client: Client,
 }
 
@@ -76,14 +75,14 @@ impl SplitEnumerator for S3SplitEnumerator {
         let config = AwsConfigV2::from(HashMap::from(properties.clone()));
         let sdk_config = config.load_config(None).await;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-        let matcher = if let Some(pattern) = properties.match_pattern.as_ref() {
-            let glob = Glob::new(pattern)
+        let (prefix, matcher) = if let Some(pattern) = properties.match_pattern.as_ref() {
+            let prefix = get_prefix(pattern);
+            let matcher = glob::Pattern::new(pattern)
                 .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
-            Some(glob.compile_matcher())
+            (Some(prefix), Some(matcher))
         } else {
-            None
+            (None, None)
         };
-        let prefix = matcher.as_ref().map(|m| get_prefix(m.glob().glob()));
 
         Ok(S3SplitEnumerator {
             bucket_name: properties.bucket_name,
@@ -94,35 +93,41 @@ impl SplitEnumerator for S3SplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
-        let list_obj_out = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket_name)
-            .set_prefix(self.prefix.clone())
-            .send()
-            .await?;
+        let mut objects = Vec::new();
+        let mut next_continuation_token = None;
+        loop {
+            let mut req = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket_name)
+                .set_prefix(self.prefix.clone());
+            if let Some(continuation_token) = next_continuation_token.take() {
+                req = req.continuation_token(continuation_token);
+            }
+            let mut res = req.send().await?;
+            objects.extend(res.contents.take().unwrap_or_default());
+            if res.is_truncated() {
+                next_continuation_token = Some(res.next_continuation_token.unwrap())
+            } else {
+                break;
+            }
+        }
 
-        let objects = list_obj_out.contents();
-        let splits = if let Some(objs) = objects {
-            let matched_objs = objs
-                .iter()
-                .filter(|obj| obj.key().is_some())
-                .filter(|obj| {
-                    self.matcher
-                        .as_ref()
-                        .map(|m| m.is_match(obj.key().unwrap()))
-                        .unwrap_or(true)
-                })
-                .collect_vec();
+        let matched_objs = objects
+            .iter()
+            .filter(|obj| obj.key().is_some())
+            .filter(|obj| {
+                self.matcher
+                    .as_ref()
+                    .map(|m| m.matches(obj.key().unwrap()))
+                    .unwrap_or(true)
+            })
+            .collect_vec();
 
-            matched_objs
-                .into_iter()
-                .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
-                .collect_vec()
-        } else {
-            Vec::new()
-        };
-        Ok(splits)
+        Ok(matched_objs
+            .into_iter()
+            .map(|obj| FsSplit::new(obj.key().unwrap().to_owned(), 0, obj.size() as usize))
+            .collect_vec())
     }
 }
 

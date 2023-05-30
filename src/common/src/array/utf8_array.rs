@@ -153,6 +153,10 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         self.bytes.pop()
     }
 
+    fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
     fn finish(self) -> Utf8Array {
         Utf8Array {
             bytes: self.bytes.finish(),
