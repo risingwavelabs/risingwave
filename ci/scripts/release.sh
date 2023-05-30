@@ -21,6 +21,7 @@ echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
 rustup show
+cargo install sccache --locked # we use sccache as the rustc wrapper
 source ci/scripts/common.sh
 
 echo "--- Install protoc3"

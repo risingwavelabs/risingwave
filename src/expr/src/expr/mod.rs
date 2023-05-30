@@ -18,10 +18,9 @@
 //!
 //! ## Construction
 //!
-//! Expressions can be constructed by functions like [`new_binary_expr`],
-//! which returns a [`BoxedExpression`].
+//! Expressions can be constructed by [`build()`] function, which returns a [`BoxedExpression`].
 //!
-//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost`]
+//! They can also be transformed from the prost [`ExprNode`] using the [`build_from_prost()`]
 //! function.
 //!
 //! ## Evaluation
@@ -74,6 +73,7 @@ use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use risingwave_pb::expr::PbExprNode;
 use static_assertions::const_assert;
 
 pub use self::build::*;
@@ -139,6 +139,19 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
         Self: Sized + Send + 'static,
     {
         Box::new(self)
+    }
+}
+
+/// Extension trait to convert the protobuf representation to a boxed [`Expression`], with a
+/// concrete expression type.
+#[easy_ext::ext(TryFromExprNodeBoxed)]
+impl<'a, T> T
+where
+    T: TryFrom<&'a PbExprNode, Error = ExprError> + Expression + 'static,
+{
+    /// Performs the conversion.
+    fn try_from_boxed(expr: &'a PbExprNode) -> Result<BoxedExpression> {
+        T::try_from(expr).map(|e| e.boxed())
     }
 }
 

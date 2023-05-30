@@ -35,7 +35,7 @@ use risingwave_expr_macro::{build_function, function};
 use risingwave_pb::expr::expr_node::PbType;
 
 use crate::expr::template::UnaryExpression;
-use crate::expr::{build, BoxedExpression, Expression, InputRefExpression};
+use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
 
 /// String literals for bool type.
@@ -341,7 +341,7 @@ fn build_cast_str_to_list(
 }
 
 fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
@@ -385,7 +385,7 @@ fn list_cast(
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
@@ -437,7 +437,7 @@ fn struct_cast(
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
             }
-            let cast = build(
+            let cast = build_func(
                 PbType::Cast,
                 target_field_type.clone(),
                 vec![InputRefExpression::new(source_field_type.clone(), 0).boxed()],

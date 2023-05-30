@@ -303,7 +303,7 @@ where
 
             metrics: options.metrics,
 
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         })
     }
 
