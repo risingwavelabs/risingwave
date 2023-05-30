@@ -637,8 +637,9 @@ impl Cluster {
         if worker_nodes.len() < n {
             return Err(anyhow!("cannot remove more nodes than present"));
         }
+        // TODO: is this affected by madsim?
         let rand_nodes: Vec<&WorkerNode> = worker_nodes
-            .choose_multiple(&mut rand::thread_rng(), 2)
+            .choose_multiple(&mut rand::thread_rng(), n)
             .collect();
         let rand_nodes = rand_nodes.iter().map(|n| n.clone().clone()).collect_vec();
         for rand_node in rand_nodes.clone() {
