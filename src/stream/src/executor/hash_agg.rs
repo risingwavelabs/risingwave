@@ -84,7 +84,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
 
-    // TODO()
+    // The projection from group key in table schema to table pk.
     group_key_table_pk_projection: Arc<[usize]>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
