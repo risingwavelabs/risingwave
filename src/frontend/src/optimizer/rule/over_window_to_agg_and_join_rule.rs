@@ -49,11 +49,11 @@ impl Rule for OverWindowToAggAndJoinRule {
             .map(|x| x.clone().into())
             .collect_vec();
         let mut select_exprs = group_exprs.clone();
-        for window in window_functions {
-            if let WindowFuncKind::Aggregate(kind) = window.kind {
+        for func in window_functions {
+            if let WindowFuncKind::Aggregate(kind) = func.kind {
                 let agg_call = AggCall::new(
                     kind,
-                    window.args.iter().map(|x| x.clone().into()).collect_vec(),
+                    func.args.iter().map(|x| x.clone().into()).collect_vec(),
                     false,
                     OrderBy::any(),
                     Condition::true_cond(),
