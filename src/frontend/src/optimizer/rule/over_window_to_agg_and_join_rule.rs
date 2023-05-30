@@ -71,7 +71,8 @@ impl Rule for OverWindowToAggAndJoinRule {
             out_fields.push(input_len + group_exprs.len() + i);
         }
         let common_input = LogicalShare::create(over_window.input());
-        let agg = LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone()).ok()?;
+        let (agg, ..) =
+	            LogicalAgg::create(select_exprs, group_exprs, None, common_input.clone()).ok()?;
         let on_clause = window_functions[0].partition_by.iter().enumerate().fold(
             Condition::true_cond(),
             |on_clause, (idx, x)| {
