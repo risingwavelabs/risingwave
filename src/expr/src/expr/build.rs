@@ -20,7 +20,6 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
-use super::expr_array_remove::ArrayRemoveExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
@@ -64,7 +63,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
         E::Udf => UdfExpression::try_from_boxed(prost),
-        E::ArrayRemove => ArrayRemoveExpression::try_from_boxed(prost),
         E::Proctime => ProcTimeExpression::try_from_boxed(prost),
 
         _ => {
