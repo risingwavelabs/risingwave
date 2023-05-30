@@ -97,3 +97,13 @@ drop materialized view mv1;
 
 statement ok
 drop table t;
+
+# table functions should not be pruned
+query I
+with cte as (SELECT 1 as v1, unnest(array[1,2,3,4,5]) AS v2) select v1 from cte;
+----
+1
+1
+1
+1
+1
