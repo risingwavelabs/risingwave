@@ -92,7 +92,7 @@ public class JDBCSink extends SinkBase {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("detected pk {}", pkColumnNames);
+        LOG.debug("detected pk column {}", pkColumnNames);
         return pkColumnNames;
     }
 
@@ -240,8 +240,12 @@ public class JDBCSink extends SinkBase {
                     var sqlType =
                             JdbcUtils.getDbSqlType(
                                     targetDbType, fieldType.getTypeName(), fieldType);
-                    var list = (java.util.ArrayList<?>) row.get(i);
-                    stmt.setArray(i + 1, conn.createArrayOf(sqlType, list.toArray()));
+                    var val = row.get(i);
+                    if (val instanceof java.util.List<?>) {
+                        val = ((java.util.List<?>) val).toArray();
+                    }
+                    assert (val instanceof Object[]);
+                    stmt.setArray(i + 1, conn.createArrayOf(sqlType, (Object[]) val));
                     break;
                 default:
                     stmt.setObject(i + 1, row.get(i));

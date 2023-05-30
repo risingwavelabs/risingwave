@@ -42,8 +42,8 @@ public class StreamChunkDeserializer implements Deserializer {
         ValueGetter[] ret = new ValueGetter[colNames.length];
         for (int i = 0; i < colNames.length; i++) {
             int index = i;
-            Data.DataType.TypeName typeName = tableSchema.getColumnType(colNames[i]);
-            switch (typeName) {
+            var columnDesc = tableSchema.getColumnDesc(index);
+            switch (columnDesc.getDataType().getTypeName()) {
                 case INT16:
                     ret[i] =
                             row -> {
@@ -164,16 +164,57 @@ public class StreamChunkDeserializer implements Deserializer {
                             };
                     break;
                 case LIST:
-                    ret[i] = row -> {
-                        if (row.isNull(index)) {
-                            return null;
-                        }
-                        return row.getList(index);
-                    };
+                    var fieldType = columnDesc.getDataType().getFieldType(0);
+                    switch (fieldType.getTypeName()) {
+                        case INT16:
+                        case INT32:
+                        case INT64:
+                        case DOUBLE:
+                        case VARCHAR:
+                            break;
+                        default:
+                            throw io.grpc.Status.INVALID_ARGUMENT
+                                    .withDescription(
+                                            "stream_chunk: unsupported array with field type "
+                                                    + fieldType.getTypeName())
+                                    .asRuntimeException();
+                    }
+
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                Object[] objArray = null;
+                                switch (fieldType.getTypeName()) {
+                                    case INT16:
+                                        objArray = row.getArray(index, Short.class);
+                                        break;
+                                    case INT32:
+                                        objArray = row.getArray(index, Integer.class);
+                                        break;
+                                    case INT64:
+                                        objArray = row.getArray(index, Long.class);
+                                        break;
+                                    case DOUBLE:
+                                        objArray = row.getArray(index, Double.class);
+                                        break;
+                                    case VARCHAR:
+                                        objArray = row.getArray(index, String.class);
+                                        break;
+                                    default:
+                                        break;
+                                }
+
+                                return objArray;
+                            };
+                    break;
 
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("stream_chunk: unsupported data type " + typeName)
+                            .withDescription(
+                                    "stream_chunk: unsupported data type "
+                                            + columnDesc.getDataType().getTypeName())
                             .asRuntimeException();
             }
         }
