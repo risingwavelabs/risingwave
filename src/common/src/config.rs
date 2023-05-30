@@ -240,6 +240,10 @@ pub struct MetaConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Whether config object storage bucket lifecycle to purge stale data.
+    #[serde(default)]
+    pub do_not_config_object_storage_lifecycle: bool,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -607,7 +611,7 @@ mod default {
         }
 
         pub fn split_group_size_limit() -> u64 {
-            16 * 1024 * 1024 * 1024 // 16GB
+            20 * 1024 * 1024 * 1024 // 20GB
         }
     }
 
