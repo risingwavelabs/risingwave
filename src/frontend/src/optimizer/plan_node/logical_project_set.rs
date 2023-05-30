@@ -234,6 +234,22 @@ impl fmt::Display for LogicalProjectSet {
 
 impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let output_required_cols = required_cols;
+        let required_cols = {
+            let mut required_cols_set = FixedBitSet::from_iter(required_cols.iter().copied());
+            required_cols_set.grow(self.select_list().len() + 1);
+            let mut cols = required_cols.to_vec();
+            // We should not prune table functions, because the final number of result rows is
+            // depended by all table function calls
+            for (i, e) in self.select_list().iter().enumerate() {
+                if e.has_table_function() && !required_cols_set.contains(i + 1) {
+                    cols.push(i + 1);
+                    required_cols_set.set(i + 1, true);
+                }
+            }
+            cols
+        };
+
         let input_col_num = self.input().schema().len();
 
         let input_required_cols = collect_input_refs(
@@ -259,18 +275,18 @@ impl ColPrunable for LogicalProjectSet {
 
         // Reconstruct the LogicalProjectSet
         let new_node: PlanRef = LogicalProjectSet::create(new_input, select_list);
-        if new_node.schema().len() == required_cols.len() {
+        if new_node.schema().len() == output_required_cols.len() {
             // current schema perfectly fit the required columns
             new_node
         } else {
             // projected_row_id column is not needed so we did a projection to remove it
-            let mut new_output_cols = Vec::from(required_cols);
+            let mut new_output_cols = required_cols.to_vec();
             if !required_cols.contains(&0) {
                 new_output_cols.insert(0, 0);
             }
             let mapping =
                 &ColIndexMapping::with_remaining_columns(&new_output_cols, self.schema().len());
-            let output_required_cols = required_cols
+            let output_required_cols = output_required_cols
                 .iter()
                 .map(|&idx| mapping.map(idx))
                 .collect_vec();
