@@ -44,10 +44,20 @@
   <build>
     <extensions>
       <extension>
-          <groupId>kr.motd.maven</groupId>
-          <artifactId>os-maven-plugin</artifactId>
-          <version>1.7.0</version>
+        <groupId>kr.motd.maven</groupId>
+        <artifactId>os-maven-plugin</artifactId>
+        <version>1.7.0</version>
       </extension>
     </extensions>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0-M6</version>
+        <configuration>
+          <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+    </plugins>
   </build>
 </project>

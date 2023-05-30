@@ -42,11 +42,15 @@ public class UdfServer implements AutoCloseable {
         logger.info("listening on " + this.server.getLocation().toSocketAddress());
     }
 
+    public int getPort() {
+        return this.server.getPort();
+    }
+
     public void awaitTermination() throws InterruptedException {
         this.server.awaitTermination();
     }
 
-    public void close() throws Exception {
+    public void close() throws InterruptedException {
         this.server.close();
     }
 }
@@ -99,21 +103,25 @@ class UdfProducer extends NoOpFlightProducer {
 
     @Override
     public void doExchange(CallContext context, FlightStream reader, ServerStreamListener writer) {
-        var functionName = reader.getDescriptor().getPath().get(0);
-        var udf = this.functions.get(functionName);
-        try (var root = VectorSchemaRoot.create(udf.getOutputSchema(), this.allocator)) {
-            var loader = new VectorLoader(root);
-            writer.start(root);
-            while (reader.next()) {
-                var outputBatches = udf.evalBatch(reader.getRoot());
-                while (outputBatches.hasNext()) {
-                    var outputRoot = outputBatches.next();
-                    var unloader = new VectorUnloader(outputRoot);
-                    loader.load(unloader.getRecordBatch());
-                    writer.putNext();
+        try {
+            var functionName = reader.getDescriptor().getPath().get(0);
+            logger.debug("call function: " + functionName);
+
+            var udf = this.functions.get(functionName);
+            try (var root = VectorSchemaRoot.create(udf.getOutputSchema(), this.allocator)) {
+                var loader = new VectorLoader(root);
+                writer.start(root);
+                while (reader.next()) {
+                    var outputBatches = udf.evalBatch(reader.getRoot());
+                    while (outputBatches.hasNext()) {
+                        var outputRoot = outputBatches.next();
+                        var unloader = new VectorUnloader(outputRoot);
+                        loader.load(unloader.getRecordBatch());
+                        writer.putNext();
+                    }
                 }
+                writer.completed();
             }
-            writer.completed();
         } catch (Exception e) {
             logger.error("Error occurred during UDF execution", e);
             writer.error(e);
