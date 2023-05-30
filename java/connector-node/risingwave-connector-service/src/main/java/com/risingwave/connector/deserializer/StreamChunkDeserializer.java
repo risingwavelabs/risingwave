@@ -116,6 +116,15 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getTimestamp(index);
                             };
                     break;
+                case TIME:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getTime(index);
+                            };
+                    break;
                 case DECIMAL:
                     ret[i] =
                             row -> {
@@ -123,6 +132,45 @@ public class StreamChunkDeserializer implements Deserializer {
                                     return null;
                                 }
                                 return row.getDecimal(index);
+                            };
+                    break;
+                case DATE:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getDate(index);
+                            };
+                    break;
+
+                case INTERVAL:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getInterval(index);
+                            };
+                    break;
+
+                case JSONB:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getJsonb(index);
+                            };
+                    break;
+
+                case BYTEA:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getBytea(index);
                             };
                     break;
                 default:
