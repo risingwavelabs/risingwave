@@ -17,11 +17,14 @@ package com.risingwave.connector.sink.jdbc;
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
+import java.io.ByteArrayInputStream;
 import java.sql.*;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
@@ -29,28 +32,69 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 
 public class JDBCSinkTest {
-    static void createMockTable(String jdbcUrl, String tableName) throws SQLException {
+    enum TestType {
+        TestPg,
+        TestMySQL,
+    };
+
+    static final String pgCreateStmt =
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb JSONB, v_bytea BYTEA)";
+    static final String mysqlCreateStmt =
+            "CREATE TABLE %s (id INT PRIMARY KEY, v_varchar VARCHAR(255), v_date DATE, v_time TIME, v_timestamp TIMESTAMP, v_jsonb BLOB, v_bytea BLOB)";
+
+    static void createMockTable(String jdbcUrl, String tableName, TestType testType)
+            throws SQLException {
         Connection conn = DriverManager.getConnection(jdbcUrl);
         conn.setAutoCommit(false);
         Statement stmt = conn.createStatement();
         stmt.execute("DROP TABLE IF EXISTS " + tableName);
-        stmt.execute("create table " + tableName + " (id int primary key, name varchar(255))");
+        if (testType == TestType.TestPg) {
+            stmt.execute(String.format(pgCreateStmt, tableName));
+        } else {
+            stmt.execute(String.format(mysqlCreateStmt, tableName));
+        }
         conn.commit();
         conn.close();
     }
 
-    static void testJDBCSync(JdbcDatabaseContainer<?> container) throws SQLException {
-        String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
+    static TableSchema getTestTableSchema() {
+        return new TableSchema(
+                Lists.newArrayList(
+                        "id", "v_varchar", "v_date", "v_time", "v_timestamp", "v_jsonb", "v_bytea"),
+                Lists.newArrayList(
+                        TypeName.INT32,
+                        TypeName.VARCHAR,
+                        TypeName.DATE,
+                        TypeName.TIME,
+                        TypeName.TIMESTAMP,
+                        TypeName.JSONB,
+                        TypeName.BYTEA),
+                Lists.newArrayList("id"));
+    }
 
+    static void testJDBCSync(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
+        String tableName = "test";
+        createMockTable(container.getJdbcUrl(), tableName, testType);
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
+                        getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
 
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
+        sink.write(
+                Iterators.forArray(
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                1,
+                                "Alice",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
 
         Statement stmt = conn.createStatement();
@@ -61,7 +105,18 @@ public class JDBCSinkTest {
         }
         assertEquals(1, count);
 
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
+        sink.write(
+                Iterators.forArray(
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                2,
+                                "Bob",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
         stmt = conn.createStatement();
         rs = stmt.executeQuery("SELECT * FROM test");
@@ -74,24 +129,70 @@ public class JDBCSinkTest {
         sink.drop();
     }
 
-    static void testJDBCWrite(JdbcDatabaseContainer<?> container) throws SQLException {
+    static void testJDBCWrite(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
         String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
+        createMockTable(container.getJdbcUrl(), tableName, testType);
 
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
+                        getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkRow(Op.INSERT, 2, "Bob"),
-                        new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
-                        new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare"),
-                        new ArraySinkRow(Op.DELETE, 2, "Bob")));
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                1,
+                                "Alice",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                        new ArraySinkRow(
+                                Op.INSERT,
+                                2,
+                                "Bob",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                        new ArraySinkRow(
+                                Op.UPDATE_DELETE,
+                                1,
+                                "Alice",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                        new ArraySinkRow(
+                                Op.UPDATE_INSERT,
+                                1,
+                                "Clare",
+                                new Date(2000000000),
+                                new Time(2000000000),
+                                new Timestamp(2000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}"),
+                                new ByteArrayInputStream("I want to eat".getBytes())),
+                        new ArraySinkRow(
+                                Op.DELETE,
+                                2,
+                                "Bob",
+                                new Date(1000000000),
+                                new Time(1000000000),
+                                new Timestamp(1000000000),
+                                new String(
+                                        "{\"key\": \"password\", \"value\": \"Singularity123\"}"),
+                                new ByteArrayInputStream("I want to sleep".getBytes()))));
         sink.sync();
 
         Statement stmt = conn.createStatement();
@@ -101,20 +202,28 @@ public class JDBCSinkTest {
         // check if rows are inserted
         assertEquals(1, rs.getInt(1));
         assertEquals("Clare", rs.getString(2));
+        assertEquals(new Date(2000000000).toString(), rs.getDate(3).toString());
+        assertEquals(new Time(2000000000).toString(), rs.getTime(4).toString());
+        assertEquals(new Timestamp(2000000000), rs.getTimestamp(5));
+        assertEquals(
+                new String("{\"key\": \"password\", \"value\": \"Singularity123123123123\"}"),
+                rs.getString(6));
+        assertEquals(new String("I want to eat"), new String(rs.getBytes(7)));
         assertFalse(rs.next());
 
         sink.sync();
         stmt.close();
     }
 
-    static void testJDBCDrop(JdbcDatabaseContainer<?> container) throws SQLException {
+    static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
+            throws SQLException {
         String tableName = "test";
-        createMockTable(container.getJdbcUrl(), tableName);
+        createMockTable(container.getJdbcUrl(), tableName, testType);
 
         JDBCSink sink =
                 new JDBCSink(
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
-                        TableSchema.getMockTableSchema());
+                        getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
@@ -136,9 +245,9 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         pg.start();
-        testJDBCSync(pg);
-        testJDBCWrite(pg);
-        testJDBCDrop(pg);
+        testJDBCSync(pg, TestType.TestPg);
+        testJDBCWrite(pg, TestType.TestPg);
+        testJDBCDrop(pg, TestType.TestPg);
         pg.stop();
     }
 
@@ -153,9 +262,9 @@ public class JDBCSinkTest {
                         .withUrlParam("user", "postgres")
                         .withUrlParam("password", "password");
         mysql.start();
-        testJDBCSync(mysql);
-        testJDBCWrite(mysql);
-        testJDBCDrop(mysql);
+        testJDBCSync(mysql, TestType.TestMySQL);
+        testJDBCWrite(mysql, TestType.TestMySQL);
+        testJDBCDrop(mysql, TestType.TestMySQL);
         mysql.stop();
     }
 }
