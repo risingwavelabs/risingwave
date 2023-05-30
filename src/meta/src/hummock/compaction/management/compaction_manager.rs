@@ -29,6 +29,7 @@ use tokio::sync::oneshot::Receiver;
 use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 use tracing::log::info;
 
+use super::compactor_backend::CompactorBackend;
 use crate::hummock::compaction::{
     DynamicLevelSelector, LevelSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
@@ -54,7 +55,7 @@ where
 {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
-    compaction_task_tx: mpsc::UnboundedSender<(CompactTask, u64)>,
+    compactor_backend: Box<dyn CompactorBackend>,
 }
 
 impl<S> CompactionManager<S>
@@ -64,12 +65,12 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        compaction_task_tx: mpsc::UnboundedSender<(CompactTask, u64)>,
+        compactor_backend: Box<dyn CompactorBackend>,
     ) -> Self {
         Self {
             env,
             hummock_manager,
-            compaction_task_tx,
+            compactor_backend,
         }
     }
 
@@ -223,13 +224,12 @@ where
             .pick_compaction(compaction_group, task_type, compaction_selectors)
             .await
         {
-            // send task to task manager
-
             // FIXME: refactor timeout and handle send error
             const TIMEOUT_SECOND: u64 = 600;
-            self.compaction_task_tx
-                .send((compact_task, TIMEOUT_SECOND))
-                .unwrap();
+            let _ = self
+                .compactor_backend
+                .submit(compaction_group, compact_task, TIMEOUT_SECOND)
+                .await;
             true
         } else {
             false

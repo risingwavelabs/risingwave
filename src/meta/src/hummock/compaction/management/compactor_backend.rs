@@ -13,15 +13,30 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
+use super::CompactionTaskEvent;
 use crate::hummock::HummockManagerRef;
 use crate::storage::MetaStore;
 
 #[async_trait]
 pub trait CompactorBackend {
-    async fn submit(&self, compact_task: &CompactTask) -> bool;
+    async fn submit(
+        &self,
+        compaction_group: CompactionGroupId,
+        compact_task: CompactTask,
+        timeout: u64,
+    ) -> bool;
+
+    async fn cancel(&self, compact_task: &CompactTask) -> bool;
+
+    fn event_channel(
+        &mut self,
+        compact_task: &CompactTask,
+    ) -> Option<UnboundedReceiver<CompactionTaskEvent>>;
 }
 
 pub struct DedicatedCompactorBackend<S>
@@ -29,23 +44,45 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
+
+    event_sender: UnboundedSender<CompactionTaskEvent>,
+
+    event_receiver: Option<UnboundedReceiver<CompactionTaskEvent>>,
 }
 
-impl<S> DedicatedCompactorBackend<S> where S: MetaStore {}
+impl<S> DedicatedCompactorBackend<S>
+where
+    S: MetaStore,
+{
+    fn new(hummock_manager: HummockManagerRef<S>) -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        Self {
+            hummock_manager,
+            event_sender: tx,
+            event_receiver: Some(rx),
+        }
+    }
+}
 
 #[async_trait]
 impl<S> CompactorBackend for DedicatedCompactorBackend<S>
 where
     S: MetaStore,
 {
-    async fn submit(&self, compact_task: &CompactTask) -> bool {
+    async fn submit(
+        &self,
+        compaction_group_id: CompactionGroupId,
+        compact_task: CompactTask,
+        timeout: u64,
+    ) -> bool {
         // how to trigger a new compaction when failed assign ?
 
         if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
             // 2. Assign the compaction task to a compactor.
             match self
                 .hummock_manager
-                .assign_compaction_task(compact_task, compactor.context_id())
+                .assign_compaction_task(&compact_task, compactor.context_id())
                 .await
             {
                 Ok(_) => {}
@@ -67,9 +104,27 @@ where
                 return false;
             }
 
+            // TODO: timeout configuration
+            let _ = self.event_sender.send(CompactionTaskEvent::Register(
+                compaction_group_id,
+                compact_task,
+                timeout,
+            ));
+
             return true;
         } else {
             return false;
         }
+    }
+
+    async fn cancel(&self, compact_task: &CompactTask) -> bool {
+        todo!()
+    }
+
+    fn event_channel(
+        &mut self,
+        compact_task: &CompactTask,
+    ) -> Option<UnboundedReceiver<CompactionTaskEvent>> {
+        self.event_receiver.take()
     }
 }

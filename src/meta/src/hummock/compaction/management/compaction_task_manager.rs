@@ -12,129 +12,88 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-use std::task::Poll;
+use std::collections::HashMap;
 
-use futures::future::{select, Either};
-use futures::{Future, FutureExt};
+use futures::StreamExt;
+use risingwave_common::util::select_all;
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactTask;
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::{self, unbounded_channel};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
-pub(crate) enum CompactTaskEvent {
-    Pending((CompactTask, u64)),
-    Committed(CompactTask),
-    Finished(CompactTask),
-    Cancel(CompactTask),
-}
-
-pub(crate) struct NextCompactTaskEvent<'a> {
-    pending_task: &'a mut VecDeque<(CompactTask, u64)>,
-    committed_task: &'a mut VecDeque<CompactTask>,
-    finished_task: &'a mut VecDeque<CompactTask>,
-    cancel_task: &'a mut VecDeque<CompactTask>,
-}
-
-impl<'a> Future for NextCompactTaskEvent<'a> {
-    type Output = CompactTaskEvent;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        if !self.cancel_task.is_empty() {
-            let task = self.cancel_task.pop_front().unwrap();
-            return Poll::Ready(CompactTaskEvent::Cancel(task));
-        }
-
-        if !self.finished_task.is_empty() {
-            let task = self.finished_task.pop_front().unwrap();
-            return Poll::Ready(CompactTaskEvent::Finished(task));
-        }
-
-        if !self.committed_task.is_empty() {
-            let task = self.committed_task.pop_front().unwrap();
-            return Poll::Ready(CompactTaskEvent::Committed(task));
-        }
-
-        if !self.pending_task.is_empty() {
-            let (task, timeout) = self.pending_task.pop_front().unwrap();
-            return Poll::Ready(CompactTaskEvent::Pending((task, timeout)));
-        }
-
-        Poll::Pending
-    }
-}
+use super::CompactionTaskEvent;
 
 pub struct CompactionTaskManager {
-    compaction_task_rx: mpsc::UnboundedReceiver<(CompactTask, u64)>,
+    // compaction_task_rx: mpsc::UnboundedReceiver<(CompactionGroupId, CompactTask, u64)>,
+    task_event_sender: mpsc::UnboundedSender<CompactionTaskEvent>,
 
-    pub pending_task: VecDeque<(CompactTask, u64)>,
-    pub committed_task: VecDeque<CompactTask>,
-    pub finished_task: VecDeque<CompactTask>,
-    pub cancel_task: VecDeque<CompactTask>,
+    task_event_receiver: Option<mpsc::UnboundedReceiver<CompactionTaskEvent>>,
+
+    backend_event_receiver: Option<mpsc::UnboundedReceiver<CompactionTaskEvent>>,
+
+    // compaction_group_id -> <task_id -> task>
+    compaction_task: HashMap<CompactionGroupId, HashMap<u64, CompactTask>>,
 }
 
 impl CompactionTaskManager {
-    fn new(compaction_task_rx: mpsc::UnboundedReceiver<(CompactTask, u64)>) -> Self {
+    fn new(
+        // compaction_task_rx: mpsc::UnboundedReceiver<(CompactionGroupId, CompactTask, u64)>,
+        backend_event_receiver: mpsc::UnboundedReceiver<CompactionTaskEvent>,
+    ) -> Self {
+        let (tx, rx) = unbounded_channel();
         Self {
-            compaction_task_rx,
-            pending_task: VecDeque::default(),
-            committed_task: VecDeque::default(),
-            finished_task: VecDeque::default(),
-            cancel_task: VecDeque::default(),
-        }
-    }
+            task_event_sender: tx,
+            task_event_receiver: Some(rx),
+            backend_event_receiver: Some(backend_event_receiver),
 
-    async fn next_event(&mut self) -> Option<Either<CompactTaskEvent, (CompactTask, u64)>> {
-        match select(
-            NextCompactTaskEvent {
-                pending_task: &mut self.pending_task,
-                committed_task: &mut self.committed_task,
-                finished_task: &mut self.finished_task,
-                cancel_task: &mut self.cancel_task,
-            },
-            self.compaction_task_rx.recv().boxed(),
-        )
-        .await
-        {
-            Either::Left((event, _)) => Some(Either::Left(event)),
-            Either::Right((event, _)) => event.map(Either::Right),
+            compaction_task: HashMap::default(),
         }
     }
 
     pub async fn start_compact_task_event_handler(mut self) {
-        while let Some(event) = self.next_event().await {
+        let event_trigger = vec![
+            Box::pin(UnboundedReceiverStream::new(
+                self.task_event_receiver.take().unwrap(),
+            )),
+            Box::pin(UnboundedReceiverStream::new(
+                self.backend_event_receiver.take().unwrap(),
+            )),
+        ];
+
+        let mut event_stream = select_all(event_trigger);
+
+        while let Some(event) = event_stream.next().await {
             match event {
-                Either::Left(event) => match event {
-                    CompactTaskEvent::Pending((task, timeout)) => self.on_handle_pending_task(),
-
-                    CompactTaskEvent::Committed(task) => self.on_handle_committed_task(),
-
-                    CompactTaskEvent::Finished(task) => self.on_handle_finished_task(),
-
-                    CompactTaskEvent::Cancel(task) => self.on_handle_cancel_task(),
-                },
-
-                Either::Right((compact_task, timeout)) => {
-                    self.pending_task.push_back((compact_task, timeout))
+                CompactionTaskEvent::Register(compaction_group_id, compact_task, timeout) => {
+                    self.on_handle_register()
                 }
+
+                CompactionTaskEvent::TaskProgress(compact_task) => self.on_handle_task_progress(),
+
+                CompactionTaskEvent::Cancel(compact_task) => self.on_handle_cancel(),
+
+                CompactionTaskEvent::Timer(task_id, timeout) => self.on_handle_timer(),
             }
         }
     }
 
-    fn on_handle_pending_task(&mut self) {
+    fn on_handle_register(&mut self) {
         todo!()
     }
 
-    fn on_handle_committed_task(&mut self) {
+    fn on_handle_task_progress(&mut self) {
         todo!()
     }
 
-    fn on_handle_finished_task(&mut self) {
+    fn on_handle_cancel(&mut self) {
         todo!()
     }
 
-    fn on_handle_cancel_task(&mut self) {
+    fn on_handle_timer(&mut self) {
+        // TODO handler timeout
+        // 1. cancel task
+        // 2. User-customized event ?
+
         todo!()
     }
 }

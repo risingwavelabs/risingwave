@@ -16,5 +16,16 @@ mod compaction_manager;
 mod compaction_task_manager;
 mod compactor_backend;
 
+use std::time::Instant;
+
 pub use compaction_manager::CompactionManager;
 pub use compaction_task_manager::CompactionTaskManager;
+use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::CompactTask;
+
+pub enum CompactionTaskEvent {
+    Register(CompactionGroupId, CompactTask, u64),
+    TaskProgress(CompactTask),
+    Cancel(CompactTask),
+    Timer(u64, Instant),
+}
