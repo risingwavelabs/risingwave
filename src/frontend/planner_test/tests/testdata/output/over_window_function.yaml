@@ -48,7 +48,7 @@
     create table t(x int);
     select 1+row_number() over(ORDER BY x) from t;
   planner_error: |-
-    Feature is not yet implemented: window function in expression: (1:Int32 + row_number([]) OVER(ORDER BY $0 ASC))
+    Feature is not yet implemented: window function in expression: (1:Int32 + row_number() OVER(ORDER BY $0 ASC))
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
@@ -134,7 +134,7 @@
 - sql: |
     create table t(x int);
     select row_number() over() from t;
-  planner_error: 'Invalid input syntax: window rank function without order by: row_number([]) OVER()'
+  planner_error: 'Invalid input syntax: window rank function without order by: row_number() OVER()'
 - sql: |
     create table t(x int);
     select * from t order by (row_number() over(PARTITION BY x ORDER BY x));
