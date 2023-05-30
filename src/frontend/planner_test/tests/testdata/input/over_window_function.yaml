@@ -340,7 +340,17 @@
     select * from (
         SELECT x, y, z, avg(z * z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
     )
-    WHERE z > 0 and y > 0 and x > 0 and res <= 3;
+    WHERE z > 0 and y > 0 and x > 0 and res <= 3.0;
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: stddev_samp
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select * from (
+        SELECT x, y, z, stddev_pop(x - y) OVER (PARTITION BY z order by x) as res0, stddev_samp(x) OVER (PARTITION BY z order by x) as res1 FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and res0 <= 3.0 and res1 > 1.0;
   expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan
