@@ -202,11 +202,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             &args.agg_calls,
             Some(&args.extra.group_key_indices),
         );
+
+        let group_key_len = args.extra.group_key_indices.len();
         // NOTE: we assume the prefix of table pk is exactly the group key
-        let group_key_table_pk_projection = args.result_table.pk_indices()
-            [..args.extra.group_key_indices.len()]
-            .to_vec()
-            .into();
+        let group_key_table_pk_projection = &args.result_table.pk_indices()[..group_key_len];
+        assert!(group_key_table_pk_projection
+            .iter()
+            .sorted()
+            .copied()
+            .eq(0..group_key_len));
+
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -220,7 +225,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
-                group_key_table_pk_projection,
+                group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,

@@ -119,6 +119,8 @@ impl StreamHashAgg {
         self.logical.i2o_col_mapping()
     }
 
+    // TODO(rc): It'll be better to force creation of EOWC version through `new`, especially when we
+    // optimize for 2-phase EOWC aggregation later.
     pub fn to_eowc_version(&self) -> Result<PlanRef> {
         let input = self.input();
         let wtmk_group_key = self.logical.watermark_group_key(input.watermark_columns());
