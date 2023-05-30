@@ -460,6 +460,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         self.inner.store_media_type()
     }
 
+    pub fn inner(&self) -> &OS {
+        &self.inner
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let operation_type = "upload";
         self.object_store_metrics
