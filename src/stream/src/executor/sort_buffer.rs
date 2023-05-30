@@ -254,10 +254,10 @@ fn key_value_to_full_row<S: StateStore>(
     let key = deserialize_pk_with_vnode(&key, table.pk_serde())
         .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?
         .1;
-    for (i, v) in key.into_inner().into_iter().enumerate() {
+    for (i, v) in key.into_iter().enumerate() {
         row[pk_indices[i]] = v;
     }
-    for (i, v) in value.into_inner().into_iter().enumerate() {
+    for (i, v) in value.into_iter().enumerate() {
         row[val_indices[i]] = v;
     }
     Ok(OwnedRow::new(row))
