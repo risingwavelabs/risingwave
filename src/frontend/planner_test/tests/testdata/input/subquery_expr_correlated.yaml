@@ -399,3 +399,10 @@
     select * from t1 where exists (select * from t2 where t2.c = t1.a union all select * from t3 where t3.f = t1.b);
   expected_outputs:
   - optimized_logical_plan_for_batch
+- name: A correlated subquery contains distinct on
+  sql: |
+    create table t1 (a int, b int);
+    create table t2 (c int, d int);
+    select * from t2 where exists (select distinct on(a) a from t1 where b = d);
+  expected_outputs:
+  - optimized_logical_plan_for_batch

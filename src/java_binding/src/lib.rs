@@ -140,7 +140,7 @@ impl<T> From<T> for Pointer<'static, T> {
     fn from(value: T) -> Self {
         Pointer {
             pointer: Box::into_raw(Box::new(value)) as jlong,
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -149,7 +149,7 @@ impl<T> Pointer<'static, T> {
     fn null() -> Self {
         Pointer {
             pointer: 0,
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         }
     }
 }
