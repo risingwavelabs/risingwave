@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::Result as RwResult;
+use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::expr::build_from_prost;
@@ -242,6 +242,19 @@ impl ExprImpl {
     /// Shorthand to inplace cast expr to `target` type in implicit context.
     pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Implicit)
+    }
+
+    /// Ensure the return type of this expression is an array of some type.
+    pub fn ensure_array_type(&self) -> Result<(), ErrorCode> {
+        if self.is_untyped() {
+            return Err(ErrorCode::BindError(
+                "could not determine polymorphic type because input has type unknown".into(),
+            ));
+        }
+        match self.return_type() {
+            DataType::List(_) => Ok(()),
+            t => Err(ErrorCode::BindError(format!("expects array but got {t}"))),
+        }
     }
 
     /// Shorthand to enforce implicit cast to boolean

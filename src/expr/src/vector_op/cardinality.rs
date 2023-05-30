@@ -54,7 +54,7 @@ use risingwave_expr_macro::function;
 /// ----
 /// 1
 ///
-/// query error unknown type
+/// query error type unknown
 /// select cardinality(null);
 /// ```
 #[function("cardinality(list) -> int64")]
