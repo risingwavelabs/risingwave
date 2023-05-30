@@ -91,7 +91,7 @@ impl Rule for OverWindowToAggAndJoinRule {
         );
         Some(
             LogicalProject::with_out_col_idx(
-                LogicalJoin::new(common_input, agg.0, JoinType::Inner, on_clause).into(),
+                LogicalJoin::new(common_input, agg, JoinType::Inner, on_clause).into(),
                 out_fields.into_iter(),
             )
             .into(),
