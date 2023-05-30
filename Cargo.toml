@@ -11,6 +11,7 @@ members = [
   "src/connector",
   "src/ctl",
   "src/expr",
+  "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
@@ -19,6 +20,7 @@ members = [
   "src/prost",
   "src/prost/helpers",
   "src/risedevtool",
+  "src/risedevtool/config",
   "src/rpc_client",
   "src/source",
   "src/sqlparser",
@@ -32,6 +34,7 @@ members = [
   "src/stream",
   "src/test_runner",
   "src/tests/compaction_test",
+  "src/tests/e2e_extended_mode",
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
@@ -47,7 +50,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0-alpha"
+version = "1.0.0-alpha"
 edition = "2021"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -64,23 +67,17 @@ aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
 aws-endpoint = "0.51"
 aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+futures-async-stream = "0.2"
+hytra = "0.1"
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
+hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"] }
 
 [profile.dev]
 lto = 'off'
 
 [profile.release]
-debug = 1 # line tables only
+debug = "line-tables-only"
 lto = 'thin'
-
-[profile.bench]
-opt-level = 3
-debug = false
-codegen-units = 1
-lto = 'thin'
-incremental = false
-debug-assertions = false
-overflow-checks = false
-rpath = false
 
 # The profile used for CI in main branch.
 # This profile inherits from the release profile, but turns on some checks and assertions for us to
@@ -96,6 +93,7 @@ overflow-checks = true
 [profile.ci-dev]
 inherits = "dev"
 incremental = false
+debug = "line-tables-only"
 [profile.ci-dev.package."*"] # external dependencies
 opt-level = 1
 [profile.ci-dev.package."tokio"]
@@ -114,13 +112,13 @@ opt-level = 3
 inherits = "dev"
 opt-level = 2
 incremental = false
+debug = "line-tables-only"
 
 # Patch third-party crates for deterministic simulation.
 [patch.crates-io]
-quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
-getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710" }
+quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
+getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
-tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "43e025d" }
+tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }

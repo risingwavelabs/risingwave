@@ -14,9 +14,9 @@
 
 use risingwave_pb::data::{ArrayType, PbArray};
 
-use super::{Array, ArrayBuilder, ArrayMeta};
-use crate::array::ArrayBuilderImpl;
+use super::{Array, ArrayBuilder, DataType};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::estimate_size::EstimateSize;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {
@@ -66,6 +66,12 @@ impl FromIterator<bool> for BoolArray {
     }
 }
 
+impl EstimateSize for BoolArray {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size() + self.data.estimated_heap_size()
+    }
+}
+
 impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
     type OwnedItem = bool;
@@ -104,9 +110,8 @@ impl Array for BoolArray {
         self.bitmap = bitmap;
     }
 
-    fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
-        let array_builder = BoolArrayBuilder::new(capacity);
-        ArrayBuilderImpl::Bool(array_builder)
+    fn data_type(&self) -> DataType {
+        DataType::Boolean
     }
 }
 
@@ -120,11 +125,16 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
+    fn new(capacity: usize) -> Self {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
         }
+    }
+
+    fn with_type(capacity: usize, ty: DataType) -> Self {
+        assert_eq!(ty, DataType::Boolean);
+        Self::new(capacity)
     }
 
     fn append_n(&mut self, n: usize, value: Option<bool>) {
@@ -154,6 +164,10 @@ impl ArrayBuilder for BoolArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> BoolArray {
         BoolArray {
             bitmap: self.bitmap.finish(),
@@ -169,7 +183,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::array::{read_bool_array, NULL_VAL_FOR_HASH};
+    use crate::array::{ArrayImpl, NULL_VAL_FOR_HASH};
     use crate::util::iter_util::ZipEqFast;
 
     fn helper_test_builder(data: Vec<Option<bool>>) -> BoolArray {
@@ -194,6 +208,8 @@ mod tests {
             })
             .collect_vec();
         let array = helper_test_builder(v.clone());
+        assert_eq!(256, array.estimated_heap_size());
+        assert_eq!(320, array.estimated_size());
         let res = v.iter().zip_eq_fast(array.iter()).all(|(a, b)| *a == b);
         assert!(res);
     }
@@ -216,7 +232,9 @@ mod tests {
             let array = helper_test_builder(v.clone());
 
             let encoded = array.to_protobuf();
-            let decoded = read_bool_array(&encoded, num_bits).unwrap().into_bool();
+            let decoded = ArrayImpl::from_protobuf(&encoded, num_bits)
+                .unwrap()
+                .into_bool();
 
             let equal = array
                 .iter()

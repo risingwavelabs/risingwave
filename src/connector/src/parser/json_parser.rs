@@ -16,14 +16,14 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, ValueAccess};
+use simd_json::BorrowedValue;
 
 use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 impl_common_parser_logic!(JsonParser);
 
@@ -70,8 +70,9 @@ impl JsonParser {
     ) -> Result<WriteGuard> {
         writer.insert(|desc| {
             simd_json_parse_value(
+                &SourceFormat::Json,
                 &desc.data_type,
-                value.get(desc.name.to_ascii_lowercase().as_str()),
+                json_object_smart_get_value(value, desc.name.as_str().into()),
             )
             .map_err(|e| {
                 tracing::error!("failed to process value ({}): {}", value, e);
@@ -83,7 +84,7 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         enum Op {
@@ -91,25 +92,23 @@ impl JsonParser {
             Delete,
         }
 
-        let (_payload, op) = if self.enable_upsert {
-            let msg: UpsertMessage<'_> = bincode::deserialize(payload)
+        let (mut payload_mut, op) = if self.enable_upsert {
+            let msg: UpsertMessage<'_> = bincode::deserialize(&payload)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
+                (msg.record.to_vec(), Op::Insert)
             } else {
-                (msg.primary_key, Op::Delete)
+                (msg.primary_key.to_vec(), Op::Delete)
             }
         } else {
-            (payload.into(), Op::Insert)
+            (payload, Op::Insert)
         };
-
-        let mut payload_mut = _payload.to_vec();
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        if let BorrowedValue::Array(ref objects) = value  && matches!(op, Op::Insert) {
-             at_least_one_ok(
+        if let BorrowedValue::Array(ref objects) = value && matches!(op, Op::Insert) {
+            at_least_one_ok(
                 objects
                     .iter()
                     .map(|obj| Self::parse_single_value(obj, &mut writer))
@@ -118,15 +117,12 @@ impl JsonParser {
         } else {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
+                    &SourceFormat::Json,
                     &desc.data_type,
-                    value.get(desc.name.to_ascii_lowercase().as_str()),
+                    json_object_smart_get_value(&value, desc.name.as_str().into()),
                 )
                 .map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
-                        e
-                    );
+                    tracing::error!("failed to process value: {}", e);
                     e.into()
                 })
             };
@@ -145,29 +141,29 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
+    use risingwave_common::cast::{str_to_date, str_to_timestamp};
     use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
     use crate::common::UpsertMessage;
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
-    fn get_payload() -> Vec<&'static [u8]> {
+    fn get_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.to_vec(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.to_vec(),
         ]
     }
 
-    fn get_array_top_level_payload() -> Vec<&'static [u8]> {
+    fn get_array_top_level_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.as_slice()
+            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.to_vec()
         ]
     }
 
-    async fn test_json_parser(get_payload: fn() -> Vec<&'static [u8]>) {
+    async fn test_json_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
@@ -175,10 +171,10 @@ mod tests {
             SourceColumnDesc::simple("i64", DataType::Int64, 4.into()),
             SourceColumnDesc::simple("f32", DataType::Float32, 5.into()),
             SourceColumnDesc::simple("f64", DataType::Float64, 6.into()),
-            SourceColumnDesc::simple("varchar", DataType::Varchar, 7.into()),
-            SourceColumnDesc::simple("date", DataType::Date, 8.into()),
-            SourceColumnDesc::simple("timestamp", DataType::Timestamp, 9.into()),
-            SourceColumnDesc::simple("decimal", DataType::Decimal, 10.into()),
+            SourceColumnDesc::simple("Varchar", DataType::Varchar, 7.into()),
+            SourceColumnDesc::simple("Date", DataType::Date, 8.into()),
+            SourceColumnDesc::simple("Timestamp", DataType::Timestamp, 9.into()),
+            SourceColumnDesc::simple("Decimal", DataType::Decimal, 10.into()),
         ];
 
         let parser = JsonParser::new(descs.clone(), Default::default()).unwrap();
@@ -224,11 +220,11 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(7).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
+                (Some(ScalarImpl::Date(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
@@ -286,7 +282,7 @@ mod tests {
         // Parse a correct record.
         {
             let writer = builder.row_writer();
-            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap();
         }
 
@@ -294,14 +290,14 @@ mod tests {
         {
             let writer = builder.row_writer();
             // `v2` overflowed.
-            let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
-            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap();
         }
 
@@ -357,7 +353,7 @@ mod tests {
                 "username": "Dooley5659"
             }
         }
-        "#;
+        "#.to_vec();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
@@ -370,7 +366,7 @@ mod tests {
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("1732524418112319151".into())),
@@ -378,7 +374,7 @@ mod tests {
                 Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::NaiveDateTime(
+                Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
                 Some(ScalarImpl::Utf8("7772634297".into())),
@@ -386,11 +382,11 @@ mod tests {
                 Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
-        assert_eq!(row, expected);
+        assert_eq!(row, expected.into());
     }
     #[tokio::test]
     async fn test_json_upsert_parser() {
-        let items = &[
+        let items = [
             (r#"{"a":1}"#, r#"{"a":1,"b":2}"#),
             (r#"{"a":1}"#, r#"{"a":1,"b":3}"#),
             (r#"{"a":2}"#, r#"{"a":2,"b":2}"#),
@@ -402,7 +398,8 @@ mod tests {
                 record: v.as_bytes().into(),
             })
             .unwrap()
-        });
+        })
+        .to_vec();
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),

@@ -5,11 +5,11 @@ extend = [
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
-  { path = "src/risedevtool/gcloud-pubsub.toml"},
+  { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
-  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml" },
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -22,9 +22,16 @@ env_scripts = [
   '''
 #!@duckscript
 
+# only duckscript can modify env variables in cargo-make
+
+set_env ENABLE_TELEMETRY "false"
+
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
+is_release = get_env ENABLE_RELEASE_PROFILE
+is_not_release = not ${is_release}
+is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -47,6 +54,12 @@ else
   set_env BUILD_HDFS_BACKEND_CMD ""
 end
 
+if ${is_not_release} and ${is_dynamic_linking}
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+else
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
 ''',
 ]
 
@@ -57,6 +70,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
+min_version = "0.36.6"
 
 [tasks.clean-full]
 category = "Misc"
@@ -164,7 +178,7 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which logs you want to follow"
   echo "Available logs are..."
   ls ${PREFIX_LOG}
@@ -176,7 +190,7 @@ if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
   echo "Available logs are..."
   ls ${PREFIX_LOG}
   exit 1
-fi 
+fi
 
 tail -f -n 5 ${PREFIX_LOG}/$1
 '''
@@ -326,6 +340,7 @@ echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
+            ${RISINGWAVE_FEATURE_FLAGS} \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
@@ -343,7 +358,7 @@ cargo clean
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" }
 script = '''
 #!/usr/bin/env bash
 
@@ -369,7 +384,6 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
-  "download-connector",
   "download-maven",
   "download-etcd",
   "download-grafana",
@@ -441,13 +455,17 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["download-connector"]
+dependencies = ["build-connector-node"]
 script = '''
 #!/usr/bin/env bash
 
 set -ex
 
-RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 \
+cargo run --bin risingwave \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          -- playground
 '''
 
 [tasks.ctl]
@@ -475,8 +493,7 @@ alias = "dev"
 [tasks.dev]
 category = "RiseDev - Start"
 dependencies = ["pre-start-dev"]
-command = "target/${BUILD_MODE_DIR}/risedev-dev"
-args = ["${@}"]
+script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
 description = "Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kafka]
@@ -507,15 +524,20 @@ category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
+[tasks.install-nextest]
+category = "RiseDev - Check"
+install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = ["nextest", "--help"], install_command = "binstall" }
+
+[tasks.install-llvm-cov]
+category = "RiseDev - Check"
+install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = ["llvm-cov", "--help"], install_command = "binstall" }
+
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
 #!/usr/bin/env bash
 
 set -e
-
-cargo install cargo-quickinstall --locked
-cargo quickinstall cargo-binstall
 
 for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
 do
@@ -564,7 +586,7 @@ echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(t
 
 [tasks.test-cov]
 category = "RiseDev - Test"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-llvm-cov", "install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
@@ -576,7 +598,7 @@ description = "Run unit tests and report coverage"
 
 [tasks.test]
 category = "RiseDev - Test"
-dependencies = ["warn-on-missing-tools"]
+dependencies = ["install-nextest"]
 script = """
 #!/usr/bin/env bash
 set -e
@@ -588,7 +610,11 @@ description = "Run unit tests"
 [tasks.build-connector-node]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"], files_modified = { input = [
+  "./java/connector-node/**/*.java",
+], output = [
+  "./java/connector-node/assembly/target/*",
+] } }
 description = "Build RisingWave Connector from source"
 script = '''
 #!/usr/bin/env bash
@@ -603,29 +629,26 @@ fi
 ARTIFACT="risingwave-connector-1.0.0.tar.gz"
 TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
-if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
-  echo "Rebuild connector node"
-  cd "${JAVA_DIR}"
-  "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
-else
-  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
-fi
+echo "Building connector node..."
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
 tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
 
-
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo build \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_batch \
   -p risingwave_common \
   -p risingwave_compute \
@@ -643,13 +666,14 @@ cargo build \
 [tasks.stest]
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+dependencies = ["install-nextest"]
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_batch \
   -p risingwave_common \
   -p risingwave_compute \
@@ -665,31 +689,38 @@ cargo nextest run \
 """
 
 [tasks.sscale-test]
-category = "RiseDev - Simulation scaling tests"
-description = "Run integration scaling tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+category = "RiseDev - Simulation integration tests"
+description = "Run scaling tests in deterministic simulation mode"
+deprecated = "Please use `risedev sit-test scale::` instead."
+
+[tasks.sit-test]
+category = "RiseDev - Simulation integration tests"
+description = "Run integration tests in deterministic simulation mode"
+dependencies = ["install-nextest"]
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
   "$@"
 """
 
-[tasks.sarchive-scale-test]
-category = "RiseDev - Simulation scaling tests"
-description = "Archive integration scaling tests in deterministic simulation mode"
-dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+[tasks.sarchive-it-test]
+category = "RiseDev - Simulation integration tests"
+description = "Archive integration tests in deterministic simulation mode"
+dependencies = ["install-nextest"]
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
 cargo nextest archive \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
   -p risingwave_simulation \
-  --archive-file scale-test.tar.zst \
+  --archive-file simulation-it-test.tar.zst \
   "$@"
 """
 
@@ -697,55 +728,65 @@ cargo nextest archive \
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation --all-targets "$@"
+cargo check \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo run -p risingwave_simulation "$@"
+cargo run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation "$@"
 """
 
 [tasks.sslt-build-all]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo build -p risingwave_simulation --tests "$@"
+cargo build \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation \
+  --tests "$@"
 """
 
 [tasks.sslt-cov]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
-dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim-cov" }
+dependencies = ["install-llvm-cov"]
+env = { CARGO_TARGET_DIR = "target/sim-cov" }
 script = """
 #!/usr/bin/env bash
 set -e
 
-cargo llvm-cov run -p risingwave_simulation --html "$@"
+cargo llvm-cov run \
+  --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  -p risingwave_simulation \
+  --html "$@"
 """
 
 [tasks.check-java]
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -757,14 +798,14 @@ else
 fi
 
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" spotless:check
+"${MAVEN_PATH}" spotless:check -q
 """
 
 [tasks.check-java-fix]
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
-condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -782,20 +823,21 @@ cd "${JAVA_DIR}"
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
+install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = ["hakari", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 
-# cargo hakari will generate new Cargo.toml regardless whether the original Cargo.toml is correct or not.
-# So we always verify before generate, so as not to change the modified time of Cargo.toml.
-(cargo hakari verify > /dev/null) || cargo hakari generate
+cargo hakari generate --diff --quiet || cargo hakari generate
+cargo hakari verify > /dev/null
 test $? -eq 0 || exit 1
 """
 
 [tasks.check-dep-sort]
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
+install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = ["sort", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -824,7 +866,7 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -840,23 +882,21 @@ if [ $# -gt 0 ]; then
   ARGS=("$@")
 
   echo "Applying clippy --fix for $@ (including dirty and staged files)"
-  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+  cargo clippy ${ARGS[@]/#/--package risingwave_} ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
   echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
-  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+  cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 fi
 """
 
 [tasks.check-typos]
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
+install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = ["--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
-if ! [ -x "$(command -v typos)" ]; then
-  echo "Error: 'typos-cli' is not installed, please run './risedev install-tools'." >&2
-  exit 1
-fi
+
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
 fi
@@ -866,6 +906,7 @@ fi
 category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
+install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = ["udeps", "--help"], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -874,7 +915,7 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
 
@@ -968,7 +1009,7 @@ description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-dependencies = ["warn-on-missing-tools"]
+install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = ["--help"] }
 command = "sqllogictest"
 args = ["${@}"]
 description = "Run SQLLogicTest"
@@ -1053,4 +1094,15 @@ script = '''
 set -e
 
 cp -a .risingwave/rw-docker/* docker
+'''
+
+[tasks.generate-example-config]
+category = "misc"
+description = "Generate default config and write to src/config/example.toml"
+script = '''
+cat << EOF > src/config/example.toml
+# This file is generated by ./risedev generate-example-config
+# Check detailed comments in src/common/src/config.rs
+EOF
+cargo run --bin example-config >> src/config/example.toml
 '''

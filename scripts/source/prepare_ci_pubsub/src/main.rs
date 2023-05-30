@@ -14,16 +14,16 @@ const SUBSCRIPTION_COUNT: usize = 50;
 async fn main() -> anyhow::Result<()> {
     std::env::set_var("PUBSUB_EMULATOR_HOST", "127.0.0.1:5980");
 
-    let client = Client::default().await?;
+    let client = Client::new(Default::default()).await?;
 
     // delete and create "test-topic"
     let topic = client.topic(TOPIC);
-    for subscription in topic.subscriptions(None, None).await? {
-        subscription.delete(None, None).await?;
+    for subscription in topic.subscriptions(None).await? {
+        subscription.delete(None).await?;
     }
 
-    let _ = topic.delete(None, None).await;
-    topic.create(Some(Default::default()), None, None).await?;
+    let _ = topic.delete(None).await;
+    topic.create(Some(Default::default()), None).await?;
     for i in 0..SUBSCRIPTION_COUNT {
         let _ = client
             .create_subscription(
@@ -33,7 +33,6 @@ async fn main() -> anyhow::Result<()> {
                     retain_acked_messages: true,
                     ..Default::default()
                 },
-                None,
                 None,
             )
             .await?;
@@ -57,7 +56,7 @@ async fn main() -> anyhow::Result<()> {
                 ..Default::default()
             })
             .await;
-        a.get(None).await?;
+        a.get().await?;
         println!("published {}", line);
     }
 

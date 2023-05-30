@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::estimate_size::VecWithKvSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -28,16 +29,19 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
+use crate::cache::cache_may_stale;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Executor, Message, PkIndices};
+use crate::executor::{ActorContextRef, Barrier, Executor, Message, PkIndices};
 use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
+    pub ctx: ActorContextRef,
+
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
     pub arrangement: Box<dyn Executor>,
@@ -116,6 +120,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 impl<S: StateStore> LookupExecutor<S> {
     pub fn new(params: LookupExecutorParams<S>) -> Self {
         let LookupExecutorParams {
+            ctx,
             arrangement,
             stream,
             arrangement_col_descs,
@@ -202,6 +207,7 @@ impl<S: StateStore> LookupExecutor<S> {
         );
 
         Self {
+            ctx,
             chunk_data_types,
             schema: output_schema,
             pk_indices,
@@ -265,18 +271,11 @@ impl<S: StateStore> LookupExecutor<S> {
         #[for_await]
         for msg in input {
             let msg = msg?;
+            self.lookup_cache.evict();
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
-                    if self.arrangement.use_current_epoch {
-                        // If we are using current epoch, stream barrier should always come after
-                        // arrange barrier. So we flush now.
-                        self.lookup_cache.flush();
-                    }
+                    self.process_barrier(&barrier);
 
-                    // Use the new stream barrier epoch as new cache epoch
-                    self.lookup_cache.update_epoch(barrier.epoch.curr);
-
-                    self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
                         // ready, so we can forward barrier now.
@@ -294,10 +293,6 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
 
                     if !self.arrangement.use_current_epoch {
-                        // If we are using previous epoch, arrange barrier should always come after
-                        // stream barrier. So we flush now.
-                        self.lookup_cache.flush();
-
                         // When look prev epoch, arrange ready will always come after stream
                         // barrier. So we yield barrier now.
                         yield Message::Barrier(barrier);
@@ -336,11 +331,23 @@ impl<S: StateStore> LookupExecutor<S> {
         }
     }
 
-    /// Store the barrier.
-    #[expect(clippy::unused_async)]
-    async fn process_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
-        self.last_barrier = Some(barrier);
-        Ok(())
+    /// Process the barrier and apply changes if necessary.
+    fn process_barrier(&mut self, barrier: &Barrier) {
+        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+            let previous_vnode_bitmap = self
+                .arrangement
+                .storage_table
+                .update_vnode_bitmap(vnode_bitmap.clone());
+
+            // Manipulate the cache if necessary.
+            if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+                self.lookup_cache.clear();
+            }
+        }
+
+        // Use the new stream barrier epoch as new cache epoch
+        self.lookup_cache.update_epoch(barrier.epoch.curr);
+        self.last_barrier = Some(barrier.clone());
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
@@ -354,13 +361,27 @@ impl<S: StateStore> LookupExecutor<S> {
         let lookup_row = stream_row
             .project(&self.key_indices_mapping)
             .into_owned_row();
+        let table_id_str = self.arrangement.storage_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        self.ctx
+            .streaming_metrics
+            .lookup_total_query_cache_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }
 
+        // cache miss
+        self.ctx
+            .streaming_metrics
+            .lookup_cache_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
+
         tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
-        let mut all_rows = vec![];
+        let mut all_rows = VecWithKvSize::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {
@@ -397,11 +418,16 @@ impl<S: StateStore> LookupExecutor<S> {
             }
         }
 
-        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
+        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows.inner());
 
-        self.lookup_cache
-            .batch_update(lookup_row, all_rows.iter().cloned());
+        self.lookup_cache.batch_update(lookup_row, all_rows.clone());
 
-        Ok(all_rows)
+        self.ctx
+            .streaming_metrics
+            .lookup_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.lookup_cache.len() as i64);
+
+        Ok(all_rows.into_inner())
     }
 }

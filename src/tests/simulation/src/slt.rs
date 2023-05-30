@@ -21,6 +21,7 @@ use sqllogictest::ParallelTestError;
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
+use crate::utils::TimedExt;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql
@@ -38,17 +39,22 @@ enum SqlCmd {
     Drop,
     Dml,
     Flush,
+    Alter,
     Others,
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete since the atomicity is not guaranteed.
+    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
     // Notice that `create table as` is also not atomic in our system.
+    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+    // remove it until transactional commit of table fragment and catalog is supported.
     fn ignore_kill(&self) -> bool {
         matches!(
             self,
             SqlCmd::Dml
                 | SqlCmd::Flush
+                | SqlCmd::Alter
                 | SqlCmd::Create {
                     is_create_table_as: true
                 }
@@ -70,6 +76,7 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
         "flush" => SqlCmd::Flush,
+        "alter" => SqlCmd::Alter,
         _ => SqlCmd::Others,
     }
 }
@@ -78,10 +85,8 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // We already have visibility_all cases.
-    "visibility_checkpoint.slt",
-    // This depends on session config.
-    "session_timezone.slt",
+    // Drop is not retryable in search path test.
+    "search_path.slt",
 ];
 
 /// Run the sqllogictest files in `glob`.
@@ -106,13 +111,23 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             .then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+            // uncomment to print metrics for task counts
+            // let metrics = madsim::runtime::Handle::current().metrics();
+            // println!("{:#?}", metrics);
+            // println!("{}", metrics.num_tasks_by_node_by_spawn());
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }
 
             // For normal records.
             if !kill {
-                match tester.run_async(record).await {
+                match tester
+                    .run_async(record.clone())
+                    .timed(|_res, elapsed| {
+                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
+                    })
+                    .await
+                {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
                 }
@@ -128,7 +143,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             if cmd.ignore_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
-                    if let Err(err) = tester.run_async(record.clone()).await {
+                    if let Err(err) = tester
+                        .run_async(record.clone())
+                        .timed(|_res, elapsed| {
+                            tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
+                        })
+                        .await
+                    {
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
                         let should_retry =
@@ -145,7 +166,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 continue;
             }
 
-            let should_kill = thread_rng().gen_ratio((opts.kill_rate * 1000.0) as u32, 1000);
+            let should_kill = thread_rng().gen_bool(opts.kill_rate as f64);
             // spawn a background task to kill nodes
             let handle = if should_kill {
                 let cluster = cluster.clone();
@@ -162,7 +183,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // retry up to 5 times until it succeed
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
-                match tester.run_async(record.clone()).await {
+                match tester
+                    .run_async(record.clone())
+                    .timed(|_res, elapsed| {
+                        tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
+                    })
+                    .await
+                {
                     Ok(_) => break,
                     // allow 'table exists' error when retry CREATE statement
                     Err(e)

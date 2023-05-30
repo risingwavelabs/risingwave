@@ -51,6 +51,7 @@ pub enum StatementType {
     CREATE_USER,
     CREATE_INDEX,
     CREATE_FUNCTION,
+    CREATE_CONNECTION,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -63,7 +64,13 @@ pub enum StatementType {
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
+    DROP_CONNECTION,
+    ALTER_INDEX,
+    ALTER_VIEW,
     ALTER_TABLE,
+    ALTER_MATERIALIZED_VIEW,
+    ALTER_SINK,
+    ALTER_SOURCE,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
@@ -99,7 +106,7 @@ pub struct PgResponse<VS> {
     // row count of effected row. Used for INSERT, UPDATE, DELETE, COPY, and other statements that
     // don't return rows.
     row_cnt: Option<i32>,
-    notice: Option<String>,
+    notices: Vec<String>,
     values_stream: Option<VS>,
     callback: Option<BoxedCallback>,
     row_desc: Vec<PgFieldDescriptor>,
@@ -113,7 +120,7 @@ where
         f.debug_struct("PgResponse")
             .field("stmt_type", &self.stmt_type)
             .field("row_cnt", &self.row_cnt)
-            .field("notice", &self.notice)
+            .field("notices", &self.notices)
             .field("row_desc", &self.row_desc)
             .finish()
     }
@@ -188,6 +195,9 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Sink => Ok(StatementType::DROP_SINK),
                 risingwave_sqlparser::ast::ObjectType::Database => Ok(StatementType::DROP_DATABASE),
                 risingwave_sqlparser::ast::ObjectType::User => Ok(StatementType::DROP_USER),
+                risingwave_sqlparser::ast::ObjectType::Connection => {
+                    Ok(StatementType::DROP_CONNECTION)
+                }
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
             Statement::Flush => Ok(StatementType::FLUSH),
@@ -258,7 +268,7 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: None,
+            notices: vec![],
             callback: None,
         }
     }
@@ -270,11 +280,19 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: if !notice.is_empty() {
-                Some(notice)
-            } else {
-                None
-            },
+            notices: vec![notice],
+            callback: None,
+        }
+    }
+
+    pub fn empty_result_with_notices(stmt_type: StatementType, notices: Vec<String>) -> Self {
+        let row_cnt = if stmt_type.is_query() { None } else { Some(0) };
+        Self {
+            stmt_type,
+            row_cnt,
+            values_stream: None,
+            row_desc: vec![],
+            notices,
             callback: None,
         }
     }
@@ -285,7 +303,7 @@ where
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
-        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, None, None)
+        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, vec![], None)
     }
 
     pub fn new_for_stream_extra(
@@ -293,7 +311,7 @@ where
         row_cnt: Option<i32>,
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
-        notice: String,
+        notices: Vec<String>,
         callback: impl Callback + 'static,
     ) -> Self {
         Self::new_for_stream_inner(
@@ -301,11 +319,7 @@ where
             row_cnt,
             values_stream,
             row_desc,
-            if !notice.is_empty() {
-                Some(notice)
-            } else {
-                None
-            },
+            notices,
             Some(callback.boxed()),
         )
     }
@@ -315,7 +329,7 @@ where
         row_cnt: Option<i32>,
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
-        notice: Option<String>,
+        notices: Vec<String>,
         callback: Option<BoxedCallback>,
     ) -> Self {
         assert!(
@@ -327,7 +341,7 @@ where
             row_cnt,
             values_stream: Some(values_stream),
             row_desc,
-            notice,
+            notices,
             callback,
         }
     }
@@ -336,8 +350,8 @@ where
         self.stmt_type
     }
 
-    pub fn get_notice(&self) -> Option<String> {
-        self.notice.clone()
+    pub fn get_notices(&self) -> &[String] {
+        &self.notices
     }
 
     pub fn get_effected_rows_cnt(&self) -> Option<i32> {

@@ -66,6 +66,15 @@ pub enum ExprError {
 
     #[error("UDF error: {0}")]
     Udf(#[from] risingwave_udf::Error),
+
+    #[error("not a constant")]
+    NotConstant,
+
+    #[error("Context not found")]
+    Context,
+
+    #[error("field name must not be null")]
+    FieldNameNull,
 }
 
 impl From<ExprError> for RwError {

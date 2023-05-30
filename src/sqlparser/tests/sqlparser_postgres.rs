@@ -52,7 +52,7 @@ fn parse_create_table_with_defaults() {
                         None,
                         vec![ColumnOptionDef {
                             name: None,
-                            option: ColumnOption::Default(verified_expr(
+                            option: ColumnOption::DefaultColumns(verified_expr(
                                 "nextval(public.customer_customer_id_seq)"
                             ))
                         }],
@@ -101,7 +101,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(Expr::Value(Value::Boolean(true))),
+                                option: ColumnOption::DefaultColumns(Expr::Value(Value::Boolean(
+                                    true
+                                ))),
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -116,7 +118,9 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(verified_expr("CAST(now() AS TEXT)"))
+                                option: ColumnOption::DefaultColumns(verified_expr(
+                                    "CAST(now() AS TEXT)"
+                                ))
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -131,7 +135,7 @@ fn parse_create_table_with_defaults() {
                         vec![
                             ColumnOptionDef {
                                 name: None,
-                                option: ColumnOption::Default(verified_expr("now()")),
+                                option: ColumnOption::DefaultColumns(verified_expr("now()")),
                             },
                             ColumnOptionDef {
                                 name: None,
@@ -1021,7 +1025,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:28'".to_string()
         ))
     );
 
@@ -1029,7 +1033,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:24'".to_string()
         ))
     );
 
@@ -1037,7 +1041,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:27'".to_string()
         ))
     );
 
@@ -1045,7 +1049,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:23'".to_string()
         ))
     );
 

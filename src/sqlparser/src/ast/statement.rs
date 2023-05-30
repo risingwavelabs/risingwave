@@ -89,8 +89,9 @@ pub struct CreateSourceStatement {
 pub enum SourceSchema {
     Protobuf(ProtobufSchema),
     // Keyword::PROTOBUF ProtobufSchema
-    Json,                   // Keyword::JSON
-    DebeziumJson,           // Keyword::DEBEZIUM_JSON
+    Json,         // Keyword::JSON
+    DebeziumJson, // Keyword::DEBEZIUM_JSON
+    DebeziumMongoJson,
     UpsertJson,             // Keyword::UPSERT_JSON
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
@@ -113,6 +114,7 @@ impl ParseTo for SourceSchema {
                 SourceSchema::Protobuf(protobuf_schema)
             }
             "DEBEZIUM_JSON" => SourceSchema::DebeziumJson,
+            "DEBEZIUM_MONGO_JSON" => SourceSchema::DebeziumMongoJson,
             "AVRO" => {
                 impl_parse_to!(avro_schema: AvroSchema, p);
                 SourceSchema::Avro(avro_schema)
@@ -148,6 +150,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::UpsertJson => write!(f, "UPSERT JSON"),
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
+            SourceSchema::DebeziumMongoJson => write!(f, "DEBEZIUM MONGO JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             SourceSchema::UpsertAvro(avro_schema) => write!(f, "UPSERT AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
@@ -492,6 +495,48 @@ impl fmt::Display for CreateSinkStatement {
     }
 }
 
+// sql_grammar!(CreateConnectionStatement {
+//     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
+//     connection_name: Ident,
+//     with_properties: AstOption<WithProperties>,
+// });
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateConnectionStatement {
+    pub if_not_exists: bool,
+    pub connection_name: ObjectName,
+    pub with_properties: WithProperties,
+}
+
+impl ParseTo for CreateConnectionStatement {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
+        impl_parse_to!(connection_name: ObjectName, p);
+        impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "connection properties not provided".to_string(),
+            ));
+        }
+
+        Ok(Self {
+            if_not_exists,
+            connection_name,
+            with_properties,
+        })
+    }
+}
+
+impl fmt::Display for CreateConnectionStatement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
+        impl_fmt_display!(connection_name, v, self);
+        impl_fmt_display!(with_properties, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct AstVec<T>(pub Vec<T>);
@@ -710,7 +755,7 @@ impl ParseTo for UserOptions {
                 break;
             }
 
-            if let Token::Word(ref w) = token {
+            if let Token::Word(ref w) = token.token {
                 parser.next_token();
                 let (item_mut_ref, user_option) = match w.keyword {
                     Keyword::SUPERUSER => (&mut builder.super_user, UserOption::SuperUser),

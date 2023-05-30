@@ -17,10 +17,18 @@ use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
-    CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
+    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
+    Value,
 };
+
+use crate::catalog::connection_catalog::resolve_private_link_connection;
+use crate::catalog::ConnectionId;
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::handler::util::get_connection_name;
+use crate::session::SessionImpl;
 
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
@@ -53,6 +61,10 @@ impl WithOptions {
     /// Get the reference of the inner map.
     pub fn inner(&self) -> &BTreeMap<String, String> {
         &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut BTreeMap<String, String> {
+        &mut self.inner
     }
 
     /// Take the value of the inner map.
@@ -96,6 +108,39 @@ impl WithOptions {
         }
         false
     }
+}
+
+#[inline(always)]
+fn is_kafka_connector(with_options: &WithOptions) -> bool {
+    let Some(connector) = with_options.inner().get(UPSTREAM_SOURCE_KEY).map(|s| s.to_lowercase()) else {
+        return false;
+    };
+    connector == KAFKA_CONNECTOR
+}
+
+pub(crate) fn resolve_connection_in_with_option(
+    with_options: &mut WithOptions,
+    schema_name: &Option<String>,
+    session: &SessionImpl,
+) -> RwResult<Option<ConnectionId>> {
+    let connection_name = get_connection_name(with_options);
+    let is_kafka = is_kafka_connector(with_options);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection = session
+                .get_connection_by_name(schema_name.clone(), &connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Connection is only supported in kafka connector".to_string(),
+                )));
+            }
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
+        }
+        None => None,
+    };
+    Ok(connection_id)
 }
 
 impl TryFrom<&[SqlOption]> for WithOptions {
@@ -144,6 +189,12 @@ impl TryFrom<&Statement> for WithOptions {
             | Statement::CreateSink {
                 stmt:
                     CreateSinkStatement {
+                        with_properties, ..
+                    },
+            }
+            | Statement::CreateConnection {
+                stmt:
+                    CreateConnectionStatement {
                         with_properties, ..
                     },
             } => Self::try_from(with_properties.0.as_slice()),

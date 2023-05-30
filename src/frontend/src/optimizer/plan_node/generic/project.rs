@@ -216,9 +216,8 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         let input_len = self.input.schema().len();
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
+            if let ExprImpl::InputRef(input) = expr {
+                map[i] = Some(input.index())
             }
         }
         ColIndexMapping::with_target_size(map, input_len)
@@ -227,7 +226,15 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
+        let exprs = &self.exprs;
+        let input_len = self.input.schema().len();
+        let mut map = vec![None; input_len];
+        for (i, expr) in exprs.iter().enumerate() {
+            if let ExprImpl::InputRef(input) = expr {
+                map[input.index()] = Some(i)
+            }
+        }
+        ColIndexMapping::with_target_size(map, exprs.len())
     }
 
     pub fn is_all_inputref(&self) -> bool {
@@ -280,6 +287,10 @@ impl ProjectBuilder {
             self.exprs_index.insert(expr.clone(), index);
             Ok(index)
         }
+    }
+
+    pub fn get_expr(&self, index: usize) -> Option<&ExprImpl> {
+        self.exprs.get(index)
     }
 
     pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {

@@ -16,8 +16,7 @@ use std::iter::FusedIterator;
 use std::mem::swap;
 
 use super::iter_util::ZipEqDebug;
-use crate::array::column::Column;
-use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
+use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, DataChunk};
 use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
@@ -149,7 +148,7 @@ impl DataChunkBuilder {
 
     fn do_append_one_row_from_datums(&mut self, datums: impl Iterator<Item = impl ToDatumRef>) {
         for (array_builder, datum) in self.array_builders.iter_mut().zip_eq_debug(datums) {
-            array_builder.append_datum(datum);
+            array_builder.append(datum);
         }
         self.buffered_count += 1;
     }
@@ -211,7 +210,7 @@ impl DataChunkBuilder {
 
         let columns = new_array_builders.into_iter().fold(
             Vec::with_capacity(self.data_types.len()),
-            |mut vec, array_builder| -> Vec<Column> {
+            |mut vec, array_builder| -> Vec<ArrayRef> {
                 let column = array_builder.finish().into();
                 vec.push(column);
                 vec
@@ -222,6 +221,10 @@ impl DataChunkBuilder {
 
     pub fn buffered_count(&self) -> usize {
         self.buffered_count
+    }
+
+    pub fn num_columns(&self) -> usize {
+        self.data_types.len()
     }
 
     pub fn data_types(&self) -> Vec<DataType> {
@@ -435,13 +438,13 @@ mod tests {
 
         let mut left_array_builder = DataType::Int32.create_array_builder(5);
         for v in [1, 2, 3, 4, 5] {
-            left_array_builder.append_datum(&Some(ScalarImpl::Int32(v)));
+            left_array_builder.append(&Some(ScalarImpl::Int32(v)));
         }
         let left_arrays = vec![left_array_builder.finish()];
 
         let mut right_array_builder = DataType::Int64.create_array_builder(5);
         for v in [5, 4, 3, 2, 1] {
-            right_array_builder.append_datum(&Some(ScalarImpl::Int64(v)));
+            right_array_builder.append(&Some(ScalarImpl::Int64(v)));
         }
         let right_arrays = vec![right_array_builder.finish()];
 

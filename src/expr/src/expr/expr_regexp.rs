@@ -18,8 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::{Regex, RegexBuilder};
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
-    Utf8Array,
+    Array, ArrayBuilder, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Utf8Array,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
@@ -42,6 +41,29 @@ impl RegexpContext {
                 .case_insensitive(options.case_insensitive)
                 .build()?,
         ))
+    }
+
+    pub fn from_pattern(pattern: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Self::new(pattern, "")
+    }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags)
     }
 }
 
@@ -192,19 +214,15 @@ impl RegexpMatchExpression {
 #[async_trait::async_trait]
 impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
-        DataType::List {
-            datatype: Box::new(DataType::Varchar),
-        }
+        DataType::List(Box::new(DataType::Varchar))
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let text_arr = self.child.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
-        let mut output = ListArrayBuilder::with_meta(
+        let mut output = ListArrayBuilder::with_type(
             input.capacity(),
-            ArrayMeta::List {
-                datatype: Box::new(DataType::Varchar),
-            },
+            DataType::List(Box::new(DataType::Varchar)),
         );
 
         for (text, vis) in text_arr.iter().zip_eq_fast(input.vis().iter()) {

@@ -12,30 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Deref;
 use std::sync::Arc;
 
+use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::PbIndex;
-use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
-use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
-use crate::expr::{Expr, InputRef};
+use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
+use crate::expr::{Expr, ExprImpl, FunctionCall};
+use crate::user::UserId;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
     pub id: IndexId,
 
     pub name: String,
 
-    /// Only `InputRef` type index is supported Now.
+    /// Only `InputRef` and `FuncCall` type index is supported Now.
     /// The index of `InputRef` is the column index of the primary table.
-    /// index_item size is equal to index table columns size
-    pub index_item: Vec<InputRef>,
+    /// The index_item size is equal to the index table columns size
+    /// The input args of `FuncCall` is also the column index of the primary table.
+    pub index_item: Vec<ExprImpl>,
 
     pub index_table: Arc<TableCatalog>,
 
@@ -44,6 +47,15 @@ pub struct IndexCatalog {
     pub primary_to_secondary_mapping: BTreeMap<usize, usize>,
 
     pub secondary_to_primary_mapping: BTreeMap<usize, usize>,
+
+    /// Map function call from the primary table to the index table.
+    /// Use `HashMap` instead of `BTreeMap`, because `FunctionCall` can't be used as the key for
+    /// `BTreeMap`. BTW, the trait `std::hash::Hash` is not implemented for
+    /// `HashMap<function_call::FunctionCall, usize>`, so we need to ignore it. It will not
+    /// affect the correctness, since it can be derived by `index_item`.
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
+    pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,
 }
@@ -54,29 +66,38 @@ impl IndexCatalog {
         index_table: &TableCatalog,
         primary_table: &TableCatalog,
     ) -> Self {
-        let index_item = index_prost
+        let index_item: Vec<ExprImpl> = index_prost
             .index_item
             .iter()
-            .map(|x| match x.rex_node.as_ref().unwrap() {
-                RexNode::InputRef(input_col_idx) => InputRef {
-                    index: *input_col_idx as usize,
-                    data_type: DataType::from(x.return_type.as_ref().unwrap()),
-                },
-                RexNode::FuncCall(_) => unimplemented!(),
+            .map(ExprImpl::from_expr_proto)
+            .try_collect()
+            .unwrap();
+
+        let primary_to_secondary_mapping: BTreeMap<usize, usize> = index_item
+            .iter()
+            .enumerate()
+            .filter_map(|(i, expr)| match expr {
+                ExprImpl::InputRef(input_ref) => Some((input_ref.index, i)),
+                ExprImpl::FunctionCall(_) => None,
                 _ => unreachable!(),
             })
-            .collect_vec();
-
-        let primary_to_secondary_mapping = index_item
-            .iter()
-            .enumerate()
-            .map(|(i, input_ref)| (input_ref.index, i))
             .collect();
 
-        let secondary_to_primary_mapping = index_item
+        let secondary_to_primary_mapping = BTreeMap::from_iter(
+            primary_to_secondary_mapping
+                .clone()
+                .into_iter()
+                .map(|(x, y)| (y, x)),
+        );
+
+        let function_mapping: HashMap<FunctionCall, usize> = index_item
             .iter()
             .enumerate()
-            .map(|(i, input_ref)| (i, input_ref.index))
+            .filter_map(|(i, expr)| match expr {
+                ExprImpl::InputRef(_) => None,
+                ExprImpl::FunctionCall(func) => Some((func.deref().clone(), i)),
+                _ => unreachable!(),
+            })
             .collect();
 
         let original_columns = index_prost
@@ -94,6 +115,7 @@ impl IndexCatalog {
             primary_table: Arc::new(primary_table.clone()),
             primary_to_secondary_mapping,
             secondary_to_primary_mapping,
+            function_mapping,
             original_columns,
         }
     }
@@ -134,6 +156,10 @@ impl IndexCatalog {
         &self.primary_to_secondary_mapping
     }
 
+    pub fn function_mapping(&self) -> &HashMap<FunctionCall, usize> {
+        &self.function_mapping
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbIndex {
         PbIndex {
             id: self.id.index_id,
@@ -146,9 +172,61 @@ impl IndexCatalog {
             index_item: self
                 .index_item
                 .iter()
-                .map(InputRef::to_expr_proto)
+                .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
         }
+    }
+
+    pub fn display(&self) -> IndexDisplay {
+        let index_table = self.index_table.clone();
+        let index_columns_with_ordering = index_table
+            .pk
+            .iter()
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
+            .map(|x| {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                format!("{} {}", index_column_name, x.order_type)
+            })
+            .collect_vec();
+
+        let pk_column_index_set = index_table
+            .pk
+            .iter()
+            .map(|x| x.column_index)
+            .collect::<HashSet<_>>();
+
+        let include_columns = index_table
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !pk_column_index_set.contains(i))
+            .filter(|(_, x)| !x.is_hidden)
+            .map(|(_, x)| x.name().to_string())
+            .collect_vec();
+
+        let distributed_by_columns = index_table
+            .distribution_key
+            .iter()
+            .map(|&x| index_table.columns[x].name().to_string())
+            .collect_vec();
+
+        IndexDisplay {
+            index_columns_with_ordering,
+            include_columns,
+            distributed_by_columns,
+        }
+    }
+}
+
+pub struct IndexDisplay {
+    pub index_columns_with_ordering: Vec<String>,
+    pub include_columns: Vec<String>,
+    pub distributed_by_columns: Vec<String>,
+}
+
+impl OwnedByUserCatalog for IndexCatalog {
+    fn owner(&self) -> UserId {
+        self.index_table.owner
     }
 }

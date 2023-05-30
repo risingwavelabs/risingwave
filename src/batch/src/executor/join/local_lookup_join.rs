@@ -22,6 +22,7 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -37,13 +38,14 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
+use tokio::sync::watch::Receiver;
 use uuid::Uuid;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, DummyExecutor, Executor,
     ExecutorBuilder, JoinType, LookupJoinBase,
 };
-use crate::task::{BatchTaskContext, TaskId};
+use crate::task::{BatchTaskContext, ShutdownMsg, TaskId};
 
 /// Inner side executor builder for the `LocalLookupJoinExecutor`
 struct InnerSideExecutorBuilder<C> {
@@ -60,6 +62,7 @@ struct InnerSideExecutorBuilder<C> {
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
+    shutdown_rx: Receiver<ShutdownMsg>,
 }
 
 /// Used to build the executor for the inner side
@@ -233,6 +236,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
             &task_id,
             self.context.clone(),
             self.epoch.clone(),
+            self.shutdown_rx.clone(),
         );
 
         executor_builder.build().await
@@ -367,7 +371,7 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
         let vnode_mapping = lookup_join_node.get_inner_side_vnode_mapping().to_vec();
         assert!(!vnode_mapping.is_empty());
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let inner_side_builder = InnerSideExecutorBuilder {
             table_desc: table_desc.clone(),
@@ -383,8 +387,10 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             pu_to_worker_mapping: get_pu_to_worker_mapping(lookup_join_node.get_worker_nodes()),
             pu_to_scan_range_mapping: HashMap::new(),
             chunk_size,
+            shutdown_rx: source.shutdown_rx.clone(),
         };
 
+        let identity = source.plan_node().get_identity().clone();
         Ok(LocalLookupJoinExecutorArgs {
             join_type,
             condition,
@@ -400,7 +406,9 @@ impl BoxedExecutorBuilder for LocalLookupJoinExecutorBuilder {
             schema: actual_schema,
             output_indices,
             chunk_size,
-            identity: source.plan_node().get_identity().clone(),
+            identity: identity.clone(),
+            shutdown_rx: Some(source.shutdown_rx.clone()),
+            mem_ctx: source.context.create_executor_mem_context(&identity),
         }
         .dispatch())
     }
@@ -422,6 +430,8 @@ struct LocalLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
@@ -444,6 +454,8 @@ impl HashKeyDispatcher for LocalLookupJoinExecutorArgs {
             output_indices: self.output_indices,
             chunk_size: self.chunk_size,
             identity: self.identity,
+            shutdown_rx: self.shutdown_rx,
+            mem_ctx: self.mem_ctx,
             _phantom: PhantomData,
         }))
     }
@@ -458,13 +470,11 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::memory::MemoryContext;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::{
-        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
-    };
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
@@ -547,6 +557,8 @@ mod tests {
             output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
+            shutdown_rx: None,
+            mem_ctx: MemoryContext::none(),
         }
         .dispatch()
     }
@@ -568,6 +580,7 @@ mod tests {
             column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
+            MemoryContext::none(),
         ))
     }
 
@@ -674,21 +687,9 @@ mod tests {
              2 5.5 2 5.5
              2 8.4 2 5.5",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::Inner, condition, false, expected).await;
+        do_test(JoinType::Inner, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -703,21 +704,9 @@ mod tests {
              5 9.1 . .
              . .   . .",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftOuter, condition, false, expected).await;
+        do_test(JoinType::LeftOuter, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -728,21 +717,9 @@ mod tests {
              2 5.5
              2 8.4",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftSemi, condition, false, expected).await;
+        do_test(JoinType::LeftSemi, Some(condition), false, expected).await;
     }
 
     #[tokio::test]
@@ -754,20 +731,8 @@ mod tests {
             5 9.1
             . .",
         );
+        let condition = build_from_pretty("(less_than:boolean (cast:float4 5:int4) $3:float4)");
 
-        let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
-            )
-            .unwrap(),
-        );
-
-        do_test(JoinType::LeftAnti, condition, false, expected).await;
+        do_test(JoinType::LeftAnti, Some(condition), false, expected).await;
     }
 }

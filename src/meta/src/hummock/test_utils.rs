@@ -17,19 +17,16 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManagerRef, FullKeyFilterKeyExtractor,
-};
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::add_worker_node_request::Property;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::default_level_selector;
@@ -58,8 +55,8 @@ where
 {
     // Increase version by 2.
     let mut epoch: u64 = 1;
-    let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_tables(epoch, table_ids);
+    let sstable_ids = get_sst_ids(hummock_manager, 3).await;
+    let test_tables = generate_test_sstables_with_table_id(epoch, 1, sstable_ids);
     register_sstable_infos_to_compaction_group(
         hummock_manager,
         &test_tables,
@@ -75,8 +72,6 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables]}
-
     // Simulate a compaction and increase version by 1.
     let mut temp_compactor = false;
     if hummock_manager
@@ -86,23 +81,8 @@ where
     {
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, u64::MAX);
+            .add_compactor(context_id, u64::MAX, 16);
         temp_compactor = true;
-    }
-    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
-    let mut selector = default_level_selector();
-    let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
-        .await
-        .unwrap()
-        .unwrap();
-    compact_task.target_level = 6;
-    hummock_manager
-        .assign_compaction_task(&compact_task, compactor.context_id())
-        .await
-        .unwrap();
-    if temp_compactor {
-        assert_eq!(compactor.context_id(), context_id);
     }
     let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
     register_sstable_infos_to_compaction_group(
@@ -111,19 +91,41 @@ where
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
+    let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let mut selector = default_level_selector();
+    let mut compact_task = hummock_manager
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .input_ssts
+            .iter()
+            .map(|i| i.table_infos.len())
+            .sum::<usize>(),
+        3
+    );
+    compact_task.target_level = 6;
+    hummock_manager
+        .assign_compaction_task(&compact_task, compactor.context_id())
+        .await
+        .unwrap();
+    if temp_compactor {
+        assert_eq!(compactor.context_id(), context_id);
+    }
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
-    hummock_manager
+    let ret = hummock_manager
         .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap();
+    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()
             .remove_compactor(context_id);
     }
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, test_tables to_delete]}
-
     // Increase version by 1.
     epoch += 1;
     let test_tables_3 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
@@ -142,9 +144,42 @@ where
         .commit_epoch(epoch, ssts, sst_to_worker)
         .await
         .unwrap();
-    // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables], v3:
-    // [test_tables_2, test_tables_3]}
     vec![test_tables, test_tables_2, test_tables_3]
+}
+
+pub fn generate_test_sstables_with_table_id(
+    epoch: u64,
+    table_id: u32,
+    sst_ids: Vec<HummockSstableObjectId>,
+) -> Vec<SstableInfo> {
+    let mut sst_info = vec![];
+    for (i, sst_id) in sst_ids.into_iter().enumerate() {
+        sst_info.push(SstableInfo {
+            object_id: sst_id,
+            sst_id,
+            key_range: Some(KeyRange {
+                left: key_with_epoch(
+                    format!("{:03}\0\0_key_test_{:05}", table_id, i + 1)
+                        .as_bytes()
+                        .to_vec(),
+                    epoch,
+                ),
+                right: key_with_epoch(
+                    format!("{:03}\0\0_key_test_{:05}", table_id, (i + 1) * 10)
+                        .as_bytes()
+                        .to_vec(),
+                    epoch,
+                ),
+                right_exclusive: false,
+            }),
+            file_size: 2,
+            table_ids: vec![table_id],
+            uncompressed_file_size: 2,
+            max_epoch: epoch,
+            ..Default::default()
+        });
+    }
+    sst_info
 }
 
 pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
@@ -160,12 +195,9 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) ->
             }),
             file_size: 2,
             table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
-            meta_offset: 0,
-            stale_key_count: 0,
-            total_key_count: 0,
             uncompressed_file_size: 2,
-            min_epoch: 0,
-            max_epoch: 0,
+            max_epoch: epoch,
+            ..Default::default()
         });
     }
     sst_info
@@ -223,32 +255,6 @@ pub async fn unregister_table_ids_from_compaction_group<S>(
         .unwrap();
 }
 
-pub fn update_filter_key_extractor_for_table_ids(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    table_ids: &[u32],
-) {
-    for table_id in table_ids {
-        filter_key_extractor_manager_ref.update(
-            *table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
-        )
-    }
-}
-
-pub fn update_filter_key_extractor_for_tables(
-    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[PbTable],
-) {
-    for table in tables {
-        filter_key_extractor_manager_ref.update(
-            table.id,
-            Arc::new(FilterKeyExtractorImpl::from_table(table)),
-        )
-    }
-}
-
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 pub fn iterator_test_key_of_epoch(
     table: HummockSstableObjectId,
@@ -257,7 +263,7 @@ pub fn iterator_test_key_of_epoch(
 ) -> Vec<u8> {
     // key format: {prefix_index}_version
     key_with_epoch(
-        format!("{:03}_key_test_{:05}", table, idx)
+        format!("{:03}\0\0_key_test_{:05}", table, idx)
             .as_bytes()
             .to_vec(),
         ts,
@@ -322,7 +328,15 @@ pub async fn setup_compute_env_with_config(
     };
     let fake_parallelism = 4;
     let worker_node = cluster_manager
-        .add_worker_node(WorkerType::ComputeNode, fake_host_address, fake_parallelism)
+        .add_worker_node(
+            WorkerType::ComputeNode,
+            fake_host_address,
+            Property {
+                worker_node_parallelism: fake_parallelism as _,
+                is_streaming: true,
+                is_serving: true,
+            },
+        )
         .await
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
@@ -339,6 +353,8 @@ pub async fn setup_compute_env(
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
         .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
         .build();
     setup_compute_env_with_config(port, config).await
 }
@@ -380,13 +396,7 @@ where
     S: MetaStore,
 {
     let table_ids = get_sst_ids(hummock_manager, 3).await;
-    let test_tables = generate_test_tables(epoch, table_ids);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager,
-        &test_tables,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
+    let test_tables = generate_test_sstables_with_table_id(epoch, 1, table_ids);
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()

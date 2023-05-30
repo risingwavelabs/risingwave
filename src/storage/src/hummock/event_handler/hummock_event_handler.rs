@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -22,16 +21,18 @@ use await_tree::InstrumentAwait;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
+use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info};
+use tracing::{error, info, trace, warn};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::event_handler::cache_refill_policy::CacheRefillPolicy;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
@@ -44,6 +45,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
 };
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -51,27 +53,37 @@ use crate::store::SyncResult;
 pub struct BufferTracker {
     flush_threshold: usize,
     global_buffer: Arc<MemoryLimiter>,
-    global_upload_task_size: Arc<AtomicUsize>,
+    global_upload_task_size: GenericGauge<AtomicU64>,
 }
 
 impl BufferTracker {
-    pub fn from_storage_opts(config: &StorageOpts) -> Self {
+    pub fn from_storage_opts(
+        config: &StorageOpts,
+        global_upload_task_size: GenericGauge<AtomicU64>,
+    ) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = capacity * 4 / 5;
-        Self::new(capacity, flush_threshold)
+        Self::new(capacity, flush_threshold, global_upload_task_size)
     }
 
-    pub fn new(capacity: usize, flush_threshold: usize) -> Self {
+    pub fn new(
+        capacity: usize,
+        flush_threshold: usize,
+        global_upload_task_size: GenericGauge<AtomicU64>,
+    ) -> Self {
         assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
             global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
-            global_upload_task_size: Arc::new(AtomicUsize::new(0)),
+            global_upload_task_size,
         }
     }
 
     pub fn for_test() -> Self {
-        Self::from_storage_opts(&StorageOpts::default())
+        Self::from_storage_opts(
+            &StorageOpts::default(),
+            GenericGauge::new("test", "test").unwrap(),
+        )
     }
 
     pub fn get_buffer_size(&self) -> usize {
@@ -82,15 +94,14 @@ impl BufferTracker {
         &self.global_buffer
     }
 
-    pub fn global_upload_task_size(&self) -> &Arc<AtomicUsize> {
+    pub fn global_upload_task_size(&self) -> &GenericGauge<AtomicU64> {
         &self.global_upload_task_size
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// flush threshold.
     pub fn need_more_flush(&self) -> bool {
-        self.get_buffer_size()
-            > self.flush_threshold + self.global_upload_task_size.load(Ordering::Relaxed)
+        self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
     }
 }
 
@@ -108,6 +119,7 @@ pub struct HummockEventHandler {
 
     last_instance_id: LocalInstanceId,
 
+    cache_fill_policy: Arc<CacheRefillPolicy>,
     sstable_object_id_manager: SstableObjectIdManagerRef,
 }
 
@@ -136,22 +148,42 @@ impl HummockEventHandler {
         hummock_event_rx: mpsc::UnboundedReceiver<HummockEvent>,
         pinned_version: PinnedVersion,
         compactor_context: Arc<CompactorContext>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
     ) -> Self {
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
-        let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
+        let buffer_tracker = BufferTracker::from_storage_opts(
+            &compactor_context.storage_opts,
+            state_store_metrics.uploader_uploading_task_size.clone(),
+        );
+        let max_preload_wait_time_mill = compactor_context.storage_opts.max_preload_wait_time_mill;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
+        let sstable_store = compactor_context.sstable_store.clone();
+        let metrics = compactor_context.compactor_metrics.clone();
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
+        let upload_compactor_context = compactor_context.clone();
         let uploader = HummockUploader::new(
+            state_store_metrics,
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
-                spawn(flush_imms(payload, task_info, compactor_context.clone()))
+                spawn(flush_imms(
+                    payload,
+                    task_info,
+                    upload_compactor_context.clone(),
+                ))
             }),
             buffer_tracker,
+            &compactor_context.storage_opts,
+            compactor_context.compaction_executor.clone(),
         );
+        let cache_fill_policy = Arc::new(CacheRefillPolicy::new(
+            sstable_store,
+            metrics,
+            max_preload_wait_time_mill,
+        ));
 
         Self {
             hummock_event_tx,
@@ -163,6 +195,7 @@ impl HummockEventHandler {
             read_version_mapping,
             uploader,
             last_instance_id: 0,
+            cache_fill_policy,
             sstable_object_id_manager,
         }
     }
@@ -266,6 +299,7 @@ impl HummockEventHandler {
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
         // todo: do some prune for version update
         Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+            trace!("data_spilled. SST size {}", staging_sstable_info.imm_size());
             read_version.update(VersionUpdate::Staging(StagingData::Sst(
                 staging_sstable_info.clone(),
             )))
@@ -370,15 +404,26 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
-        let pinned_version = self.pinned_version.load();
+    async fn handle_version_update(&mut self, version_payload: Payload) {
+        let pinned_version = self.pinned_version.load().clone();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
         let newly_pinned_version = match version_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = pinned_version.version();
+                let max_level = version_to_apply
+                    .levels
+                    .values()
+                    .map(|levels| levels.levels.last().unwrap().level_idx)
+                    .max()
+                    .unwrap();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
+                        self.cache_fill_policy
+                            .execute(version_delta.clone(), max_level)
+                            .await;
+                    }
                     version_to_apply.apply_version_delta(version_delta);
                 }
                 version_to_apply
@@ -441,6 +486,26 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
+
+                    UploaderEvent::ImmMerged(merge_output) => {
+                        // update read version for corresponding table shards
+                        let read_guard = self.read_version_mapping.read();
+                        read_guard.get(&merge_output.table_id).map_or((), |shards| {
+                            shards.get(&merge_output.instance_id).map_or_else(
+                                || {
+                                    warn!(
+                                        "handle ImmMerged: table instance not found. table {}, instance {}",
+                                        &merge_output.table_id, &merge_output.instance_id
+                                    )
+                                },
+                                |read_version| {
+                                    read_version.write().update(VersionUpdate::Staging(
+                                        StagingData::MergedImmMem(merge_output.merged_imm),
+                                    ));
+                                },
+                            )
+                        });
+                    }
                 },
                 Either::Right(event) => {
                     match event {
@@ -462,7 +527,7 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload);
+                            self.handle_version_update(version_payload).await;
                         }
 
                         HummockEvent::ImmToUploader(imm) => {
@@ -475,8 +540,12 @@ impl HummockEventHandler {
                             is_checkpoint,
                         } => {
                             self.uploader.seal_epoch(epoch);
+
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
+                            } else {
+                                // start merging task on non-checkpoint epochs sealed
+                                self.uploader.start_merge_imms(epoch);
                             }
                         }
                         #[cfg(any(test, feature = "test"))]

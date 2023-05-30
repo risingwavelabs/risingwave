@@ -13,16 +13,15 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
-use std::sync::Arc;
 
-use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
-use risingwave_common::for_all_variants;
+use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{literal_type_match, DataType, Datum};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
+use super::ValueImpl;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
@@ -39,37 +38,19 @@ impl Expression for LiteralExpression {
         self.return_type.clone()
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut array_builder = self.return_type.create_array_builder(input.capacity());
-        let capacity = input.capacity();
-        let builder = &mut array_builder;
-        let literal = &self.literal;
-
-        macro_rules! array_impl_literal_append {
-            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match (builder, literal) {
-                    $(
-                        (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                            inner.append_n(capacity, Some(v.as_scalar_ref()));
-                        }
-                        (ArrayBuilderImpl::$variant_name(inner), None) => {
-                            inner.append_n(capacity, None);
-                        }
-                    )*
-                    (_, _) => $crate::bail!(
-                        "Do not support values in insert values executor".to_string()
-                    ),
-                }
-            };
-        }
-
-        for_all_variants! { array_impl_literal_append }
-
-        Ok(Arc::new(array_builder.finish()))
+    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+        Ok(ValueImpl::Scalar {
+            value: self.literal.clone(),
+            capacity: input.capacity(),
+        })
     }
 
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
+    }
+
+    fn eval_const(&self) -> Result<Datum> {
+        Ok(self.literal.clone())
     }
 }
 
@@ -120,9 +101,8 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{I32Array, StructValue};
-    use risingwave_common::array_nonnull;
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{Decimal, Interval, IntoOrdered, Scalar, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::{PbDataType, PbDatum};
@@ -225,10 +205,10 @@ mod tests {
 
         let v = 32i32;
         let t = TypeName::Interval;
-        let bytes = serialize_datum(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(Interval::from_month(v).to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(
-            IntervalUnit::from_month(v).to_scalar_value(),
+            Interval::from_month(v).to_scalar_value(),
             expr.literal().unwrap()
         );
     }
@@ -249,7 +229,7 @@ mod tests {
     async fn test_literal_eval_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
         let result = literal.eval(&DataChunk::new_dummy(1)).await.unwrap();
-        assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
+        assert_eq!(*result, I32Array::from_iter([1]).into());
     }
 
     #[tokio::test]

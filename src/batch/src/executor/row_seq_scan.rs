@@ -26,7 +26,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, PbScanRange};
@@ -37,10 +37,10 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
-use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
+use crate::monitor::BatchMetricsWithTaskLabels;
 use crate::task::BatchTaskContext;
 
 /// Executor that scans data from row table
@@ -50,7 +50,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    metrics: Option<BatchMetricsWithTaskLabels>,
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
@@ -138,7 +138,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
-        metrics: Option<BatchTaskMetricsWithTaskLabels>,
+        metrics: Option<BatchMetricsWithTaskLabels>,
     ) -> Self {
         Self {
             chunk_size,
@@ -248,11 +248,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let chunk_size = if let Some(chunk_size_) = &seq_scan_node.chunk_size {
             chunk_size_
                 .get_chunk_size()
-                .min(source.context.get_config().developer.batch_chunk_size as u32)
+                .min(source.context.get_config().developer.chunk_size as u32)
         } else {
-            source.context.get_config().developer.batch_chunk_size as u32
+            source.context.get_config().developer.chunk_size as u32
         };
-        let metrics = source.context().task_metrics();
+        let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
@@ -310,18 +310,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let table = Arc::new(table);
 
         // Create collector.
-        let histogram = if let Some(ref metrics) = metrics {
-            let mut labels = metrics.task_labels();
-            labels.push(identity.as_str());
-            Some(
-                metrics
-                    .metrics
-                    .task_row_seq_scan_next_duration
-                    .with_label_values(&labels),
-            )
-        } else {
-            None
-        };
+        let histogram = metrics
+            .as_ref()
+            .map(|metrics| metrics.create_collector_for_row_seq_scan_next_duration(vec![identity]));
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -406,9 +397,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         let (start_bound, end_bound) =
-            match table.pk_serializer().get_order_types()[pk_prefix.len()].direction() {
-                Direction::Ascending => (next_col_bounds.0, next_col_bounds.1),
-                Direction::Descending => (next_col_bounds.1, next_col_bounds.0),
+            if table.pk_serializer().get_order_types()[pk_prefix.len()].is_ascending() {
+                (next_col_bounds.0, next_col_bounds.1)
+            } else {
+                (next_col_bounds.1, next_col_bounds.0)
             };
 
         // Range Scan.

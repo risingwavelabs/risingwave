@@ -15,12 +15,13 @@
 use bytes::Bytes;
 
 use super::{OwnedRow, Row, RowDeserializer};
+use crate::estimate_size::EstimateSize;
 use crate::types::DataType;
 use crate::util::value_encoding;
 
 /// `CompactedRow` is used in streaming executors' cache, which takes less memory than `Vec<Datum>`.
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, EstimateSize)]
 pub struct CompactedRow {
     pub row: Bytes,
 }

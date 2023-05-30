@@ -20,7 +20,7 @@ use nix::sys::statfs::{
     statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
 };
 use parking_lot::RwLock;
-use risingwave_common::cache::{LruCache, LruCacheEventListener};
+use risingwave_common::cache::{CachePriority, LruCache, LruCacheEventListener};
 use risingwave_common::util::iter_util::ZipEqFast;
 use tokio::sync::RwLock as AsyncRwLock;
 use tracing::Instrument;
@@ -303,7 +303,7 @@ where
 
             metrics: options.metrics,
 
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         })
     }
 
@@ -355,6 +355,7 @@ where
                     hash_builder.hash_one(&key),
                     utils::align_up(self.block_size, block_loc.len as usize),
                     slot,
+                    CachePriority::High,
                 );
             }
         }

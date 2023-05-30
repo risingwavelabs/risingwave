@@ -107,7 +107,7 @@ impl StreamFragmentGraph {
             edges: self.edges.values().cloned().collect(),
             env: Some(self.env.clone()),
             // To be filled later
-            dependent_relation_ids: vec![],
+            dependent_table_ids: vec![],
             table_ids_cnt: 0,
             parallelism: None,
         }
@@ -131,6 +131,18 @@ impl StreamFragmentGraph {
         downstream_id: LocalFragmentId,
         edge: StreamFragmentEdge,
     ) {
+        self.try_add_edge(upstream_id, downstream_id, edge).unwrap();
+    }
+
+    /// Try to link upstream to downstream in the graph.
+    ///
+    /// If the edge between upstream and downstream already exists, return an error.
+    pub fn try_add_edge(
+        &mut self,
+        upstream_id: LocalFragmentId,
+        downstream_id: LocalFragmentId,
+        edge: StreamFragmentEdge,
+    ) -> Result<(), String> {
         let edge = StreamFragmentEdgeProto {
             upstream_id,
             downstream_id,
@@ -140,6 +152,12 @@ impl StreamFragmentGraph {
 
         self.edges
             .try_insert((upstream_id, downstream_id), edge)
-            .unwrap();
+            .map(|_| ())
+            .map_err(|e| {
+                format!(
+                    "edge between {} and {} already exists: {}",
+                    upstream_id, downstream_id, e
+                )
+            })
     }
 }

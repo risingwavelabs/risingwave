@@ -26,6 +26,8 @@ message TaskInfoResponse {
     FINISHED = 6;
     FAILED = 7;
     ABORTED = 8;
+    CANCELLED = 9;
+    PING = 10;
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
@@ -39,11 +41,11 @@ message CreateTaskRequest {
   common.BatchQueryEpoch epoch = 3;
 }
 
-message AbortTaskRequest {
+message CancelTaskRequest {
   batch_plan.TaskId task_id = 1;
 }
 
-message AbortTaskResponse {
+message CancelTaskResponse {
   common.Status status = 1;
 }
 
@@ -63,8 +65,8 @@ message ExecuteRequest {
 
 service TaskService {
   rpc CreateTask(CreateTaskRequest) returns (stream TaskInfoResponse);
-  // Abort an already-died (self execution-failure, previous aborted, completed) task will still succeed.
-  rpc AbortTask(AbortTaskRequest) returns (AbortTaskResponse);
+  // Cancel an already-died (self execution-failure, previous aborted, completed) task will still succeed.
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskResponse);
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
 }
 
@@ -72,28 +74,38 @@ message GetDataRequest {
   batch_plan.TaskOutputId task_output_id = 1;
 }
 
+// The structure for permit-based back-pressure.
+message Permits {
+  oneof value {
+    // The permits required for a chunk, i.e. the cardinality of the chunk.
+    uint32 record = 1;
+    // The permits required for a barrier, typically 1.
+    uint32 barrier = 2;
+  }
+}
+
 message GetStreamRequest {
-  // The first message, which tells the upstream which channel this exchange stream is for.
   message Get {
     uint32 up_actor_id = 1;
     uint32 down_actor_id = 2;
     uint32 up_fragment_id = 3;
     uint32 down_fragment_id = 4;
   }
-  // The following messages, which adds the permits back to the upstream to achieve back-pressure.
-  message AddPermits {
-    uint32 permits = 1;
-  }
+
   oneof value {
+    // The first message, which tells the upstream which channel this exchange stream is for.
     Get get = 1;
-    AddPermits add_permits = 2;
+    // The following messages, which adds the permits back to the upstream to achieve back-pressure.
+    Permits add_permits = 2;
   }
 }
 
 message GetStreamResponse {
   stream_plan.StreamMessage message = 1;
-  // The number of permits acquired for this message, which should be sent back to the upstream with `AddPermits`.
-  uint32 permits = 2;
+  // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
+  // In theory, this can also be derived from the message itself by the receiver. Here we send it explicitly to
+  // avoid any sense of inconsistency for the derivation logic, so the receiver can simply send it back verbatim.
+  Permits permits = 2;
 }
 
 service ExchangeService {

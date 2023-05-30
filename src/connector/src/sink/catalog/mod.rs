@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+    ColumnCatalog, ConnectionId, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkType};
@@ -115,7 +115,7 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink. Derived by the frontend.
+    /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
@@ -138,6 +138,9 @@ pub struct SinkCatalog {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+
+    /// Sink may use a privatelink connection to connect to the downstream system.
+    pub connection_id: Option<ConnectionId>,
 }
 
 impl SinkCatalog {
@@ -168,7 +171,13 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
+            connection_id: self.connection_id.map(|id| id.into()),
         }
+    }
+
+    /// Returns the SQL statement that can be used to create this sink.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
     }
 
     pub fn schema(&self) -> Schema {
@@ -190,10 +199,10 @@ impl From<PbSink> for SinkCatalog {
         let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
-            name: pb.name.clone(),
+            name: pb.name,
             schema_id: pb.schema_id.into(),
             database_id: pb.database_id.into(),
-            definition: pb.definition.clone(),
+            definition: pb.definition,
             columns: pb
                 .columns
                 .into_iter()
@@ -204,9 +213,13 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.iter().map(|k| *k as _).collect_vec(),
-            distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            properties: pb.properties.clone(),
+            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            distribution_key: pb
+                .distribution_key
+                .into_iter()
+                .map(|k| k as _)
+                .collect_vec(),
+            properties: pb.properties,
             owner: pb.owner.into(),
             dependent_relations: pb
                 .dependent_relations
@@ -214,6 +227,7 @@ impl From<PbSink> for SinkCatalog {
                 .map(TableId::from)
                 .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
+            connection_id: pb.connection_id.map(ConnectionId),
         }
     }
 }

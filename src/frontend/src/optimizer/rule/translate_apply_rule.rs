@@ -14,16 +14,15 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    PlanTreeNodeBinary, PlanTreeNodeUnary,
+    LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, PlanTreeNodeBinary,
+    PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -91,8 +90,7 @@ impl Rule for TranslateApplyRule {
                 })
                 .collect();
             let project = LogicalProject::create(rewritten_left, exprs);
-            let distinct =
-                LogicalAgg::new(vec![], (0..project.schema().len()).collect_vec(), project);
+            let distinct = Agg::new(vec![], (0..project.schema().len()).collect(), project);
             distinct.into()
         } else {
             // The left side of the apply is not SPJ. We need to use the general way to calculate
@@ -106,11 +104,16 @@ impl Rule for TranslateApplyRule {
                 left
             };
 
-            let distinct = LogicalAgg::new(
-                vec![],
-                correlated_indices.clone().into_iter().collect_vec(),
-                left.clone(),
-            );
+            let exprs = correlated_indices
+                .clone()
+                .into_iter()
+                .map(|correlated_index| {
+                    let data_type = left.schema().fields()[correlated_index].data_type.clone();
+                    InputRef::new(correlated_index, data_type).into()
+                })
+                .collect();
+            let project = LogicalProject::create(left.clone(), exprs);
+            let distinct = Agg::new(vec![], (0..project.schema().len()).collect(), project);
             distinct.into()
         };
 

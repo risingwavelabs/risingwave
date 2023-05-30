@@ -16,45 +16,59 @@ package com.risingwave.metrics;
 
 import static io.grpc.Status.INTERNAL;
 
+import com.sun.management.OperatingSystemMXBean;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.exporter.HTTPServer;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
 import java.net.InetSocketAddress;
 
 public class ConnectorNodeMetrics {
-    private static final Counter activeConnections =
+    private static final Counter activeSourceConnections =
             Counter.build()
-                    .name("active_connections")
-                    .labelNames("sink_type", "ip")
-                    .help("Number of active connections")
+                    .name("active_source_connections")
+                    .labelNames("source_type", "ip")
+                    .help("Number of active source connections")
                     .register();
 
-    private static final Counter totalConnections =
+    private static final Counter activeSinkConnections =
             Counter.build()
-                    .name("total_connections")
-                    .labelNames("sink_type", "ip")
+                    .name("active_sink_connections")
+                    .labelNames("connector_type", "ip")
+                    .help("Number of active sink connections")
+                    .register();
+
+    private static final Counter totalSinkConnections =
+            Counter.build()
+                    .name("total_sink_connections")
+                    .labelNames("connector_type", "ip")
                     .help("Number of total connections")
                     .register();
-    private static final Gauge cpuUsage =
-            Gauge.build()
-                    .name("cpu_usage")
-                    .labelNames("node_id")
-                    .help("CPU usage in percentage")
+    private static final Counter cpuUsage =
+            Counter.build()
+                    .name("process_cpu_seconds_total")
+                    .labelNames("job")
+                    .help("Total user and system CPU time spent in seconds.")
                     .register();
     private static final Gauge ramUsage =
             Gauge.build()
-                    .name("ram_usage")
-                    .labelNames("node_id")
+                    .name("process_resident_memory_bytes")
+                    .labelNames("job")
                     .help("RAM usage in bytes")
                     .register();
 
+    private static final Counter sourceRowsReceived =
+            Counter.build()
+                    .name("connector_source_rows_received")
+                    .labelNames("source_type", "source_id")
+                    .help("Number of rows received by source")
+                    .register();
     private static final Counter sinkRowsReceived =
             Counter.build()
-                    .name("sink_rows_received")
+                    .name("connector_sink_rows_received")
+                    .labelNames("connector_type", "sink_id")
                     .help("Number of rows received by sink")
                     .register();
 
@@ -68,14 +82,15 @@ public class ConnectorNodeMetrics {
     static class PeriodicMetricsCollector extends Thread {
         private final int interval;
         private final OperatingSystemMXBean osBean;
-        private final String nodeId;
+        private final String job;
 
-        public PeriodicMetricsCollector(int intervalMillis, String nodeId) {
+        public PeriodicMetricsCollector(int intervalMillis, String job) {
             this.interval = intervalMillis;
-            this.nodeId = nodeId;
-            this.osBean = ManagementFactory.getOperatingSystemMXBean();
+            this.job = job;
+            this.osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
         }
 
+        @SuppressWarnings({"InfiniteLoopStatement", "BusyWait"})
         @Override
         public void run() {
             while (true) {
@@ -89,24 +104,27 @@ public class ConnectorNodeMetrics {
         }
 
         private void collect() {
-            double cpuUsage = osBean.getSystemLoadAverage();
-            ConnectorNodeMetrics.cpuUsage.labels(nodeId).set(cpuUsage);
+            double cpuTotal = osBean.getProcessCpuTime() / 1000000000.0;
+            double cpuPast = ConnectorNodeMetrics.cpuUsage.labels(job).get();
+            ConnectorNodeMetrics.cpuUsage.labels(job).inc(cpuTotal - cpuPast);
             long ramUsageBytes =
                     Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-            ConnectorNodeMetrics.ramUsage.labels(nodeId).set(ramUsageBytes);
+            ConnectorNodeMetrics.ramUsage.labels(job).set(ramUsageBytes);
         }
     }
 
     public static void startHTTPServer(int port) {
         CollectorRegistry registry = new CollectorRegistry();
-        registry.register(activeConnections);
+        registry.register(activeSourceConnections);
+        registry.register(activeSinkConnections);
+        registry.register(sourceRowsReceived);
+        registry.register(sinkRowsReceived);
         registry.register(cpuUsage);
         registry.register(ramUsage);
-        PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "node1");
+        PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
-
         try {
-            HTTPServer server = new HTTPServer(new InetSocketAddress("localhost", port), registry);
+            new HTTPServer(new InetSocketAddress("localhost", port), registry);
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)
@@ -114,28 +132,36 @@ public class ConnectorNodeMetrics {
         }
     }
 
-    public static void incActiveConnections(String sinkType, String ip) {
-        activeConnections.labels(sinkType, ip).inc();
+    public static void incActiveSourceConnections(String sourceType, String ip) {
+        activeSourceConnections.labels(sourceType, ip).inc();
     }
 
-    public static void decActiveConnections(String sinkType, String ip) {
-        activeConnections.remove(sinkType, ip);
+    public static void decActiveSourceConnections(String sourceType, String ip) {
+        activeSourceConnections.remove(sourceType, ip);
     }
 
-    public static void incSinkRowsReceived() {
-        sinkRowsReceived.inc();
+    public static void incActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.labels(connectorType, ip).inc();
+    }
+
+    public static void decActiveSinkConnections(String connectorType, String ip) {
+        activeSinkConnections.remove(connectorType, ip);
+    }
+
+    public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
+        sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
+    }
+
+    public static void incSinkRowsReceived(String connectorType, String sinkId, double amt) {
+        sinkRowsReceived.labels(connectorType, sinkId).inc(amt);
     }
 
     public static void incTotalConnections(String sinkType, String ip) {
-        totalConnections.labels(sinkType, ip).inc();
+        totalSinkConnections.labels(sinkType, ip).inc();
     }
 
     public static void incErrorCount(String sinkType, String ip) {
         errorCount.labels(sinkType, ip).inc();
-    }
-
-    public static void setCpuUsage(String ip, double cpuUsagePercentage) {
-        cpuUsage.labels(ip).set(cpuUsagePercentage);
     }
 
     public static void setRamUsage(String ip, long usedRamInBytes) {

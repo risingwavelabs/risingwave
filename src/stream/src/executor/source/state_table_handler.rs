@@ -16,19 +16,18 @@ use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::array::JsonbVal;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
@@ -160,6 +159,14 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
+    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+        if let Some(prev_row) = self.get(key).await? {
+            self.state_store.delete(prev_row);
+        }
+
+        Ok(())
+    }
+
     /// This function provides the ability to persist the source state
     /// and needs to be invoked by the ``SourceReader`` to call it,
     /// and will return the error when the dependent ``StateStore`` handles the error.
@@ -180,7 +187,18 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    ///
+    pub async fn trim_state<SS>(&mut self, to_trim: &[SS]) -> StreamExecutorResult<()>
+    where
+        SS: SplitMetaData,
+    {
+        for split in to_trim {
+            tracing::info!("trimming source state for split {}", split.id());
+            self.delete(split.id()).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn try_recover_from_state_store(
         &mut self,
         stream_source_split: &SplitImpl,
@@ -230,6 +248,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Ascending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         ..Default::default()

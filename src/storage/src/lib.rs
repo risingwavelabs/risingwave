@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![feature(allocator_api)]
+#![feature(arc_unwrap_or_clone)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
@@ -35,7 +36,7 @@
 #![feature(is_sorted)]
 #![feature(btree_drain_filter)]
 #![feature(exact_size_is_empty)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
@@ -44,6 +45,7 @@
 #![feature(associated_type_bounds)]
 #![feature(local_key_cell_methods)]
 #![feature(exclusive_range_pattern)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod hummock;
 pub mod memory;
@@ -59,6 +61,7 @@ pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
+pub mod filter_key_extractor;
 pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]

@@ -86,7 +86,7 @@ SELECT f.f1, f.f1 - '-10' AS x FROM FLOAT4_TBL f
 SELECT * FROM FLOAT4_TBL;
 
 -- test the unary float4abs operator
---@ SELECT f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f;
+SELECT f.f1, @f.f1 AS abs_f1 FROM FLOAT4_TBL f;
 
 UPDATE FLOAT4_TBL
    SET f1 = FLOAT4_TBL.f1 * '-1'
@@ -96,9 +96,9 @@ SELECT * FROM FLOAT4_TBL;
 
 -- test edge-case coercions to integer
 SELECT '32767.4'::float4::int2 AS int2;
---@ SELECT '32767.6'::float4::int2;
+SELECT '32767.6'::float4::int2;
 SELECT '-32768.4'::float4::int2 AS int2;
---@ SELECT '-32768.6'::float4::int2;
+SELECT '-32768.6'::float4::int2;
 SELECT '2147483520'::float4::int4 AS int4;
 SELECT '2147483647'::float4::int4;
 SELECT '-2147483648.5'::float4::int4 AS int4;

@@ -4,6 +4,7 @@ package plan_common;
 
 import "common.proto";
 import "data.proto";
+import "expr.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -26,11 +27,29 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+
+  // deprecated, breaking change
+  // GeneratedColumnDesc generated_column = 6 [deprecated = true];
+  // reserved 6;
+
+  // Optional description for the generated column or default value.
+  oneof generated_or_default_column {
+    GeneratedColumnDesc generated_column = 6;
+    DefaultColumnDesc default_column = 7;
+  }
 }
 
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
+}
+
+message GeneratedColumnDesc {
+  expr.ExprNode expr = 1;
+}
+
+message DefaultColumnDesc {
+  expr.ExprNode expr = 1;
 }
 
 message StorageTableDesc {
@@ -42,8 +61,8 @@ message StorageTableDesc {
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
-  // Whether the table is versioned. If `true`, column-aware row encoding will be used
-  // to be compatible with schema changes.
+  // Whether the table is versioned. If `true`, column-aware row encoding will
+  // be used to be compatible with schema changes.
   bool versioned = 8;
 }
 
@@ -74,4 +93,14 @@ enum RowFormatType {
   DEBEZIUM_AVRO = 9;
   UPSERT_JSON = 10;
   UPSERT_AVRO = 11;
+  DEBEZIUM_MONGO_JSON = 12;
+}
+
+message IndexAndExpr {
+  uint32 index = 1;
+  expr.ExprNode expr = 2;
+}
+
+message DefaultColumns {
+  repeated IndexAndExpr default_columns = 1;
 }

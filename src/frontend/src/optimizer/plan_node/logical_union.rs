@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
@@ -23,8 +24,8 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
-    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalProject, PlanTreeNode,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
@@ -39,6 +40,7 @@ pub struct LogicalUnion {
 
 impl LogicalUnion {
     pub fn new(all: bool, inputs: Vec<PlanRef>) -> Self {
+        assert!(Schema::all_type_eq(inputs.iter().map(|x| x.schema())));
         Self::new_with_source_col(all, inputs, None)
     }
 
@@ -77,9 +79,7 @@ impl LogicalUnion {
 
 impl PlanTreeNode for LogicalUnion {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        let mut vec = smallvec::SmallVec::new();
-        vec.extend(self.core.inputs.clone().into_iter());
-        vec
+        self.core.inputs.clone().into_iter().collect()
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
@@ -131,9 +131,9 @@ impl ToBatch for LogicalUnion {
         // Convert union to union all + agg
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
-            Ok(BatchHashAgg::new(LogicalAgg::new(
+            Ok(BatchHashAgg::new(generic::Agg::new(
                 vec![],
-                (0..self.base.schema.len()).collect_vec(),
+                (0..self.base.schema.len()).collect(),
                 batch_union,
             ))
             .into())

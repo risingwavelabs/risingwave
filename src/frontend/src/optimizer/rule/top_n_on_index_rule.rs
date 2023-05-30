@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
@@ -62,15 +62,11 @@ impl TopNOnIndexRule {
         for index in order_satisfied_index {
             if let Some(mut index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 index_scan.set_chunk_size(
-                    ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
+                    ((u32::MAX as u64)
+                        .min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
+                        as u32,
                 );
-
-                let logical_limit = LogicalLimit::create(
-                    index_scan.into(),
-                    logical_top_n.limit(),
-                    logical_top_n.offset(),
-                );
-                return Some(logical_limit);
+                return Some(logical_top_n.clone_with_input(index_scan.into()).into());
             }
         }
 
@@ -94,7 +90,7 @@ impl TopNOnIndexRule {
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
             column_orders: primary_key
-                .into_iter()
+                .iter()
                 .map(|o| {
                     ColumnOrder::new(
                         *output_col_map
@@ -107,14 +103,10 @@ impl TopNOnIndexRule {
         };
         if primary_key_order.satisfies(order) {
             logical_scan.set_chunk_size(
-                ((u32::MAX as u64).min(logical_top_n.limit() + logical_top_n.offset())) as u32,
+                ((u32::MAX as u64).min(logical_top_n.limit_attr().limit() + logical_top_n.offset()))
+                    as u32,
             );
-            let logical_limit = LogicalLimit::create(
-                logical_scan.into(),
-                logical_top_n.limit(),
-                logical_top_n.offset(),
-            );
-            Some(logical_limit)
+            Some(logical_top_n.clone_with_input(logical_scan.into()).into())
         } else {
             None
         }

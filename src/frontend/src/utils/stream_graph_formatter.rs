@@ -167,13 +167,16 @@ impl StreamGraphFormatter {
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
             )),
-            stream_node::NodeBody::GlobalSimpleAgg(inner) => {
+            stream_node::NodeBody::SimpleAgg(inner) => {
                 fields.push((
                     "result table",
                     self.pretty_add_table(inner.get_result_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
-                fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
+                fields.push((
+                    "distinct tables",
+                    self.distinct_tables(node, inner.get_distinct_dedup_tables()),
+                ));
             }
             stream_node::NodeBody::HashAgg(inner) => {
                 fields.push((
@@ -181,8 +184,11 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(inner.get_result_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
-                fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
-            },
+                fields.push((
+                    "distinct tables",
+                    self.distinct_tables(node, inner.get_distinct_dedup_tables()),
+                ));
+            }
             stream_node::NodeBody::HashJoin(node) => {
                 fields.push((
                     "left table",
@@ -193,19 +199,13 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_right_table().unwrap()),
                 ));
                 if let Some(tb) = &node.left_degree_table {
-                    fields.push((
-                        "left degree table",
-                        self.pretty_add_table(tb),
-                    ));
+                    fields.push(("left degree table", self.pretty_add_table(tb)));
                 }
                 if let Some(tb) = &node.right_degree_table {
-                    fields.push((
-                        "right degree table",
-                        self.pretty_add_table(tb),
-                    ));
+                    fields.push(("right degree table", self.pretty_add_table(tb)));
                 }
             }
-            stream_node::NodeBody::TopN(node) =>{
+            stream_node::NodeBody::TopN(node) => {
                 fields.push((
                     "state table",
                     self.pretty_add_table(node.get_table().unwrap()),
@@ -235,10 +235,7 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::GroupTopN(node) => {
                 let table = self.pretty_add_table(node.get_table().unwrap());
-                fields.push((
-                    "state table",
-                    table,
-                ));
+                fields.push(("state table", table));
             }
             stream_node::NodeBody::AppendOnlyGroupTopN(node) => {
                 fields.push((
@@ -252,7 +249,19 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
-            _ => {},
+            stream_node::NodeBody::AppendOnlyDedup(node) => {
+                fields.push((
+                    "state table",
+                    self.pretty_add_table(node.get_state_table().unwrap()),
+                ));
+            }
+            stream_node::NodeBody::Chain(node) => {
+                fields.push((
+                    "state table",
+                    self.pretty_add_table(node.get_state_table().unwrap()),
+                ))
+            }
+            _ => {}
         };
 
         if self.verbose {

@@ -15,14 +15,19 @@
 mod compactor_observer;
 mod rpc;
 mod server;
+mod telemetry;
 
 use clap::Parser;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 
 use crate::server::compactor_serve;
 
-/// Command-line arguments for compute-node.
+/// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless worker node that compacts data for the storage engine"
+)]
 pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -50,12 +55,6 @@ pub struct CompactorOpts {
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
-
-    /// Of the form `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -94,7 +93,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compactor node options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -117,10 +115,4 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         observer_join_handle.abort();
     })
-}
-
-fn warn_future_deprecate_options(opts: &CompactorOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compactor node in the next release. Please consider moving this argument to the meta node.");
-    }
 }

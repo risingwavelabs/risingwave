@@ -24,7 +24,7 @@ use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, PbStreamEnvironment, SourceNode, StreamActor, StreamNode,
+    FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
 };
 
 use super::{ActorId, FragmentId};
@@ -261,6 +261,7 @@ impl TableFragments {
             (fragment_type_mask
                 & (FragmentTypeFlag::Source as u32
                     | FragmentTypeFlag::Now as u32
+                    | FragmentTypeFlag::Values as u32
                     | FragmentTypeFlag::BarrierRecv as u32))
                 != 0
         })
@@ -270,6 +271,13 @@ impl TableFragments {
     pub fn mview_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::Mview as u32) != 0
+        })
+    }
+
+    /// Returns values actor ids.
+    pub fn values_actor_ids(&self) -> Vec<ActorId> {
+        Self::filter_actor_ids(self, |fragment_type_mask| {
+            (fragment_type_mask & FragmentTypeFlag::Values as u32) != 0
         })
     }
 
@@ -292,16 +300,16 @@ impl TableFragments {
         .collect()
     }
 
-    /// Find the source node that contains an external stream source inside the stream node, if any.
-    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the external stream source info inside the stream node, if any.
+    pub fn find_stream_source(stream_node: &StreamNode) -> Option<&StreamSource> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            if source.source_inner.is_some() {
-                return Some(source);
+            if let Some(inner) = &source.source_inner {
+                return Some(inner);
             }
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node_with_stream_source(child) {
+            if let Some(source) = Self::find_stream_source(child) {
                 return Some(source);
             }
         }
@@ -316,10 +324,9 @@ impl TableFragments {
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
-                    actor.nodes.as_ref().unwrap(),
-                )
-                .map(|s| s.source_inner.as_ref().unwrap().source_id)
+                if let Some(source_id) =
+                    TableFragments::find_stream_source(actor.nodes.as_ref().unwrap())
+                        .map(|s| s.source_id)
                 {
                     source_fragments
                         .entry(source_id)
@@ -377,16 +384,24 @@ impl TableFragments {
         map
     }
 
+    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
+        let mut map = HashMap::new();
+        for actor_status in self.actor_status.values() {
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
+                .or_insert_with(HashSet::new)
+                .insert(actor_status.get_parallel_unit().unwrap().id);
+        }
+        map
+    }
+
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
-            if fragment.vnode_mapping.is_some() {
-                if let Some(ref mut mapping) = fragment.vnode_mapping {
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            *id = migrate_map.get(id).unwrap().id;
-                        }
-                    });
-                }
+            if let Some(mapping) = &mut fragment.vnode_mapping {
+                mapping.data.iter_mut().for_each(|id| {
+                    if migrate_map.contains_key(id) {
+                        *id = migrate_map.get(id).unwrap().id;
+                    }
+                });
             }
         }
     }

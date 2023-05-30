@@ -22,6 +22,8 @@ import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
+import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.util.Map;
 
 public class JsonDeserializer implements Deserializer {
@@ -31,6 +33,8 @@ public class JsonDeserializer implements Deserializer {
         this.tableSchema = tableSchema;
     }
 
+    // Encoding here should be consistent with `datum_to_json_object()` in
+    // src/connector/src/sink/mod.rs
     @Override
     public CloseableIterator<SinkRow> deserialize(
             ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
@@ -113,7 +117,24 @@ public class JsonDeserializer implements Deserializer {
         }
     }
 
+    private static BigDecimal castDecimal(Object value) {
+        if (value instanceof String) {
+            // FIXME(eric): See `datum_to_json_object()` in src/connector/src/sink/mod.rs
+            return new BigDecimal((String) value);
+        } else if (value instanceof BigDecimal) {
+            return (BigDecimal) value;
+        } else {
+            throw io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("unable to cast into double from " + value.getClass())
+                    .asRuntimeException();
+        }
+    }
+
     private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
+        // value might be null
+        if (value == null) {
+            return null;
+        }
         switch (typeName) {
             case INT16:
                 return castLong(value).shortValue();
@@ -132,6 +153,8 @@ public class JsonDeserializer implements Deserializer {
                 return castDouble(value);
             case FLOAT:
                 return castDouble(value).floatValue();
+            case DECIMAL:
+                return castDecimal(value);
             case BOOLEAN:
                 if (!(value instanceof Boolean)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
@@ -139,6 +162,15 @@ public class JsonDeserializer implements Deserializer {
                             .asRuntimeException();
                 }
                 return value;
+            case TIMESTAMP:
+            case TIMESTAMPTZ:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription(
+                                    "Expected timestamp in string, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return Timestamp.valueOf((String) value);
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)

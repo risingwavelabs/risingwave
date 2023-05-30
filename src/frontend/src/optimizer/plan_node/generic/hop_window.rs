@@ -18,7 +18,7 @@ use std::num::NonZeroUsize;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, IntervalUnit, IntervalUnitDisplay};
+use risingwave_common::types::{DataType, Interval, IntervalDisplay};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_expr::ExprError;
 
@@ -26,7 +26,8 @@ use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::plan_node::batch::BatchPlanRef;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`HopWindow`] implements Hop Table Function.
@@ -34,9 +35,9 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct HopWindow<PlanRef> {
     pub input: PlanRef,
     pub time_col: InputRef,
-    pub window_slide: IntervalUnit,
-    pub window_size: IntervalUnit,
-    pub window_offset: IntervalUnit,
+    pub window_slide: Interval,
+    pub window_size: Interval,
+    pub window_offset: Interval,
     /// Provides mapping from input schema, window_start, window_end to output schema.
     /// For example, if we had:
     /// input schema: | 0: trip_time | 1: trip_name |
@@ -118,17 +119,25 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     }
 }
 
+impl<PlanRef: BatchPlanRef> HopWindow<PlanRef> {
+    pub fn get_out_column_index_order(&self) -> Order {
+        self.i2o_col_mapping()
+            .rewrite_provided_order(self.input.order())
+    }
+}
+
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(
-        self,
-    ) -> (
-        PlanRef,
-        InputRef,
-        IntervalUnit,
-        IntervalUnit,
-        IntervalUnit,
-        Vec<usize>,
-    ) {
+    pub fn output_window_start_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_start_col_idx())
+    }
+
+    pub fn output_window_end_col_idx(&self) -> Option<usize> {
+        self.internal2output_col_mapping()
+            .try_map(self.internal_window_end_col_idx())
+    }
+
+    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,
             self.time_col,
@@ -162,7 +171,9 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn output2internal_col_mapping(&self) -> ColIndexMapping {
-        self.internal2output_col_mapping().inverse()
+        self.internal2output_col_mapping()
+            .inverse()
+            .expect("must be invertible")
     }
 
     pub fn internal2output_col_mapping(&self) -> ColIndexMapping {
@@ -285,14 +296,14 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
 
         builder.field(
             "slide",
-            &IntervalUnitDisplay {
+            &IntervalDisplay {
                 core: &self.window_slide,
             },
         );
 
         builder.field(
             "size",
-            &IntervalUnitDisplay {
+            &IntervalDisplay {
                 core: &self.window_size,
             },
         );

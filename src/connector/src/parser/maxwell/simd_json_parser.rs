@@ -21,9 +21,9 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -48,11 +48,10 @@ impl MaxwellParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let op = event.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
@@ -61,6 +60,7 @@ impl MaxwellParser {
             ))
         })?;
 
+        let format = SourceFormat::Maxwell;
         match op {
             MAXWELL_INSERT_OP => {
                 let after = event.get(AFTER).ok_or_else(|| {
@@ -70,8 +70,9 @@ impl MaxwellParser {
                 })?;
                 writer.insert(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        json_object_smart_get_value(after, column.name.as_str().into()),
                     )
                     .map_err(Into::into)
                 })
@@ -90,13 +91,15 @@ impl MaxwellParser {
 
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name.to_ascii_lowercase();
-                    let before_value = before
-                        .get(col_name_lc.as_str())
-                        .or_else(|| after.get(col_name_lc.as_str()));
-                    let before = simd_json_parse_value(&column.data_type, before_value)?;
-                    let after =
-                        simd_json_parse_value(&column.data_type, after.get(col_name_lc.as_str()))?;
+                    let col_name_lc = column.name.as_str();
+                    let before_value = json_object_smart_get_value(before, col_name_lc.into())
+                        .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
+                    let before = simd_json_parse_value(&format, &column.data_type, before_value)?;
+                    let after = simd_json_parse_value(
+                        &format,
+                        &column.data_type,
+                        json_object_smart_get_value(after, col_name_lc.into()),
+                    )?;
                     Ok((before, after))
                 })
             }
@@ -106,8 +109,9 @@ impl MaxwellParser {
                 })?;
                 writer.delete(|column| {
                     simd_json_parse_value(
+                        &format,
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        json_object_smart_get_value(before, column.name.as_str().into()),
                     )
                     .map_err(Into::into)
                 })
@@ -123,9 +127,9 @@ impl MaxwellParser {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::Op;
+    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
@@ -142,9 +146,9 @@ mod tests {
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         let payloads = vec![
-            br#"{"database":"test","table":"t","type":"insert","ts":1666937996,"xid":1171,"commit":true,"data":{"id":1,"name":"tom","is_adult":0,"birthday":"2017-12-31 16:00:01"}}"#.as_slice(),
-            br#"{"database":"test","table":"t","type":"insert","ts":1666938023,"xid":1254,"commit":true,"data":{"id":2,"name":"alex","is_adult":1,"birthday":"1999-12-31 16:00:01"}}"#.as_slice(),
-            br#"{"database":"test","table":"t","type":"update","ts":1666938068,"xid":1373,"commit":true,"data":{"id":2,"name":"chi","is_adult":1,"birthday":"1999-12-31 16:00:01"},"old":{"name":"alex"}}"#.as_slice()
+            br#"{"database":"test","table":"t","type":"insert","ts":1666937996,"xid":1171,"commit":true,"data":{"id":1,"name":"tom","is_adult":0,"birthday":"2017-12-31 16:00:01"}}"#.to_vec(),
+            br#"{"database":"test","table":"t","type":"insert","ts":1666938023,"xid":1254,"commit":true,"data":{"id":2,"name":"alex","is_adult":1,"birthday":"1999-12-31 16:00:01"}}"#.to_vec(),
+            br#"{"database":"test","table":"t","type":"update","ts":1666938068,"xid":1373,"commit":true,"data":{"id":2,"name":"chi","is_adult":1,"birthday":"1999-12-31 16:00:01"},"old":{"name":"alex"}}"#.to_vec()
         ];
 
         for payload in payloads {
@@ -170,7 +174,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2017-12-31 16:00:01").unwrap()
                 )))
             )
@@ -190,7 +194,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )
@@ -210,7 +214,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )
@@ -230,7 +234,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
             )

@@ -15,9 +15,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_expr::agg::AggCall;
 use risingwave_storage::StateStore;
 
-use super::aggregation::{AggCall, AggStateStorage};
+use super::aggregation::AggStateStorage;
 use super::Executor;
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
@@ -25,7 +26,7 @@ use crate::executor::{ActorContextRef, PkIndices};
 use crate::task::AtomicU64Ref;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
-pub struct AggExecutorArgs<S: StateStore> {
+pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     // basic
     pub input: Box<dyn Executor>,
     pub actor_ctx: ActorContextRef,
@@ -42,17 +43,20 @@ pub struct AggExecutorArgs<S: StateStore> {
     pub result_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
-
-    // extra
-    pub extra: Option<AggExecutorArgsExtra>,
-}
-
-/// Extra arguments needed to construct an `XxxAggExecutor`.
-pub struct AggExecutorArgsExtra {
-    // hash agg specific things
-    pub group_key_indices: Vec<usize>,
-
-    // things only used by hash agg currently
     pub metrics: Arc<StreamingMetrics>,
-    pub chunk_size: usize,
+    // extra
+    pub extra: E,
 }
+
+pub trait AggExecutorExtraArgs {}
+
+pub struct SimpleAggExecutorExtraArgs {}
+impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
+
+/// Extra arguments needed to construct an `HashAggExecutor`.
+pub struct HashAggExecutorExtraArgs {
+    pub group_key_indices: Vec<usize>,
+    pub chunk_size: usize,
+    pub emit_on_window_close: bool,
+}
+impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

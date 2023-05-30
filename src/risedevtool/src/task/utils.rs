@@ -19,6 +19,9 @@ use itertools::Itertools;
 
 use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig};
 
+#[allow(dead_code)]
+pub(crate) const DEFAULT_QUERY_LOG_PATH: &str = ".risingwave/log/";
+
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
     match provide_meta_node {
@@ -51,25 +54,25 @@ pub enum HummockInMemoryStrategy {
     Disallowed,
 }
 
-/// Add a storage backend to the parameters. Returns whether this is a shared backend.
-pub fn add_storage_backend(
+/// Add a hummock storage backend to the parameters. Returns whether this is a shared backend.
+pub fn add_hummock_backend(
     id: &str,
     provide_opendal: &[OpendalConfig],
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
-) -> Result<bool> {
-    let is_shared_backend = match (provide_minio, provide_aws_s3, provide_opendal) {
+) -> Result<(bool, bool)> {
+    let (is_shared_backend, is_persistent_backend) = match (provide_minio, provide_aws_s3, provide_opendal) {
         ([], [], []) => {
             match hummock_in_memory_strategy {
                 HummockInMemoryStrategy::Isolated => {
                     cmd.arg("--state-store").arg("hummock+memory");
-                    false
+                    (false, false)
                 }
                 HummockInMemoryStrategy::Shared => {
                     cmd.arg("--state-store").arg("hummock+memory-shared");
-                    true
+                    (true, false)
                 },
                 HummockInMemoryStrategy::Disallowed => return Err(anyhow!(
                     "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
@@ -85,7 +88,7 @@ pub fn add_storage_backend(
                 minio_addr = minio.address,
                 minio_port = minio.port,
             ));
-            true
+            (true, true)
         }
         ([], [aws_s3], []) => {
             // if s3-compatible is true, using some s3 compatible object store.
@@ -95,36 +98,37 @@ pub fn add_storage_backend(
                 false => cmd.arg("--state-store")
                 .arg(format!("hummock+s3://{}", aws_s3.bucket)),
             };
-            true
+            (true, true)
         }
         ([], [], [opendal]) => {
             if opendal.engine == "hdfs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
-                true
             }
             else if opendal.engine == "gcs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+gcs://{}@{}", opendal.bucket, opendal.root));
-            true}
+            }
             else if opendal.engine == "oss"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+oss://{}@{}", opendal.bucket, opendal.root));
-                true
             }
             else if opendal.engine == "webhdfs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+webhdfs://{}@{}", opendal.namenode, opendal.root));
-                true
+            }
+            else if opendal.engine == "azblob"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+azblob://{}@{}", opendal.bucket, opendal.root));
             }
             else if opendal.engine == "fs"{
                 cmd.arg("--state-store")
                 .arg(format!("hummock+fs://{}@{}", opendal.namenode, opendal.root));
-                true
             }
             else{
                 unimplemented!()
             }
+            (true, true)
         }
 
         (other_minio, other_s3, _) => {
@@ -136,5 +140,5 @@ pub fn add_storage_backend(
         }
     };
 
-    Ok(is_shared_backend)
+    Ok((is_shared_backend, is_persistent_backend))
 }

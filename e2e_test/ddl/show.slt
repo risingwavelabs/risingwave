@@ -10,29 +10,39 @@ create view v3 as select sum(v2) as sum_v2 from t3;
 query TT
 describe t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 primary key _row_id
 
 query TT
 show columns from t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 
 statement ok
-create index idx1 on t3 (v1,v2);;
+create index idx1 on t3 (v1,v2);
+
+query TTTTT
+show indexes from t3;
+----
+idx1 t3 v1 ASC, v2 ASC v3 v1, v2
 
 query TT
 describe t3;
 ----
-v1 Int32
-v2 Int32
-v3 Int32
+v1 integer
+v2 integer
+v3 integer
 primary key _row_id
-idx1 index(v1, v2) include(v3) distributed by(v1, v2)
+idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1, v2)
+
+query TT
+show create index idx1;
+----
+public.idx1 CREATE INDEX idx1 ON t3(v1, v2)
 
 statement ok
 drop index idx1;
@@ -120,22 +130,22 @@ drop table t3;
 query TT
 describe pg_matviews;
 ----
-schemaname Varchar
-matviewname Varchar
-matviewowner Int32
-definition Varchar
-matviewid Int32
-matviewtimezone Varchar
-matviewgraph Varchar
-primary key schemaname
+schemaname varchar
+matviewname varchar
+matviewowner integer
+definition varchar
+matviewid integer
+matviewtimezone varchar
+matviewgraph varchar
+primary key schemaname, matviewname
 
 query TT
 show columns from pg_catalog.pg_matviews;
 ----
-schemaname Varchar
-matviewname Varchar
-matviewowner Int32
-definition Varchar
-matviewid Int32
-matviewtimezone Varchar
-matviewgraph Varchar
+schemaname varchar
+matviewname varchar
+matviewowner integer
+definition varchar
+matviewid integer
+matviewtimezone varchar
+matviewgraph varchar

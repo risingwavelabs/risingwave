@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::key::{
@@ -30,13 +31,14 @@ use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
+use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::store::{ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &B,
-    inclusive_end_key: &B,
+    end_key: Bound<&B>,
 ) -> bool
 where
     R: RangeBounds<B>,
@@ -46,10 +48,12 @@ where
 
     //        RANGE
     // TABLE
-    let too_left = match start_bound {
-        Included(range_start) => range_start > inclusive_end_key,
-        Excluded(range_start) => range_start >= inclusive_end_key,
-        Unbounded => false,
+    let too_left = match (start_bound, end_key) {
+        (Included(range_start), Included(inclusive_end_key)) => range_start > inclusive_end_key,
+        (Included(range_start), Excluded(end_key))
+        | (Excluded(range_start), Included(end_key))
+        | (Excluded(range_start), Excluded(end_key)) => range_start >= end_key,
+        (Unbounded, _) | (_, Unbounded) => false,
     };
     // RANGE
     //        TABLE
@@ -101,11 +105,18 @@ where
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(&(left, right), &table_start, &table_end)
-        && info
-            .get_table_ids()
-            .binary_search(&table_id.table_id())
-            .is_ok()
+    range_overlap(
+        &(left, right),
+        &table_start,
+        if table_range.right_exclusive {
+            Bound::Excluded(&table_end)
+        } else {
+            Bound::Included(&table_end)
+        },
+    ) && info
+        .get_table_ids()
+        .binary_search(&table_id.table_id())
+        .is_ok()
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
@@ -279,6 +290,10 @@ impl MemoryLimiter {
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.total_size.load(AtomicOrdering::Acquire)
     }
+
+    pub fn quota(&self) -> u64 {
+        self.inner.quota
+    }
 }
 
 impl MemoryLimiter {
@@ -352,6 +367,7 @@ pub(crate) async fn do_insert_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -382,6 +398,7 @@ pub(crate) async fn do_delete_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -422,6 +439,7 @@ pub(crate) async fn do_update_sanity_check(
         table_id,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill(CachePriority::High),
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {
@@ -446,40 +464,65 @@ pub(crate) async fn do_update_sanity_check(
     }
 }
 
+pub fn cmp_delete_range_left_bounds(a: Bound<&Bytes>, b: Bound<&Bytes>) -> Ordering {
+    match (a, b) {
+        // only right bound of delete range can be `Unbounded`
+        (Unbounded, _) | (_, Unbounded) => unreachable!(),
+        (Included(x), Included(y)) | (Excluded(x), Excluded(y)) => x.cmp(y),
+        (Included(x), Excluded(y)) => x.cmp(y).then(Ordering::Less),
+        (Excluded(x), Included(y)) => x.cmp(y).then(Ordering::Greater),
+    }
+}
+
+fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
+    match (left, right) {
+        // only right bound of delete range can be `Unbounded`
+        (Unbounded, _) => unreachable!(),
+        (_, Unbounded) => true,
+        (Included(x), Included(y)) => x <= y,
+        (Included(x), Excluded(y)) | (Excluded(x), Included(y)) | (Excluded(x), Excluded(y)) => {
+            x < y
+        }
+    }
+}
+
 pub(crate) fn filter_with_delete_range<'a>(
     kv_iter: impl Iterator<Item = (Bytes, KeyOp)> + 'a,
-    mut delete_ranges_iter: impl Iterator<Item = &'a (Bytes, Bytes)> + 'a,
+    mut delete_ranges_iter: impl Iterator<Item = &'a (Bound<Bytes>, Bound<Bytes>)> + 'a,
 ) -> impl Iterator<Item = (Bytes, KeyOp)> + 'a {
     let mut range = delete_ranges_iter.next();
     if let Some((range_start, range_end)) = range {
         assert!(
-            range_start <= range_end,
+            validate_delete_range(range_start, range_end),
             "range_end {:?} smaller than range_start {:?}",
             range_start,
             range_end
         );
     }
     kv_iter.filter(move |(ref key, _)| {
-        if let Some((range_start, range_end)) = range {
-            if key < range_start {
+        if let Some(range_bound) = range {
+            if cmp_delete_range_left_bounds(Included(key), range_bound.0.as_ref()) == Ordering::Less
+            {
                 true
-            } else if key < range_end {
+            } else if range_bound.contains(key) {
                 false
             } else {
                 // Key has exceeded the current key range. Advance to the next range.
                 loop {
                     range = delete_ranges_iter.next();
-                    if let Some((range_start, range_end)) = range {
+                    if let Some(range_bound) = range {
                         assert!(
-                            range_start <= range_end,
+                            validate_delete_range(&range_bound.0, &range_bound.1),
                             "range_end {:?} smaller than range_start {:?}",
-                            range_start,
-                            range_end
+                            range_bound.0,
+                            range_bound.1
                         );
-                        if key < range_start {
+                        if cmp_delete_range_left_bounds(Included(key), range_bound.0.as_ref())
+                            == Ordering::Less
+                        {
                             // Not fall in the next delete range
                             break true;
-                        } else if key < range_end {
+                        } else if range_bound.contains(key) {
                             // Fall in the next delete range
                             break false;
                         } else {

@@ -18,8 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{Op, Vis, VisRef};
+use risingwave_common::array::{ArrayRef, Op, Vis, VisRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
@@ -27,22 +26,27 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::AggCall;
-use crate::cache::ExecutorCache;
+use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
-use crate::executor::StreamExecutorResult;
+use crate::executor::monitor::StreamingMetrics;
+use crate::executor::{ActorContextRef, StreamExecutorResult};
+use crate::task::ActorId;
 
-type DedupCache = ExecutorCache<CompactedRow, Box<[i64]>>;
+type DedupCache = ManagedLruCache<CompactedRow, Box<[i64]>>;
 
 /// Deduplicater for one distinct column.
 struct ColumnDeduplicater<S: StateStore> {
     cache: DedupCache,
+    metrics_info: MetricsInfo,
     _phantom: PhantomData<S>,
 }
 
 impl<S: StateStore> ColumnDeduplicater<S> {
-    fn new(watermark_epoch: &Arc<AtomicU64>) -> Self {
+    fn new(watermark_epoch: &Arc<AtomicU64>, metrics_info: MetricsInfo) -> Self {
         Self {
-            cache: DedupCache::new(crate::cache::new_unbounded(watermark_epoch.clone())),
+            cache: new_unbounded_with_metrics(watermark_epoch.clone(), metrics_info.clone()),
+            metrics_info,
             _phantom: PhantomData,
         }
     }
@@ -50,12 +54,13 @@ impl<S: StateStore> ColumnDeduplicater<S> {
     async fn dedup(
         &mut self,
         ops: &[Op],
-        column: &Column,
+        column: &ArrayRef,
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
         group_key: Option<&OwnedRow>,
+        ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
-        let column = column.array_ref();
+        let column = column;
         let n_calls = visibilities.len();
 
         let mut prev_counts_map = HashMap::new(); // also serves as changeset
@@ -64,7 +69,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         let mut vis_masks_inv = (0..visibilities.len())
             .map(|_| BitmapBuilder::zeroed(column.len()))
             .collect_vec();
-
+        let actor_id_str = ctx.id.to_string();
+        let table_id_str = dedup_table.table_id().to_string();
         for (datum_idx, (op, datum)) in ops.iter().zip_eq_fast(column.iter()).enumerate() {
             // skip if this item is hidden to all agg calls (this is likely to happen)
             if !visibilities.iter().any(|vis| vis.is_set(datum_idx)) {
@@ -74,9 +80,22 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             // get counts of the distinct key of all agg calls that distinct on this column
             let key = group_key.chain(row::once(datum));
             let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
-            let counts = if let Some(counts) = self.cache.get_mut(&compacted_key) {
-                counts
+
+            self.metrics_info
+                .metrics
+                .agg_distinct_total_cache_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .inc();
+            // TODO(yuhao): avoid this `contains`.
+            // https://github.com/risingwavelabs/risingwave/issues/9233
+            let mut counts = if self.cache.contains(&compacted_key) {
+                self.cache.get_mut(&compacted_key).unwrap()
             } else {
+                self.metrics_info
+                    .metrics
+                    .agg_distinct_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
                     dedup_table.get_row(&key).await? as Option<OwnedRow>
@@ -92,6 +111,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                     vec![0; n_calls].into_boxed_slice()
                 };
                 self.cache.put(compacted_key.clone(), counts); // TODO(rc): can we avoid this clone?
+
                 self.cache.get_mut(&compacted_key).unwrap()
             };
             debug_assert_eq!(counts.len(), visibilities.len());
@@ -156,12 +176,25 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             }
         }
 
+        // if we determine to flush to the table when processing every chunk instead of barrier
+        // coming, we can evict all including current epoch data.
+        self.cache.evict();
+
         Ok(())
     }
 
     /// Flush the deduplication table.
-    fn flush(&mut self, _dedup_table: &mut StateTable<S>) {
+    fn flush(&mut self, dedup_table: &mut StateTable<S>, ctx: ActorContextRef) {
         // TODO(rc): now we flush the table in `dedup` method.
+        // WARN: if you want to change to batching the write to table. please remember to change
+        // `self.cache.evict()` too.
+        let actor_id_str = ctx.id.to_string();
+        let table_id_str = dedup_table.table_id().to_string();
+        self.metrics_info
+            .metrics
+            .agg_distinct_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.cache.len() as i64);
         self.cache.evict();
     }
 }
@@ -185,7 +218,13 @@ pub struct DistinctDeduplicater<S: StateStore> {
 }
 
 impl<S: StateStore> DistinctDeduplicater<S> {
-    pub fn new(agg_calls: &[AggCall], watermark_epoch: &Arc<AtomicU64>) -> Self {
+    pub fn new(
+        agg_calls: &[AggCall],
+        watermark_epoch: &Arc<AtomicU64>,
+        distinct_dedup_tables: &HashMap<usize, StateTable<S>>,
+        actor_id: ActorId,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
         let deduplicaters: HashMap<_, _> = agg_calls
             .iter()
             .enumerate()
@@ -193,8 +232,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             .into_group_map_by(|(_, call)| call.args.val_indices()[0])
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
+                let table_id = distinct_dedup_tables.get(&distinct_col).unwrap().table_id();
+                let metrics_info =
+                    MetricsInfo::new(metrics.clone(), table_id, actor_id, "distinct dedup");
                 let call_indices: Box<[_]> = indices_and_calls.into_iter().map(|v| v.0).collect();
-                let deduplicater = ColumnDeduplicater::new(watermark_epoch);
+                let deduplicater = ColumnDeduplicater::new(watermark_epoch, metrics_info);
                 (distinct_col, (call_indices, deduplicater))
             })
             .collect();
@@ -212,10 +254,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub async fn dedup_chunk(
         &mut self,
         ops: &[Op],
-        columns: &[Column],
+        columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
         group_key: Option<&OwnedRow>,
+        ctx: ActorContextRef,
     ) -> StreamExecutorResult<Vec<Option<Bitmap>>> {
         // convert `Option<Bitmap>` to `Vis` for convenience
         let mut visibilities = visibilities
@@ -233,7 +276,14 @@ impl<S: StateStore> DistinctDeduplicater<S> {
             // SAFETY: all items in `agg_call_indices` are unique by nature, see `new`.
             let visibilities = unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
             deduplicater
-                .dedup(ops, column, visibilities, dedup_table, group_key)
+                .dedup(
+                    ops,
+                    column,
+                    visibilities,
+                    dedup_table,
+                    group_key,
+                    ctx.clone(),
+                )
                 .await?;
         }
         Ok(visibilities
@@ -246,10 +296,11 @@ impl<S: StateStore> DistinctDeduplicater<S> {
     pub fn flush(
         &mut self,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
+        ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
         for (distinct_col, (_, deduplicater)) in &mut self.deduplicaters {
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
-            deduplicater.flush(dedup_table);
+            deduplicater.flush(dedup_table, ctx.clone());
         }
         Ok(())
     }
@@ -263,10 +314,12 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::agg::{AggArgs, AggKind};
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
-    use crate::executor::aggregation::{AggArgs, AggCall, AggKind};
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::ActorContext;
 
     fn count_agg_call(kind: AggKind, col_idx: usize, distinct: bool) -> AggCall {
         AggCall {
@@ -276,7 +329,6 @@ mod tests {
             distinct,
 
             column_orders: vec![],
-            append_only: false,
             filter: None,
         }
     }
@@ -372,7 +424,13 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+        );
 
         // --- chunk 1 ---
 
@@ -387,7 +445,14 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
+            .dedup_chunk(
+                &ops,
+                &columns,
+                visibilities,
+                &mut dedup_tables,
+                None,
+                ActorContext::create(0),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -407,7 +472,9 @@ mod tests {
             vec![true, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater
+            .flush(&mut dedup_tables, ActorContext::create(0))
+            .unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -428,7 +495,14 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
+            .dedup_chunk(
+                &ops,
+                &columns,
+                visibilities,
+                &mut dedup_tables,
+                None,
+                ActorContext::create(0),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -448,7 +522,9 @@ mod tests {
             vec![false, false, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater
+            .flush(&mut dedup_tables, ActorContext::create(0))
+            .unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -456,7 +532,13 @@ mod tests {
         }
 
         // test recovery
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+        );
 
         // --- chunk 3 ---
 
@@ -472,7 +554,14 @@ mod tests {
             .take(agg_calls.len())
             .collect_vec();
         let visibilities = deduplicater
-            .dedup_chunk(&ops, &columns, visibilities, &mut dedup_tables, None)
+            .dedup_chunk(
+                &ops,
+                &columns,
+                visibilities,
+                &mut dedup_tables,
+                None,
+                ActorContext::create(0),
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -507,7 +596,9 @@ mod tests {
             ]
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater
+            .flush(&mut dedup_tables, ActorContext::create(0))
+            .unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -543,7 +634,13 @@ mod tests {
             .values_mut()
             .for_each(|table| table.init_epoch(epoch));
 
-        let mut deduplicater = DistinctDeduplicater::new(&agg_calls, &Arc::new(AtomicU64::new(0)));
+        let mut deduplicater = DistinctDeduplicater::new(
+            &agg_calls,
+            &Arc::new(AtomicU64::new(0)),
+            &dedup_tables,
+            0,
+            Arc::new(StreamingMetrics::unused()),
+        );
 
         let chunk = StreamChunk::from_pretty(
             " I   I     I
@@ -565,6 +662,7 @@ mod tests {
                 visibilities,
                 &mut dedup_tables,
                 Some(&group_key),
+                ActorContext::create(0),
             )
             .await
             .unwrap();
@@ -581,7 +679,9 @@ mod tests {
             vec![true, true, false, false, true] // distinct on b
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater
+            .flush(&mut dedup_tables, ActorContext::create(0))
+            .unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {
@@ -606,6 +706,7 @@ mod tests {
                 visibilities,
                 &mut dedup_tables,
                 Some(&group_key),
+                ActorContext::create(0),
             )
             .await
             .unwrap();
@@ -632,7 +733,9 @@ mod tests {
             ]
         );
 
-        deduplicater.flush(&mut dedup_tables).unwrap();
+        deduplicater
+            .flush(&mut dedup_tables, ActorContext::create(0))
+            .unwrap();
 
         epoch.inc();
         for table in dedup_tables.values_mut() {

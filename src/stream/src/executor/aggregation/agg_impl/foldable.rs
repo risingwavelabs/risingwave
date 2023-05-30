@@ -15,11 +15,13 @@
 //! Implementation of `StreamingFoldAgg`, which includes sum and count.
 
 use std::marker::PhantomData;
+use std::ops::BitXor;
 
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
@@ -55,7 +57,7 @@ pub trait StreamingFoldable<R: Scalar, I: Scalar>: std::fmt::Debug + Send + Sync
 /// `R`: Result (or output, stored) type.
 /// `I`: Input type.
 /// `S`: Sum function.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct StreamingFoldAgg<R, I, S>
 where
     R: Array,
@@ -82,7 +84,7 @@ where
 
 /// `PrimitiveSummable` sums two primitives by `accumulate` and `retract` functions.
 /// It produces the same type of output as input `S`.
-#[derive(Debug)]
+#[derive(Debug, EstimateSize)]
 pub struct PrimitiveSummable<S, I>
 where
     I: Scalar + Into<S> + std::ops::Neg<Output = I>,
@@ -194,6 +196,46 @@ where
     }
 }
 
+/// `BitXorable` returns the result of `bit_xor` all the values.
+/// It produces the same type of output as input `S`.
+#[derive(Debug)]
+pub struct BitXorable<S>
+where
+    S: Scalar + BitXor<Output = S>,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> StreamingFoldable<S, S> for BitXorable<S>
+where
+    S: Scalar + BitXor<Output = S>,
+{
+    fn accumulate(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().bitxor(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+
+    /// `fn accumulate` and `fn retract` share the same implementation.
+    fn retract(
+        result: Option<&S>,
+        input: Option<S::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<S>> {
+        Ok(match (result, input) {
+            (Some(x), Some(y)) => Some(x.clone().bitxor(y.to_owned_scalar())),
+            (None, Some(y)) => Some(y.to_owned_scalar()),
+            (Some(x), None) => Some(x.clone()),
+            (None, None) => None,
+        })
+    }
+}
+
 /// `Minimizable` return minimum value overall.
 /// It produces the same type of output as input `S`.
 #[derive(Debug)]
@@ -288,18 +330,19 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in visibility
-                    .iter()
-                    .zip_eq_fast(ops.iter())
-                    .zip_eq_fast(data.iter())
-                {
-                    if visible {
-                        match op {
+                for idx in visibility.iter_ones() {
+                    // SAFETY(value_at_unchecked): the idx is always in bound.
+                    unsafe {
+                        match ops[idx] {
                             Op::Insert | Op::UpdateInsert => {
-                                self.result = S::accumulate(self.result.as_ref(), data)?
+                                self.result = S::accumulate(
+                                    self.result.as_ref(),
+                                    data.value_at_unchecked(idx),
+                                )?
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                self.result = S::retract(self.result.as_ref(), data)?
+                                self.result =
+                                    S::retract(self.result.as_ref(), data.value_at_unchecked(idx))?
                             }
                         }
                     }
@@ -406,9 +449,9 @@ impl_fold_agg! { I64Array, Int64, DecimalArray }
 impl_fold_agg! { I64Array, Int64, StructArray }
 impl_fold_agg! { I64Array, Int64, ListArray }
 impl_fold_agg! { I64Array, Int64, IntervalArray }
-impl_fold_agg! { I64Array, Int64, NaiveTimeArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateArray }
-impl_fold_agg! { I64Array, Int64, NaiveDateTimeArray }
+impl_fold_agg! { I64Array, Int64, TimeArray }
+impl_fold_agg! { I64Array, Int64, DateArray }
+impl_fold_agg! { I64Array, Int64, TimestampArray }
 // max/min
 impl_fold_agg! { I16Array, Int16, I16Array }
 impl_fold_agg! { I32Array, Int32, I32Array }
@@ -419,9 +462,9 @@ impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
 impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
-impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
-impl_fold_agg! { NaiveDateArray, NaiveDate, NaiveDateArray }
-impl_fold_agg! { NaiveDateTimeArray, NaiveDateTime, NaiveDateTimeArray }
+impl_fold_agg! { TimeArray, Time, TimeArray }
+impl_fold_agg! { DateArray, Date, DateArray }
+impl_fold_agg! { TimestampArray, Timestamp, TimestampArray }
 // sum
 impl_fold_agg! { DecimalArray, Decimal, I64Array }
 // avg
@@ -429,9 +472,13 @@ impl_fold_agg! { F64Array, Float64, F32Array }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::I64Array;
-    use risingwave_common::types::OrderedF64;
-    use risingwave_common::{array, array_nonnull};
+    extern crate test;
+
+    use risingwave_common::array::stream_chunk::Op;
+    use risingwave_common::array::{Array, I64Array};
+    use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
+    use risingwave_common::types::F64;
+    use test::Bencher;
 
     use super::*;
 
@@ -444,6 +491,8 @@ mod tests {
 
     type TestStreamingMaxAgg<R> = StreamingFoldAgg<R, R, Maximizable<<R as Array>::OwnedItem>>;
 
+    type TestStreamingBitXorAgg<R> = StreamingFoldAgg<R, R, BitXorable<<R as Array>::OwnedItem>>;
+
     #[test]
     /// This test uses `Box<dyn StreamingAggImpl>` to test an aggregator.
     fn test_primitive_sum_boxed() {
@@ -451,7 +500,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -459,7 +508,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -471,7 +520,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &3);
@@ -479,7 +528,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![true, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &5);
@@ -503,7 +552,7 @@ mod tests {
                 .map(|(c, v)| {
                     (
                         if c == '+' { Op::Insert } else { Op::Delete },
-                        Some(OrderedF64::from(v)),
+                        Some(F64::from(v)),
                     )
                 })
                 .unzip();
@@ -516,7 +565,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 agg.get_output().unwrap().unwrap().as_float64(),
-                &OrderedF64::from(expected)
+                &F64::from(expected)
             );
         }
     }
@@ -527,7 +576,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [10, 1, 2, 3, 3]).into()],
+            &[&I64Array::from_iter([10, 1, 2, 3, 3]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-7);
@@ -535,7 +584,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-8);
@@ -552,7 +601,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array_nonnull!(I64Array, [1, 2, 1, 2]).into()],
+            &[&I64Array::from_iter([1, 2, 1, 2]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -560,7 +609,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Insert],
             Some(&(vec![false, true, false, true]).into_iter().collect()),
-            &[&array_nonnull!(I64Array, [3, 1, 3, 1]).into()],
+            &[&I64Array::from_iter([3, 1, 3, 1]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &0);
@@ -572,7 +621,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Delete],
             None,
-            &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
+            &[&I64Array::from_iter([Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
 
@@ -581,7 +630,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
             Some(&(vec![false, true, false, false]).into_iter().collect()),
-            &[&array!(I64Array, [Some(1), None, Some(3), Some(1)]).into()],
+            &[&I64Array::from_iter([Some(1), None, Some(3), Some(1)]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &1);
@@ -593,7 +642,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(I64Array, [Some(1), Some(10), None, Some(5)]).into()],
+            &[&I64Array::from_iter([Some(1), Some(10), None, Some(5)]).into()],
         )
         .unwrap();
 
@@ -602,7 +651,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(I64Array, [Some(1), Some(10), Some(-1), Some(5)]).into()],
+            &[&I64Array::from_iter([1, 10, -1, 5]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &-1);
@@ -614,7 +663,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(F64Array, [Some(1.0), Some(10.0), None, Some(5.0)]).into()],
+            &[&F64Array::from_iter([Some(1.0), Some(10.0), None, Some(5.0)]).into()],
         )
         .unwrap();
 
@@ -623,7 +672,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(F64Array, [Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
+            &[&F64Array::from_iter([Some(1.0), Some(10.0), Some(-1.0), Some(5.0)]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_float64(), &-1.0);
@@ -635,7 +684,7 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(I64Array, [Some(10), Some(1), None, Some(5)]).into()],
+            &[&I64Array::from_iter([Some(10), Some(1), None, Some(5)]).into()],
         )
         .unwrap();
 
@@ -644,9 +693,326 @@ mod tests {
         agg.apply_batch(
             &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
             None,
-            &[&array!(I64Array, [Some(1), Some(10), Some(100), Some(5)]).into()],
+            &[&I64Array::from_iter([1, 10, 100, 5]).into()],
         )
         .unwrap();
         assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
+    }
+
+    #[test]
+    fn test_bit_xor() {
+        let mut agg = TestStreamingBitXorAgg::<I64Array>::default();
+        agg.apply_batch(
+            &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
+            None,
+            &[&I64Array::from_iter([Some(10), Some(1), None, Some(5)]).into()],
+        )
+        .unwrap();
+
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &14);
+
+        agg.apply_batch(
+            &[Op::Delete, Op::Delete, Op::Delete, Op::Delete],
+            None,
+            &[&I64Array::from_iter([1, 10, 100, 5]).into()],
+        )
+        .unwrap();
+        assert_eq!(agg.get_output().unwrap().unwrap().as_int64(), &100);
+    }
+
+    fn bench_i64(
+        b: &mut Bencher,
+        mut agg: Box<dyn StreamingAggImpl>,
+        agg_desc: &str,
+        chunk_size: usize,
+        vis_rate: f64,
+        iter_count: usize,
+        append_only: bool,
+    ) {
+        println!(
+            "benching {} agg, chunk_size {}, vis_rate {}, iter_count {}",
+            agg_desc, chunk_size, vis_rate, iter_count
+        );
+        let bitmap = if vis_rate < 1.0 {
+            Some(rand_bitmap::gen_rand_bitmap(
+                chunk_size,
+                (chunk_size as f64 * vis_rate) as usize,
+                666,
+            ))
+        } else {
+            None
+        };
+        let (ops, data) = rand_stream_chunk::gen_legal_stream_chunk(
+            bitmap.as_ref(),
+            chunk_size,
+            append_only,
+            666,
+        );
+        b.iter(|| {
+            for _ in 0..iter_count {
+                agg.apply_batch(&ops, bitmap.as_ref(), &[&data]).unwrap();
+            }
+        });
+    }
+
+    // TODO: refactor with macro
+    #[bench]
+    fn bench_foldable_sum_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            1.0,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.75,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.5,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.25,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_sum_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingSumAgg<I64Array>>::default(),
+            "sum",
+            1024,
+            0.05,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            1.0,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.75,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.5,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.25,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_count_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingCountAgg<I64Array>>::default(),
+            "count",
+            1024,
+            0.05,
+            100,
+            false,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            1.0,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.75,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.5,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.25,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_min_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMinAgg<I64Array>>::default(),
+            "min",
+            1024,
+            0.05,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_without_vis(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            1.0,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_75(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.75,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_5(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.5,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_25(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.25,
+            100,
+            true,
+        );
+    }
+
+    #[bench]
+    fn bench_foldable_max_agg_vis_rate_0_05(b: &mut Bencher) {
+        bench_i64(
+            b,
+            Box::<TestStreamingMaxAgg<I64Array>>::default(),
+            "max",
+            1024,
+            0.05,
+            100,
+            true,
+        );
     }
 }

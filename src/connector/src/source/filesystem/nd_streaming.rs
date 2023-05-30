@@ -84,13 +84,13 @@ impl<T> NdByteStreamWrapper<T> {
                     let msg: SourceMessage = std::mem::take(&mut last_message).unwrap();
                     let last_payload = msg.payload.unwrap();
                     offset -= last_payload.len();
-                    line = String::from_utf8(last_payload.into()).unwrap() + &line;
+                    line = String::from_utf8(last_payload).unwrap() + &line;
                 }
                 let len = line.as_bytes().len();
 
                 msgs.push(SourceMessage {
                     payload: Some(line.into()),
-                    offset: offset.to_string(),
+                    offset: (offset + len).to_string(),
                     split_id: split_id.clone(),
                     meta: meta.clone(),
                 });
@@ -148,7 +148,7 @@ mod tests {
                 Ok(e.chunks(N3)
                     .enumerate()
                     .map(|(j, buf)| SourceMessage {
-                        payload: Some(buf.to_owned().into()),
+                        payload: Some(buf.to_owned()),
                         offset: (i * N2 + j * N3).to_string(),
                         split_id: split_id.clone(),
                         meta: crate::source::SourceMeta::Empty,
@@ -164,7 +164,7 @@ mod tests {
         let items = msg_stream
             .into_iter()
             .flatten()
-            .map(|e| String::from_utf8(e.payload.unwrap().into()).unwrap())
+            .map(|e| String::from_utf8(e.payload.unwrap()).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(items.len(), N1);
         let text = items.join("");

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derivative::Derivative;
+use educe::Educe;
 use generic::PlanAggCall;
 use itertools::Itertools;
 use pb::stream_node as pb_node;
@@ -69,6 +69,7 @@ macro_rules! impl_node {
 pub trait StreamPlanNode: GenericPlanNode {
     fn distribution(&self) -> Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
     fn to_stream_base(&self) -> PlanBase {
         let ctx = self.ctx();
         PlanBase {
@@ -78,6 +79,7 @@ pub trait StreamPlanNode: GenericPlanNode {
             logical_pk: self.logical_pk().unwrap_or_default(),
             dist: self.distribution(),
             append_only: self.append_only(),
+            emit_on_window_close: self.emit_on_window_close(),
         }
     }
 }
@@ -85,6 +87,7 @@ pub trait StreamPlanNode: GenericPlanNode {
 pub trait StreamPlanRef: GenericPlanRef {
     fn distribution(&self) -> &Distribution;
     fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
 }
 
 impl generic::GenericPlanRef for PlanRef {
@@ -131,6 +134,10 @@ impl StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
         self.append_only
     }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -140,6 +147,10 @@ impl StreamPlanRef for PlanRef {
 
     fn append_only(&self) -> bool {
         self.0.append_only
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.0.emit_on_window_close
     }
 }
 
@@ -185,12 +196,12 @@ pub struct Filter {
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GlobalSimpleAgg {
+pub struct SimpleAgg {
     pub core: generic::Agg<PlanRef>,
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
 }
-impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(SimpleAgg, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupTopN {
@@ -316,17 +327,18 @@ pub struct IndexScan {
     pub batch_plan_id: PlanNodeId,
 }
 impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
-/// Local simple agg.
+
+/// Stateless simple agg.
 ///
 /// Should only be used for stateless agg, including `sum`, `count` and *append-only* `min`/`max`.
 ///
-/// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
-/// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
+/// The output of `StatelessSimpleAgg` doesn't have pk columns, so the result can only be used by
+/// `SimpleAgg` with `ManagedValueState`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LocalSimpleAgg {
+pub struct StatelessSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
-impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(LocalSimpleAgg, core, input);
+impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(StatelessSimpleAgg, core, input);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Materialize {
@@ -382,21 +394,22 @@ pub struct TopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug, Derivative)]
-#[derivative(PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct PlanBase {
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub id: PlanNodeId,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
-    #[derivative(PartialEq = "ignore")]
-    #[derivative(Hash = "ignore")]
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub dist: Distribution,
     pub append_only: bool,
+    pub emit_on_window_close: bool,
 }
 
 impl_node!(
@@ -406,13 +419,13 @@ impl_node!(
     DeltaJoin,
     Expand,
     Filter,
-    GlobalSimpleAgg,
+    SimpleAgg,
     GroupTopN,
     HashAgg,
     HashJoin,
     HopWindow,
     IndexScan,
-    LocalSimpleAgg,
+    StatelessSimpleAgg,
     Materialize,
     ProjectSet,
     Project,
@@ -455,12 +468,12 @@ pub fn to_stream_prost_body(
                 .predicate()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto());
-            let left_table = infer_left_internal_table_catalog(base, me.left_index)
+            let left_table = infer_left_internal_table_catalog(base, me.left_index())
                 .with_id(state.gen_table_id_wrapped());
-            let right_table = infer_right_internal_table_catalog(&me.right.0)
+            let right_table = infer_right_internal_table_catalog(&me.right().0)
                 .with_id(state.gen_table_id_wrapped());
             PbNodeBody::DynamicFilter(DynamicFilterNode {
-                left_key: me.left_index as u32,
+                left_key: me.left_index() as u32,
                 condition,
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),
@@ -547,12 +560,12 @@ pub fn to_stream_prost_body(
                 search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
-        Node::GlobalSimpleAgg(me) => {
+        Node::SimpleAgg(me) => {
             let result_table = me.core.infer_result_table(base, None);
             let agg_states = me.core.infer_stream_agg_state(base, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
-            PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
+            PbNodeBody::SimpleAgg(SimpleAggNode {
                 agg_calls: me
                     .core
                     .agg_calls
@@ -583,14 +596,20 @@ pub fn to_stream_prost_body(
             })
         }
         Node::GroupTopN(me) => {
+            let input = &me.core.input.0;
             let table = me
                 .core
-                .infer_internal_table_catalog(base, me.vnode_col_idx)
+                .infer_internal_table_catalog(
+                    input.schema(),
+                    input.ctx(),
+                    input.logical_pk(),
+                    me.vnode_col_idx,
+                )
                 .with_id(state.gen_table_id_wrapped());
             let group_topn_node = GroupTopNNode {
-                limit: me.core.limit,
+                limit: me.core.limit_attr.limit(),
                 offset: me.core.offset,
-                with_ties: me.core.with_ties,
+                with_ties: me.core.limit_attr.with_ties(),
                 group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
                 table: Some(table.to_internal_table_prost()),
                 order_by: me.core.order.to_protobuf(),
@@ -604,7 +623,7 @@ pub fn to_stream_prost_body(
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
             PbNodeBody::HashAgg(HashAggNode {
-                group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
+                group_key: me.core.group_key.ones().map(|idx| idx as u32).collect(),
                 agg_calls: me
                     .core
                     .agg_calls
@@ -654,9 +673,9 @@ pub fn to_stream_prost_body(
                 window_end_exprs,
             })
         }
-        Node::LocalSimpleAgg(me) => {
+        Node::StatelessSimpleAgg(me) => {
             let me = &me.core;
-            PbNodeBody::LocalSimpleAgg(SimpleAggNode {
+            PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
                 agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
                 row_count_index: u32::MAX, // this is not used
                 distribution_key: base
@@ -678,7 +697,6 @@ pub fn to_stream_prost_body(
                 table_id: 0,
                 column_orders: me.table.pk().iter().map(ColumnOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
-                handle_pk_conflict_behavior: 0,
             })
         }
         Node::ProjectSet(me) => {
@@ -719,27 +737,30 @@ pub fn to_stream_prost_body(
                 info: Some(me.info.clone()),
                 row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
-                pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone().into_iter().collect(),
             });
             PbNodeBody::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
+            let input = &me.core.input.0;
             let me = &me.core;
             let topn_node = TopNNode {
-                limit: me.limit,
+                limit: me.limit_attr.limit(),
                 offset: me.offset,
-                with_ties: me.with_ties,
+                with_ties: me.limit_attr.with_ties(),
                 table: Some(
-                    me.infer_internal_table_catalog(base, None)
-                        .with_id(state.gen_table_id_wrapped())
-                        .to_internal_table_prost(),
+                    me.infer_internal_table_catalog(
+                        input.schema(),
+                        input.ctx(),
+                        input.logical_pk(),
+                        None,
+                    )
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
                 ),
                 order_by: me.order.to_protobuf(),
             };
-            // TODO: support with ties for append only TopN
-            // <https://github.com/risingwavelabs/risingwave/issues/5642>
-            if me.input.0.append_only && !me.with_ties {
+            if me.input.0.append_only {
                 PbNodeBody::AppendOnlyTopN(topn_node)
             } else {
                 PbNodeBody::TopN(topn_node)

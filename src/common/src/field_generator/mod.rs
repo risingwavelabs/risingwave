@@ -52,7 +52,13 @@ pub trait NumericFieldRandomGenerator {
 
 /// fields that can be continuously generated impl this trait
 pub trait NumericFieldSequenceGenerator {
-    fn new(start: Option<String>, end: Option<String>, offset: u64, step: u64) -> Result<Self>
+    fn new(
+        start: Option<String>,
+        end: Option<String>,
+        offset: u64,
+        step: u64,
+        event_offset: u64,
+    ) -> Result<Self>
     where
         Self: Sized;
 
@@ -69,6 +75,12 @@ pub enum FieldKind {
     Random,
 }
 
+pub enum VarcharProperty {
+    RandomVariableLength,
+    RandomFixedLength(Option<usize>),
+    Constant,
+}
+
 pub enum FieldGeneratorImpl {
     I16Sequence(I16SequenceField),
     I32Sequence(I32SequenceField),
@@ -80,7 +92,9 @@ pub enum FieldGeneratorImpl {
     I64Random(I64RandomField),
     F32Random(F32RandomField),
     F64Random(F64RandomField),
-    Varchar(VarcharField),
+    VarcharRandomVariableLength(VarcharRandomVariableLengthField),
+    VarcharRandomFixedLength(VarcharRandomFixedLengthField),
+    VarcharConstant,
     Timestamp(TimestampField),
     Struct(Vec<(String, FieldGeneratorImpl)>),
     List(Box<FieldGeneratorImpl>, usize),
@@ -93,6 +107,7 @@ impl FieldGeneratorImpl {
         end: Option<String>,
         split_index: u64,
         split_num: u64,
+        offset: u64,
     ) -> Result<Self> {
         match data_type {
             DataType::Int16 => Ok(FieldGeneratorImpl::I16Sequence(I16SequenceField::new(
@@ -100,30 +115,35 @@ impl FieldGeneratorImpl {
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int32 => Ok(FieldGeneratorImpl::I32Sequence(I32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int64 => Ok(FieldGeneratorImpl::I64Sequence(I64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float32 => Ok(FieldGeneratorImpl::F32Sequence(F32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Sequence(F64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             _ => unimplemented!(),
         }
@@ -151,7 +171,7 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            _ => unimplemented!(),
+            _ => unimplemented!("DataType: {}", data_type),
         }
     }
 
@@ -169,10 +189,21 @@ impl FieldGeneratorImpl {
         )?))
     }
 
-    pub fn with_varchar(length: Option<String>, seed: u64) -> Result<Self> {
-        Ok(FieldGeneratorImpl::Varchar(VarcharField::new(
-            length, seed,
-        )?))
+    pub fn with_varchar(varchar_property: &VarcharProperty, seed: u64) -> Self {
+        match varchar_property {
+            VarcharProperty::RandomFixedLength(length_option) => {
+                FieldGeneratorImpl::VarcharRandomFixedLength(VarcharRandomFixedLengthField::new(
+                    length_option,
+                    seed,
+                ))
+            }
+            VarcharProperty::RandomVariableLength => {
+                FieldGeneratorImpl::VarcharRandomVariableLength(
+                    VarcharRandomVariableLengthField::new(seed),
+                )
+            }
+            VarcharProperty::Constant => FieldGeneratorImpl::VarcharConstant,
+        }
     }
 
     pub fn with_struct_fields(fields: Vec<(String, FieldGeneratorImpl)>) -> Result<Self> {
@@ -200,7 +231,9 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate(offset),
-            FieldGeneratorImpl::Varchar(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharRandomFixedLength(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate(offset),
+            FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_json(),
             FieldGeneratorImpl::Timestamp(f) => f.generate(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
@@ -230,7 +263,9 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::I64Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F32Random(f) => f.generate_datum(offset),
             FieldGeneratorImpl::F64Random(f) => f.generate_datum(offset),
-            FieldGeneratorImpl::Varchar(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharRandomFixedLength(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharRandomVariableLength(f) => f.generate_datum(offset),
+            FieldGeneratorImpl::VarcharConstant => VarcharConstant::generate_datum(),
             FieldGeneratorImpl::Timestamp(f) => f.generate_datum(offset),
             FieldGeneratorImpl::Struct(fields) => {
                 let data = fields
@@ -265,6 +300,7 @@ mod tests {
                     Some("20".to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             );
@@ -294,7 +330,10 @@ mod tests {
             DataType::Timestamp,
         ] {
             let mut generator = match data_type {
-                DataType::Varchar => FieldGeneratorImpl::with_varchar(None, seed).unwrap(),
+                DataType::Varchar => FieldGeneratorImpl::with_varchar(
+                    &VarcharProperty::RandomFixedLength(None),
+                    seed,
+                ),
                 DataType::Timestamp => {
                     FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
                 }

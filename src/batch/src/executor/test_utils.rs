@@ -16,19 +16,20 @@ use std::collections::VecDeque;
 use std::future::Future;
 
 use assert_matches::assert_matches;
+use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::field_generator::FieldGeneratorImpl;
+use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
+use super::{BoxedExecutorBuilder, ExecutorBuilder};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
@@ -40,23 +41,12 @@ const SEED: u64 = 0xFF67FEABBAEF76FF;
 /// Generate `batch_num` data chunks with type `data_types`, each data chunk has cardinality of
 /// `batch_size`.
 pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) -> Vec<DataChunk> {
-    let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
-
-    for i in 0..batch_num {
-        let mut columns = Vec::new();
-        for data_type in data_types {
-            let mut data_gen =
-                FieldGeneratorImpl::with_number_random(data_type.clone(), None, None, SEED)
-                    .unwrap();
-            let mut array_builder = data_type.create_array_builder(batch_size);
-            for j in 0..batch_size {
-                array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
-            }
-            columns.push(array_builder.finish().into());
-        }
-        ret.push(DataChunk::new(columns, batch_size));
-    }
-    ret
+    DataChunk::gen_data_chunks(
+        batch_num,
+        batch_size,
+        data_types,
+        &VarcharProperty::RandomFixedLength(None),
+    )
 }
 
 /// Generate `batch_num` sorted data chunks with type `Int64`, each data chunk has cardinality of
@@ -66,6 +56,7 @@ pub fn gen_sorted_data(
     batch_num: usize,
     start: String,
     step: u64,
+    offset: u64,
 ) -> Vec<DataChunk> {
     let mut data_gen = FieldGeneratorImpl::with_number_sequence(
         DataType::Int64,
@@ -73,6 +64,7 @@ pub fn gen_sorted_data(
         Some(i64::MAX.to_string()),
         0,
         step,
+        offset,
     )
     .unwrap();
     let mut ret = Vec::<DataChunk>::with_capacity(batch_num);
@@ -81,7 +73,7 @@ pub fn gen_sorted_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
-            array_builder.append_datum(&data_gen.generate_datum(0));
+            array_builder.append(&data_gen.generate_datum(0));
         }
 
         let array = array_builder.finish();
@@ -108,13 +100,13 @@ pub fn gen_projected_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
-            array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
+            array_builder.append(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
-        let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
+        let chunk = DataChunk::new(vec![array], batch_size);
         ret.push(chunk);
     }
 
@@ -221,7 +213,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
         .columns()
         .iter()
         .zip_eq_fast(actual.columns().iter())
-        .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
+        .for_each(|(c1, c2)| assert_eq!(c1, c2));
 
     is_data_chunk_eq(&expect, &actual)
 }
@@ -346,5 +338,80 @@ impl LookupExecutorBuilder for FakeInnerSideExecutorBuilder {
 
     fn reset(&mut self) {
         self.datums = vec![];
+    }
+}
+
+pub struct BlockExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BlockExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BlockExecutor {}))
+    }
+}
+
+pub struct BlockExecutor {}
+
+impl Executor for BlockExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BlockExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BlockExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to block
+        #[allow(clippy::empty_loop)]
+        loop {}
+    }
+}
+
+pub struct BusyLoopExecutorBuidler {}
+
+#[async_trait::async_trait]
+impl BoxedExecutorBuilder for BusyLoopExecutorBuidler {
+    async fn new_boxed_executor<C: BatchTaskContext>(
+        _source: &ExecutorBuilder<'_, C>,
+        _inputs: Vec<BoxedExecutor>,
+    ) -> Result<BoxedExecutor> {
+        Ok(Box::new(BusyLoopExecutor {}))
+    }
+}
+
+pub struct BusyLoopExecutor {}
+
+impl Executor for BusyLoopExecutor {
+    fn schema(&self) -> &Schema {
+        unimplemented!("Not used in test")
+    }
+
+    fn identity(&self) -> &str {
+        "BusyLoopExecutor"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        self.do_execute().boxed()
+    }
+}
+
+impl BusyLoopExecutor {
+    #[try_stream(ok = DataChunk, error = RwError)]
+    async fn do_execute(self) {
+        // infinite loop to generate data
+        loop {
+            yield DataChunk::new_dummy(1);
+        }
     }
 }

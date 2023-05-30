@@ -44,6 +44,18 @@ mod top_n;
 pub use top_n::*;
 mod share;
 pub use share::*;
+mod dedup;
+pub use dedup::*;
+mod intersect;
+pub use intersect::*;
+mod over_window;
+pub use over_window::*;
+mod except;
+pub use except::*;
+mod update;
+pub use update::*;
+mod delete;
+pub use delete::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;

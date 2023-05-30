@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{pin_mut, TryStreamExt};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
     HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
@@ -28,7 +30,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 
@@ -49,6 +51,7 @@ async fn test_empty_read_v2() {
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -65,6 +68,7 @@ async fn test_empty_read_v2() {
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -163,6 +167,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -181,6 +186,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -201,6 +207,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -236,6 +243,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -272,6 +280,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -291,6 +300,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -310,6 +320,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -330,6 +341,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -350,6 +362,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -369,6 +382,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -389,6 +403,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -417,6 +432,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -435,6 +451,7 @@ async fn test_basic_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -456,8 +473,8 @@ async fn test_state_store_sync_inner(
 
     // ingest 16B batch
     let mut batch1 = vec![
-        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
-        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
+        (Bytes::from("\0\0aaaa"), StorageValue::new_put("1111")),
+        (Bytes::from("\0\0bbbb"), StorageValue::new_put("2222")),
     ];
 
     // Make sure the batch is sorted.
@@ -481,9 +498,18 @@ async fn test_state_store_sync_inner(
 
     // ingest 24B batch
     let mut batch2 = vec![
-        (Bytes::from("cccc"), StorageValue::new_put("3333")),
-        (Bytes::from("dddd"), StorageValue::new_put("4444")),
-        (Bytes::from("eeee"), StorageValue::new_put("5555")),
+        (
+            Bytes::copy_from_slice(b"\0\0cccc"),
+            StorageValue::new_put("3333"),
+        ),
+        (
+            Bytes::copy_from_slice(b"\0\0dddd"),
+            StorageValue::new_put("4444"),
+        ),
+        (
+            Bytes::copy_from_slice(b"\0\0eeee"),
+            StorageValue::new_put("5555"),
+        ),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     local
@@ -511,7 +537,10 @@ async fn test_state_store_sync_inner(
     local.seal_current_epoch(epoch);
 
     // ingest more 8B then will trigger a sync behind the scene
-    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("5555"))];
+    let mut batch3 = vec![(
+        Bytes::copy_from_slice(b"\0\0eeee"),
+        StorageValue::new_put("5555"),
+    )];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     local
         .ingest_batch(
@@ -617,6 +646,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -637,6 +667,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -671,6 +702,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -691,6 +723,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -711,6 +744,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -731,6 +765,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -750,6 +785,7 @@ async fn test_reload_storage() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             },
         )
         .await
@@ -780,7 +816,7 @@ async fn test_write_anytime_inner(
                 "111".as_bytes(),
                 hummock_storage
                     .get(
-                        Bytes::from("aa"),
+                        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -790,6 +826,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -800,7 +837,7 @@ async fn test_write_anytime_inner(
                 "222".as_bytes(),
                 hummock_storage
                     .get(
-                        Bytes::from("bb"),
+                        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -810,6 +847,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -820,7 +858,7 @@ async fn test_write_anytime_inner(
                 "333".as_bytes(),
                 hummock_storage
                     .get(
-                        Bytes::from("cc"),
+                        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat()),
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -830,6 +868,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -840,8 +879,12 @@ async fn test_write_anytime_inner(
             let iter = hummock_storage
                 .iter(
                     (
-                        Bound::Included(Bytes::from("aa")),
-                        Bound::Included(Bytes::from("cc")),
+                        Bound::Included(Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat(),
+                        )),
+                        Bound::Included(Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat(),
+                        )),
                     ),
                     epoch,
                     ReadOptions {
@@ -852,6 +895,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -859,21 +903,39 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
+                    FullKey::for_test(
+                        TableId::default(),
+                        Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
+                        ),
+                        epoch
+                    ),
                     Bytes::from("111")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch),
+                    FullKey::for_test(
+                        TableId::default(),
+                        Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb".as_slice()].concat()
+                        ),
+                        epoch
+                    ),
                     Bytes::from("222")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
+                    FullKey::for_test(
+                        TableId::default(),
+                        Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
+                        ),
+                        epoch
+                    ),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()
@@ -883,9 +945,18 @@ async fn test_write_anytime_inner(
     };
 
     let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
-        (Bytes::from("cc"), StorageValue::new_put("333")),
+        (
+            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            StorageValue::new_put("111"),
+        ),
+        (
+            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
+            StorageValue::new_put("222"),
+        ),
+        (
+            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat()),
+            StorageValue::new_put("333"),
+        ),
     ];
 
     let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
@@ -912,7 +983,7 @@ async fn test_write_anytime_inner(
                 "111_new".as_bytes(),
                 hummock_storage
                     .get(
-                        Bytes::from("aa"),
+                        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -922,6 +993,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -931,7 +1003,7 @@ async fn test_write_anytime_inner(
 
             assert!(hummock_storage
                 .get(
-                    Bytes::from("bb"),
+                    Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
                     epoch,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -941,6 +1013,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     }
                 )
                 .await
@@ -950,7 +1023,7 @@ async fn test_write_anytime_inner(
                 "333".as_bytes(),
                 hummock_storage
                     .get(
-                        Bytes::from("cc"),
+                        Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat()),
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -960,6 +1033,7 @@ async fn test_write_anytime_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -969,8 +1043,12 @@ async fn test_write_anytime_inner(
             let iter = hummock_storage
                 .iter(
                     (
-                        Bound::Included(Bytes::from("aa")),
-                        Bound::Included(Bytes::from("cc")),
+                        Bound::Included(Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat(),
+                        )),
+                        Bound::Included(Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc"].concat(),
+                        )),
                     ),
                     epoch,
                     ReadOptions {
@@ -981,6 +1059,7 @@ async fn test_write_anytime_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -988,14 +1067,26 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
+                    FullKey::for_test(
+                        TableId::default(),
+                        Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa".as_slice()].concat()
+                        ),
+                        epoch
+                    ),
                     Bytes::from("111_new")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
+                    FullKey::for_test(
+                        TableId::default(),
+                        Bytes::from(
+                            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"cc".as_slice()].concat()
+                        ),
+                        epoch
+                    ),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()
@@ -1006,8 +1097,14 @@ async fn test_write_anytime_inner(
 
     // Update aa, delete bb, cc unchanged
     let batch2 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111_new")),
-        (Bytes::from("bb"), StorageValue::new_delete()),
+        (
+            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"aa"].concat()),
+            StorageValue::new_put("111_new"),
+        ),
+        (
+            Bytes::from([VirtualNode::ZERO.to_be_bytes().as_slice(), b"bb"].concat()),
+            StorageValue::new_delete(),
+        ),
     ];
 
     local
@@ -1138,6 +1235,7 @@ async fn test_delete_get_inner(
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill(CachePriority::High),
             }
         )
         .await
@@ -1225,6 +1323,7 @@ async fn test_multiple_epoch_sync_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await
@@ -1244,6 +1343,7 @@ async fn test_multiple_epoch_sync_inner(
                         retention_seconds: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     }
                 )
                 .await
@@ -1262,6 +1362,7 @@ async fn test_multiple_epoch_sync_inner(
                             retention_seconds: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill(CachePriority::High),
                         }
                     )
                     .await

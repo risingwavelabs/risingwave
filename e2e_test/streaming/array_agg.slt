@@ -13,9 +13,6 @@ create materialized view mv1 as select array_agg(c) as res from t;
 statement ok
 create materialized view mv2 as select array_agg(a order by b asc, a desc) as res from t;
 
-statement ok
-flush;
-
 query T
 select u from (select unnest(res) from mv1) p(u) order by u;
 ----
@@ -48,10 +45,24 @@ select * from mv2;
 {ccc,bbb,x,ddd,aaa,y}
 
 statement ok
+create materialized view mv3 as select array_agg(a order by b nulls first, a nulls last) as res from t;
+
+statement ok
+insert into t values (NULL, NULL, 2), ('z', NULL, 6);
+
+query T
+select * from mv3;
+----
+{z,NULL,bbb,ccc,aaa,ddd,x,y}
+
+statement ok
 drop materialized view mv1;
 
 statement ok
 drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
 
 statement ok
 drop table t;

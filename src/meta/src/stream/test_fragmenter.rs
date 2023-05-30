@@ -19,7 +19,9 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{ParallelUnit, PbColumnOrder, PbDirection, PbOrderType, WorkerNode};
+use risingwave_pb::common::{
+    ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::Type;
@@ -96,6 +98,7 @@ fn make_column_order(column_index: u32) -> PbColumnOrder {
         column_index,
         order_type: Some(PbOrderType {
             direction: PbDirection::Ascending as _,
+            nulls_are: PbNullsAre::Largest as _,
         }),
     }
 }
@@ -129,6 +132,7 @@ fn make_source_internal_table(id: u32) -> PbTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Descending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         ..Default::default()
@@ -150,6 +154,7 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Descending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         stream_key: vec![2],
@@ -260,7 +265,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // simple agg node
     let simple_agg_node = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -272,7 +277,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
         operator_id: 3,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 
@@ -303,7 +308,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
 
     // agg node
     let simple_agg_node_1 = StreamNode {
-        node_body: Some(NodeBody::GlobalSimpleAgg(SimpleAggNode {
+        node_body: Some(NodeBody::SimpleAgg(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_key: Default::default(),
             is_append_only: false,
@@ -315,7 +320,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
         operator_id: 5,
-        identity: "GlobalSimpleAggExecutor".to_string(),
+        identity: "SimpleAggExecutor".to_string(),
         ..Default::default()
     };
 
@@ -356,7 +361,6 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            handle_pk_conflict_behavior: 0,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -407,7 +411,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
-        dependent_relation_ids: vec![],
+        dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
     }

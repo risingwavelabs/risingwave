@@ -17,13 +17,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{
-    add_meta_node, add_storage_backend, CompactorConfig, ExecuteContext, HummockInMemoryStrategy,
-    Task,
-};
+use crate::{add_meta_node, CompactorConfig, ExecuteContext, Task};
 
 pub struct CompactorService {
     config: CompactorConfig,
@@ -38,26 +35,16 @@ impl CompactorService {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
         if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
-            Ok(Command::new(Path::new(&prefix_bin).join("risingwave").join("compactor")))
+            Ok(Command::new(
+                Path::new(&prefix_bin).join("risingwave").join("compactor"),
+            ))
         } else {
             Ok(Command::new(Path::new(&prefix_bin).join("compactor")))
         }
     }
 
     /// Apply command args according to config
-    pub fn apply_command_args(
-        cmd: &mut Command,
-        config: &CompactorConfig,
-        hummock_in_memory_strategy: HummockInMemoryStrategy,
-    ) -> Result<()> {
-        if matches!(
-            hummock_in_memory_strategy,
-            HummockInMemoryStrategy::Isolated
-        ) {
-            return Err(anyhow!(
-                "compactor cannot use in-memory hummock if remote object store is not provided"
-            ));
-        }
+    pub fn apply_command_args(cmd: &mut Command, config: &CompactorConfig) -> Result<()> {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--prometheus-listener-addr")
@@ -78,18 +65,6 @@ impl CompactorService {
                 .arg(format!("{}", compaction_worker_threads_number));
         }
 
-        let provide_minio = config.provide_minio.as_ref().unwrap();
-        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        let provide_opendal = config.provide_opendal.as_ref().unwrap();
-        add_storage_backend(
-            &config.id,
-            provide_opendal,
-            provide_minio,
-            provide_aws_s3,
-            hummock_in_memory_strategy,
-            cmd,
-        )?;
-
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
 
@@ -107,6 +82,9 @@ impl Task for CompactorService {
         let mut cmd = self.compactor()?;
 
         cmd.env("RUST_BACKTRACE", "1");
+
+        // FIXME: Otherwise, CI will throw log size too large error
+        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
                 "RW_PROFILE_PATH",
@@ -124,7 +102,7 @@ impl Task for CompactorService {
 
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
-        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Disallowed)?;
+        Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

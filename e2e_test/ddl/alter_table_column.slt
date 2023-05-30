@@ -209,3 +209,35 @@ drop materialized view mv;
 
 statement ok
 drop table t;
+
+# Test the consistency of tables and indexes #https://github.com/risingwavelabs/risingwave/issues/8649
+statement ok
+create table t(id int primary key, a int, b varchar);
+
+statement ok
+create index idx on t(a, lower(b));
+
+statement ok
+alter table t add column c int;
+
+query IITI rowsort
+select * from t;
+----
+
+statement ok
+drop table t;
+
+statement ok
+create table t(id int primary key, a int, b varchar);
+
+statement ok
+create index idx on t(b) include(b);
+
+statement ok
+alter table t drop column a;
+
+query II rowsort
+select * from t where b = '1';
+
+statement ok
+drop table t;

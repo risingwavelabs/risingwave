@@ -16,8 +16,9 @@ use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
+};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -134,7 +135,7 @@ impl UpdateExecutor {
             let updated_data_chunk = {
                 let mut columns = Vec::with_capacity(self.exprs.len());
                 for expr in &mut self.exprs {
-                    let column = Column::new(expr.eval(&data_chunk).await?);
+                    let column = expr.eval(&data_chunk).await?;
                     columns.push(column);
                 }
 
@@ -175,7 +176,7 @@ impl UpdateExecutor {
             array_builder.append(Some(rows_updated as i64));
 
             let array = array_builder.finish();
-            let ret_chunk = DataChunk::new(vec![array.into()], 1);
+            let ret_chunk = DataChunk::new(vec![array.into_ref()], 1);
 
             yield ret_chunk
         }
@@ -209,7 +210,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.context().dml_manager(),
             child,
             exprs,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,
         )))
@@ -296,12 +297,7 @@ mod tests {
             let result = stream.next().await.unwrap().unwrap();
 
             assert_eq!(
-                result
-                    .column_at(0)
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
                 vec![Some(5)] // updated rows
             );
         });
@@ -319,7 +315,6 @@ mod tests {
 
             assert_eq!(
                 chunk.chunk.columns()[0]
-                    .array()
                     .as_int32()
                     .iter()
                     .collect::<Vec<_>>(),
@@ -332,7 +327,6 @@ mod tests {
 
             assert_eq!(
                 chunk.chunk.columns()[1]
-                    .array()
                     .as_int32()
                     .iter()
                     .collect::<Vec<_>>(),

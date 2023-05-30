@@ -55,6 +55,7 @@ fn is_nested_loop_join_error(db_error: &str) -> bool {
 
 fn is_subquery_unnesting_error(db_error: &str) -> bool {
     db_error.contains("Subquery can not be unnested")
+        || db_error.contains("Scalar subquery might produce more than one row")
 }
 
 /// Can't avoid numeric overflows, we do not eval const expr
@@ -64,7 +65,35 @@ fn is_numeric_overflow_error(db_error: &str) -> bool {
 
 /// Negative substr error
 fn is_neg_substr_error(db_error: &str) -> bool {
-    db_error.contains("length in substr should be non-negative")
+    db_error.contains("negative substring length not allowed")
+}
+
+/// Zero or negative overlay start error
+fn is_overlay_start_error(db_error: &str) -> bool {
+    db_error.contains("Invalid parameter start") && db_error.contains("is not positive")
+}
+
+/// Broken channel error
+fn is_broken_channel_error(db_error: &str) -> bool {
+    db_error.contains("failed to finish command: channel closed")
+}
+
+/// Permit recovery error
+/// Suppose Out Of Range Error happens in the following query:
+/// ```sql
+/// SELECT sum0(v1) FROM t;
+/// ```
+/// It would be a valid scenario from Sqlsmith.
+/// In that case we would trigger recovery for the materialized view.
+/// We could encounter this error on subsequent queries:
+/// ```text
+/// Barrier read is unavailable for now. Likely the cluster is recovering
+/// ```
+/// Recovery should be successful after a while.
+/// Hence we should retry for some bound.
+pub fn is_recovery_in_progress_error(db_error: &str) -> bool {
+    db_error.contains("Barrier read is unavailable for now. Likely the cluster is recovering")
+        || db_error.contains("Service unavailable: The cluster is starting or recovering")
 }
 
 /// Certain errors are permitted to occur. This is because:
@@ -80,4 +109,6 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_subquery_unnesting_error(db_error)
         || is_numeric_overflow_error(db_error)
         || is_neg_substr_error(db_error)
+        || is_overlay_start_error(db_error)
+        || is_broken_channel_error(db_error)
 }

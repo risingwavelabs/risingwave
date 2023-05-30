@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
@@ -34,6 +34,48 @@ mod value;
 
 impl Binder {
     pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
+        // We use a different function instead `map_err` directly in `bind_expr_inner`, because in
+        // some cases, recursive error messages don't look good. Whole expr-level should be enough
+        // in most cases.
+        //
+        // e.g., too verbose:
+        //
+        // ```ignore
+        // Bind error: failed to bind expression: a1 + b1 = c1
+        //
+        // Caused by:
+        //   Bind error: failed to bind expression: a1 + b1
+        //
+        // Caused by:
+        //   Bind error: failed to bind expression: a1
+        //
+        // Caused by:
+        //   Item not found: Invalid column: a1
+        // ```
+        //
+        // confusing message with an unused subexpr, when the expr is rewritten while binding:
+        //
+        // ```ignore
+        // > create table t (v1 int);
+        // > select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
+        //
+        // Bind error: failed to bind expression: CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END
+        //
+        // Caused by:
+        //   Bind error: failed to bind expression: v1 = true
+        //
+        // Caused by:
+        //   Feature is not yet implemented: Equal[Int32, Boolean]
+        // ```
+        self.bind_expr_inner(expr.clone()).map_err(|e| {
+            RwError::from(ErrorCode::BindError(format!(
+                "failed to bind expression: {}\n\nCaused by:\n  {}",
+                expr, e
+            )))
+        })
+    }
+
+    fn bind_expr_inner(&mut self, expr: Expr) -> Result<ExprImpl> {
         match expr {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
@@ -65,11 +107,13 @@ impl Binder {
             // operators & functions
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
-            Expr::Nested(expr) => self.bind_expr(*expr),
+            Expr::Nested(expr) => self.bind_expr_inner(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
+            Expr::ArrayRangeIndex { obj, start, end } => {
+                self.bind_array_range_index(*obj, start, end)
+            }
             Expr::Function(f) => self.bind_function(f),
-            // subquery
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
             Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),
             Expr::InSubquery {
@@ -85,6 +129,8 @@ impl Binder {
             Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
             Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
             Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
+            Expr::IsUnknown(expr) => self.bind_is_unknown(ExprType::IsNull, *expr),
+            Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
             Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
             Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
             Expr::Case {
@@ -111,12 +157,17 @@ impl Binder {
                 time_zone,
             } => self.bind_at_time_zone(*timestamp, time_zone),
             // special syntaxt for string
-            Expr::Trim { expr, trim_where } => self.bind_trim(*expr, trim_where),
+            Expr::Trim {
+                expr,
+                trim_where,
+                trim_what,
+            } => self.bind_trim(*expr, trim_where, trim_what),
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
             } => self.bind_substring(*expr, substring_from, substring_for),
+            Expr::Position { substring, string } => self.bind_position(*substring, *string),
             Expr::Overlay {
                 expr,
                 new_substring,
@@ -133,7 +184,7 @@ impl Binder {
     }
 
     pub(super) fn bind_extract(&mut self, field: String, expr: Expr) -> Result<ExprImpl> {
-        let arg = self.bind_expr(expr)?;
+        let arg = self.bind_expr_inner(expr)?;
         let arg_type = arg.return_type();
         Ok(FunctionCall::new(
             ExprType::Extract,
@@ -152,7 +203,7 @@ impl Binder {
     }
 
     pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: String) -> Result<ExprImpl> {
-        let input = self.bind_expr(input)?;
+        let input = self.bind_expr_inner(input)?;
         let time_zone = self.bind_string(time_zone)?.into();
         FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
     }
@@ -163,11 +214,11 @@ impl Binder {
         list: Vec<Expr>,
         negated: bool,
     ) -> Result<ExprImpl> {
-        let left = self.bind_expr(expr)?;
+        let left = self.bind_expr_inner(expr)?;
         let mut bound_expr_list = vec![left.clone()];
         let mut non_const_exprs = vec![];
         for elem in list {
-            let expr = self.bind_expr(elem)?;
+            let expr = self.bind_expr_inner(elem)?;
             match expr.is_const() {
                 true => bound_expr_list.push(expr),
                 false => non_const_exprs.push(expr),
@@ -198,7 +249,7 @@ impl Binder {
         subquery: Query,
         negated: bool,
     ) -> Result<ExprImpl> {
-        let bound_expr = self.bind_expr(expr)?;
+        let bound_expr = self.bind_expr_inner(expr)?;
         let bound_subquery = self.bind_subquery_expr(subquery, SubqueryKind::In(bound_expr))?;
         if negated {
             Ok(
@@ -214,10 +265,13 @@ impl Binder {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::PGAbs => ExprType::Abs,
             UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
+            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
+            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported unary expression: {:?}", op),
@@ -226,13 +280,13 @@ impl Binder {
                 .into())
             }
         };
-        let expr = self.bind_expr(expr)?;
+        let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
     }
 
     /// Directly returns the expression itself if it is a positive number.
     fn rewrite_positive(&mut self, expr: Expr) -> Result<ExprImpl> {
-        let expr = self.bind_expr(expr)?;
+        let expr = self.bind_expr_inner(expr)?;
         let return_type = expr.return_type();
         if return_type.is_numeric() {
             return Ok(expr);
@@ -243,21 +297,20 @@ impl Binder {
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,
-        // ([BOTH | LEADING | TRAILING], <expr>)
-        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+        // BOTH | LEADING | TRAILING
+        trim_where: Option<TrimWhereField>,
+        trim_what: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
-        let mut inputs = vec![self.bind_expr(expr)?];
+        let mut inputs = vec![self.bind_expr_inner(expr)?];
         let func_type = match trim_where {
-            Some(t) => {
-                inputs.push(self.bind_expr(*t.1)?);
-                match t.0 {
-                    TrimWhereField::Both => ExprType::Trim,
-                    TrimWhereField::Leading => ExprType::Ltrim,
-                    TrimWhereField::Trailing => ExprType::Rtrim,
-                }
-            }
+            Some(TrimWhereField::Both) => ExprType::Trim,
+            Some(TrimWhereField::Leading) => ExprType::Ltrim,
+            Some(TrimWhereField::Trailing) => ExprType::Rtrim,
             None => ExprType::Trim,
         };
+        if let Some(t) = trim_what {
+            inputs.push(self.bind_expr_inner(*t)?);
+        }
         Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 
@@ -268,16 +321,25 @@ impl Binder {
         substring_for: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let mut args = vec![
-            self.bind_expr(expr)?,
+            self.bind_expr_inner(expr)?,
             match substring_from {
-                Some(expr) => self.bind_expr(*expr)?,
+                Some(expr) => self.bind_expr_inner(*expr)?,
                 None => ExprImpl::literal_int(1),
             },
         ];
         if let Some(expr) = substring_for {
-            args.push(self.bind_expr(*expr)?);
+            args.push(self.bind_expr_inner(*expr)?);
         }
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
+    }
+
+    fn bind_position(&mut self, substring: Expr, string: Expr) -> Result<ExprImpl> {
+        let args = vec![
+            // Note that we reverse the order of arguments.
+            self.bind_expr_inner(string)?,
+            self.bind_expr_inner(substring)?,
+        ];
+        FunctionCall::new(ExprType::Position, args).map(Into::into)
     }
 
     fn bind_overlay(
@@ -288,12 +350,12 @@ impl Binder {
         count: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let mut args = vec![
-            self.bind_expr(expr)?,
-            self.bind_expr(new_substring)?,
-            self.bind_expr(start)?,
+            self.bind_expr_inner(expr)?,
+            self.bind_expr_inner(new_substring)?,
+            self.bind_expr_inner(start)?,
         ];
         if let Some(count) = count {
-            args.push(self.bind_expr(*count)?);
+            args.push(self.bind_expr_inner(*count)?);
         }
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
@@ -310,9 +372,9 @@ impl Binder {
         low: Expr,
         high: Expr,
     ) -> Result<ExprImpl> {
-        let expr = self.bind_expr(expr)?;
-        let low = self.bind_expr(low)?;
-        let high = self.bind_expr(high)?;
+        let expr = self.bind_expr_inner(expr)?;
+        let low = self.bind_expr_inner(low)?;
+        let high = self.bind_expr_inner(high)?;
 
         let func_call = if negated {
             // negated = true: expr < low or expr > high
@@ -350,9 +412,11 @@ impl Binder {
         let mut inputs = Vec::new();
         let results_expr: Vec<ExprImpl> = results
             .into_iter()
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| self.bind_expr_inner(expr))
             .collect::<Result<_>>()?;
-        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
+        let else_result_expr = else_result
+            .map(|expr| self.bind_expr_inner(*expr))
+            .transpose()?;
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             let condition = match operand {
@@ -364,7 +428,7 @@ impl Binder {
                 None => condition,
             };
             inputs.push(
-                self.bind_expr(condition)
+                self.bind_expr_inner(condition)
                     .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
             );
             inputs.push(result);
@@ -376,20 +440,27 @@ impl Binder {
     }
 
     pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
-        let expr = self.bind_expr(expr)?;
+        let expr = self.bind_expr_inner(expr)?;
+        Ok(FunctionCall::new(func_type, vec![expr])?.into())
+    }
+
+    pub(super) fn bind_is_unknown(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
+        let expr = self
+            .bind_expr_inner(expr)?
+            .cast_implicit(DataType::Boolean)?;
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
     pub(super) fn bind_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
-        let left = self.bind_expr(left)?;
-        let right = self.bind_expr(right)?;
+        let left = self.bind_expr_inner(left)?;
+        let right = self.bind_expr_inner(right)?;
         let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
         Ok(func_call?.into())
     }
 
     pub(super) fn bind_not_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
-        let left = self.bind_expr(left)?;
-        let right = self.bind_expr(right)?;
+        let left = self.bind_expr_inner(left)?;
+        let right = self.bind_expr_inner(right)?;
         let func_call = FunctionCall::new(ExprType::IsNotDistinctFrom, vec![left, right]);
         Ok(func_call?.into())
     }
@@ -402,7 +473,7 @@ impl Binder {
             // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
             // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
-                let input = self.bind_expr(expr)?;
+                let input = self.bind_expr_inner(expr)?;
                 let class_name = match &input {
                     ExprImpl::Literal(literal)
                         if literal.return_type() == DataType::Varchar
@@ -432,10 +503,12 @@ impl Binder {
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
-        if let Expr::Array(Array {elem: ref expr, ..}) = expr && matches!(&data_type, DataType::List{ .. } ) {
+        if let Expr::Array(Array { elem: ref expr, .. }) = expr
+            && matches!(&data_type, DataType::List { .. })
+        {
             return self.bind_array_cast(expr.clone(), data_type);
         }
-        let lhs = self.bind_expr(expr)?;
+        let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
     }
 }
@@ -452,6 +525,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
+                    generated_or_default_column: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -464,6 +538,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
+        generated_or_default_column: None,
     })
 }
 
@@ -489,9 +564,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List {
-            datatype: Box::new(bind_data_type(datatype)?),
-        },
+        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
                 "CHAR is not supported, please use VARCHAR instead\n".to_string(),
@@ -513,6 +586,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int2" => DataType::Int16,
                 "int4" => DataType::Int32,
                 "int8" => DataType::Int64,
+                "rw_int256" => DataType::Int256,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,

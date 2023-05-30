@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::array::JsonbVal;
+use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::source::base::SplitMetaData;

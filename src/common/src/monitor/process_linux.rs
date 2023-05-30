@@ -17,6 +17,10 @@ use std::io::{Error, ErrorKind, Result};
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
+#[cfg(target_os = "linux")]
+use super::{CLOCK_TICK, PAGESIZE};
+use crate::util::resource_util;
+
 /// Monitors current process.
 pub fn monitor_process(registry: &Registry) -> Result<()> {
     let pc = ProcessCollector::new();
@@ -31,6 +35,7 @@ pub struct ProcessCollector {
     cpu_total: IntCounter,
     vsize: IntGauge,
     rss: IntGauge,
+    cpu_core_num: IntGauge,
 }
 
 impl Default for ProcessCollector {
@@ -65,11 +70,16 @@ impl ProcessCollector {
         .unwrap();
         descs.extend(rss.desc().into_iter().cloned());
 
+        let cpu_core_num =
+            IntGauge::with_opts(Opts::new("process_cpu_core_num", "Cpu core num.")).unwrap();
+        descs.extend(cpu_core_num.desc().into_iter().cloned());
+
         Self {
             descs,
             cpu_total,
             vsize,
             rss,
+            cpu_core_num,
         }
     }
 }
@@ -88,24 +98,35 @@ impl Collector for ProcessCollector {
                 return Vec::new();
             }
         };
+        let stat = match p.stat() {
+            Ok(stat) => stat,
+            Err(..) => {
+                // we can't get the stat, so there's no stats to gather
+                return Vec::new();
+            }
+        };
 
         // memory
-        self.vsize.set(p.stat.vsize as i64);
-        self.rss.set(p.stat.rss * *PAGESIZE);
+        self.vsize.set(stat.vsize as i64);
+        self.rss.set(stat.rss as i64 * *PAGESIZE);
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / *CLOCK_TICK;
+            let total = (stat.utime + stat.stime) / *CLOCK_TICK;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
             self.cpu_total.collect()
         };
+
+        self.cpu_core_num
+            .set(resource_util::cpu::total_cpu_available() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
         mfs.extend(cpu_total_mfs);
         mfs.extend(self.vsize.collect());
         mfs.extend(self.rss.collect());
+        mfs.extend(self.cpu_core_num.collect());
         mfs
     }
 }
@@ -119,8 +140,8 @@ impl Collector for ProcessCollector {
     fn collect(&self) -> Vec<proto::MetricFamily> {
         let pid = unsafe { libc::getpid() };
         let clock_tick = unsafe {
-            let mut info = mach::mach_time::mach_timebase_info::default();
-            let errno = mach::mach_time::mach_timebase_info(&mut info as *mut _);
+            let mut info = mach2::mach_time::mach_timebase_info::default();
+            let errno = mach2::mach_time::mach_timebase_info(&mut info as *mut _);
             if errno != 0 {
                 1_f64
             } else {
@@ -148,11 +169,15 @@ impl Collector for ProcessCollector {
             self.cpu_total.collect()
         };
 
+        self.cpu_core_num
+            .set(resource_util::cpu::total_cpu_available() as i64);
+
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
         mfs.extend(cpu_total_mfs);
         mfs.extend(self.vsize.collect());
         mfs.extend(self.rss.collect());
+        mfs.extend(self.cpu_core_num.collect());
         mfs
     }
 }
@@ -174,19 +199,15 @@ impl Collector for ProcessCollector {
             self.cpu_total.collect()
         };
 
+        self.cpu_core_num
+            .set(resource_util::cpu::total_cpu_available() as i64);
+
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(4);
         mfs.extend(cpu_total_mfs);
         mfs.extend(self.vsize.collect());
         mfs.extend(self.rss.collect());
+        mfs.extend(self.cpu_core_num.collect());
         mfs
     }
 }
-
-#[cfg(target_os = "linux")]
-static PAGESIZE: std::sync::LazyLock<i64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_PAGESIZE) });
-
-#[cfg(target_os = "linux")]
-static CLOCK_TICK: std::sync::LazyLock<u64> =
-    std::sync::LazyLock::new(|| unsafe { libc::sysconf(libc::_SC_CLK_TCK) as u64 });

@@ -22,6 +22,7 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -37,7 +38,6 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
-use crate::stream::stream_graph::visit;
 use crate::MetaResult;
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
@@ -91,7 +91,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut internal_tables = Vec::new();
 
-        visit::visit_internal_tables(fragment, |table, table_type_name| {
+        stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen.to_global_id(table.id).as_global_id();
             table.schema_id = job.schema_id();
             table.database_id = job.database_id();
@@ -116,7 +116,7 @@ impl BuildingFragment {
         let fragment_id = fragment.fragment_id;
         let mut has_table = false;
 
-        visit::visit_fragment(fragment, |node_body| match node_body {
+        stream_graph_visitor::visit_fragment(fragment, |node_body| match node_body {
             NodeBody::Materialize(materialize_node) => {
                 materialize_node.table_id = table_id;
 
@@ -151,7 +151,7 @@ impl BuildingFragment {
     ) -> HashMap<TableId, Vec<i32>> {
         let mut table_columns = HashMap::new();
 
-        visit::visit_fragment(fragment, |node_body| {
+        stream_graph_visitor::visit_fragment(fragment, |node_body| {
             if let NodeBody::Chain(chain_node) = node_body {
                 let table_id = chain_node.table_id.into();
                 let column_ids = chain_node.upstream_column_ids.clone();
@@ -244,7 +244,7 @@ pub struct StreamFragmentGraph {
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
 
     /// Dependent relations of this job.
-    dependent_relations: HashSet<TableId>,
+    dependent_table_ids: HashSet<TableId>,
 
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active parallel units will be used.
@@ -303,11 +303,10 @@ impl StreamFragmentGraph {
                 .unwrap();
         }
 
-        // Note: Here we directly use the field `dependent_relation_ids` in the proto (resolved in
-        // frontend), instead of visiting the graph ourselves. Note that for creating table with a
-        // connector, the source itself is NOT INCLUDED in this list.
-        let dependent_relations = proto
-            .dependent_relation_ids
+        // Note: Here we directly use the field `dependent_table_ids` in the proto (resolved in
+        // frontend), instead of visiting the graph ourselves.
+        let dependent_table_ids = proto
+            .dependent_table_ids
             .iter()
             .map(TableId::from)
             .collect();
@@ -322,7 +321,7 @@ impl StreamFragmentGraph {
             fragments,
             downstreams,
             upstreams,
-            dependent_relations,
+            dependent_table_ids,
             default_parallelism,
         })
     }
@@ -350,9 +349,9 @@ impl StreamFragmentGraph {
             .expect("require exactly 1 materialize/sink node when creating the streaming job")
     }
 
-    /// Get the dependent relations of this job.
-    pub fn dependent_relations(&self) -> &HashSet<TableId> {
-        &self.dependent_relations
+    /// Get the dependent streaming job ids of this job.
+    pub fn dependent_table_ids(&self) -> &HashSet<TableId> {
+        &self.dependent_table_ids
     }
 
     /// Get the default parallelism of the job.

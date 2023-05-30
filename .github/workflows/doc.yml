@@ -10,13 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions-rs/toolchain@v1
+      - name: Setup Rust toolchain
+        run: rustup show
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld
       - name: Docs
         run: |
-          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
-          cp docs/rust.css target/doc/rust.css
+          RUSTDOCFLAGS="--markdown-css rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" cargo doc --workspace --no-deps --document-private-items
+          cp docs/rustdoc/rust.css target/doc/rust.css
       - name: Upload artifacts
         uses: actions/upload-pages-artifact@v1
         with:

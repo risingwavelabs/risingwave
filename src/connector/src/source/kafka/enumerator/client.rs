@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -22,7 +23,7 @@ use rdkafka::{Offset, TopicPartitionList};
 
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_SYNC_CALL_TIMEOUT};
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -40,6 +41,8 @@ pub struct KafkaSplitEnumerator {
 
     // maybe used in the future for batch processing
     stop_offset: KafkaEnumeratorOffset,
+
+    sync_call_timeout: Duration,
 }
 
 impl KafkaSplitEnumerator {}
@@ -57,6 +60,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let broker_rewrite_map = common_props.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         common_props.set_security_properties(&mut config);
         let mut scan_start_offset = match properties
             .scan_startup_mode
@@ -89,6 +93,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,
+            sync_call_timeout: properties.sync_call_timeout,
         })
     }
 
@@ -162,13 +167,12 @@ impl KafkaSplitEnumerator {
             for partition in &topic_partitions {
                 let (low, high) = self
                     .client
-                    .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
+                    .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
                     .await?;
                 ret.insert(partition, (low - 1, high));
             }
             ret
         };
-        // println!("Watermark: {:?}", watermarks);
 
         Ok(topic_partitions
             .iter()
@@ -220,7 +224,7 @@ impl KafkaSplitEnumerator {
                 for partition in partitions {
                     let (_, high_watermark) = self
                         .client
-                        .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
+                        .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
                         .await?;
                     map.insert(*partition, Some(high_watermark));
                 }
@@ -246,7 +250,7 @@ impl KafkaSplitEnumerator {
                 for partition in partitions {
                     let (low_watermark, high_watermark) = self
                         .client
-                        .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
+                        .fetch_watermarks(self.topic.as_str(), *partition, self.sync_call_timeout)
                         .await?;
                     let offset = match self.start_offset {
                         KafkaEnumeratorOffset::Earliest => low_watermark - 1,
@@ -280,7 +284,7 @@ impl KafkaSplitEnumerator {
 
         let offsets = self
             .client
-            .offsets_for_times(tpl, KAFKA_SYNC_CALL_TIMEOUT)
+            .offsets_for_times(tpl, self.sync_call_timeout)
             .await?;
 
         let mut result = HashMap::with_capacity(partitions.len());
@@ -296,7 +300,7 @@ impl KafkaSplitEnumerator {
                         .fetch_watermarks(
                             self.topic.as_str(),
                             elem.partition(),
-                            KAFKA_SYNC_CALL_TIMEOUT,
+                            self.sync_call_timeout,
                         )
                         .await?;
                     result.insert(elem.partition(), Some(high_watermark));
@@ -311,7 +315,7 @@ impl KafkaSplitEnumerator {
         // for now, we only support one topic
         let metadata = self
             .client
-            .fetch_metadata(Some(self.topic.as_str()), KAFKA_SYNC_CALL_TIMEOUT)
+            .fetch_metadata(Some(self.topic.as_str()), self.sync_call_timeout)
             .await?;
 
         let topic_meta = match metadata.topics() {

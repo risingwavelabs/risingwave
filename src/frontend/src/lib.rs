@@ -25,12 +25,14 @@
 #![feature(assert_matches)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]
-#![feature(is_some_and)]
+#![feature(extend_one)]
+#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -42,15 +44,14 @@ pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
-mod optimizer;
+pub mod optimizer;
 pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
-#[expect(dead_code)]
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;
-use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_common::config::OverrideConfig;
 pub use stream_fragmenter::build_graph;
 mod utils;
 pub use utils::{explain_stream_graph, WithOptions};
@@ -60,6 +61,8 @@ mod user;
 
 pub mod health_service;
 mod monitor;
+
+mod telemetry;
 
 use std::ffi::OsString;
 use std::iter;
@@ -71,6 +74,10 @@ use session::SessionManagerImpl;
 
 /// Command-line arguments for frontend-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The stateless proxy that parses SQL queries and performs planning and optimizations of query jobs"
+)]
 pub struct FrontendOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.

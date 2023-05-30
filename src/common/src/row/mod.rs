@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
-use crate::util::ordered::OrderedRowSerde;
+use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
+use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
@@ -75,7 +77,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = Vec::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf
     }
@@ -83,7 +89,11 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Serializes the row with value encoding and returns the bytes.
     #[inline]
     fn value_serialize_bytes(&self) -> Bytes {
-        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        let estimate_size = self
+            .iter()
+            .map(value_encoding::estimate_serialize_datum_size)
+            .sum();
+        let mut buf = BytesMut::with_capacity(estimate_size);
         self.value_serialize_into(&mut buf);
         buf.freeze()
     }
@@ -106,12 +116,12 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
 
     /// Returns the hash code of the row.
     #[inline]
-    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+    fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode<H> {
         let mut hasher = hash_builder.build_hasher();
         for datum in self.iter() {
             hash_datum(datum, &mut hasher);
         }
-        HashCode(hasher.finish())
+        hasher.finish().into()
     }
 
     /// Determines whether the datums of this row are equal to those of another.
@@ -145,6 +155,25 @@ pub trait RowExt: Row {
     {
         assert_row(Project::new(self, indices))
     }
+
+    fn display(&self) -> impl Display + '_ {
+        struct D<'a, T: Row>(&'a T);
+        impl<'a, T: Row> Display for D<'a, T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{}",
+                    self.0.iter().format_with(" | ", |datum, f| {
+                        match datum {
+                            None => f(&"NULL"),
+                            Some(scalar) => f(&format_args!("{}", scalar.to_text())),
+                        }
+                    })
+                )
+            }
+        }
+        D(self)
+    }
 }
 
 impl<R: Row> RowExt for R {}
@@ -152,11 +181,11 @@ impl<R: Row> RowExt for R {}
 /// Forward the implementation of [`Row`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
-        fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        fn datum_at(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at(index)
         }
 
-        unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
             (**self).datum_at_unchecked(index)
         }
 
@@ -186,17 +215,17 @@ macro_rules! deref_forward_row {
 
         fn memcmp_serialize_into(
             &self,
-            serde: &$crate::util::ordered::OrderedRowSerde,
+            serde: &$crate::util::row_serde::OrderedRowSerde,
             buf: impl bytes::BufMut,
         ) {
             (**self).memcmp_serialize_into(serde, buf)
         }
 
-        fn memcmp_serialize(&self, serde: &$crate::util::ordered::OrderedRowSerde) -> Vec<u8> {
+        fn memcmp_serialize(&self, serde: &$crate::util::row_serde::OrderedRowSerde) -> Vec<u8> {
             (**self).memcmp_serialize(serde)
         }
 
-        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode {
+        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode<H> {
             (**self).hash(hash_builder)
         }
 
@@ -349,6 +378,7 @@ mod chain;
 mod compacted_row;
 mod empty;
 mod once;
+mod ordered;
 mod owned_row;
 mod project;
 mod repeat_n;
@@ -356,6 +386,6 @@ pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
 pub use once::{once, Once};
-pub use owned_row::{AscentOwnedRow, OwnedRow, RowDeserializer};
+pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};

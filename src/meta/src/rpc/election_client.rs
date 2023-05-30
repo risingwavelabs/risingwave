@@ -16,7 +16,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use etcd_client::{ConnectOptions, Error, GetOptions};
+use etcd_client::{ConnectOptions, Error, GetOptions, LeaderKey, ResignOptions};
 use risingwave_common::bail;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
@@ -145,8 +145,10 @@ impl ElectionClient for EtcdElectionClient {
 
             // timeout controller, when keep alive fails for more than a certain period of time
             // before it is considered a complete failure
-            let mut timeout = time::interval(Duration::from_secs((ttl / 2) as u64));
+            let mut timeout = time::interval(Duration::from_secs_f64(ttl as f64 / 2.0));
             timeout.reset();
+
+            let mut keep_alive_sending = false;
 
             loop {
                 tokio::select! {
@@ -158,16 +160,21 @@ impl ElectionClient for EtcdElectionClient {
                         break;
                     }
 
-                    _ = ticker.tick() => {
+                    _ = ticker.tick(), if !keep_alive_sending => {
                         if let Err(err) = keeper.keep_alive().await {
                             tracing::debug!("keep alive for lease {} failed {}", lease_id, err);
                             continue
                         }
 
-                        match resp_stream.message().await {
+                        keep_alive_sending = true;
+                    }
+
+                    resp = resp_stream.message() => {
+                        keep_alive_sending = false;
+                        match resp {
                             Ok(Some(resp)) => {
                                 if resp.ttl() <= 0 {
-                                    tracing::warn!("lease expired or revoked {}", lease_id);
+                                    tracing::error!("lease expired or revoked {}", lease_id);
                                     keep_alive_fail_tx.send(()).unwrap();
                                     break;
                                 }
@@ -178,7 +185,7 @@ impl ElectionClient for EtcdElectionClient {
                                 tracing::debug!("lease keeper for lease {} response stream closed unexpected", lease_id);
 
                                 // try to re-create lease keeper, with timeout as ttl / 2
-                                if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs((ttl / 2) as u64), lease_client.keep_alive(lease_id)).await {
+                                if let Ok(Ok((keeper_, resp_stream_))) = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), lease_client.keep_alive(lease_id)).await {
                                     keeper = keeper_;
                                     resp_stream = resp_stream_;
                                 };
@@ -206,25 +213,31 @@ impl ElectionClient for EtcdElectionClient {
         if !restored_leader {
             self.is_leader_sender.send_replace(false);
             tracing::info!("no restored leader, campaigning");
-            tokio::select! {
-                biased;
-
-                _ = stop.changed() => {
-                    tracing::info!("stop signal received when campaigning");
-                    return Ok(());
-                }
-
-                _ = keep_alive_fail_rx.borrow_mut() => {
-                    tracing::error!("keep alive failed, stopping main loop");
-                    bail!("keep alive failed, stopping main loop");
-                },
-
-                campaign_resp = self.client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
-                    campaign_resp?;
-                    tracing::info!("client {} wins election {}", self.id, META_ELECTION_KEY);
-                }
-            };
         }
+
+        // Even if we are already a restored leader, we still need to campaign to obtain the correct
+        // `LeaderKey` from campaign response, which is used to provide the parameter for the
+        // resign call.
+        let leader_key: Option<LeaderKey> = tokio::select! {
+            biased;
+
+            _ = stop.changed() => {
+                tracing::info!("stop signal received when campaigning");
+                return Ok(());
+            }
+
+            _ = keep_alive_fail_rx.borrow_mut() => {
+                tracing::error!("keep alive failed, stopping main loop");
+                bail!("keep alive failed, stopping main loop");
+            },
+
+
+            campaign_resp = self.client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
+                let campaign_resp = campaign_resp?;
+                tracing::info!("client {} wins election {}", self.id, META_ELECTION_KEY);
+                campaign_resp.leader().cloned()
+            }
+        };
 
         self.is_leader_sender.send_replace(true);
 
@@ -235,6 +248,12 @@ impl ElectionClient for EtcdElectionClient {
                 biased;
                 _ = stop.changed() => {
                     tracing::info!("stop signal received when observing");
+
+                    if let Some(leader_key) = leader_key {
+                        tracing::info!("leader key found with lease {}, resigning", leader_key.lease());
+                        self.client.resign(Some(ResignOptions::new().with_leader(leader_key))).await?;
+                    }
+
                     break;
                 },
                 _ = keep_alive_fail_rx.borrow_mut() => {
@@ -247,7 +266,7 @@ impl ElectionClient for EtcdElectionClient {
                             tracing::debug!("observe stream closed unexpected, recreating");
 
                             // try to re-create observe stream, with timeout as ttl / 2
-                            if let Ok(Ok(stream)) = time::timeout(Duration::from_secs((ttl / 2) as u64), self.client.observe(META_ELECTION_KEY)).await {
+                            if let Ok(Ok(stream)) = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), self.client.observe(META_ELECTION_KEY)).await {
                                 observe_stream = stream;
                                 tracing::debug!("recreating observe stream");
                             }
@@ -343,70 +362,20 @@ mod tests {
     use etcd_client::GetOptions;
     use itertools::Itertools;
     use tokio::sync::watch;
+    use tokio::sync::watch::Sender;
     use tokio::time;
 
     use crate::rpc::election_client::{ElectionClient, EtcdElectionClient, META_ELECTION_KEY};
 
+    type ElectionHandle = (Sender<()>, Arc<dyn ElectionClient>);
+
     #[tokio::test]
     async fn test_election() {
-        let handle = tokio::spawn(async move {
-            let addr = "0.0.0.0:2388".parse().unwrap();
-            let mut builder = etcd_client::SimServer::builder();
-            builder.serve(addr).await;
-        });
-
-        let mut clients: Vec<(watch::Sender<()>, Arc<dyn ElectionClient>)> = vec![];
-
-        for i in 0..3 {
-            let (stop_sender, stop_receiver) = watch::channel(());
-            clients.push((
-                stop_sender,
-                Arc::new(
-                    EtcdElectionClient::new(
-                        vec!["localhost:2388".to_string()],
-                        None,
-                        false,
-                        format!("client_{}", i).to_string(),
-                    )
-                    .await
-                    .unwrap(),
-                ),
-            ));
-        }
-
-        for client in &clients {
-            assert!(!client.1.is_leader().await);
-        }
-
-        for (stop_sender, client) in &clients {
-            let client_ = client.clone();
-            let stop = stop_sender.subscribe();
-
-            tokio::spawn(async move {
-                let mut ticker = time::interval(Duration::from_secs(1));
-                loop {
-                    ticker.tick().await;
-                    if let Ok(_) = client_.run_once(3, stop.clone()).await {
-                        break;
-                    }
-                }
-            });
-        }
+        let clients = prepare_election_client(3, 5).await;
 
         time::sleep(Duration::from_secs(10)).await;
 
-        let mut leaders = vec![];
-        let mut followers = vec![];
-        for (sender, client) in &clients {
-            if client.is_leader().await {
-                leaders.push((sender, client));
-            } else {
-                followers.push((sender, client));
-            }
-        }
-
-        assert_eq!(leaders.len(), 1);
-        assert_eq!(followers.len(), 2);
+        let (leaders, followers) = check_role(clients, 1, 2).await;
 
         let leader = leaders.into_iter().next().unwrap();
 
@@ -415,18 +384,7 @@ mod tests {
 
         time::sleep(Duration::from_secs(10)).await;
 
-        let mut new_leaders = vec![];
-        let mut new_followers = vec![];
-        for (sender, client) in followers {
-            if client.is_leader().await {
-                new_leaders.push((sender, client));
-            } else {
-                new_followers.push((sender, client));
-            }
-        }
-
-        assert_eq!(new_leaders.len(), 1);
-        assert_eq!(new_followers.len(), 1);
+        let (new_leaders, new_followers) = check_role(followers, 1, 1).await;
 
         let leader = new_leaders.into_iter().next().unwrap();
         let election_leader = leader.1.leader().await.unwrap().unwrap();
@@ -459,5 +417,95 @@ mod tests {
         let leader = new_followers.into_iter().next().unwrap();
 
         assert!(leader.1.is_leader().await);
+    }
+
+    #[tokio::test]
+    async fn test_resign() {
+        // with a long ttl
+        let clients = prepare_election_client(3, 1000).await;
+
+        time::sleep(Duration::from_secs(10)).await;
+
+        let (leaders, followers) = check_role(clients, 1, 2).await;
+
+        let leader = leaders.into_iter().next().unwrap();
+
+        // stop leader
+        leader.0.send(()).unwrap();
+
+        time::sleep(Duration::from_secs(10)).await;
+
+        check_role(followers, 1, 1).await;
+    }
+
+    async fn check_role(
+        clients: Vec<ElectionHandle>,
+        expected_leader_count: usize,
+        expected_follower_count: usize,
+    ) -> (Vec<ElectionHandle>, Vec<ElectionHandle>) {
+        let mut leaders = vec![];
+        let mut followers = vec![];
+        for (sender, client) in clients {
+            if client.is_leader().await {
+                leaders.push((sender, client));
+            } else {
+                followers.push((sender, client));
+            }
+        }
+
+        assert_eq!(leaders.len(), expected_leader_count);
+        assert_eq!(followers.len(), expected_follower_count);
+        (leaders, followers)
+    }
+
+    async fn prepare_election_client(
+        count: i32,
+        ttl: i64,
+    ) -> Vec<(Sender<()>, Arc<dyn ElectionClient>)> {
+        let handle = tokio::spawn(async move {
+            let addr = "0.0.0.0:2388".parse().unwrap();
+            let mut builder = etcd_client::SimServer::builder();
+            builder.serve(addr).await.unwrap();
+        });
+
+        let mut clients: Vec<(watch::Sender<()>, Arc<dyn ElectionClient>)> = vec![];
+
+        for i in 0..count {
+            let (stop_sender, stop_receiver) = watch::channel(());
+            clients.push((
+                stop_sender,
+                Arc::new(
+                    EtcdElectionClient::new(
+                        vec!["localhost:2388".to_string()],
+                        None,
+                        false,
+                        format!("client_{}", i).to_string(),
+                    )
+                    .await
+                    .unwrap(),
+                ),
+            ));
+        }
+
+        for client in &clients {
+            assert!(!client.1.is_leader().await);
+        }
+
+        for (stop_sender, client) in &clients {
+            let client_ = client.clone();
+            let stop = stop_sender.subscribe();
+
+            tokio::spawn(async move {
+                let mut ticker = time::interval(Duration::from_secs(1));
+                loop {
+                    ticker.tick().await;
+                    if let Ok(_) = client_.run_once(ttl, stop.clone()).await {
+                        break;
+                    }
+                }
+            });
+        }
+
+        clients
     }
 }

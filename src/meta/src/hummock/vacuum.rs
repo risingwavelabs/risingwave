@@ -20,6 +20,7 @@ use std::time::Duration;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
@@ -67,7 +68,6 @@ where
     ///
     /// Returns number of deleted deltas
     pub async fn vacuum_metadata(&self) -> MetaResult<usize> {
-        self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
         let mut total_deleted = 0;
         loop {
@@ -76,7 +76,7 @@ where
                 .delete_version_deltas(batch_size)
                 .await?;
             total_deleted += deleted;
-            if remain < batch_size {
+            if total_deleted == 0 || remain < batch_size {
                 break;
             }
         }
@@ -170,8 +170,8 @@ where
     ) -> MetaResult<()> {
         let reject: HashSet<HummockSstableObjectId> =
             self.backup_manager.list_pinned_ssts().into_iter().collect();
-        // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
-        // These SSTs will be GCed during full GC when they are no longer pinned.
+        // Ack these SSTs immediately, because they tend to be pinned for long time.
+        // They will be GCed during full GC when they are no longer pinned.
         let to_ack = objects_to_delete
             .iter()
             .filter(|s| reject.contains(s))
@@ -285,11 +285,9 @@ where
 {
     let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = vec![
+        cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
-            .await,
-        cluster_manager
-            .list_worker_node(WorkerType::Compactor, None)
+            .list_worker_node(WorkerType::Compactor, Some(Running))
             .await,
     ]
     .concat();
@@ -348,7 +346,7 @@ mod tests {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::VacuumTask;
 
@@ -377,19 +375,25 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
+        hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
-        // v3: [test_tables_2, test_tables_3]}
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        hummock_manager.create_version_checkpoint(1).await.unwrap();
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
-        // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
-        // Delta of v1->v2 cannot be deleted yet because it's used by objects_to_delete.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 5);
+        assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+        hummock_manager
+            .unpin_version_before(context_id, HummockVersionId::MAX)
+            .await
+            .unwrap();
+        assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
         // No SST deletion is scheduled because no available worker.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let _receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
         // SST deletion is scheduled.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -400,9 +404,6 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             3
         );
-        // The delta cannot be deleted yet.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
-
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
@@ -415,8 +416,6 @@ mod tests {
             })
             .await
             .unwrap();
-        // The delta can be deleted now.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 1);
         // No objects_to_delete.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -453,7 +452,7 @@ mod tests {
             .await
             .unwrap());
 
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
 
         assert!(vacuum
             .start_full_gc(Duration::from_secs(

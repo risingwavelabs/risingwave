@@ -14,12 +14,14 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
+};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::types::Serial;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
@@ -68,26 +70,23 @@ impl RowIdGenExecutor {
 
     /// Create a new row id generator based on the assigned vnodes.
     fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        // TODO: We may generate row id for each vnode in the future instead of using the first
-        // vnode.
-        let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
-        RowIdGenerator::with_epoch(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
+        RowIdGenerator::new(vnodes.iter_vnodes())
     }
 
     /// Generate a row ID column according to ops.
-    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
-        let len = column.array_ref().len();
-        let mut builder = I64ArrayBuilder::new(len);
+    fn gen_row_id_column_by_op(&mut self, column: &ArrayRef, ops: Ops<'_>) -> ArrayRef {
+        let len = column.len();
+        let mut builder = SerialArrayBuilder::new(len);
 
-        for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
+        for (datum, op) in column.iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().await)),
-                _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap())),
+                Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
+                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
             }
         }
 
-        builder.finish().into()
+        builder.finish().into_ref()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -106,9 +105,8 @@ impl RowIdGenExecutor {
                 Message::Chunk(chunk) => {
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
-                    columns[self.row_id_index] = self
-                        .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
-                        .await;
+                    columns[self.row_id_index] =
+                        self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
                     yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
@@ -159,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn test_row_id_gen_executor() {
         let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
         let pk_indices = vec![0];
@@ -184,7 +182,7 @@ mod tests {
 
         // Insert operation
         let chunk1 = StreamChunk::from_pretty(
-            " I I
+            " SRL I
             + . 1
             + . 2
             + . 6
@@ -198,7 +196,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         row_id_col.iter().for_each(|row_id| {
             // Should generate row id for insert operations.
             assert!(row_id.is_some());
@@ -206,7 +204,7 @@ mod tests {
 
         // Update operation
         let chunk2 = StreamChunk::from_pretty(
-            "      I        I
+            "      SRL        I
             U- 32874283748  1
             U+ 32874283748 999",
         );
@@ -218,14 +216,14 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for update operations.
-        assert_eq!(row_id_col.value_at(0).unwrap(), 32874283748);
-        assert_eq!(row_id_col.value_at(1).unwrap(), 32874283748);
+        assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(32874283748));
+        assert_eq!(row_id_col.value_at(1).unwrap(), Serial::from(32874283748));
 
         // Delete operation
         let chunk3 = StreamChunk::from_pretty(
-            "      I       I
+            "      SRL       I
             - 84629409685  1",
         );
         tx.push_chunk(chunk3);
@@ -236,8 +234,8 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for delete operations.
-        assert_eq!(row_id_col.value_at(0).unwrap(), 84629409685);
+        assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(84629409685));
     }
 }

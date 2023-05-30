@@ -50,7 +50,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
-use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
 };
@@ -58,10 +58,11 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 
 /// the distribution property provided by a operator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -79,7 +80,7 @@ pub enum Distribution {
     /// [`Distribution::HashShard`], but may have different vnode mapping.
     ///
     /// It exists because the upstream MV can be scaled independently. So we use
-    /// `UpstreamHashShard` to force an exchange is inserted.
+    /// `UpstreamHashShard` to **force an exchange to be inserted**.
     ///
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
@@ -113,9 +114,9 @@ impl Distribution {
         &self,
         output_count: u32,
         catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
-    ) -> ExchangeInfo {
-        ExchangeInfo {
+        worker_node_manager: &WorkerNodeSelector,
+    ) -> Result<ExchangeInfo> {
+        let exchange_info = ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::HashShard(_) => DistributionMode::Hash,
@@ -145,9 +146,8 @@ impl Distribution {
                         "hash key should not be empty, use `Single` instead"
                     );
 
-                    let vnode_mapping =
-                        Self::get_vnode_mapping(catalog_reader, worker_node_manager, table_id)
-                            .expect("vnode_mapping of UpstreamHashShard should not be none");
+                    let vnode_mapping = worker_node_manager
+                        .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
 
                     let pu2id_map: HashMap<ParallelUnitId, u32> = vnode_mapping
                         .iter_unique()
@@ -161,7 +161,8 @@ impl Distribution {
                     }))
                 }
             },
-        }
+        };
+        Ok(exchange_info)
     }
 
     /// check if the distribution satisfies other required distribution
@@ -200,17 +201,12 @@ impl Distribution {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(
-        catalog_reader: &CatalogReader,
-        worker_node_manager: &WorkerNodeManagerRef,
-        table_id: &TableId,
-    ) -> Option<ParallelUnitMapping> {
+    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| worker_node_manager.get_fragment_mapping(&table.fragment_id))
-            .ok()
-            .flatten()
+            .map(|table| table.fragment_id)
+            .map_err(Into::into)
     }
 }
 

@@ -46,14 +46,11 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
-    pub stream_total_mem_usage: IntGauge,
-    pub batch_total_mem_usage: IntGauge,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_insert_cache_miss_count: GenericCounterVec<AtomicU64>,
-    pub join_may_exist_true_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
@@ -67,6 +64,31 @@ pub struct StreamingMetrics {
     pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
     pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_total_cache_count: GenericCounterVec<AtomicU64>,
+    pub agg_distinct_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
+    // Streaming TopN
+    pub group_top_n_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_cached_entry_count: GenericGaugeVec<AtomicI64>,
+    pub group_top_n_appendonly_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_appendonly_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub group_top_n_appendonly_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
+    // look up
+    pub lookup_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub lookup_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub lookup_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
+    // temporal join
+    pub temporal_join_cache_miss_count: GenericCounterVec<AtomicU64>,
+    pub temporal_join_total_query_cache_count: GenericCounterVec<AtomicU64>,
+    pub temporal_join_cached_entry_count: GenericGaugeVec<AtomicI64>,
+
+    // Backfill
+    pub backfill_snapshot_read_row_count: GenericCounterVec<AtomicU64>,
+    pub backfill_upstream_output_row_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -84,9 +106,17 @@ pub struct StreamingMetrics {
     pub lru_runtime_loop_count: IntCounter,
     pub lru_watermark_step: IntGauge,
     pub jemalloc_allocated_bytes: IntGauge,
+    pub jemalloc_active_bytes: IntGauge,
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
+
+    // Materialize
+    pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
+    pub materialize_cache_total_count: GenericCounterVec<AtomicU64>,
+
+    // Memory
+    pub stream_memory_usage: GenericGaugeVec<AtomicI64>,
 }
 
 impl StreamingMetrics {
@@ -94,7 +124,7 @@ impl StreamingMetrics {
         let executor_row_count = register_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
-            &["actor_id", "executor_id"],
+            &["actor_id", "executor_identity"],
             registry
         )
         .unwrap();
@@ -143,20 +173,6 @@ impl StreamingMetrics {
             "stream_exchange_frag_recv_size",
             "Total size of messages that have been received from upstream Fragment",
             &["up_fragment_id", "down_fragment_id"],
-            registry
-        )
-        .unwrap();
-
-        let stream_total_mem_usage = register_int_gauge_with_registry!(
-            "stream_total_mem_usage",
-            "The memory allocated by streaming jobs, get from TaskLocalAlloc",
-            registry
-        )
-        .unwrap();
-
-        let batch_total_mem_usage = register_int_gauge_with_registry!(
-            "batch_total_mem_usage",
-            "The memory allocated by batch jobs, get from TaskLocalAlloc",
             registry
         )
         .unwrap();
@@ -275,32 +291,24 @@ impl StreamingMetrics {
 
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
-            "Join executor lookup miss count",
-            &["actor_id", "side"],
+            "Join executor lookup miss duration",
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
 
         let join_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_total_count",
-            "Join executor lookup total count",
-            &["actor_id", "side"],
+            "Join executor lookup total operation",
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
 
         let join_insert_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_insert_cache_miss_count",
-            "Count of cache miss when insert rows in join executor",
-            &["actor_id", "side"],
-            registry
-        )
-        .unwrap();
-
-        let join_may_exist_true_count = register_int_counter_vec_with_registry!(
-            "stream_join_may_exist_true_count",
-            "Count of may_exist's true returns of when insert rows in join executor",
-            &["actor_id", "side"],
+            "Join executor cache miss when insert operation",
+            &["side", "join_table_id", "degree_table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -357,7 +365,7 @@ impl StreamingMetrics {
         let agg_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_miss_count",
             "Aggregation executor lookup miss duration",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -365,7 +373,128 @@ impl StreamingMetrics {
         let agg_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_lookup_total_count",
             "Aggregation executor lookup total operation",
-            &["actor_id"],
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_distinct_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_distinct_cache_miss_count",
+            "Aggregation executor dinsinct miss duration",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_distinct_total_cache_count = register_int_counter_vec_with_registry!(
+            "stream_agg_distinct_total_cache_count",
+            "Aggregation executor distinct total operation",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_distinct_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_agg_distinct_cached_entry_count",
+            "Total entry counts in distinct aggregation executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let group_top_n_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_group_top_n_cache_miss_count",
+            "Group top n executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let group_top_n_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_group_top_n_total_query_cache_count",
+            "Group top n executor query cache total count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let group_top_n_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_group_top_n_cached_entry_count",
+            "Total entry counts in group top n executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let group_top_n_appendonly_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_group_top_n_appendonly_cache_miss_count",
+            "Group top n appendonly executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let group_top_n_appendonly_total_query_cache_count =
+            register_int_counter_vec_with_registry!(
+                "stream_group_top_n_appendonly_total_query_cache_count",
+                "Group top n appendonly executor total cache count",
+                &["table_id", "actor_id"],
+                registry
+            )
+            .unwrap();
+
+        let group_top_n_appendonly_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_group_top_n_appendonly_cached_entry_count",
+            "Total entry counts in group top n appendonly executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let lookup_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_lookup_cache_miss_count",
+            "Lookup executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let lookup_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_lookup_total_query_cache_count",
+            "Lookup executor query cache total count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let lookup_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_lookup_cached_entry_count",
+            "Total entry counts in lookup executor cache",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let temporal_join_cache_miss_count = register_int_counter_vec_with_registry!(
+            "stream_temporal_join_cache_miss_count",
+            "Temporal join executor cache miss count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let temporal_join_total_query_cache_count = register_int_counter_vec_with_registry!(
+            "stream_temporal_join_total_query_cache_count",
+            "Temporal join executor query cache total count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let temporal_join_cached_entry_count = register_int_gauge_vec_with_registry!(
+            "stream_temporal_join_cached_entry_count",
+            "Total entry count in temporal join executor cache",
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -373,7 +502,7 @@ impl StreamingMetrics {
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -381,7 +510,7 @@ impl StreamingMetrics {
         let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_miss_count",
             "Aggregation executor chunk-level lookup miss duration",
-            &["actor_id"],
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -389,7 +518,23 @@ impl StreamingMetrics {
         let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
             "stream_agg_chunk_lookup_total_count",
             "Aggregation executor chunk-level lookup total operation",
-            &["actor_id"],
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let backfill_snapshot_read_row_count = register_int_counter_vec_with_registry!(
+            "stream_backfill_snapshot_read_row_count",
+            "Total number of rows that have been read from the backfill snapshot",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let backfill_upstream_output_row_count = register_int_counter_vec_with_registry!(
+            "stream_backfill_upstream_output_row_count",
+            "Total number of rows that have been output from the backfill upstream",
+            &["table_id", "actor_id"],
             registry
         )
         .unwrap();
@@ -445,7 +590,14 @@ impl StreamingMetrics {
 
         let jemalloc_allocated_bytes = register_int_gauge_with_registry!(
             "jemalloc_allocated_bytes",
-            "The memory jemalloc allocated, got from jemalloc_ctl",
+            "The allocated memory jemalloc, got from jemalloc_ctl",
+            registry
+        )
+        .unwrap();
+
+        let jemalloc_active_bytes = register_int_gauge_with_registry!(
+            "jemalloc_active_bytes",
+            "The active memory jemalloc, got from jemalloc_ctl",
             registry
         )
         .unwrap();
@@ -455,6 +607,30 @@ impl StreamingMetrics {
             "Compute errors in the system, queryable by tags",
             &["error_type", "error_msg", "executor_name", "fragment_id"],
             registry,
+        )
+        .unwrap();
+
+        let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_hit_count",
+            "Materialize executor cache hit count",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let materialize_cache_total_count = register_int_counter_vec_with_registry!(
+            "stream_materialize_cache_total_count",
+            "Materialize executor cache total operation",
+            &["table_id", "actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let stream_memory_usage = register_int_gauge_vec_with_registry!(
+            "stream_memory_usage",
+            "Memory usage for stream executors",
+            &["table_id", "actor_id", "desc"],
+            registry
         )
         .unwrap();
 
@@ -481,12 +657,9 @@ impl StreamingMetrics {
             source_output_row_count,
             source_row_per_barrier,
             exchange_frag_recv_size,
-            stream_total_mem_usage,
-            batch_total_mem_usage,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,
-            join_may_exist_true_count,
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,
@@ -498,6 +671,23 @@ impl StreamingMetrics {
             agg_cached_keys,
             agg_chunk_lookup_miss_count,
             agg_chunk_total_lookup_count,
+            agg_distinct_cache_miss_count,
+            agg_distinct_total_cache_count,
+            agg_distinct_cached_entry_count,
+            group_top_n_cache_miss_count,
+            group_top_n_total_query_cache_count,
+            group_top_n_cached_entry_count,
+            group_top_n_appendonly_cache_miss_count,
+            group_top_n_appendonly_total_query_cache_count,
+            group_top_n_appendonly_cached_entry_count,
+            lookup_cache_miss_count,
+            lookup_total_query_cache_count,
+            lookup_cached_entry_count,
+            temporal_join_cache_miss_count,
+            temporal_join_total_query_cache_count,
+            temporal_join_cached_entry_count,
+            backfill_snapshot_read_row_count,
+            backfill_upstream_output_row_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
@@ -506,7 +696,11 @@ impl StreamingMetrics {
             lru_runtime_loop_count,
             lru_watermark_step,
             jemalloc_allocated_bytes,
+            jemalloc_active_bytes,
             user_compute_error_count,
+            materialize_cache_hit_count,
+            materialize_cache_total_count,
+            stream_memory_usage,
         }
     }
 

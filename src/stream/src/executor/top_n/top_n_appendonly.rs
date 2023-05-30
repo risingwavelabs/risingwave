@@ -21,52 +21,24 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
+use super::{ManagedTopNState, TopNCache, NO_GROUP_KEY};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
-/// If the input contains only append, `AppendOnlyTopNExecutor` does not need
-/// to keep all the data records/rows that have been seen. As long as a record
-/// is no longer being in the result set, it can be deleted.
+/// If the input is append-only, `AppendOnlyGroupTopNExecutor` does not need
+/// to keep all the rows seen. As long as a record
+/// is no longer in the result set, it can be deleted.
+///
 /// TODO: Optimization: primary key may contain several columns and is used to determine
 /// the order, therefore the value part should not contain the same columns to save space.
 pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerAppendOnlyTopNExecutor<S, WITH_TIES>>;
 
-impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
+impl<S: StateStore, const WITH_TIES: bool> AppendOnlyTopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_without_ties(
-        input: Box<dyn Executor>,
-        ctx: ActorContextRef,
-        storage_key: Vec<ColumnOrder>,
-        offset_and_limit: (usize, usize),
-        order_by: Vec<ColumnOrder>,
-        executor_id: u64,
-        state_table: StateTable<S>,
-    ) -> StreamResult<Self> {
-        let info = input.info();
-
-        Ok(TopNExecutorWrapper {
-            input,
-            ctx,
-            inner: InnerAppendOnlyTopNExecutor::new(
-                info,
-                storage_key,
-                offset_and_limit,
-                order_by,
-                executor_id,
-                state_table,
-            )?,
-        })
-    }
-}
-
-impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_ties(
+    pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
         storage_key: Vec<ColumnOrder>,
@@ -126,9 +98,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+        let data_types = schema.data_types();
 
         Ok(Self {
             info: ExecutorInfo {
@@ -138,7 +110,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
         })
     }
@@ -290,7 +262,7 @@ mod tests {
         .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new_without_ties(
+            AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key,
@@ -372,7 +344,7 @@ mod tests {
         .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new_without_ties(
+            AppendOnlyTopNExecutor::<_, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
                 storage_key(),

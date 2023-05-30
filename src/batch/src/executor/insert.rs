@@ -13,18 +13,22 @@
 // limitations under the License.
 
 use std::iter::repeat;
+use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::array::{
-    ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::plan_common::IndexAndExpr;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
@@ -44,6 +48,7 @@ pub struct InsertExecutor {
     schema: Schema,
     identity: String,
     column_indices: Vec<usize>,
+    sorted_default_columns: Vec<(usize, BoxedExpression)>,
 
     row_id_index: Option<usize>,
     returning: bool,
@@ -59,6 +64,7 @@ impl InsertExecutor {
         chunk_size: usize,
         identity: String,
         column_indices: Vec<usize>,
+        sorted_default_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
@@ -73,11 +79,12 @@ impl InsertExecutor {
                 table_schema
             } else {
                 Schema {
-                    fields: vec![Field::unnamed(DataType::Int64)],
+                    fields: vec![Field::unnamed(DataType::Serial)],
                 }
             },
             identity,
             column_indices,
+            sorted_default_columns,
             row_id_index,
             returning,
         }
@@ -111,20 +118,32 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-            // No need to check for duplicate columns. This is already validated in binder.
-            if !&self.column_indices.is_sorted() {
-                let mut ordered_cols = columns.clone();
-                for (i, idx) in self.column_indices.iter().enumerate() {
-                    ordered_cols[*idx] = columns[i].clone()
-                }
-                columns = ordered_cols
+            let dummy_chunk = DataChunk::new_dummy(cap);
+
+            let mut ordered_columns = self
+                .column_indices
+                .iter()
+                .enumerate()
+                .map(|(i, idx)| (*idx, columns[i].clone()))
+                .collect_vec();
+            ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
+
+            for (idx, expr) in &self.sorted_default_columns {
+                let column = expr.eval(&dummy_chunk).await?;
+                ordered_columns.push((*idx, column));
             }
+
+            ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
+            columns = ordered_columns
+                .into_iter()
+                .map(|(_, column)| column)
+                .collect_vec();
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = I64Array::from_iter(repeat(None).take(cap));
-                columns.insert(row_id_index, row_id_col.into())
+                let row_id_col = SerialArray::from_iter(repeat(None).take(cap));
+                columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 
             let stream_chunk =
@@ -163,7 +182,7 @@ impl InsertExecutor {
             array_builder.append(Some(rows_inserted as i64));
 
             let array = array_builder.finish();
-            let ret_chunk = DataChunk::new(vec![array.into()], 1);
+            let ret_chunk = DataChunk::new(vec![Arc::new(array.into())], 1);
 
             yield ret_chunk
         }
@@ -189,15 +208,34 @@ impl BoxedExecutorBuilder for InsertExecutor {
             .iter()
             .map(|&i| i as usize)
             .collect();
+        let sorted_default_columns = if let Some(default_columns) = &insert_node.default_columns {
+            let mut default_columns = default_columns
+                .get_default_columns()
+                .iter()
+                .cloned()
+                .map(|IndexAndExpr { index: i, expr: e }| {
+                    Ok((
+                        i as usize,
+                        build_from_prost(&e.ok_or_else(|| anyhow!("expression is None"))?)
+                            .map_err(|e| anyhow!("failed to build expression: {}", e))?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            default_columns.sort_unstable_by_key(|(i, _)| *i);
+            default_columns
+        } else {
+            vec![]
+        };
 
         Ok(Box::new(Self::new(
             table_id,
             insert_node.table_version_id,
             source.context().dml_manager(),
             child,
-            source.context.get_config().developer.batch_chunk_size,
+            source.context.get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
+            sorted_default_columns,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
@@ -212,12 +250,13 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
-    use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
+    use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
@@ -244,22 +283,22 @@ mod tests {
         // Schema of the table
         let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
-        schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
+        schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
 
         let row_id_index = Some(3);
 
-        let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
-        let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
+        let col1 = Arc::new(I32Array::from_iter([1, 3, 5, 7, 9]).into());
+        let col2 = Arc::new(I32Array::from_iter([2, 4, 6, 8, 10]).into());
         let array = StructArray::from_slices(
             &[true, false, false, false, false],
             vec![
-                array! { I32Array, [Some(1),None,None,None,None] }.into(),
-                array! { I32Array, [Some(2),None,None,None,None] }.into(),
-                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         );
-        let col3 = array.into();
+        let col3 = Arc::new(array.into());
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
         mock_executor.add(data_chunk.clone());
 
@@ -288,7 +327,8 @@ mod tests {
             Box::new(mock_executor),
             1024,
             "InsertExecutor".to_string(),
-            vec![], // Ignoring insertion order
+            vec![0, 1, 2], // Ignoring insertion order
+            vec![],
             row_id_index,
             false,
         ));
@@ -297,12 +337,7 @@ mod tests {
             let result = stream.next().await.unwrap().unwrap();
 
             assert_eq!(
-                result
-                    .column_at(0)
-                    .array()
-                    .as_int64()
-                    .iter()
-                    .collect::<Vec<_>>(),
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
                 vec![Some(5)] // inserted rows
             );
         });
@@ -312,7 +347,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[0]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -321,7 +355,6 @@ mod tests {
 
         assert_eq!(
             chunk.chunk.columns()[1]
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -331,14 +364,14 @@ mod tests {
         let array: ArrayImpl = StructArray::from_slices(
             &[true, false, false, false, false],
             vec![
-                array! { I32Array, [Some(1),None,None,None,None] }.into(),
-                array! { I32Array, [Some(2),None,None,None,None] }.into(),
-                array! { I32Array, [Some(3),None,None,None,None] }.into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into(),
             ],
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .into();
-        assert_eq!(*chunk.chunk.columns()[2].array(), array);
+        assert_eq!(*chunk.chunk.columns()[2], array);
 
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
@@ -354,6 +387,7 @@ mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await?;

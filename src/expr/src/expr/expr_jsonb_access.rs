@@ -14,14 +14,16 @@
 
 use either::Either;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, JsonbArray, JsonbArrayBuilder, JsonbRef,
-    Utf8ArrayBuilder,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, JsonbArray, JsonbArrayBuilder,
+    Utf8Array, Utf8ArrayBuilder,
 };
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarRef};
+use risingwave_common::types::{DataType, Datum, JsonbRef, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr_macro::build_function;
 
 use super::{BoxedExpression, Expression};
+use crate::Result;
 
 /// This is forked from [`BinaryExpression`] for the following reasons:
 /// * Optimize for the case when rhs path is const. (not implemented yet)
@@ -219,5 +221,151 @@ impl AccessOutput for Utf8ArrayBuilder {
                 Some(s.to_scalar_value())
             }
         }
+    }
+}
+
+#[build_function("jsonb_access_inner(jsonb, varchar) -> jsonb")]
+fn build_jsonb_access_object_field(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<Utf8Array, JsonbArrayBuilder, _>::new_expr(
+            l,
+            r,
+            jsonb_object_field,
+        )
+        .boxed(),
+    )
+}
+
+#[build_function("jsonb_access_inner(jsonb, int32) -> jsonb")]
+fn build_jsonb_access_array_element(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<I32Array, JsonbArrayBuilder, _>::new_expr(
+            l,
+            r,
+            jsonb_array_element,
+        )
+        .boxed(),
+    )
+}
+
+#[build_function("jsonb_access_str(jsonb, varchar) -> varchar")]
+fn build_jsonb_access_object_field_str(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<Utf8Array, Utf8ArrayBuilder, _>::new_expr(l, r, jsonb_object_field)
+            .boxed(),
+    )
+}
+
+#[build_function("jsonb_access_str(jsonb, int32) -> varchar")]
+fn build_jsonb_access_array_element_str(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<I32Array, Utf8ArrayBuilder, _>::new_expr(l, r, jsonb_array_element)
+            .boxed(),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::vec;
+
+    use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
+    use risingwave_common::types::Scalar;
+    use risingwave_common::util::value_encoding::serialize_datum;
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+    use risingwave_pb::expr::expr_node::{RexNode, Type};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+    use crate::expr::build_from_prost;
+
+    #[tokio::test]
+    async fn test_array_access_expr() {
+        let values = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum(Some("foo".into()).as_ref()),
+                    })),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum(Some("bar".into()).as_ref()),
+                    })),
+                },
+            ],
+        };
+        let array_index = FunctionCall {
+            children: vec![
+                ExprNode {
+                    expr_type: Type::Array as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::List as i32,
+                        field_type: vec![ProstDataType {
+                            type_name: TypeName::Varchar as i32,
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::FuncCall(values)),
+                },
+                ExprNode {
+                    expr_type: Type::ConstantValue as i32,
+                    return_type: Some(ProstDataType {
+                        type_name: TypeName::Int32 as i32,
+                        ..Default::default()
+                    }),
+                    rex_node: Some(RexNode::Constant(ProstDatum {
+                        body: serialize_datum(Some(1_i32.to_scalar_value()).as_ref()),
+                    })),
+                },
+            ],
+        };
+        let access = ExprNode {
+            expr_type: Type::ArrayAccess as i32,
+            return_type: Some(ProstDataType {
+                type_name: TypeName::Varchar as i32,
+                ..Default::default()
+            }),
+            rex_node: Some(RexNode::FuncCall(array_index)),
+        };
+        let expr = build_from_prost(&access);
+        assert!(expr.is_ok());
+
+        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).await.unwrap();
+        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_iter(["foo"])));
     }
 }

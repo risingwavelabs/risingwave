@@ -16,14 +16,14 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::error::{ErrorCode, Result};
 
+use super::plan_node::RewriteExprsRecursive;
+use crate::expr::InlineNowProcTime;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
-use crate::optimizer::plan_visitor::{
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, PlanVisitor,
-};
+use crate::optimizer::plan_visitor::{has_logical_apply, HasMaxOneRowApply, PlanVisitor};
 use crate::optimizer::rule::*;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -118,12 +118,16 @@ lazy_static! {
             // Pull correlated predicates up the algebra tree to unnest simple subquery.
             PullUpCorrelatedPredicateRule::create(),
         ],
-        ApplyOrder::TopDown,
+        ApplyOrder::BottomUp,
     );
 
-    static ref UNION_MERGE: OptimizationStage = OptimizationStage::new(
-        "Union Merge",
-        vec![UnionMergeRule::create()],
+    static ref SET_OPERATION_MERGE: OptimizationStage = OptimizationStage::new(
+        "Set Operation Merge",
+        vec![
+            UnionMergeRule::create(),
+            IntersectMergeRule::create(),
+            ExceptMergeRule::create(),
+        ],
         ApplyOrder::BottomUp,
     );
 
@@ -143,12 +147,14 @@ lazy_static! {
     static ref GENERAL_UNNESTING_PUSH_DOWN_APPLY: OptimizationStage = OptimizationStage::new(
         "General Unnesting(Push Down Apply)",
         vec![
+            ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
+            ApplyUnionTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyScanRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -160,13 +166,13 @@ lazy_static! {
     );
 
     static ref LEFT_DEEP_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
-        "Join Reorder".to_string(),
+        "Join Ordering".to_string(),
         vec![LeftDeepTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
 
     static ref BUSHY_TREE_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
-        "Bushy tree join ordering Rule".to_string(),
+        "Join Ordering".to_string(),
         vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
@@ -178,7 +184,7 @@ lazy_static! {
     );
 
     static ref PUSH_CALC_OF_JOIN: OptimizationStage = OptimizationStage::new(
-        "Push Down the Calculation of Inputs of Join's Condition",
+        "Push down the calculation of inputs of join's condition",
         vec![PushCalculationOfJoinRule::create()],
         ApplyOrder::TopDown,
     );
@@ -209,6 +215,7 @@ lazy_static! {
             ProjectEliminateRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            JoinProjectTransposeRule::create(),
             // project-join merge should be applied after merge
             // eliminate and to values
             ProjectJoinMergeRule::create(),
@@ -217,22 +224,19 @@ lazy_static! {
         ApplyOrder::BottomUp,
     );
 
+    // the `OverWindowToTopNRule` need to match the pattern of Proj-Filter-OverWindow so it is
+    // 1. conflict with `ProjectJoinMergeRule`, `AggProjectMergeRule` or other rules
+    // 2. should be after merge the multiple projects
     static ref CONVERT_WINDOW_AGG: OptimizationStage = OptimizationStage::new(
-        "Convert Window Aggregation",
+        "Convert Window Function",
         vec![
-            OverAggToTopNRule::create(),
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToTopNRule::create(),
         ],
-        ApplyOrder::TopDown,
-    );
-
-
-    static ref DEDUP_GROUP_KEYS: OptimizationStage = OptimizationStage::new(
-        "Dedup Group keys",
-        vec![AggDedupGroupKeyRule::create()],
         ApplyOrder::TopDown,
     );
 
@@ -247,6 +251,33 @@ lazy_static! {
         vec![TopNOnIndexRule::create(),
              MinMaxOnIndexRule::create()],
         ApplyOrder::TopDown,
+    );
+
+    static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
+        "Void always-false filter's downstream",
+        vec![AlwaysFalseFilterRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref LIMIT_PUSH_DOWN: OptimizationStage = OptimizationStage::new(
+        "Push Down Limit",
+        vec![LimitPushDownRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref PULL_UP_HOP: OptimizationStage = OptimizationStage::new(
+        "Pull Up Hop",
+        vec![PullUpHopRule::create()],
+        ApplyOrder::BottomUp,
+    );
+
+    static ref SET_OPERATION_TO_JOIN: OptimizationStage = OptimizationStage::new(
+        "Set Operation To Join",
+        vec![
+            IntersectToSemiJoinRule::create(),
+            ExceptToAntiJoinRule::create(),
+        ],
+        ApplyOrder::BottomUp,
     );
 }
 
@@ -325,6 +356,24 @@ impl LogicalOptimizer {
         plan
     }
 
+    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+        // FIXME: This may differ from the snapshot we use for actual execution. We should instead
+        // use a pinned snapshot consistently during optimization and execution.
+        let epoch = ctx
+            .session_ctx()
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch();
+
+        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline Now and ProcTime:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -334,16 +383,19 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Remove project to make common sub-plan sharing easier.
+        plan = plan.optimize_by_rules(&PROJECT_REMOVE);
+
         // If share plan is disable, we need to remove all the share operator generated by the
         // binder, e.g. CTE and View. However, we still need to share source to ensure self
         // source join can return correct result.
         let enable_share_plan = ctx.session_ctx().config().get_enable_share_plan();
         if enable_share_plan {
-            // Common sub-plan detection.
-            plan = plan.merge_eq_nodes();
+            // Common sub-plan sharing.
+            plan = plan.common_subplan_sharing();
             plan = plan.prune_share();
             if explain_trace {
-                ctx.trace("Merging equivalent nodes:");
+                ctx.trace("Common Sub-plan Sharing:");
                 ctx.trace(plan.explain_to_string().unwrap());
             }
         } else {
@@ -359,7 +411,8 @@ impl LogicalOptimizer {
             }
         }
 
-        plan = plan.optimize_by_rules(&UNION_MERGE);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
@@ -397,24 +450,15 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_STREAM);
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE);
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
-
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
-
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
@@ -435,11 +479,16 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Inline `NOW()` and `PROCTIME()`, only for batch queries.
+        plan = Self::inline_now_proc_time(plan, &ctx);
+
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
-        plan = plan.optimize_by_rules(&UNION_MERGE);
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -466,6 +515,9 @@ impl LogicalOptimizer {
 
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
+        // WARN: Please see the comments on `CONVERT_WINDOW_AGG` before change or move this line!
+        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
+
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
 
@@ -473,19 +525,11 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&PROJECT_REMOVE);
 
-        plan = plan.optimize_by_rules(&CONVERT_WINDOW_AGG);
-
-        if has_logical_over_agg(plan.clone()) {
-            return Err(ErrorCode::InternalError(format!(
-                "OverAgg can not be transformed. Plan:\n{}",
-                plan.explain_to_string().unwrap()
-            ))
-            .into());
-        }
-
-        plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
+        plan = plan.optimize_by_rules(&PULL_UP_HOP);
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
+
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

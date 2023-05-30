@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::pin::pin;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -69,7 +70,7 @@ impl S3FileReader {
             byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
 
-        let reader = Box::pin(BufReader::new(stream_reader));
+        let reader = pin!(BufReader::new(stream_reader));
 
         let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
 
@@ -81,7 +82,7 @@ impl S3FileReader {
             let bytes = read?;
             let len = bytes.len();
             let msg = SourceMessage {
-                payload: Some(bytes),
+                payload: Some(bytes.as_ref().to_vec()),
                 offset: offset.to_string(),
                 split_id: split.id(),
                 meta: SourceMeta::Empty,
@@ -202,9 +203,9 @@ impl S3FileReader {
                 parser,
                 ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
             ) {
-                NdByteStreamWrapper::new(parser).into_stream(Box::pin(data_stream))
+                NdByteStreamWrapper::new(parser).into_stream(data_stream)
             } else {
-                parser.into_stream(Box::pin(data_stream))
+                parser.into_stream(data_stream)
             };
             #[for_await]
             for msg in msg_stream {

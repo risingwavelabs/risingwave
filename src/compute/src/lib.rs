@@ -19,6 +19,7 @@
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -28,15 +29,20 @@ pub mod memory_management;
 pub mod observer;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::AsyncStackTraceOption;
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
+use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -69,15 +75,6 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
     pub connector_rpc_sink_payload_format: Option<String>,
 
-    /// One of:
-    /// 1. `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    /// 2. `in-memory`
-    /// 3. `sled://{path}`
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
-
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -92,21 +89,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
-    /// The policy for compute node memory control. Valid values:
-    /// - streaming-only
-    /// - streaming-batch
-    #[clap(
-        long,
-        env = "RW_MEMORY_CONTROL_POLICY",
-        default_value = "streaming-only"
-    )]
-    pub memory_control_policy: String,
-
-    /// The proportion of streaming memory to all available memory for computing. Only works when
-    /// `memory_control_policy` is set to "streaming-batch". Ignored otherwise. See
-    /// [`FixedProportionPolicy`] for more details.
-    #[clap(long, env = "RW_STREAMING_MEMORY_PROPORTION", default_value_t = 0.7)]
-    pub streaming_memory_proportion: f64,
+    /// Decides whether the compute node can be used for streaming and serving.
+    #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
+    pub role: Role,
 
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
@@ -137,6 +122,32 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
+}
+
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
+pub enum Role {
+    Serving,
+    Streaming,
+    #[default]
+    Both,
+}
+
+impl Role {
+    pub fn for_streaming(&self) -> bool {
+        match self {
+            Role::Serving => false,
+            Role::Streaming => true,
+            Role::Both => true,
+        }
+    }
+
+    pub fn for_serving(&self) -> bool {
+        match self {
+            Role::Serving => true,
+            Role::Streaming => false,
+            Role::Both => true,
+        }
+    }
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
@@ -172,7 +183,6 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         validate_opts(&opts);
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -206,8 +216,6 @@ fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
 }
 
-fn warn_future_deprecate_options(opts: &ComputeNodeOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compute node in the next release. Please consider moving this argument to the meta node.");
-    }
+fn default_role() -> Role {
+    Role::Both
 }

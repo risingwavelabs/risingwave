@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use pgwire::types::Format;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::ScalarImpl;
+use pgwire::types::{Format, FormatIterator};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::{Datum, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
@@ -24,8 +24,20 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 /// Rewrites parameter expressions to literals.
 pub(crate) struct ParamRewriter {
     pub(crate) params: Vec<Bytes>,
+    pub(crate) parsed_params: Vec<Datum>,
     pub(crate) param_formats: Vec<Format>,
     pub(crate) error: Option<RwError>,
+}
+
+impl ParamRewriter {
+    pub(crate) fn new(param_formats: Vec<Format>, params: Vec<Bytes>) -> Self {
+        Self {
+            parsed_params: vec![None; params.len()],
+            params,
+            param_formats,
+            error: None,
+        }
+    }
 }
 
 impl ExprRewriter for ParamRewriter {
@@ -44,6 +56,7 @@ impl ExprRewriter for ParamRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
 
@@ -74,6 +87,7 @@ impl ExprRewriter for ParamRewriter {
                 }
             }
         };
+        self.parsed_params[parameter_index] = Some(scalar.clone());
         Literal::new(Some(scalar), data_type).into()
     }
 }
@@ -83,12 +97,13 @@ impl BoundStatement {
         mut self,
         params: Vec<Bytes>,
         param_formats: Vec<Format>,
-    ) -> Result<BoundStatement> {
-        let mut rewriter = ParamRewriter {
+    ) -> Result<(BoundStatement, Vec<Datum>)> {
+        let mut rewriter = ParamRewriter::new(
+            FormatIterator::new(&param_formats, params.len())
+                .map_err(ErrorCode::BindError)?
+                .collect(),
             params,
-            param_formats,
-            error: None,
-        };
+        );
 
         self.rewrite_exprs_recursive(&mut rewriter);
 
@@ -96,7 +111,7 @@ impl BoundStatement {
             return Err(err);
         }
 
-        Ok(self)
+        Ok((self, rewriter.parsed_params))
     }
 }
 
@@ -125,7 +140,7 @@ mod test {
         let mut binder = mock_binder_with_param_types(param_types);
         let stmt = parse_sql_statements(sql).unwrap().remove(0);
         let bound = binder.bind(stmt).unwrap();
-        bound.bind_parameter(params, param_formats).unwrap()
+        bound.bind_parameter(params, param_formats).unwrap().0
     }
 
     fn expect_actual_eq(expect: BoundStatement, actual: BoundStatement) {

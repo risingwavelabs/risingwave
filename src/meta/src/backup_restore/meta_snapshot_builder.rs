@@ -13,20 +13,23 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_backup::error::BackupResult;
+use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
 use crate::manager::model::SystemParamsModel;
-use crate::model::MetadataModel;
+use crate::model::{ClusterId, MetadataModel};
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
 
 const VERSION: u32 = 1;
@@ -44,9 +47,17 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         }
     }
 
-    pub async fn build(&mut self, id: MetaSnapshotId) -> BackupResult<()> {
+    pub async fn build<D: Future<Output = HummockVersion>>(
+        &mut self,
+        id: MetaSnapshotId,
+        hummock_version_builder: D,
+    ) -> BackupResult<()> {
         self.snapshot.format_version = VERSION;
         self.snapshot.id = id;
+        // Get `hummock_version` before `meta_store_snapshot`.
+        // We have ensure the required delta logs for replay is available, see
+        // `HummockManager::delete_version_deltas`.
+        let hummock_version = hummock_version_builder.await;
         // Caveat: snapshot impl of etcd meta store doesn't prevent it from expiration.
         // So expired snapshot read may return error. If that happens,
         // tune auto-compaction-mode and auto-compaction-retention on demand.
@@ -54,16 +65,20 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let default_cf = self.build_default_cf(&meta_store_snapshot).await?;
         // hummock_version and version_stats is guaranteed to exist in a initialized cluster.
         let hummock_version = {
-            let mut redo_state = HummockVersion::list_at_snapshot::<S>(&meta_store_snapshot)
-                .await?
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow!("hummock version checkpoint not found in meta store"))?;
+            let mut redo_state = hummock_version;
             let hummock_version_deltas =
                 HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot).await?;
             for version_delta in &hummock_version_deltas {
                 if version_delta.prev_id == redo_state.id {
                     redo_state.apply_version_delta(version_delta);
+                }
+            }
+            if let Some(log) = hummock_version_deltas.iter().next_back() {
+                if log.id != redo_state.id {
+                    return Err(BackupError::Other(anyhow::anyhow!(format!(
+                        "inconsistent hummock version: expected {}, actual {}",
+                        log.id, redo_state.id
+                    ))));
                 }
             }
             redo_state
@@ -95,9 +110,16 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let connection = Connection::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
+
+        // tracking_id is always created in meta store
+        let cluster_id = ClusterId::from_snapshot::<S>(&meta_store_snapshot)
+            .await?
+            .ok_or_else(|| anyhow!("cluster id not found in meta store"))?
+            .into();
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
@@ -114,7 +136,9 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             table_fragments,
             user_info,
             function,
+            connection,
             system_param,
+            cluster_id,
         };
         Ok(())
     }
@@ -145,12 +169,12 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot::MetaSnapshot;
     use risingwave_common::error::ToErrorStr;
-    use risingwave_common::system_param::default_system_params;
+    use risingwave_common::system_param::system_params_for_test;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
     use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
     use crate::manager::model::SystemParamsModel;
-    use crate::model::MetadataModel;
+    use crate::model::{ClusterId, MetadataModel};
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
 
     #[tokio::test]
@@ -158,20 +182,19 @@ mod tests {
         let meta_store = Arc::new(MemStore::new());
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        let err = builder.build(1).await.unwrap_err();
-        let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!(
-            "hummock version checkpoint not found in meta store",
-            err.to_error_str()
-        );
-
         let hummock_version = HummockVersion {
             id: 1,
             ..Default::default()
         };
+        let get_ckpt_builder = |v: &HummockVersion| {
+            let v_ = v.clone();
+            async move { v_ }
+        };
         hummock_version.insert(meta_store.deref()).await.unwrap();
-        let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        let err = builder.build(1).await.unwrap_err();
+        let err = builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!(
             "hummock version stats not found in meta store",
@@ -186,16 +209,35 @@ mod tests {
             .insert(meta_store.deref())
             .await
             .unwrap();
-        let err = builder.build(1).await.unwrap_err();
+        let err = builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("system params not found in meta store", err.to_error_str());
 
-        default_system_params()
+        system_params_for_test()
             .insert(meta_store.deref())
             .await
             .unwrap();
+
+        let err = builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap_err();
+        let err = assert_matches!(err, BackupError::Other(e) => e);
+        assert_eq!("cluster id not found in meta store", err.to_error_str());
+
+        ClusterId::new()
+            .put_at_meta_store(meta_store.deref())
+            .await
+            .unwrap();
+
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
-        builder.build(1).await.unwrap();
+        builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap();
 
         let dummy_key = vec![0u8, 1u8, 2u8];
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
@@ -203,7 +245,10 @@ mod tests {
             .put_cf(DEFAULT_COLUMN_FAMILY, dummy_key.clone(), vec![100])
             .await
             .unwrap();
-        builder.build(1).await.unwrap();
+        builder
+            .build(1, get_ckpt_builder(&hummock_version))
+            .await
+            .unwrap();
         let snapshot = builder.finish().unwrap();
         let encoded = snapshot.encode();
         let decoded = MetaSnapshot::decode(&encoded).unwrap();

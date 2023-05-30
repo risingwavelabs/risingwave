@@ -26,7 +26,7 @@ impl Binder {
         op: BinaryOperator,
         mut right: Expr,
     ) -> Result<ExprImpl> {
-        let bound_left = self.bind_expr(left)?;
+        let bound_left = self.bind_expr_inner(left)?;
 
         let mut func_types = vec![];
 
@@ -42,7 +42,7 @@ impl Binder {
             right => right,
         };
 
-        let bound_right = self.bind_expr(right)?;
+        let bound_right = self.bind_expr_inner(right)?;
 
         func_types.extend(Self::resolve_binary_operator(
             op,
@@ -86,6 +86,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccessInner,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
                 match (bound_left.return_type(), bound_right.return_type()) {
                     // array concatenation

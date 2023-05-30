@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
+use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -77,6 +79,7 @@ pub fn gen_create_mv_plan(
     query: Query,
     name: ObjectName,
     columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, PbTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
@@ -85,18 +88,28 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_relations, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        (binder.included_relations(), bound)
     };
 
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
+
     let col_names = get_column_names(&bound, session, columns)?;
+
+    let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
+    if emit_on_window_close {
+        context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
+    }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     }
-    let materialize = plan_root.gen_materialize_plan(table_name, definition)?;
+    let materialize =
+        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -105,7 +118,16 @@ pub fn gen_create_mv_plan(
         );
     }
     let plan: PlanRef = materialize.into();
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
+
     table.owner = session.user_id();
+
+    // record dependent relations.
+    table.dependent_relations = dependent_relations
+        .into_iter()
+        .map(|t| t.table_id)
+        .collect_vec();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -122,17 +144,24 @@ pub async fn handle_create_mv(
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    let has_order_by = !query.order_by.is_empty();
-
     session.check_relation_name_duplicated(name.clone())?;
-    let mut notice = String::new();
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
+
+        let has_order_by = !query.order_by.is_empty();
+        if has_order_by {
+            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_string());
+        }
+
+        let (plan, table) =
+            gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
         let context = plan.plan_base().ctx.clone();
         let mut graph = build_graph(plan);
         graph.parallelism = session
@@ -142,7 +171,6 @@ pub async fn handle_create_mv(
         // Set the timezone for the stream environment
         let env = graph.env.as_mut().unwrap();
         env.timezone = context.get_session_timezone();
-        context.append_notice(&mut notice);
 
         (table, graph)
     };
@@ -163,14 +191,8 @@ pub async fn handle_create_mv(
         .create_materialized_view(table, graph)
         .await?;
 
-    if has_order_by {
-        notice.push_str(r#"
-The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#);
-    }
-    Ok(PgResponse::empty_result_with_notice(
+    Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
-        notice.to_string(),
     ))
 }
 
@@ -244,7 +266,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
@@ -302,18 +324,11 @@ pub mod tests {
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
         assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert_eq!(response.get_notice(), None);
+        assert!(response.get_notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
         assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert_eq!(
-            response.get_notice().unwrap(),
-r#"
-The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#
-                .to_string()
-        );
     }
 }

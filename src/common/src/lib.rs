@@ -23,7 +23,7 @@
 #![feature(lint_reasons)]
 #![feature(generators)]
 #![feature(map_try_insert)]
-#![feature(once_cell)]
+#![feature(lazy_cell)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
@@ -32,7 +32,12 @@
 #![feature(array_chunks)]
 #![feature(inline_const_pat)]
 #![allow(incomplete_features)]
-#![feature(const_option_ext)]
+#![feature(iterator_try_collect)]
+#![feature(round_ties_even)]
+#![feature(iter_order_by)]
+#![feature(exclusive_range_pattern)]
+#![feature(binary_heap_into_iter_sorted)]
+#![feature(impl_trait_in_assoc_type)]
 
 #[macro_use]
 pub mod jemalloc;
@@ -44,17 +49,21 @@ pub mod array;
 pub mod util;
 pub mod buffer;
 pub mod cache;
+pub mod cast;
 pub mod catalog;
-pub mod collection;
 pub mod config;
 pub mod constants;
+pub mod estimate_size;
 pub mod field_generator;
 pub mod hash;
+pub mod memory;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
 pub mod system_param;
-#[cfg(test)]
+pub mod telemetry;
+
+pub mod metrics;
 pub mod test_utils;
 pub mod types;
 
@@ -65,4 +74,10 @@ pub mod test_prelude {
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const GIT_SHA: &str = option_env!("GIT_SHA").unwrap_or("unknown");
+// FIXME: We expand `unwrap_or` since it's unavailable in const context now.
+// `const_option_ext` was broken by https://github.com/rust-lang/rust/pull/110393
+// Tracking issue: https://github.com/rust-lang/rust/issues/91930
+pub const GIT_SHA: &str = match option_env!("GIT_SHA") {
+    Some(v) => v,
+    None => "unknown",
+};

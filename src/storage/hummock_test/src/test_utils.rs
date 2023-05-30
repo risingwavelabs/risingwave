@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -19,21 +20,21 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
-};
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
-    update_filter_key_extractor_for_table_ids, update_filter_key_extractor_for_tables,
 };
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{PbTable, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::error::StorageResult;
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+    FullKeyFilterKeyExtractor,
+};
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -92,7 +93,7 @@ pub trait TestIngestBatch: LocalStateStore {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize>;
 }
@@ -102,7 +103,7 @@ impl<S: LocalStateStore> TestIngestBatch for S {
     async fn ingest_batch(
         &mut self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
     ) -> StorageResult<usize> {
         assert_eq!(self.epoch(), write_options.epoch);
@@ -161,6 +162,17 @@ pub async fn with_hummock_storage_v2(
 
     (hummock_storage, meta_client)
 }
+pub fn update_filter_key_extractor_for_table_ids(
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    table_ids: &[u32],
+) {
+    for table_id in table_ids {
+        filter_key_extractor_manager_ref.update(
+            *table_id,
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        )
+    }
+}
 
 pub async fn register_tables_with_id_for_test<S: MetaStore>(
     filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
@@ -176,10 +188,21 @@ pub async fn register_tables_with_id_for_test<S: MetaStore>(
     .await;
 }
 
+pub fn update_filter_key_extractor_for_tables(
+    filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
+    tables: &[PbTable],
+) {
+    for table in tables {
+        filter_key_extractor_manager_ref.update(
+            table.id,
+            Arc::new(FilterKeyExtractorImpl::from_table(table)),
+        )
+    }
+}
 pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
     filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
     hummock_manager_ref: &HummockManagerRef<S>,
-    tables: &[PbTable],
+    tables: &[Table],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
     let table_ids = tables.iter().map(|t| t.id).collect_vec();

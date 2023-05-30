@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
@@ -34,20 +34,8 @@ impl Binder {
             nulls_first,
         }: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        // TODO(rc): support `NULLS FIRST | LAST`
-        if nulls_first.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                "NULLS FIRST or NULLS LAST".to_string(),
-                4743.into(),
-            )
-            .into());
-        }
-        let order_type = match asc {
-            None => OrderType::default(),
-            Some(true) => OrderType::ascending(),
-            Some(false) => OrderType::descending(),
-        };
-        let expr = self.bind_expr(expr)?;
+        let order_type = OrderType::from_bools(asc, nulls_first);
+        let expr = self.bind_expr_inner(expr)?;
         Ok(BoundOrderByExpr { expr, order_type })
     }
 }

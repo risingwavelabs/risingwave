@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+use risingwave_common::types::{Interval, Timestamp};
+use risingwave_expr_macro::function;
 
+use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use crate::{ExprError, Result};
 
-#[inline]
-pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<NaiveDateTimeWrapper> {
+#[function("date_trunc(varchar, timestamp) -> timestamp")]
+pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
     Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => ts.truncate_micros(),
         "milliseconds" => ts.truncate_millis(),
@@ -36,8 +38,20 @@ pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<Nai
     })
 }
 
-#[inline]
-pub fn date_trunc_interval(field: &str, interval: IntervalUnit) -> Result<IntervalUnit> {
+// #[function("date_trunc(varchar, timestamptz) -> timestamptz")]
+pub fn date_trunc_timestamptz(_field: &str, _ts: i64) -> Result<i64> {
+    todo!("date_trunc_timestamptz")
+}
+
+#[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
+pub fn date_trunc_timestamptz_at_timezone(field: &str, ts: i64, timezone: &str) -> Result<i64> {
+    let timestamp = timestamptz_at_time_zone(ts, timezone)?;
+    let truncated = date_trunc_timestamp(field, timestamp)?;
+    timestamp_at_time_zone(truncated, timezone)
+}
+
+#[function("date_trunc(varchar, interval) -> interval")]
+pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> {
     Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => interval,
         "milliseconds" => interval.truncate_millis(),

@@ -16,14 +16,19 @@ use std::collections::{HashMap, HashSet};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
+use risingwave_common::catalog::{
+    ColumnCatalog, ConflictBehavior, TableDesc, TableId, TableVersionId,
+};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+use risingwave_pb::plan_common::DefaultColumnDesc;
 
-use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, OwnedByUserCatalog, SchemaId};
+use crate::expr::ExprImpl;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -113,7 +118,10 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub conflict_behavior_type: ConflictBehaviorType,
+    /// The behavior of handling incoming pk conflict from source executor, we can overwrite or
+    /// ignore conflict pk. For normal materialize executor and other executors, this field will be
+    /// `No Check`.
+    pub conflict_behavior: ConflictBehavior,
 
     pub read_prefix_len_hint: usize,
 
@@ -158,7 +166,7 @@ impl TableType {
         }
     }
 
-    fn to_prost(self) -> PbTableType {
+    pub(crate) fn to_prost(self) -> PbTableType {
         match self {
             Self::Table => PbTableType::Table,
             Self::MaterializedView => PbTableType::MaterializedView,
@@ -213,8 +221,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn conflict_behavior_type(&self) -> ConflictBehaviorType {
-        self.conflict_behavior_type
+    pub fn conflict_behavior(&self) -> ConflictBehavior {
+        self.conflict_behavior
     }
 
     pub fn table_type(&self) -> TableType {
@@ -367,14 +375,53 @@ impl TableCatalog {
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
             dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
-            handle_pk_conflict_behavior: self.conflict_behavior_type,
+            handle_pk_conflict_behavior: self.conflict_behavior.to_protobuf().into(),
         }
+    }
+
+    /// Get columns excluding hidden columns and generated golumns.
+    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden() && !c.is_generated())
+    }
+
+    pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_generated())
+            .map(|c| c.name())
+    }
+
+    pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
+        self.columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_default())
+            .map(|(i, c)| {
+                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
+                    c.column_desc.generated_or_default_column.clone().unwrap()
+                {
+                    (
+                        i,
+                        ExprImpl::from_expr_proto(&expr.unwrap())
+                            .expect("expr in default columns corrupted"),
+                    )
+                } else {
+                    unreachable!()
+                }
+            })
+    }
+
+    pub fn has_generated_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_generated())
     }
 }
 
 impl From<PbTable> for TableCatalog {
     fn from(tb: PbTable) -> Self {
         let id = tb.id;
+        let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
@@ -382,6 +429,8 @@ impl From<PbTable> for TableCatalog {
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_index: HashMap<i32, usize> = HashMap::new();
+
+        let conflict_behavior = ConflictBehavior::from_protobuf(&tb_conflict_behavior);
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for (idx, catalog) in columns.clone().into_iter().enumerate() {
             let col_name = catalog.name();
@@ -395,11 +444,9 @@ impl From<PbTable> for TableCatalog {
 
         let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
         let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
-        for idx in tb.watermark_indices {
-            watermark_columns.insert(idx as _);
+        for idx in &tb.watermark_indices {
+            watermark_columns.insert(*idx as _);
         }
-
-        let conflict_behavior_type = tb.handle_pk_conflict_behavior;
 
         Self {
             id: id.into(),
@@ -422,7 +469,7 @@ impl From<PbTable> for TableCatalog {
             row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
-            conflict_behavior_type,
+            conflict_behavior,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -437,7 +484,7 @@ impl From<&PbTable> for TableCatalog {
     }
 }
 
-impl RelationCatalog for TableCatalog {
+impl OwnedByUserCatalog for TableCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }
@@ -510,7 +557,7 @@ mod tests {
                 next_column_id: 2,
             }),
             watermark_indices: vec![],
-            handle_pk_conflict_behavior: 0,
+            handle_pk_conflict_behavior: 3,
             dist_key_in_pk: vec![],
         }
         .into();
@@ -533,22 +580,11 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            generated_or_default_column: None,
                         },
                         is_hidden: false
                     }
@@ -567,7 +603,7 @@ mod tests {
                 row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                conflict_behavior_type: 0,
+                conflict_behavior: ConflictBehavior::NoCheck,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),

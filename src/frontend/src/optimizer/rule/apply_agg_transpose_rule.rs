@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::AggKind;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::{ApplyOffsetRewriter, BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalApply, LogicalFilter, LogicalProject};
 use crate::optimizer::PlanRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalAgg`.
 ///
@@ -53,7 +55,6 @@ impl Rule for ApplyAggTransposeRule {
         let agg: &LogicalAgg = right.as_logical_agg()?;
         let (mut agg_calls, agg_group_key, agg_input) = agg.clone().decompose();
         let is_scalar_agg = agg_group_key.is_empty();
-        let agg_input_len = agg_input.schema().len();
         let apply_left_len = left.schema().len();
 
         if !is_scalar_agg && max_one_row {
@@ -102,7 +103,7 @@ impl Rule for ApplyAggTransposeRule {
                 JoinType::LeftOuter,
                 Condition::true_cond(),
                 correlated_id,
-                correlated_indices,
+                correlated_indices.clone(),
                 false,
             )
             .translate_apply(left, eq_predicates)
@@ -113,7 +114,7 @@ impl Rule for ApplyAggTransposeRule {
                 JoinType::Inner,
                 Condition::true_cond(),
                 correlated_id,
-                correlated_indices,
+                correlated_indices.clone(),
                 false,
             )
             .into()
@@ -122,7 +123,8 @@ impl Rule for ApplyAggTransposeRule {
         let group_agg = {
             // shift index of agg_calls' `InputRef` with `apply_left_len`.
             let offset = apply_left_len as isize;
-            let mut shift_index = ColIndexMapping::with_shift_offset(agg_input_len, offset);
+            let mut rewriter =
+                ApplyOffsetRewriter::new(apply_left_len, &correlated_indices, correlated_id);
             agg_calls.iter_mut().for_each(|agg_call| {
                 agg_call.inputs.iter_mut().for_each(|input_ref| {
                     input_ref.shift_with_offset(offset);
@@ -131,7 +133,7 @@ impl Rule for ApplyAggTransposeRule {
                     .order_by
                     .iter_mut()
                     .for_each(|o| o.shift_with_offset(offset));
-                agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut shift_index);
+                agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut rewriter);
             });
             if is_scalar_agg {
                 // convert count(*) to count(1).
@@ -143,9 +145,9 @@ impl Rule for ApplyAggTransposeRule {
                     }
                 });
             }
-            let mut group_keys: Vec<usize> = (0..apply_left_len).collect();
-            group_keys.extend(agg_group_key.into_iter().map(|key| key + apply_left_len));
-            LogicalAgg::new(agg_calls, group_keys, node).into()
+            let mut group_keys: FixedBitSet = (0..apply_left_len).collect();
+            group_keys.extend(agg_group_key.ones().map(|key| key + apply_left_len));
+            Agg::new(agg_calls, group_keys, node).into()
         };
 
         let filter = LogicalFilter::create(group_agg, on);

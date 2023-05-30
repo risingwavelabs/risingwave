@@ -20,12 +20,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevels
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, Level, LevelType, OverlappingLevel, SstableInfo};
 
+use super::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::overlap_strategy::{
     OverlapInfo, OverlapStrategy, RangeOverlapInfo,
 };
-use crate::hummock::compaction::{
-    CompactionInput, CompactionPicker, LocalPickerStatistic, ManualCompactionOption,
-};
+use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct ManualCompactionPicker {
@@ -144,8 +143,13 @@ impl ManualCompactionPicker {
                 table_infos: l0.sub_levels[idx].table_infos.clone(),
             })
         }
-        let target_input_ssts =
+        let target_input_ssts_range =
             info.check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos);
+        let target_input_ssts = if target_input_ssts_range.is_empty() {
+            vec![]
+        } else {
+            levels.levels[self.target_level - 1].table_infos[target_input_ssts_range].to_vec()
+        };
         if target_input_ssts
             .iter()
             .any(|table| level_handlers[self.target_level].is_pending_compact(&table.sst_id))

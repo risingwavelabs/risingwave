@@ -19,8 +19,8 @@ use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::watch::{channel, Receiver, Sender};
 
-use super::default_system_params;
 use super::reader::SystemParamsReader;
+use super::system_params_for_test;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
 pub type LocalSystemParamsManagerRef = Arc<LocalSystemParamsManager>;
@@ -47,7 +47,7 @@ impl LocalSystemParamsManager {
     }
 
     pub fn for_test() -> Self {
-        Self::new(default_system_params().into())
+        Self::new(system_params_for_test().into())
     }
 
     pub fn get_params(&self) -> SystemParamsReaderRef {

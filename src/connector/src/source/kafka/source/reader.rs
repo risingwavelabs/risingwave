@@ -26,7 +26,7 @@ use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
-use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext};
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_ISOLATION_LEVEL};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
     SplitReader,
@@ -67,6 +67,7 @@ impl SplitReader for KafkaSplitReader {
         config.set("enable.partition.eof", "false");
         config.set("enable.auto.commit", "false");
         config.set("auto.offset.reset", "smallest");
+        config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
 
         properties.common.set_security_properties(&mut config);
@@ -136,13 +137,9 @@ impl SplitReader for KafkaSplitReader {
             bytes_per_second,
             max_num_messages,
             split_id,
+            enable_upsert: parser_config.specific.is_upsert(),
             parser_config,
             source_ctx,
-            enable_upsert: properties
-                .upsert
-                .as_ref()
-                .filter(|x| *x == "true")
-                .is_some(),
         })
     }
 
@@ -155,7 +152,7 @@ impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_data_stream(self) {
         if let Some(stop_offset) = self.stop_offset {
-            if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
+            if let Some(start_offset) = self.start_offset && (start_offset + 1) >= stop_offset {
                 yield Vec::new();
                 return Ok(());
             } else if stop_offset == 0 {

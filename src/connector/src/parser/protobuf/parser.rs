@@ -24,11 +24,12 @@ use prost_reflect::{
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, NotImplemented, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::impl_common_parser_logic;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
@@ -154,6 +155,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
+                generated_or_default_column: None,
             })
         } else {
             *index += 1;
@@ -188,13 +190,14 @@ impl ProtobufParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if self.confluent_wire_type {
-            let raw_payload = resolve_pb_header(payload)?;
-            payload = raw_payload;
-        }
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
@@ -227,8 +230,8 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
         Value::U32(i) => ScalarImpl::Int64(*i as i64),
         Value::I64(i) => ScalarImpl::Int64(*i),
         Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
-        Value::F32(f) => ScalarImpl::Float32(OrderedF32::from(*f)),
-        Value::F64(f) => ScalarImpl::Float64(OrderedF64::from(*f)),
+        Value::F32(f) => ScalarImpl::Float32(F32::from(*f)),
+        Value::F64(f) => ScalarImpl::Float64(F64::from(*f)),
         Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
         Value::EnumNumber(idx) => {
             let kind = field_desc.kind();
@@ -291,8 +294,10 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         Kind::Bool => DataType::Boolean,
         Kind::Double => DataType::Float64,
         Kind::Float => DataType::Float32,
-        Kind::Int32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
-        Kind::Int64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => DataType::Int64,
+        Kind::Int32 | Kind::Sint32 | Kind::Sfixed32 | Kind::Fixed32 => DataType::Int32,
+        Kind::Int64 | Kind::Sint64 | Kind::Sfixed64 | Kind::Fixed64 | Kind::Uint32 => {
+            DataType::Int64
+        }
         Kind::Uint64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
@@ -313,9 +318,7 @@ fn protobuf_type_mapping(field_descriptor: &FieldDescriptor) -> Result<DataType>
         }
     };
     if field_descriptor.cardinality() == Cardinality::Repeated {
-        t = DataType::List {
-            datatype: Box::new(t),
-        }
+        t = DataType::List(Box::new(t))
     }
     Ok(t)
 }

@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
@@ -33,6 +34,8 @@ use crate::executor::StreamExecutorResult;
 pub(super) struct AppendOnlyRegisterBucket {
     max: u8,
 }
+
+impl ZeroHeapSize for AppendOnlyRegisterBucket {}
 
 impl RegisterBucket for AppendOnlyRegisterBucket {
     fn new() -> Self {
@@ -60,7 +63,7 @@ impl RegisterBucket for AppendOnlyRegisterBucket {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, EstimateSize)]
 pub struct AppendOnlyStreamingApproxCountDistinct {
     registers: Vec<AppendOnlyRegisterBucket>,
 

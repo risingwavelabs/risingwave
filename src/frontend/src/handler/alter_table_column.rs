@@ -15,12 +15,12 @@
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{AlterTableOperation, ObjectName, Statement};
+use risingwave_sqlparser::ast::{AlterTableOperation, ColumnOption, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
@@ -70,6 +70,13 @@ pub async fn handle_alter_table_column(
         table.clone()
     };
 
+    // TODO(yuhao): alter table with generated columns.
+    if original_catalog.has_generated_column() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Alter a table with generated column has not been implemented.".to_string(),
+        )));
+    }
+
     // Retrieve the original table definition and parse it to AST.
     let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
         .context("unable to parse original table definition")?
@@ -94,6 +101,17 @@ pub async fn handle_alter_table_column(
                     "column \"{new_column_name}\" of table \"{table_name}\" already exists"
                 )))?
             }
+
+            if new_column
+                .options
+                .iter()
+                .any(|x| matches!(x.option, ColumnOption::GeneratedColumns(_)))
+            {
+                Err(ErrorCode::InvalidInputSyntax(
+                    "alter table add generated columns is not supported".to_string(),
+                ))?
+            }
+
             // Add the new column to the table definition.
             columns.push(new_column);
         }
@@ -139,7 +157,14 @@ pub async fn handle_alter_table_column(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
     let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
-    let Statement::CreateTable { columns, constraints, source_watermarks, append_only, .. } = definition else {
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        source_watermarks,
+        append_only,
+        ..
+    } = definition
+    else {
         panic!("unexpected statement type: {:?}", definition);
     };
 

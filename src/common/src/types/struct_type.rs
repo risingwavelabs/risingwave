@@ -17,7 +17,6 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 
 use super::DataType;
-use crate::array::ArrayMeta;
 use crate::util::iter_util::ZipEqFast;
 
 /// Details about a struct type. There are 2 cases for a struct:
@@ -25,13 +24,14 @@ use crate::util::iter_util::ZipEqFast;
 ///    `STRUCT<i INT, j VARCHAR>`.
 /// 2. `field_names.len() == 0`: it represents a struct with unnamed fields, e.g.
 ///    `ROW(1, 2)`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StructType {
     pub fields: Vec<DataType>,
     pub field_names: Vec<String>,
 }
 
 impl StructType {
+    /// Creates a struct type with named fields.
     pub fn new(named_fields: Vec<(DataType, String)>) -> Self {
         let mut fields = Vec::with_capacity(named_fields.len());
         let mut field_names = Vec::with_capacity(named_fields.len());
@@ -45,10 +45,11 @@ impl StructType {
         }
     }
 
-    pub fn to_array_meta(&self) -> ArrayMeta {
-        ArrayMeta::Struct {
-            children: self.fields.clone().into(),
-            children_names: self.field_names.clone().into(),
+    /// Creates a struct type with unnamed fields.
+    pub fn unnamed(fields: Vec<DataType>) -> Self {
+        Self {
+            fields,
+            field_names: Vec::new(),
         }
     }
 }

@@ -13,43 +13,35 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{
-    IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
-};
+use risingwave_common::types::{Date, Interval, Timestamp};
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
 #[inline(always)]
-fn interval_unit_to_micro_second(t: IntervalUnit) -> i64 {
-    t.get_months() as i64 * USECS_PER_MONTH + t.get_days() as i64 * USECS_PER_DAY + t.get_usecs()
+fn interval_to_micro_second(t: Interval) -> i64 {
+    t.months() as i64 * Interval::USECS_PER_MONTH
+        + t.days() as i64 * Interval::USECS_PER_DAY
+        + t.usecs()
 }
 
-#[inline(always)]
-pub fn tumble_start_date(
-    timestamp: NaiveDateWrapper,
-    window_size: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
+#[function("tumble_start(date, interval) -> timestamp")]
+pub fn tumble_start_date(timestamp: Date, window_size: Interval) -> Result<Timestamp> {
     tumble_start_date_time(timestamp.into(), window_size)
 }
 
-#[inline(always)]
-pub fn tumble_start_date_time(
-    timestamp: NaiveDateTimeWrapper,
-    window_size: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
+#[function("tumble_start(timestamp, interval) -> timestamp")]
+pub fn tumble_start_date_time(timestamp: Timestamp, window_size: Interval) -> Result<Timestamp> {
     let timestamp_micro_second = timestamp.0.timestamp_micros();
     let window_start_micro_second = get_window_start(timestamp_micro_second, window_size)?;
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         window_start_micro_second / 1_000_000,
         (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))
 }
 
-#[inline(always)]
-pub fn tumble_start_timestamptz(
-    timestamp_micro_second: i64,
-    window_size: IntervalUnit,
-) -> Result<i64> {
+#[function("tumble_start(timestamptz, interval) -> timestamptz")]
+pub fn tumble_start_timestamptz(timestamp_micro_second: i64, window_size: Interval) -> Result<i64> {
     let timestamp_micro_second = timestamp_micro_second;
     let window_size = window_size;
     get_window_start(timestamp_micro_second, window_size)
@@ -57,30 +49,30 @@ pub fn tumble_start_timestamptz(
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
 #[inline(always)]
-fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> Result<i64> {
-    get_window_start_with_offset(timestamp_micro_second, window_size, IntervalUnit::zero())
+fn get_window_start(timestamp_micro_second: i64, window_size: Interval) -> Result<i64> {
+    get_window_start_with_offset(timestamp_micro_second, window_size, Interval::zero())
 }
 
-#[inline(always)]
+#[function("tumble_start(date, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date(
-    timestamp_date: NaiveDateWrapper,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
+    timestamp_date: Date,
+    window_size: Interval,
+    offset: Interval,
+) -> Result<Timestamp> {
     tumble_start_offset_date_time(timestamp_date.into(), window_size, offset)
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamp, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date_time(
-    time: NaiveDateTimeWrapper,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
+    time: Timestamp,
+    window_size: Interval,
+    offset: Interval,
+) -> Result<Timestamp> {
     let timestamp_micro_second = time.0.timestamp_micros();
     let window_start_micro_second =
         get_window_start_with_offset(timestamp_micro_second, window_size, offset)?;
 
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         window_start_micro_second / 1_000_000,
         (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))
@@ -89,11 +81,11 @@ pub fn tumble_start_offset_date_time(
 #[inline(always)]
 fn get_window_start_with_offset(
     timestamp_micro_second: i64,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
+    window_size: Interval,
+    offset: Interval,
 ) -> Result<i64> {
-    let window_size_micro_second = interval_unit_to_micro_second(window_size);
-    let offset_micro_second = interval_unit_to_micro_second(offset);
+    let window_size_micro_second = interval_to_micro_second(window_size);
+    let offset_micro_second = interval_to_micro_second(offset);
 
     // Inspired by https://issues.apache.org/jira/browse/FLINK-26334
     let remainder = (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
@@ -104,11 +96,11 @@ fn get_window_start_with_offset(
     }
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamptz, interval, interval) -> timestamptz")]
 pub fn tumble_start_offset_timestamptz(
     timestamp_micro_second: i64,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
+    window_size: Interval,
+    offset: Interval,
 ) -> Result<i64> {
     get_window_start_with_offset(timestamp_micro_second, window_size, offset)
 }
@@ -116,18 +108,18 @@ pub fn tumble_start_offset_timestamptz(
 #[cfg(test)]
 mod tests {
     use chrono::{Datelike, Timelike};
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{Date, Interval};
 
     use super::tumble_start_offset_date_time;
     use crate::vector_op::tumble::{
-        get_window_start, interval_unit_to_micro_second, tumble_start_date_time,
+        get_window_start, interval_to_micro_second, tumble_start_date_time,
     };
 
     #[test]
     fn test_tumble_start_date_time() {
-        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
-        let interval = IntervalUnit::from_minutes(30);
+        let dt = Date::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
+        let interval = Interval::from_minutes(30);
         let w = tumble_start_date_time(dt, interval).unwrap().0;
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
@@ -139,18 +131,18 @@ mod tests {
 
     #[test]
     fn test_tumble_start_offset_date_time() {
-        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
+        let dt = Date::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let window_size = 30;
         for offset in 0..window_size {
             for coefficient in 0..5 {
-                let w = tumble_start_date_time(dt, IntervalUnit::from_minutes(window_size))
+                let w = tumble_start_date_time(dt, Interval::from_minutes(window_size))
                     .unwrap()
                     .0;
                 println!("{}", w);
                 let w = tumble_start_offset_date_time(
                     dt,
-                    IntervalUnit::from_minutes(window_size),
-                    IntervalUnit::from_minutes(coefficient * window_size + offset),
+                    Interval::from_minutes(window_size),
+                    Interval::from_minutes(coefficient * window_size + offset),
                 )
                 .unwrap()
                 .0;
@@ -174,11 +166,11 @@ mod tests {
     fn test_remainder_necessary() {
         let mut wrong_cnt = 0;
         for i in -30..30 {
-            let timestamp_micro_second = IntervalUnit::from_minutes(i).get_usecs();
-            let window_size = IntervalUnit::from_minutes(5);
+            let timestamp_micro_second = Interval::from_minutes(i).usecs();
+            let window_size = Interval::from_minutes(5);
             let window_start = get_window_start(timestamp_micro_second, window_size).unwrap();
 
-            let window_size_micro_second = interval_unit_to_micro_second(window_size);
+            let window_size_micro_second = interval_to_micro_second(window_size);
             let default_window_start = timestamp_micro_second
                 - (timestamp_micro_second + window_size_micro_second) % window_size_micro_second;
 

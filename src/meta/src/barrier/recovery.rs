@@ -12,29 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{ActorInfo, WorkerNode, WorkerType};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
+    BarrierCompleteResponse, BroadcastActorInfoTableRequest, BuildActorsRequest,
+    ForceStopActorsRequest, UpdateActorsRequest,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
-use crate::model::ActorId;
+use crate::model::MigrationPlan;
 use crate::storage::MetaStore;
 use crate::stream::build_actor_connector_splits;
 use crate::MetaResult;
@@ -119,168 +119,243 @@ where
             .await
             .expect("clean dirty fragments");
         let retry_strategy = Self::get_retry_strategy();
+
+        // We take retry into consideration because this is the latency user sees for a cluster to
+        // get recovered.
+        let recovery_timer = self.metrics.recovery_latency.start_timer();
         let (new_epoch, _responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let mut info = self.resolve_actor_info_for_recovery().await;
-            let mut new_epoch = prev_epoch.next();
+            let recovery_result: MetaResult<(Epoch, Vec<BarrierCompleteResponse>)> = try {
+                let mut info = self.resolve_actor_info_for_recovery().await;
+                let mut new_epoch = prev_epoch.next();
 
-            // Migrate actors in expired CN to newly joined one.
-            let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                error!(err = ?err, "migrate actors failed");
-            })?;
-            if migrated {
-                info = self.resolve_actor_info_for_recovery().await;
-            }
-
-            // Reset all compute nodes, stop and drop existing actors.
-            self.reset_compute_nodes(&info).await.inspect_err(|err| {
-                error!(err = ?err, "reset compute nodes failed");
-            })?;
-
-            // update and build all actors.
-            self.update_actors(&info).await.inspect_err(|err| {
-                error!(err = ?err, "update actors failed");
-            })?;
-            self.build_actors(&info).await.inspect_err(|err| {
-                error!(err = ?err, "build_actors failed");
-            })?;
-
-            // get split assignments for all actors
-            let source_split_assignments = self.source_manager.list_assignments().await;
-            let command = Command::Plain(Some(Mutation::Add(AddMutation {
-                actor_dispatchers: Default::default(),
-                actor_splits: build_actor_connector_splits(&source_split_assignments),
-            })));
-
-            let prev_epoch = new_epoch;
-            new_epoch = prev_epoch.next();
-            // checkpoint, used as init barrier to initialize all executors.
-            let command_ctx = Arc::new(CommandContext::new(
-                self.fragment_manager.clone(),
-                self.snapshot_manager.clone(),
-                self.env.stream_client_pool_ref(),
-                info,
-                prev_epoch,
-                new_epoch,
-                command,
-                true,
-                self.source_manager.clone(),
-            ));
-
-            #[cfg(not(all(test, feature = "failpoints")))]
-            {
-                use risingwave_common::util::epoch::INVALID_EPOCH;
-
-                let mce = self
-                    .hummock_manager
-                    .get_current_version()
-                    .await
-                    .max_committed_epoch;
-
-                if mce != INVALID_EPOCH {
-                    command_ctx.wait_epoch_commit(mce).await?;
+                // Migrate actors in expired CN to newly joined one.
+                let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                    warn!(err = ?err, "migrate actors failed");
+                })?;
+                if migrated {
+                    info = self.resolve_actor_info_for_recovery().await;
                 }
-            }
 
-            let (barrier_complete_tx, mut barrier_complete_rx) =
-                tokio::sync::mpsc::unbounded_channel();
-            self.inject_barrier(command_ctx.clone(), barrier_complete_tx)
-                .await;
-            match barrier_complete_rx.recv().await.unwrap() {
-                (_, Ok(response)) => {
-                    if let Err(err) = command_ctx.post_collect().await {
-                        error!(err = ?err, "post_collect failed");
-                        return Err(err);
+                // Reset all compute nodes, stop and drop existing actors.
+                self.reset_compute_nodes(&info).await.inspect_err(|err| {
+                    warn!(err = ?err, "reset compute nodes failed");
+                })?;
+
+                // update and build all actors.
+                self.update_actors(&info).await.inspect_err(|err| {
+                    warn!(err = ?err, "update actors failed");
+                })?;
+                self.build_actors(&info).await.inspect_err(|err| {
+                    warn!(err = ?err, "build_actors failed");
+                })?;
+
+                // get split assignments for all actors
+                let source_split_assignments = self.source_manager.list_assignments().await;
+                let command = Command::Plain(Some(Mutation::Add(AddMutation {
+                    // Actors built during recovery is not treated as newly added actors.
+                    actor_dispatchers: Default::default(),
+                    added_actors: Default::default(),
+                    actor_splits: build_actor_connector_splits(&source_split_assignments),
+                })));
+
+                let prev_epoch = new_epoch;
+                new_epoch = prev_epoch.next();
+                // checkpoint, used as init barrier to initialize all executors.
+                let command_ctx = Arc::new(CommandContext::new(
+                    self.fragment_manager.clone(),
+                    self.env.stream_client_pool_ref(),
+                    info,
+                    prev_epoch,
+                    new_epoch,
+                    command,
+                    true,
+                    self.source_manager.clone(),
+                ));
+
+                #[cfg(not(all(test, feature = "failpoints")))]
+                {
+                    use risingwave_common::util::epoch::INVALID_EPOCH;
+
+                    let mce = self
+                        .hummock_manager
+                        .get_current_version()
+                        .await
+                        .max_committed_epoch;
+
+                    if mce != INVALID_EPOCH {
+                        command_ctx.wait_epoch_commit(mce).await?;
                     }
-                    Ok((new_epoch, response))
                 }
-                (_, Err(err)) => {
-                    error!(err = ?err, "inject_barrier failed");
-                    Err(err)
-                }
+
+                let (barrier_complete_tx, mut barrier_complete_rx) =
+                    tokio::sync::mpsc::unbounded_channel();
+                self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
+                    .await;
+                let res = match barrier_complete_rx.recv().await.unwrap().result {
+                    Ok(response) => {
+                        if let Err(err) = command_ctx.post_collect().await {
+                            warn!(err = ?err, "post_collect failed");
+                            Err(err)
+                        } else {
+                            Ok((new_epoch, response))
+                        }
+                    }
+                    Err(err) => {
+                        warn!(err = ?err, "inject_barrier failed");
+                        Err(err)
+                    }
+                };
+                res?
+            };
+            if recovery_result.is_err() {
+                self.metrics.recovery_failure_cnt.inc();
             }
+            recovery_result
         })
         .await
         .expect("Retry until recovery success.");
+        recovery_timer.observe_duration();
         tracing::info!("recovery success");
 
         new_epoch
     }
 
-    /// map expired CNs to newly joined CNs, so we can migrate actors later
-    /// wait until get a sufficient amount of new CNs
-    /// return "map of `ActorId` in expired CN to new CN id" and "map of `WorkerId` to
-    /// `WorkerNode` struct in new CNs"
-    async fn get_migrate_map_plan(
+    /// Migrate actors in expired CNs to newly joined ones, return true if any actor is migrated.
+    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        debug!("start migrate actors.");
+
+        // 1. get expired workers.
+        let expired_workers: HashSet<WorkerId> = info
+            .actor_map
+            .iter()
+            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
+            .map(|(&worker, _)| worker)
+            .collect();
+        if expired_workers.is_empty() {
+            debug!("no expired workers, skipping.");
+            return Ok(false);
+        }
+        let migration_plan = self.generate_migration_plan(info, expired_workers).await?;
+        // 2. start to migrate fragment one-by-one.
+        self.fragment_manager
+            .migrate_fragment_actors(&migration_plan)
+            .await?;
+        // 3. remove the migration plan.
+        migration_plan.delete(self.env.meta_store()).await?;
+
+        debug!("migrate actors succeed.");
+        Ok(true)
+    }
+
+    /// This function will generate a migration plan, which includes the mapping for all expired and
+    /// in-used parallel unit to a new one.
+    async fn generate_migration_plan(
         &self,
         info: &BarrierActorInfo,
-        expired_workers: &[WorkerId],
-    ) -> (HashMap<ActorId, WorkerId>, HashMap<WorkerId, WorkerNode>) {
-        let mut cur = 0;
-        let mut migrate_map = HashMap::new();
-        let mut node_map = HashMap::new();
+        expired_workers: HashSet<WorkerId>,
+    ) -> MetaResult<MigrationPlan> {
+        let mut cached_plan = MigrationPlan::get(self.env.meta_store()).await?;
+
+        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+
+        let mut to_migrate_parallel_units: BTreeSet<_> = all_worker_parallel_units
+            .iter()
+            .filter(|(worker, _)| expired_workers.contains(worker))
+            .flat_map(|(_, pu)| pu.iter().cloned())
+            .collect();
+        cached_plan.parallel_unit_plan.retain(|from, to| {
+            if to_migrate_parallel_units.contains(from) {
+                if !to_migrate_parallel_units.contains(&to.id) {
+                    // clean up target parallel units in migration plan that are expired and not
+                    // used by any actors.
+                    return !expired_workers.contains(&to.worker_node_id);
+                }
+                return true;
+            }
+            false
+        });
+        to_migrate_parallel_units.retain(|id| !cached_plan.parallel_unit_plan.contains_key(id));
+
+        if to_migrate_parallel_units.is_empty() {
+            // all expired parallel units are already in migration plan.
+            debug!("all expired parallel units are already in migration plan.");
+            return Ok(cached_plan);
+        }
+        let mut to_migrate_parallel_units =
+            to_migrate_parallel_units.into_iter().rev().collect_vec();
+        debug!(
+            "got to migrate parallel units {:#?}",
+            to_migrate_parallel_units
+        );
+
         let start = Instant::now();
-        while cur < expired_workers.len() {
+        // if in-used expire parallel units are not empty, should wait for newly joined worker.
+        'discovery: while !to_migrate_parallel_units.is_empty() {
             let current_nodes = self
                 .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+                .list_active_streaming_compute_nodes()
                 .await;
             let new_nodes = current_nodes
                 .into_iter()
                 .filter(|node| {
-                    !info.actor_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
+                    !info.actor_map.contains_key(&node.id)
+                        && !cached_plan
+                            .parallel_unit_plan
+                            .values()
+                            .map(|pu| pu.worker_node_id)
+                            .contains(&node.id)
                 })
                 .collect_vec();
-            for new_node in new_nodes {
-                let actors = info.actor_map.get(&expired_workers[cur]).unwrap();
-                for actor in actors {
-                    migrate_map.insert(*actor, new_node.id);
-                }
-                cur += 1;
-                debug!(
-                    "new worker joined: {}, migrate process ({}/{})",
-                    new_node.id,
-                    cur,
-                    expired_workers.len()
-                );
-                node_map.insert(new_node.id, new_node);
-                if cur == expired_workers.len() {
-                    return (migrate_map, node_map);
+            if !new_nodes.is_empty() {
+                debug!("new workers joined: {:#?}", new_nodes);
+                let target_parallel_units = new_nodes
+                    .into_iter()
+                    .flat_map(|node| node.parallel_units)
+                    .collect_vec();
+                for target_parallel_unit in target_parallel_units {
+                    if let Some(from) = to_migrate_parallel_units.pop() {
+                        debug!(
+                            "plan to migrate from parallel unit {} to {}",
+                            from, target_parallel_unit.id
+                        );
+                        cached_plan
+                            .parallel_unit_plan
+                            .insert(from, target_parallel_unit);
+                    } else {
+                        break 'discovery;
+                    }
                 }
             }
             warn!(
-                "waiting for new worker to join, elapsed: {}s",
+                "waiting for new workers to join, elapsed: {}s",
                 start.elapsed().as_secs()
             );
             // wait to get newly joined CN
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        (migrate_map, node_map)
-    }
 
-    async fn migrate_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
-        debug!("start migrate actors.");
-
-        // 1. get expired workers
-        let expired_workers = info
-            .actor_map
-            .iter()
-            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
-            .map(|(&worker, _)| worker)
-            .collect_vec();
-        if expired_workers.is_empty() {
-            debug!("no expired workers, skipping.");
-            return Ok(false);
+        // update migration plan, if there is a chain in the plan, update it.
+        let mut new_plan = MigrationPlan::default();
+        for (from, to) in &cached_plan.parallel_unit_plan {
+            let mut to = to.clone();
+            while let Some(target) = cached_plan.parallel_unit_plan.get(&to.id) {
+                to = target.clone();
+            }
+            new_plan.parallel_unit_plan.insert(*from, to);
         }
-        debug!("got expired workers {:#?}", expired_workers);
 
-        let (migrate_map, node_map) = self.get_migrate_map_plan(info, &expired_workers).await;
-        // 2. migrate actors in fragments
-        self.fragment_manager
-            .migrate_actors(&migrate_map, &node_map)
-            .await?;
-        debug!("migrate actors succeed.");
+        assert!(
+            new_plan
+                .parallel_unit_plan
+                .values()
+                .map(|pu| pu.id)
+                .all_unique(),
+            "target parallel units must be unique: {:?}",
+            new_plan.parallel_unit_plan
+        );
 
-        Ok(true)
+        new_plan.insert(self.env.meta_store()).await?;
+        Ok(new_plan)
     }
 
     /// Update all actors in compute nodes.

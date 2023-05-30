@@ -32,8 +32,8 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor<C> = GenericExchangeExecutor<DefaultCreateSource, C>;
-use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
+use crate::monitor::BatchMetricsWithTaskLabels;
 
 pub struct GenericExchangeExecutor<CS, C> {
     proto_sources: Vec<PbExchangeSource>,
@@ -47,7 +47,7 @@ pub struct GenericExchangeExecutor<CS, C> {
 
     /// Batch metrics.
     /// None: Local mode don't record mertics.
-    metrics: Option<BatchTaskMetricsWithTaskLabels>,
+    metrics: Option<BatchMetricsWithTaskLabels>,
 }
 
 /// `CreateSource` determines the right type of `ExchangeSource` to create.
@@ -140,7 +140,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
             schema: Schema { fields },
             task_id: source.task_id.clone(),
             identity: source.plan_node().get_identity().clone(),
-            metrics: source.context().task_metrics(),
+            metrics: source.context().batch_metrics(),
         }))
     }
 }
@@ -192,7 +192,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         prost_source: PbExchangeSource,
         source_creator: CS,
         context: C,
-        metrics: Option<BatchTaskMetricsWithTaskLabels>,
+        metrics: Option<BatchMetricsWithTaskLabels>,
         identity: String,
     ) {
         let mut source = source_creator
@@ -200,27 +200,14 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
             .await?;
         // create the collector
         let source_id = source.get_task_id();
-        let counter = if let Some(ref metrics) = metrics {
-            let mut labels = metrics.task_labels();
-            let source_stage_id = source_id.stage_id.to_string();
-            let source_task_id = source_id.stage_id.to_string();
-            labels.extend_from_slice(&[
-                identity.as_str(),
-                source_id.query_id.as_str(),
-                source_stage_id.as_str(),
-                source_task_id.as_str(),
-            ]);
-
-            Some(
-                metrics
-                    .metrics
-                    .task_exchange_recv_row_number
-                    .with_label_values(&labels[..]),
-            )
-        } else {
-            // no metrics to collect, no counter
-            None
-        };
+        let counter = metrics.as_ref().map(|metrics| {
+            metrics.create_collector_for_exchange_recv_row_number(vec![
+                identity,
+                source_id.query_id,
+                source_id.stage_id.to_string(),
+                source_id.task_id.to_string(),
+            ])
+        });
 
         loop {
             if let Some(res) = source.take_data().await? {
@@ -245,8 +232,7 @@ mod tests {
 
     use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::{DataChunk, I32Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -260,7 +246,7 @@ mod tests {
         for _ in 0..2 {
             let mut rng = rand::thread_rng();
             let i = rng.gen_range(1..=100000);
-            let chunk = DataChunk::new(vec![array_nonnull! { I32Array, [i] }.into()], 1);
+            let chunk = DataChunk::new(vec![I32Array::from_iter([i]).into_ref()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);

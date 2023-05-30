@@ -78,6 +78,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::CanalJson => SourceFormat::CanalJson,
             RowFormatType::Native => SourceFormat::Native,
             RowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            RowFormatType::UpsertJson => SourceFormat::UpsertJson,
             _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
@@ -103,7 +104,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
                 .context()
                 .get_config()
                 .developer
-                .stream_connector_message_buffer_size,
+                .connector_message_buffer_size,
         };
 
         let column_ids: Vec<_> = source_node

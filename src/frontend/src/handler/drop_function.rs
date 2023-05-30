@@ -43,21 +43,40 @@ pub async fn handle_drop_function(
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    // TODO: argument is not specified, drop the only function with the name
-    let mut arg_types = vec![];
-    for arg in func_desc.args.unwrap_or_default() {
-        arg_types.push(bind_data_type(&arg.data_type)?);
-    }
+    let arg_types = match func_desc.args {
+        Some(args) => {
+            let mut arg_types = vec![];
+            for arg in args {
+                arg_types.push(bind_data_type(&arg.data_type)?);
+            }
+            Some(arg_types)
+        }
+        None => None,
+    };
 
     let function_id = {
         let reader = session.env().catalog_reader().read_guard();
-        match reader.get_function_by_name_args(db_name, schema_path, &function_name, &arg_types) {
-            Ok((function, _)) => {
-                if session.user_id() != function.owner {
-                    return Err(
-                        ErrorCode::PermissionDenied("Do not have the privilege".into()).into(),
-                    );
+        let res = match arg_types {
+            Some(arg_types) => {
+                reader.get_function_by_name_args(db_name, schema_path, &function_name, &arg_types)
+            }
+            // check if there is only one function if arguments are not specified
+            None => match reader.get_functions_by_name(db_name, schema_path, &function_name) {
+                Ok((functions, schema_name)) => {
+                    if functions.len() > 1 {
+                        return Err(ErrorCode::CatalogError(format!("function name {function_name:?} is not unique\nHINT: Specify the argument list to select the function unambiguously.").into()).into());
+                    }
+                    Ok((
+                        functions.into_iter().next().expect("no functions"),
+                        schema_name,
+                    ))
                 }
+                Err(e) => Err(e),
+            },
+        };
+        match res {
+            Ok((function, schema_name)) => {
+                session.check_privilege_for_drop_alter(schema_name, &**function)?;
                 function.id
             }
             Err(CatalogError::NotFound(kind, _)) if kind == "function" && if_exists => {

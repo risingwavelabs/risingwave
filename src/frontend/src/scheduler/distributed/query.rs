@@ -38,7 +38,7 @@ use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
 use crate::scheduler::distributed::StageEvent::Scheduled;
 use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::{
     ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
@@ -64,9 +64,6 @@ enum QueryState {
 
     /// Failed
     Failed,
-
-    /// Completed
-    Completed,
 }
 
 pub struct QueryExecution {
@@ -86,8 +83,6 @@ struct QueryRunner {
 
     /// Will be set to `None` after all stage scheduled.
     root_stage_sender: Option<oneshot::Sender<SchedulerResult<QueryResultFetcher>>>,
-
-    compute_client_pool: ComputeClientPoolRef,
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
@@ -120,7 +115,7 @@ impl QueryExecution {
     pub async fn start(
         &self,
         context: ExecutionContextRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
@@ -155,7 +150,6 @@ impl QueryExecution {
                     msg_receiver,
                     root_stage_sender: Some(root_stage_sender),
                     scheduled_stages_count: 0,
-                    compute_client_pool,
                     query_execution_info,
                     query_metrics,
                 };
@@ -202,7 +196,7 @@ impl QueryExecution {
         &self,
         pinned_snapshot: &PinnedHummockSnapshot,
         context: ExecutionContextRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
     ) -> HashMap<StageId, Arc<StageExecution>> {
@@ -374,10 +368,7 @@ impl QueryRunner {
         let root_stage_result = QueryResultFetcher::new(
             root_task_output_id,
             // Execute in local, so no need to fill meaningful address.
-            HostAddress {
-                ..Default::default()
-            },
-            self.compute_client_pool.clone(),
+            HostAddress::default(),
             chunk_rx,
             self.query.query_id.clone(),
             self.query_execution_info.clone(),
@@ -446,6 +437,7 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_common::types::DataType;
+    use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
@@ -454,14 +446,13 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
-        LogicalScan, ToBatch,
+        generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::worker_node_manager::WorkerNodeManager;
+    use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeSelector};
     use crate::scheduler::{
         DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
         QueryExecutionInfo,
@@ -473,6 +464,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
         let compute_client_pool = Arc::new(ComputeClientPool::default());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
@@ -490,7 +482,7 @@ pub(crate) mod tests {
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
-                worker_node_manager,
+                worker_node_selector,
                 PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
                 compute_client_pool,
                 catalog_reader,
@@ -519,27 +511,9 @@ pub(crate) mod tests {
                 stream_key: vec![],
                 pk: vec![],
                 columns: vec![
-                    ColumnDesc {
-                        data_type: DataType::Int32,
-                        column_id: 0.into(),
-                        name: "a".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
-                    ColumnDesc {
-                        data_type: DataType::Float64,
-                        column_id: 1.into(),
-                        name: "b".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
-                    ColumnDesc {
-                        data_type: DataType::Int64,
-                        column_id: 2.into(),
-                        name: "_row_id".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
+                    ColumnDesc::new_atomic(DataType::Int32, "a", 0),
+                    ColumnDesc::new_atomic(DataType::Float64, "b", 1),
+                    ColumnDesc::new_atomic(DataType::Int64, "c", 2),
                 ],
                 distribution_key: vec![],
                 append_only: false,
@@ -557,11 +531,11 @@ pub(crate) mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
-        let batch_filter = BatchFilter::new(LogicalFilter::new(
-            batch_plan_node.clone(),
+        let batch_filter = BatchFilter::new(generic::Filter::new(
             Condition {
                 conjunctions: vec![],
             },
+            batch_plan_node.clone(),
         ))
         .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
@@ -576,43 +550,38 @@ pub(crate) mod tests {
             Distribution::HashShard(vec![0, 1]),
         )
         .into();
-        let hash_join_node: PlanRef = BatchHashJoin::new(
-            LogicalJoin::new(
-                batch_exchange_node1.clone(),
-                batch_exchange_node2.clone(),
-                JoinType::Inner,
-                Condition::true_cond(),
-            ),
-            EqJoinPredicate::new(
-                Condition::true_cond(),
-                vec![
-                    (
-                        InputRef {
-                            index: 0,
-                            data_type: DataType::Int32,
-                        },
-                        InputRef {
-                            index: 2,
-                            data_type: DataType::Int32,
-                        },
-                        false,
-                    ),
-                    (
-                        InputRef {
-                            index: 1,
-                            data_type: DataType::Float64,
-                        },
-                        InputRef {
-                            index: 3,
-                            data_type: DataType::Float64,
-                        },
-                        false,
-                    ),
-                ],
-                2,
-            ),
-        )
-        .into();
+        let logical_join_node = generic::Join::with_full_output(
+            batch_exchange_node1.clone(),
+            batch_exchange_node2.clone(),
+            JoinType::Inner,
+            Condition::true_cond(),
+        );
+        let eq_key_1 = (
+            InputRef {
+                index: 0,
+                data_type: DataType::Int32,
+            },
+            InputRef {
+                index: 2,
+                data_type: DataType::Int32,
+            },
+            false,
+        );
+        let eq_key_2 = (
+            InputRef {
+                index: 1,
+                data_type: DataType::Float64,
+            },
+            InputRef {
+                index: 3,
+                data_type: DataType::Float64,
+            },
+            false,
+        );
+        let eq_join_predicate =
+            EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
+        let hash_join_node: PlanRef =
+            BatchHashJoin::new(logical_join_node, eq_join_predicate).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
@@ -629,6 +598,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(0, 0),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -639,6 +612,10 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(8, 1),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -649,16 +626,22 @@ pub(crate) mod tests {
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
+            property: Some(Property {
+                is_streaming: true,
+                is_serving: true,
+            }),
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_fragment_mapping(0, ParallelUnitMapping::new_single(0));
+        let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
+        worker_node_manager
+            .insert_streaming_fragment_mapping(0, ParallelUnitMapping::new_single(0));
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new(
-            worker_node_manager,
+            worker_node_selector,
             catalog_reader,
             None,
             batch_exchange_node.clone(),

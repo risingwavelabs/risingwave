@@ -33,6 +33,10 @@ import org.slf4j.LoggerFactory;
 public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.SinkStreamRequest> {
     private SinkBase sink;
 
+    private String connectorType;
+
+    private long sinkId;
+
     private TableSchema tableSchema;
 
     private boolean epochStarted;
@@ -61,6 +65,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Sink is already initialized")
                             .asRuntimeException();
                 }
+                sinkId = sinkTask.getStart().getSinkId();
                 bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
                 LOG.debug("Sink initialized");
                 responseObserver.onNext(
@@ -122,7 +127,9 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
 
                 try (CloseableIterator<SinkRow> rowIter =
                         deserializer.deserialize(sinkTask.getWrite())) {
-                    sink.write(new MonitoredRowIterator(rowIter));
+                    sink.write(
+                            new MonitoredRowIterator(
+                                    rowIter, connectorType, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = sinkTask.getWrite().getBatchId();
@@ -188,6 +195,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         if (sink != null) {
             sink.drop();
         }
+        ConnectorNodeMetrics.decActiveSinkConnections(connectorType, "node1");
     }
 
     private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
@@ -207,6 +215,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
-        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getConnectorType(), "node1");
+        connectorType = sinkConfig.getConnectorType().toUpperCase();
+        ConnectorNodeMetrics.incActiveSinkConnections(connectorType, "node1");
     }
 }

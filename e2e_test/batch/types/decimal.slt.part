@@ -41,3 +41,62 @@ query R
 select '  -inF '::decimal;
 ----
 -Infinity
+
+query R
+values ('nan'::decimal), ('inf'), ('-inf'), ('2.') order by 1;
+----
+-Infinity
+        2
+ Infinity
+      NaN
+
+query TTT
+select '-inf'::decimal < 2, 2 < 'inf'::decimal, 'inf'::decimal < 'nan'::decimal;
+----
+t t t
+
+query IIIIII
+select
+	'-32768'::int2::decimal,
+	'-2147483648'::int4::decimal,
+	'-9223372036854775808'::int8::decimal,
+	'-32768'::decimal::int2,
+	'-2147483648'::decimal::int4,
+	'-9223372036854775808'::decimal::int8;
+----
+-32768 -2147483648 -9223372036854775808 -32768 -2147483648 -9223372036854775808
+
+statement error out of range
+select '32767.5'::decimal::int2;
+
+statement error out of range
+select '2147483647.5'::decimal::int4;
+
+statement error out of range
+select '9223372036854775807.5'::decimal::int8;
+
+query RRRRRRRR
+select
+	'1e-28'::float4::decimal,
+	'999999'::float4::decimal,
+	1e-28::decimal::float4,
+	'999999'::decimal::float4,
+	'1e-28'::float8::decimal,
+	'999999999999999'::float8::decimal,
+	1e-27::decimal::float8,
+	'999999999999999'::decimal::float8;
+----
+0.0000000000000000000000000001 999999 1e-28 999999 0.0000000000000000000000000001 999999999999999 1e-27 999999999999999
+
+statement error out of range
+select '1e29'::float4::decimal;
+
+query R
+select 79228162514264337593543950335::decimal::float4;
+----
+7.9228163e+28
+
+query R
+select 79228162514264337593543950335::decimal::float8;
+----
+7.922816251426434e+28

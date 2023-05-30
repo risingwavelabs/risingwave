@@ -16,6 +16,7 @@ use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
+use crate::expr::Now;
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -33,6 +34,7 @@ pub trait ExprRewriter {
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
+            ExprImpl::Now(inner) => self.rewrite_now(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -93,20 +95,22 @@ pub trait ExprRewriter {
         let WindowFunction {
             args,
             return_type,
-            function_type,
+            kind,
             partition_by,
             order_by,
+            frame,
         } = window_func;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         WindowFunction {
+            kind,
             args,
             return_type,
-            function_type,
             partition_by,
             order_by,
+            frame,
         }
         .into()
     }
@@ -117,5 +121,8 @@ pub trait ExprRewriter {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         UserDefinedFunction { args, catalog }.into()
+    }
+    fn rewrite_now(&mut self, now: Now) -> ExprImpl {
+        now.into()
     }
 }

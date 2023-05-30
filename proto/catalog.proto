@@ -58,6 +58,12 @@ message Source {
   // Define watermarks on the source. The `repeated` is just for forward
   // compatibility, currently, only one watermark on the source
   repeated WatermarkDesc watermark_descs = 11;
+  // Indicate whether this source is created by table.
+  oneof optional_associated_table_id {
+    uint32 associated_table_id = 12;
+  }
+  string definition = 13;
+  optional uint32 connection_id = 14;
 }
 
 enum SinkType {
@@ -83,20 +89,31 @@ message Sink {
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;
+  optional uint32 connection_id = 14;
 }
 
 message Connection {
   message PrivateLinkService {
-    string provider = 1;
-    string endpoint_id = 2;
-    map<string, string> dns_entries = 3;
+    enum PrivateLinkProvider {
+      UNSPECIFIED = 0;
+      MOCK = 1;
+      AWS = 2;
+    }
+    PrivateLinkProvider provider = 1;
+    string service_name = 2;
+    string endpoint_id = 3;
+    map<string, string> dns_entries = 4;
+    string endpoint_dns_name = 5;
   }
 
   uint32 id = 1;
-  string name = 2;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
   oneof info {
-    PrivateLinkService private_link_service = 3;
+    PrivateLinkService private_link_service = 5;
   }
+  uint32 owner = 6;
 }
 
 message Index {
@@ -183,6 +200,7 @@ message Table {
   // `[0..columns.len()]`.
   repeated int32 value_indices = 20;
   string definition = 21;
+  // Used to control whether handling pk conflict for incoming data.
   HandleConflictBehavior handle_pk_conflict_behavior = 22;
   // Anticipated read prefix pattern (number of fields) for the table, which can be utilized
   // for implementing the table's bloom filter or other storage optimization techniques.
@@ -195,9 +213,10 @@ message Table {
 }
 
 enum HandleConflictBehavior {
-  NO_CHECK_UNSPECIFIED = 0;
+  CONFLICT_BEHAVIOR_UNSPECIFIED = 0;
   OVERWRITE = 1;
   IGNORE = 2;
+  NO_CHECK = 3;
 }
 
 message View {

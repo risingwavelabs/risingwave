@@ -39,8 +39,9 @@ impl SourceColumnDesc {
             !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
             "called `SourceColumnDesc::simple` with a composite type."
         );
+        let name = name.into();
         Self {
-            name: name.into(),
+            name,
             data_type,
             column_id,
             fields: vec![],
@@ -77,6 +78,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name: s.name.clone(),
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
+            generated_or_default_column: None,
         }
     }
 }

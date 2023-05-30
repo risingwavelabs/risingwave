@@ -27,7 +27,7 @@ use futures_async_stream::for_await;
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
-use risingwave_batch::task::TaskId as TaskIdBatch;
+use risingwave_batch::task::{ShutdownMsg, TaskId as TaskIdBatch};
 use risingwave_common::array::DataChunk;
 use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::addr::HostAddr;
@@ -35,30 +35,29 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::plan_node::NodeBody::{Delete, Insert, Update};
 use risingwave_pb::batch_plan::{
     DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
     PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
-use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
+use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::TableId;
+use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
-use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeSelector;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
@@ -114,7 +113,7 @@ struct TaskStatusHolder {
 pub struct StageExecution {
     epoch: BatchQueryEpoch,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     state: Arc<RwLock<StageState>>,
     shutdown_tx: RwLock<Option<oneshot::Sender<StageMessage>>>,
@@ -133,7 +132,7 @@ struct StageRunner {
     epoch: BatchQueryEpoch,
     state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
-    worker_node_manager: WorkerNodeManagerRef,
+    worker_node_manager: WorkerNodeSelector,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
     // Send message to `QueryRunner` to notify stage state change.
     msg_sender: Sender<QueryMessage>,
@@ -166,7 +165,7 @@ impl StageExecution {
     pub fn new(
         epoch: BatchQueryEpoch,
         stage: QueryStageRef,
-        worker_node_manager: WorkerNodeManagerRef,
+        worker_node_manager: WorkerNodeSelector,
         msg_sender: Sender<QueryMessage>,
         children: Vec<Arc<StageExecution>>,
         compute_client_pool: ComputeClientPoolRef,
@@ -268,10 +267,6 @@ impl StageExecution {
         }
     }
 
-    pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
-        self.tasks[&task_id].get_status()
-    }
-
     /// Returns all exchange sources for `output_id`. Each `ExchangeSource` is identified by
     /// producer's `TaskId` and `output_id` (consumer's `TaskId`), since each task may produce
     /// output to several channels.
@@ -331,15 +326,16 @@ impl StageRunner {
     ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
-        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
+        if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
+            && let Some(vnode_bitmaps) = table_scan_info.partitions()
+        {
             // If the stage has table scan nodes, we create tasks according to the data distribution
             // and partition of the table.
             // We let each task read one partition by setting the `vnode_ranges` of the scan node in
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
-
+            let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())
@@ -351,7 +347,8 @@ impl StageRunner {
                     task_id: i as u32,
                 };
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
-                let plan_fragment = self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
+                let plan_fragment =
+                    self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
@@ -361,12 +358,13 @@ impl StageRunner {
                     stage_id: self.stage.id,
                     task_id: id as u32,
                 };
-                let plan_fragment = self.create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
-                let worker = self.choose_worker(&plan_fragment, id as u32)?;
+                let plan_fragment = self
+                    .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                let worker =
+                    self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
-        }
-        else {
+        } else {
             for id in 0..self.stage.parallelism.unwrap() {
                 let task_id = TaskIdPb {
                     query_id: self.stage.query_id.id.clone(),
@@ -374,7 +372,7 @@ impl StageRunner {
                     task_id: id,
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
-                let worker = self.choose_worker(&plan_fragment, id)?;
+                let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
                 futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
         }
@@ -464,6 +462,9 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
+                        TaskStatusPb::Pending => {
+                            debug!("Receive ping from task {:?}", status.task_id.unwrap());
+                        }
                         status => {
                             // The remain possible variant is Failed, but now they won't be pushed
                             // from CN.
@@ -493,28 +494,13 @@ impl StageRunner {
         }
 
         tracing::trace!(
-            "Stage [{:?}-{:?}], running task count: {}, finished task count: {}",
+            "Stage [{:?}-{:?}], running task count: {}, finished task count: {}, sent signal to next: {}",
             self.stage.query_id,
             self.stage.id,
             running_task_cnt,
-            finished_task_cnt
+            finished_task_cnt,
+            sent_signal_to_next,
         );
-
-        if !sent_signal_to_next || finished_task_cnt != self.tasks.keys().len() {
-            // This situation may come from recovery test: CN may get killed before reporting
-            // status. In this case, batch query is expected to fail. Client in
-            // simulation test should retry this query (w/o kill nodes).
-            self.notify_stage_state_changed(
-                |_| StageState::Failed,
-                QueryMessage::Stage(Failed {
-                    id: self.stage.id,
-                    reason: SchedulerError::Internal(anyhow!(
-                        "Compute node lost connection before finishing responding"
-                    )),
-                }),
-            )
-            .await;
-        }
 
         if let Some(shutdown) = all_streams.take_future() {
             tracing::trace!(
@@ -536,10 +522,10 @@ impl StageRunner {
             self.stage.id,
             self.tasks.len()
         );
-        self.abort_all_scheduled_tasks().await?;
+        self.cancel_all_scheducancled_tasks().await?;
 
         tracing::trace!(
-            "Stage runner [{:?}-{:?}] existed. ",
+            "Stage runner [{:?}-{:?}] exited.",
             self.stage.query_id,
             self.stage.id
         );
@@ -566,11 +552,15 @@ impl StageRunner {
         self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::ScheduledRoot(result_rx)))
             .await;
 
+        // TODO(ZENOTME): For now this rx is only used as placehodler, it didn't take effect.
+        // Refactor later to make use it.
+        let (_tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
         let executor = ExecutorBuilder::new(
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
             self.epoch.clone(),
+            rx,
         );
 
         let executor = executor.build().await?;
@@ -639,13 +629,23 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
+    fn get_fragment_id(&self, table_id: &TableId) -> SchedulerResult<FragmentId> {
+        self.catalog_reader
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| table.fragment_id)
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))
+    }
+
+    #[inline(always)]
+    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
         self.catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
             .map(|table| {
                 self.worker_node_manager
-                    .get_fragment_mapping(&table.fragment_id)
+                    .manager
+                    .get_streaming_fragment_mapping(&table.fragment_id)
             })
             .ok()
             .flatten()
@@ -655,34 +655,33 @@ impl StageRunner {
         &self,
         plan_fragment: &PlanFragment,
         task_id: u32,
+        dml_table_id: Option<TableId>,
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
-        let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
-
-        let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
-            _ => {
+        let vnode_mapping = match dml_table_id {
+            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
+            None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
                 {
-                    // Choose worker for distributed lookup join based on inner side vnode_mapping
+                    let fragment_id = self.get_fragment_id(
+                        &distributed_lookup_join_node
+                            .inner_side_table_desc
+                            .as_ref()
+                            .unwrap()
+                            .table_id
+                            .into(),
+                    )?;
                     let id2pu_vec = self
-                        .get_vnode_mapping(&TableId::new(
-                            distributed_lookup_join_node
-                                .inner_side_table_desc
-                                .as_ref()
-                                .unwrap()
-                                .table_id,
-                        ))
-                        .unwrap()
+                        .worker_node_manager
+                        .fragment_mapping(fragment_id)?
                         .iter_unique()
                         .collect_vec();
 
                     let pu = id2pu_vec[task_id as usize];
                     let candidates = self
                         .worker_node_manager
+                        .manager
                         .get_workers_by_parallel_unit_ids(&[pu])?;
                     return Ok(Some(candidates[0].clone()));
                 } else {
@@ -696,6 +695,7 @@ impl StageRunner {
                 let parallel_unit_ids = mapping.iter_unique().collect_vec();
                 let candidates = self
                     .worker_node_manager
+                    .manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                 Some(candidates.choose(&mut rand::thread_rng()).unwrap().clone())
             }
@@ -761,7 +761,7 @@ impl StageRunner {
     /// Abort all registered tasks. Note that here we do not care which part of tasks has already
     /// failed or completed, cuz the abort task will not fail if the task has already die.
     /// See PR (#4560).
-    async fn abort_all_scheduled_tasks(&self) -> SchedulerResult<()> {
+    async fn cancel_all_scheducancled_tasks(&self) -> SchedulerResult<()> {
         // Set state to failed.
         // {
         //     let mut state = self.state.write().await;
@@ -789,7 +789,7 @@ impl StageRunner {
             let task_id = *task;
             spawn(async move {
                 if let Err(e) = client
-                    .abort(AbortTaskRequest {
+                    .cancel(CancelTaskRequest {
                         task_id: Some(risingwave_pb::batch_plan::TaskId {
                             query_id: query_id.clone(),
                             stage_id,
@@ -815,7 +815,7 @@ impl StageRunner {
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random()?)
+            .unwrap_or(self.worker_node_manager.next_random_worker()?)
             .host
             .unwrap();
 
@@ -961,11 +961,5 @@ impl StageRunner {
 
     fn is_root_stage(&self) -> bool {
         self.stage.id == 0
-    }
-}
-
-impl TaskStatus {
-    pub fn task_host_unchecked(&self) -> HostAddress {
-        self.location.clone().unwrap()
     }
 }

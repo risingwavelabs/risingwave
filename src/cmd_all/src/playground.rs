@@ -71,6 +71,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "0.0.0.0:5691",
                 "--state-store",
                 "hummock+memory",
+                "--data-directory",
+                "hummock_001",
                 "--advertise-addr",
                 "127.0.0.1:5690",
                 "--connector-rpc-endpoint",
@@ -88,24 +90,34 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "127.0.0.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--data-directory",
+                "hummock_001",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
                 "--parallelism",
                 "4",
+                "--connector-rpc-endpoint",
+                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
@@ -120,6 +132,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                     "0.0.0.0:5691",
                     "--state-store",
                     "hummock+memory",
+                    "--data-directory",
+                    "hummock_001",
                     "--connector-rpc-endpoint",
                     "127.0.0.1:50051",
                 ])),
@@ -161,14 +175,18 @@ fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
     s.iter().map(OsString::from).collect()
 }
 
-pub async fn playground() -> Result<()> {
-    tracing::info!("launching playground");
+#[derive(Debug, Clone, Parser)]
+#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+pub struct PlaygroundOpts {
+    /// The profile to use.
+    #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]
+    profile: String,
+}
 
-    let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
-        profile.to_string()
-    } else {
-        "playground".to_string()
-    };
+pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
+    let profile = opts.profile;
+
+    tracing::info!("launching playground with profile `{}`", profile);
 
     let (services, idle_exit) = get_services(&profile);
 
@@ -242,7 +260,7 @@ pub async fn playground() -> Result<()> {
                     let _stderr_handle = tokio::spawn(async move {
                         let mut reader = BufReader::new(stderr).lines();
                         while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::error!(target: "risingwave_connector_node", "{}", line);
+                            tracing::info!(target: "risingwave_connector_node", "{}", line);
                         }
                     });
                 } else {

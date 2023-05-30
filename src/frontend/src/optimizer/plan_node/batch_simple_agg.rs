@@ -18,10 +18,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::PlanAggCall;
-use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
-};
+use super::generic::{self, PlanAggCall};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -29,25 +27,27 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
     pub base: PlanBase,
-    logical: LogicalAgg,
+    logical: generic::Agg<PlanRef>,
 }
 
 impl BatchSimpleAgg {
-    pub fn new(logical: LogicalAgg) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let input_dist = input.distribution();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            input_dist.clone(),
-            Order::any(),
-        );
+    pub fn new(logical: generic::Agg<PlanRef>) -> Self {
+        let input_dist = logical.input.distribution().clone();
+        let base = PlanBase::new_batch_from_logical(&logical, input_dist, Order::any());
         BatchSimpleAgg { base, logical }
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
-        self.logical.agg_calls()
+        &self.logical.agg_calls
+    }
+
+    fn two_phase_agg_enabled(&self) -> bool {
+        let session_ctx = self.base.ctx.session_ctx();
+        session_ctx.config().get_enable_two_phase_agg()
+    }
+
+    pub(crate) fn can_two_phase_agg(&self) -> bool {
+        self.logical.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 }
 
@@ -59,11 +59,14 @@ impl fmt::Display for BatchSimpleAgg {
 
 impl PlanTreeNodeUnary for BatchSimpleAgg {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(generic::Agg {
+            input,
+            ..self.logical.clone()
+        })
     }
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
@@ -75,8 +78,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
         let dist_input = self.input().to_distributed()?;
 
         // TODO: distinct agg cannot use 2-phase agg yet.
-        if dist_input.distribution().satisfies(&RequiredDist::AnyShard)
-            && self.logical.can_two_phase_agg()
+        if dist_input.distribution().satisfies(&RequiredDist::AnyShard) && self.can_two_phase_agg()
         {
             // partial agg
             let partial_agg = self.clone_with_input(dist_input).into();
@@ -88,7 +90,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
             // insert total agg
             let total_agg_types = self
                 .logical
-                .agg_calls()
+                .agg_calls
                 .iter()
                 .enumerate()
                 .map(|(partial_output_idx, agg_call)| {
@@ -96,7 +98,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
                 })
                 .collect();
             let total_agg_logical =
-                LogicalAgg::new(total_agg_types, self.logical.group_key().to_vec(), exchange);
+                generic::Agg::new(total_agg_types, self.logical.group_key.clone(), exchange);
             Ok(BatchSimpleAgg::new(total_agg_logical).into())
         } else {
             let new_input = self
@@ -138,13 +140,8 @@ impl ExprRewritable for BatchSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_agg()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

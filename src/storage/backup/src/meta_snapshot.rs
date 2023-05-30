@@ -18,7 +18,9 @@ use std::fmt::{Display, Formatter};
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::hummock::{CompactionGroup, HummockVersion, HummockVersionStats};
 use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
@@ -88,6 +90,8 @@ impl Display for MetaSnapshot {
         writeln!(f, "{:#?}", self.metadata.source)?;
         writeln!(f, "view:")?;
         writeln!(f, "{:#?}", self.metadata.view)?;
+        writeln!(f, "connection:")?;
+        writeln!(f, "{:#?}", self.metadata.connection)?;
         writeln!(f, "table_fragments:")?;
         writeln!(f, "{:#?}", self.metadata.table_fragments)?;
         writeln!(f, "user_info:")?;
@@ -96,6 +100,8 @@ impl Display for MetaSnapshot {
         writeln!(f, "{:#?}", self.metadata.function)?;
         writeln!(f, "system_param:")?;
         writeln!(f, "{:#?}", self.metadata.system_param)?;
+        writeln!(f, "cluster_id:")?;
+        writeln!(f, "{:#?}", self.metadata.cluster_id)?;
         Ok(())
     }
 }
@@ -120,7 +126,9 @@ pub struct ClusterMetadata {
     pub table_fragments: Vec<TableFragments>,
     pub user_info: Vec<UserInfo>,
     pub function: Vec<Function>,
+    pub connection: Vec<Connection>,
     pub system_param: SystemParams,
+    pub cluster_id: String,
 }
 
 impl ClusterMetadata {
@@ -142,7 +150,9 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.source.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.view.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.function.iter().collect_vec(), buf);
+        Self::encode_prost_message_list(&self.connection.iter().collect_vec(), buf);
         Self::encode_prost_message(&self.system_param, buf);
+        Self::encode_prost_message(&self.cluster_id, buf);
     }
 
     pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
@@ -165,7 +175,9 @@ impl ClusterMetadata {
         let source: Vec<Source> = Self::decode_prost_message_list(&mut buf)?;
         let view: Vec<View> = Self::decode_prost_message_list(&mut buf)?;
         let function: Vec<Function> = Self::decode_prost_message_list(&mut buf)?;
+        let connection: Vec<Connection> = Self::decode_prost_message_list(&mut buf)?;
         let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
+        let cluster_id: String = Self::decode_prost_message(&mut buf)?;
 
         Ok(Self {
             default_cf,
@@ -182,7 +194,9 @@ impl ClusterMetadata {
             table_fragments,
             user_info,
             function,
+            connection,
             system_param,
+            cluster_id,
         })
     }
 

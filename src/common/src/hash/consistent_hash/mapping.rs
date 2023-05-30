@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::Index;
 
-use derivative::Derivative;
+use educe::Educe;
 use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
@@ -48,8 +48,8 @@ pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 ///
 /// The representation is compressed as described in [`compress_data`], which is optimized for the
 /// mapping with a small number of items and good locality.
-#[derive(Derivative)]
-#[derivative(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Educe)]
+#[educe(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VnodeMapping<T: VnodeMappingItem> {
     original_indices: Vec<u32>,
     data: Vec<T::Item>,
@@ -268,10 +268,10 @@ pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
 
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
-    pub fn to_parallel_unit(
-        &self,
-        to_map: &HashMap<ActorId, ParallelUnitId>,
-    ) -> ParallelUnitMapping {
+    pub fn to_parallel_unit<M>(&self, to_map: &M) -> ParallelUnitMapping
+    where
+        M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
+    {
         self.transform(to_map)
     }
 

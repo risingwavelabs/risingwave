@@ -3,13 +3,10 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
-while getopts 't:p:' opt; do
+while getopts 'p:' opt; do
     case ${opt} in
-        t )
-            target=$OPTARG
-            ;;
         p )
             profile=$OPTARG
             ;;
@@ -24,6 +21,12 @@ while getopts 't:p:' opt; do
 done
 shift $((OPTIND -1))
 
+# profile is either ci-dev or ci-release
+if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
+    echo "Invalid option: profile must be either ci-dev or ci-release" 1>&2
+    exit 1
+fi
+
 echo "--- Rust cargo-sort check"
 cargo sort --check --workspace
 
@@ -35,6 +38,13 @@ echo "--- Rust format check"
 cargo fmt --all -- --check
 
 echo "--- Build Rust components"
+
+if [[ "$profile" == "ci-dev" ]]; then
+    RISINGWAVE_FEATURE_FLAGS="--features rw-dynamic-link --no-default-features"
+else 
+    RISINGWAVE_FEATURE_FLAGS="--features rw-static-link"
+fi
+
 cargo build \
     -p risingwave_cmd_all \
     -p risedev \
@@ -43,16 +53,21 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_backup_cmd \
     -p risingwave_java_binding \
-    --features "static-link static-log-level" --profile "$profile"
+    -p risingwave_e2e_extended_mode_test \
+    $RISINGWAVE_FEATURE_FLAGS \
+    --profile "$profile"
 
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test librisingwave_java_binding.so)
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
-ldd target/"$target"/risingwave
+ldd target/"$profile"/risingwave
 
 echo "--- Upload artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$profile/{} ./{}-$profile && compress-and-upload-artifact ./{}-$profile"
+
+# This magically makes it faster to exit the docker
+rm -rf target
 
 echo "--- Show sccache stats"
 sccache --show-stats

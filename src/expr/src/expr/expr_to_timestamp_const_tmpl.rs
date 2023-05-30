@@ -14,30 +14,32 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArrayBuilder, Utf8Array};
+use risingwave_common::array::{Array, ArrayBuilder, TimestampArrayBuilder, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr_macro::build_function;
 
-use super::Expression;
-use crate::vector_op::to_char::ChronoPattern;
-use crate::vector_op::to_timestamp::to_timestamp_const_tmpl;
+use super::{BoxedExpression, Expression, Result};
+use crate::expr::template::BinaryExpression;
+use crate::vector_op::to_char::{compile_pattern_to_chrono, ChronoPattern};
+use crate::vector_op::to_timestamp::{to_timestamp, to_timestamp_const_tmpl};
 
 #[derive(Debug)]
-pub(crate) struct ExprToTimestampConstTmplContext {
-    pub(crate) chrono_pattern: ChronoPattern,
+struct ExprToTimestampConstTmplContext {
+    chrono_pattern: ChronoPattern,
 }
 
 #[derive(Debug)]
-pub(crate) struct ExprToTimestampConstTmpl {
-    pub(crate) child: Box<dyn Expression>,
-    pub(crate) ctx: ExprToTimestampConstTmplContext,
+struct ExprToTimestampConstTmpl {
+    child: Box<dyn Expression>,
+    ctx: ExprToTimestampConstTmplContext,
 }
 
 #[async_trait::async_trait]
 impl Expression for ExprToTimestampConstTmpl {
     fn return_type(&self) -> DataType {
-        DataType::Varchar
+        DataType::Timestamp
     }
 
     async fn eval(
@@ -46,7 +48,7 @@ impl Expression for ExprToTimestampConstTmpl {
     ) -> crate::Result<risingwave_common::array::ArrayRef> {
         let data_arr = self.child.eval_checked(input).await?;
         let data_arr: &Utf8Array = data_arr.as_ref().into();
-        let mut output = NaiveDateTimeArrayBuilder::new(input.capacity());
+        let mut output = TimestampArrayBuilder::new(input.capacity());
         for (data, vis) in data_arr.iter().zip_eq_fast(input.vis().iter()) {
             if !vis {
                 output.append_null();
@@ -70,4 +72,34 @@ impl Expression for ExprToTimestampConstTmpl {
             None
         })
     }
+}
+
+#[build_function("to_timestamp1(varchar, varchar) -> timestamp")]
+fn build_to_timestamp_expr(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    use risingwave_common::array::*;
+
+    let mut iter = children.into_iter();
+    let data_expr = iter.next().unwrap();
+    let tmpl_expr = iter.next().unwrap();
+
+    Ok(if let Ok(Some(tmpl)) = tmpl_expr.eval_const() {
+        ExprToTimestampConstTmpl {
+            ctx: ExprToTimestampConstTmplContext {
+                chrono_pattern: compile_pattern_to_chrono(tmpl.as_utf8()),
+            },
+            child: data_expr,
+        }
+        .boxed()
+    } else {
+        BinaryExpression::<Utf8Array, Utf8Array, TimestampArray, _>::new(
+            data_expr,
+            tmpl_expr,
+            return_type,
+            to_timestamp,
+        )
+        .boxed()
+    })
 }

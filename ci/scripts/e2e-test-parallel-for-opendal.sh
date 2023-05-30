@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-source ci/scripts/common.env.sh
+source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -21,24 +21,10 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+download_and_prepare_rw "$profile" common
+
 echo "--- Download artifacts"
-mkdir -p target/debug
-buildkite-agent artifact download risingwave-"$profile" target/debug/
-buildkite-agent artifact download risedev-dev-"$profile" target/debug/
-buildkite-agent artifact download "e2e_test/generated/*" ./
-mv target/debug/risingwave-"$profile" target/debug/risingwave
-mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
-
-echo "--- Adjust permission"
-chmod +x ./target/debug/risingwave
-chmod +x ./target/debug/risedev-dev
-
-echo "--- Generate RiseDev CI config"
-cp ci/risedev-components.ci.env risedev-components.user.env
-
-echo "--- Prepare RiseDev dev cluster"
-cargo make pre-start-dev
-cargo make link-all-in-one-binaries
+download-and-decompress-artifact e2e_test_generated ./
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
@@ -47,17 +33,18 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-3cn-3fe-opendal-fs-backend
 sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-${profile}"
 
-echo "--- Kill cluster"
-rm -rf /tmp/rw_ci
+echo "--- Kill cluster Streaming"
 cargo make ci-kill
-
+sleep 1
+rm -rf /tmp/rw_ci
 
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-3fe-opendal-fs-backend
 sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-opendal-fs-backend-ddl-${profile}"
-sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-batch-${profile}"
+sqllogictest ${host_args} -d dev  './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-opendal-fs-backend-batch-${profile}"
 
-echo "--- Kill cluster"
-rm -rf /tmp/rw_ci
+echo "--- Kill cluster Batch"
 cargo make ci-kill
+sleep 1
+rm -rf /tmp/rw_ci

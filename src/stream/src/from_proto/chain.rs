@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -20,6 +22,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{BackfillExecutor, ChainExecutor, RearrangedChainExecutor};
 
 pub struct ChainExecutorBuilder;
@@ -110,10 +113,12 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
-                let distribution = match params.vnode_bitmap {
+
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+                let distribution = match &vnodes {
                     Some(vnodes) => Distribution {
                         dist_key_in_pk_indices,
-                        vnodes: vnodes.into(),
+                        vnodes: vnodes.clone(),
                     },
                     None => Distribution::fallback(),
                 };
@@ -133,8 +138,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
-                let table = StorageTable::new_partial(
-                    state_store,
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
                     table_id,
                     column_descs,
                     column_ids,
@@ -146,14 +151,21 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     prefix_hint_len,
                     versioned,
                 );
+                let state_table = if let Ok(table) = node.get_state_table() {
+                    Some(StateTable::from_table_catalog(table, state_store, vnodes).await)
+                } else {
+                    None
+                };
 
                 BackfillExecutor::new(
-                    table,
+                    upstream_table,
                     mview,
+                    state_table,
                     output_indices,
                     progress,
                     schema,
                     params.pk_indices,
+                    stream.streaming_metrics.clone(),
                 )
                 .boxed()
             }

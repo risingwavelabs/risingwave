@@ -16,6 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
+use risingwave_common::cache::CachePriority;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
@@ -67,7 +68,7 @@ impl BackwardSstableIterator {
                 .get(
                     self.sst.value(),
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill,
+                    crate::hummock::CachePolicy::Fill(CachePriority::High),
                     &mut self.stats,
                 )
                 .await?;
@@ -177,6 +178,7 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -197,7 +199,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -224,7 +226,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
@@ -252,7 +254,11 @@ mod tests {
 
         let largest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_zzzz_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
@@ -262,7 +268,11 @@ mod tests {
         // Seek to > last key
         let smallest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_aaaa_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
@@ -278,7 +288,11 @@ mod tests {
                 .seek(
                     FullKey::for_test(
                         TableId::default(),
-                        format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
+                        [
+                            VirtualNode::ZERO.to_be_bytes().as_slice(),
+                            format!("key_test_{:05}", idx * 2 - 1).as_bytes(),
+                        ]
+                        .concat(),
                         0,
                     )
                     .to_ref(),

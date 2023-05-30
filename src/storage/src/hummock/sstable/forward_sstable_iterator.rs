@@ -25,7 +25,8 @@ use super::Sstable;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{
-    BlockHolder, BlockIterator, BlockResponse, SstableStore, SstableStoreRef, TableHolder,
+    BlockHolder, BlockIterator, BlockResponse, CachePolicy, SstableStore, SstableStoreRef,
+    TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -40,7 +41,7 @@ pub trait SstableIteratorType: HummockIterator + 'static {
 /// Prefetching may increase the memory footprint of the CN process because the prefetched blocks
 /// cannot be evicted.
 enum BlockFetcher {
-    Simple,
+    Simple(SimpleFetchContext),
     Prefetch(PrefetchContext),
 }
 
@@ -53,9 +54,9 @@ impl BlockFetcher {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         match self {
-            BlockFetcher::Simple => {
+            BlockFetcher::Simple(context) => {
                 sstable_store
-                    .get(sst, block_idx, crate::hummock::CachePolicy::Fill, stats)
+                    .get(sst, block_idx, context.cache_policy, stats)
                     .await
             }
             BlockFetcher::Prefetch(context) => {
@@ -67,20 +68,27 @@ impl BlockFetcher {
     }
 }
 
+struct SimpleFetchContext {
+    cache_policy: CachePolicy,
+}
+
 struct PrefetchContext {
     prefetched_blocks: VecDeque<(usize, BlockResponse)>,
 
     /// block[cur_idx..=dest_idx] will definitely be visited in the future.
     dest_idx: usize,
+
+    cache_policy: CachePolicy,
 }
 
 const DEFAULT_PREFETCH_BLOCK_NUM: usize = 1;
 
 impl PrefetchContext {
-    fn new(dest_idx: usize) -> Self {
+    fn new(dest_idx: usize, cache_policy: CachePolicy) -> Self {
         Self {
             prefetched_blocks: VecDeque::with_capacity(DEFAULT_PREFETCH_BLOCK_NUM + 1),
             dest_idx,
+            cache_policy,
         }
     }
 
@@ -106,7 +114,7 @@ impl PrefetchContext {
             self.prefetched_blocks.push_back((
                 idx,
                 sstable_store
-                    .get_block_response(sst, idx, crate::hummock::CachePolicy::Fill, stats)
+                    .get_block_response(sst, idx, self.cache_policy, stats)
                     .await?,
             ));
         }
@@ -121,12 +129,7 @@ impl PrefetchContext {
             self.prefetched_blocks.push_back((
                 next_prefetch_idx,
                 sstable_store
-                    .get_block_response(
-                        sst,
-                        next_prefetch_idx,
-                        crate::hummock::CachePolicy::Fill,
-                        stats,
-                    )
+                    .get_block_response(sst, next_prefetch_idx, self.cache_policy, stats)
                     .await?,
             ));
         }
@@ -163,7 +166,9 @@ impl SstableIterator {
         Self {
             block_iter: None,
             cur_idx: 0,
-            block_fetcher: BlockFetcher::Simple,
+            block_fetcher: BlockFetcher::Simple(SimpleFetchContext {
+                cache_policy: options.cache_policy,
+            }),
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -211,10 +216,17 @@ impl SstableIterator {
                     }
                 };
                 if start_idx < dest_idx {
-                    self.block_fetcher = BlockFetcher::Prefetch(PrefetchContext::new(dest_idx));
+                    self.block_fetcher = BlockFetcher::Prefetch(PrefetchContext::new(
+                        dest_idx,
+                        self.options.cache_policy,
+                    ));
                 }
             }
         }
+    }
+
+    pub(crate) fn sst(&self) -> &TableHolder {
+        &self.sst
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
@@ -344,7 +356,9 @@ impl SstableIteratorType for SstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -389,7 +403,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
 
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
     }
 
@@ -403,7 +417,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
 
         let mut sstable_iter = SstableIterator::create(
             handle,
@@ -434,7 +448,11 @@ mod tests {
         // Seek to < first key
         let smallest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_aaaa_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
@@ -444,7 +462,11 @@ mod tests {
         // Seek to > last key
         let largest_key = FullKey::for_test(
             TableId::default(),
-            format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
+            [
+                VirtualNode::ZERO.to_be_bytes().as_slice(),
+                format!("key_zzzz_{:05}", 0).as_bytes(),
+            ]
+            .concat(),
             233,
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
@@ -460,7 +482,11 @@ mod tests {
                 .seek(
                     FullKey::for_test(
                         TableId::default(),
-                        format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
+                        [
+                            VirtualNode::ZERO.to_be_bytes().as_slice(),
+                            format!("key_test_{:05}", idx * 2 - 1).as_bytes(),
+                        ]
+                        .concat(),
                         0,
                     )
                     .to_ref(),
@@ -497,7 +523,7 @@ mod tests {
                 .unwrap(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
-                prefetch: true,
+                cache_policy: CachePolicy::Fill(CachePriority::High),
                 must_iterated_end_user_key: None,
             }),
         );

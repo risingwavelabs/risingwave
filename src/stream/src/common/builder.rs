@@ -19,6 +19,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 type IndexMappings = Vec<(usize, usize)>;
 
+// FIXME(rc): I think this type is over-designed for executors with two side inputs.
 /// Build a array and it's corresponding operations.
 pub struct StreamChunkBuilder {
     /// operations in the data chunk to build
@@ -69,10 +70,10 @@ impl StreamChunkBuilder {
         let reduced_capacity = capacity - 1;
         assert!(reduced_capacity > 0);
 
-        let ops = Vec::with_capacity(reduced_capacity);
+        let ops = Vec::with_capacity(capacity);
         let column_builders = data_types
             .iter()
-            .map(|datatype| datatype.create_array_builder(reduced_capacity))
+            .map(|datatype| datatype.create_array_builder(capacity))
             .collect();
         Self {
             ops,
@@ -134,10 +135,10 @@ impl StreamChunkBuilder {
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
+            self.column_builders[output_idx].append(row_update.datum_at(update_idx));
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
+            self.column_builders[output_idx].append(row_matched.datum_at(matched_idx));
         }
 
         self.inc_size()
@@ -150,10 +151,10 @@ impl StreamChunkBuilder {
     pub fn append_row_update(&mut self, op: Op, row_update: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
+            self.column_builders[output_idx].append(row_update.datum_at(update_idx));
         }
         for &(_matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(Datum::None);
+            self.column_builders[output_idx].append(Datum::None);
         }
 
         self.inc_size()
@@ -166,10 +167,10 @@ impl StreamChunkBuilder {
     pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(_update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(Datum::None);
+            self.column_builders[output_idx].append(Datum::None);
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
+            self.column_builders[output_idx].append(row_matched.datum_at(matched_idx));
         }
 
         self.inc_size()

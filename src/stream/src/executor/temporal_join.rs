@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::alloc::Global;
+use std::pin::pin;
 use std::sync::Arc;
 
 use either::Either;
@@ -31,7 +32,8 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
-use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
@@ -60,6 +62,7 @@ struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
+    ctx: ActorContextRef,
 }
 
 impl<S: StateStore> TemporalSide<S> {
@@ -69,9 +72,22 @@ impl<S: StateStore> TemporalSide<S> {
         epoch: HummockEpoch,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
         let key = key.into_owned_row();
+        let table_id_str = self.source.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        self.ctx
+            .streaming_metrics
+            .temporal_join_total_query_cache_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .inc();
         Ok(match self.cache.get(&key) {
             Some(res) => res.clone(),
             None => {
+                // cache miss
+                self.ctx
+                    .streaming_metrics
+                    .temporal_join_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
                 let res = self
                     .source
                     .get_row(key.clone(), HummockReadEpoch::NoWait(epoch))
@@ -83,17 +99,16 @@ impl<S: StateStore> TemporalSide<S> {
         })
     }
 
-    fn update(&mut self, payload: Vec<StreamChunk>, join_keys: &[usize], epoch: u64) {
+    fn update(&mut self, payload: Vec<StreamChunk>, join_keys: &[usize]) {
         payload.iter().flat_map(|c| c.rows()).for_each(|(op, row)| {
             let key = row.project(join_keys).into_owned_row();
-            if let Some(value) = self.cache.get_mut(&key) {
+            if let Some(mut value) = self.cache.get_mut(&key) {
                 match op {
                     Op::Insert | Op::UpdateInsert => *value = Some(row.into_owned_row()),
                     Op::Delete | Op::UpdateDelete => *value = None,
                 };
             }
         });
-        self.cache.update_epoch(epoch);
     }
 }
 
@@ -125,8 +140,8 @@ pub async fn chunks_until_barrier(stream: impl MessageStream, expected_barrier: 
 // `InternalMessage::Barrier(right_chunks, barrier)`.
 #[try_stream(ok = InternalMessage, error = StreamExecutorError)]
 async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
-    let mut left = Box::pin(left.execute());
-    let mut right = Box::pin(right.execute());
+    let mut left = pin!(left.execute());
+    let mut right = pin!(right.execute());
     // Keep producing intervals until stream exhaustion or errors.
     loop {
         let mut right_chunks = vec![];
@@ -195,16 +210,29 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
 
         let alloc = StatsAlloc::new(Global).shared();
 
-        let cache = new_with_hasher_in(watermark_epoch, DefaultHasher::default(), alloc);
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            table.table_id().table_id,
+            ctx.id,
+            "temporal join",
+        );
+
+        let cache = new_with_hasher_in(
+            watermark_epoch,
+            metrics_info,
+            DefaultHasher::default(),
+            alloc,
+        );
 
         Self {
-            ctx,
+            ctx: ctx.clone(),
             left,
             right,
             right_table: TemporalSide {
                 source: table,
                 table_output_indices,
                 cache,
+                ctx,
             },
             left_join_keys,
             right_join_keys,
@@ -228,8 +256,17 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
         );
 
         let mut prev_epoch = None;
+
+        let table_id_str = self.right_table.source.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
         #[for_await]
         for msg in align_input(self.left, self.right) {
+            self.right_table.cache.evict();
+            self.ctx
+                .streaming_metrics
+                .temporal_join_cached_entry_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::Chunk(chunk) => {
                     let mut builder = StreamChunkBuilder::new(
@@ -277,9 +314,16 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                     }
                 }
                 InternalMessage::Barrier(updates, barrier) => {
+                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        let prev_vnodes =
+                            self.right_table.source.update_vnode_bitmap(vnodes.clone());
+                        if cache_may_stale(&prev_vnodes, &vnodes) {
+                            self.right_table.cache.clear();
+                        }
+                    }
+                    self.right_table.cache.update_epoch(barrier.epoch.curr);
+                    self.right_table.update(updates, &self.right_join_keys);
                     prev_epoch = Some(barrier.epoch.curr);
-                    self.right_table
-                        .update(updates, &self.right_join_keys, barrier.epoch.curr);
                     yield Message::Barrier(barrier)
                 }
             }

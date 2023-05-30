@@ -69,6 +69,17 @@ impl LevelHandler {
             .any(|table| self.compacting_files.contains_key(&table.sst_id))
     }
 
+    pub fn is_level_all_pending_compact(&self, level: &Level) -> bool {
+        if level.table_infos.is_empty() {
+            return false;
+        }
+
+        level
+            .table_infos
+            .iter()
+            .all(|table| self.compacting_files.contains_key(&table.sst_id))
+    }
+
     pub fn add_pending_task(&mut self, task_id: u64, target_level: usize, ssts: &[SstableInfo]) {
         let target_level = target_level as u32;
         let mut table_ids = vec![];
@@ -111,6 +122,10 @@ impl LevelHandler {
             .iter()
             .map(|task| task.task_id)
             .collect_vec()
+    }
+
+    pub fn get_pending_tasks(&self) -> Vec<RunningCompactTask> {
+        self.pending_tasks.clone()
     }
 }
 

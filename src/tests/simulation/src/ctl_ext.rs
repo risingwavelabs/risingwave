@@ -33,6 +33,9 @@ use crate::cluster::Cluster;
 
 /// Predicates used for locating fragments.
 pub mod predicate {
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::DispatcherType;
+
     use super::*;
 
     trait Predicate = Fn(&PbFragment) -> bool + Send + 'static;
@@ -96,9 +99,15 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
-        // specified by the user.
-        no_identity_contains("StreamTableScan")
+        let p = |f: &PbFragment| {
+            // The rescheduling of no-shuffle downstreams must be derived from the most upstream
+            // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
+            !any(root(f), &|n| {
+                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
+            })
+        };
+        Box::new(p)
     }
 
     /// The fragment with the given id.

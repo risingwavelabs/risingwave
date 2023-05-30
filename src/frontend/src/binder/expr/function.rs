@@ -23,16 +23,22 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::expr::AggKind;
-use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
+use risingwave_expr::agg::AggKind;
+use risingwave_expr::function::window::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+};
+use risingwave_sqlparser::ast::{
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
+};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
+    AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, Now, OrderBy, Subquery, SubqueryKind,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction,
 };
 use crate::utils::Condition;
 
@@ -62,14 +68,7 @@ impl Binder {
         };
 
         // agg calls
-        if let Ok(kind) = function_name.parse() {
-            if f.over.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    format!("aggregate function as over window function: {}", kind),
-                    4978.into(),
-                )
-                .into());
-            }
+        if f.over.is_none() && let Ok(kind) = function_name.parse() {
             return self.bind_agg(f, kind);
         }
 
@@ -89,8 +88,22 @@ impl Binder {
             .try_collect()?;
 
         // window function
-        if let Some(window_spec) = f.over {
-            return self.bind_window_function(window_spec, function_name, inputs);
+        let window_func_kind = WindowFuncKind::from_str(function_name.as_str());
+        if let Ok(kind) = window_func_kind {
+            if let Some(window_spec) = f.over {
+                return self.bind_window_function(kind, inputs, window_spec);
+            }
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "Window function `{}` must have OVER clause",
+                function_name
+            ))
+            .into());
+        } else if f.over.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                format!("Unrecognized window function: {}", function_name),
+                8961.into(),
+            )
+            .into());
         }
 
         // table function
@@ -169,7 +182,7 @@ impl Binder {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self
-                    .bind_expr(*filter)
+                    .bind_expr_inner(*filter)
                     .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
@@ -219,35 +232,87 @@ impl Binder {
 
     pub(super) fn bind_window_function(
         &mut self,
+        kind: WindowFuncKind,
+        inputs: Vec<ExprImpl>,
         WindowSpec {
             partition_by,
             order_by,
             window_frame,
         }: WindowSpec,
-        function_name: String,
-        inputs: Vec<ExprImpl>,
     ) -> Result<ExprImpl> {
         self.ensure_window_function_allowed()?;
-        if let Some(window_frame) = window_frame {
-            return Err(ErrorCode::NotImplemented(
-                format!("window frame: {}", window_frame),
-                None.into(),
-            )
-            .into());
-        }
-        let window_function_type = WindowFunctionType::from_str(&function_name)?;
         let partition_by = partition_by
             .into_iter()
-            .map(|arg| self.bind_expr(arg))
+            .map(|arg| self.bind_expr_inner(arg))
             .try_collect()?;
-
         let order_by = OrderBy::new(
             order_by
                 .into_iter()
                 .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
                 .collect::<Result<_>>()?,
         );
-        Ok(WindowFunction::new(window_function_type, partition_by, order_by, inputs)?.into())
+        let frame = if let Some(frame) = window_frame {
+            let exclusion = if let Some(exclusion) = frame.exclusion {
+                match exclusion {
+                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
+                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!(
+                                "window frame exclusion `{}` is not supported yet",
+                                exclusion
+                            ),
+                            9124.into(),
+                        )
+                        .into());
+                    }
+                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
+                }
+            } else {
+                FrameExclusion::NoOthers
+            };
+            let bounds = match frame.units {
+                WindowFrameUnits::Rows => {
+                    let convert_bound = |bound| match bound {
+                        WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+                        WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+                        WindowFrameBound::Preceding(Some(offset)) => {
+                            FrameBound::Preceding(offset as usize)
+                        }
+                        WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+                        WindowFrameBound::Following(Some(offset)) => {
+                            FrameBound::Following(offset as usize)
+                        }
+                    };
+                    let start = convert_bound(frame.start_bound);
+                    let end = if let Some(end_bound) = frame.end_bound {
+                        convert_bound(end_bound)
+                    } else {
+                        FrameBound::CurrentRow
+                    };
+                    FrameBounds::Rows(start, end)
+                }
+                WindowFrameUnits::Range | WindowFrameUnits::Groups => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!(
+                            "window frame in `{}` mode is not supported yet",
+                            frame.units
+                        ),
+                        9124.into(),
+                    )
+                    .into());
+                }
+            };
+            if !bounds.is_valid() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window frame bounds `{bounds}` is not valid",
+                ))
+                .into());
+            }
+            Some(Frame { bounds, exclusion })
+        } else {
+            None
+        };
+        Ok(WindowFunction::new(kind, partition_by, order_by, inputs, frame)?.into())
     }
 
     fn bind_builtin_scalar_function(
@@ -300,20 +365,28 @@ impl Binder {
         fn raw_literal(literal: ExprImpl) -> Handle {
             Box::new(move |_binder, _inputs| Ok(literal.clone()))
         }
+
         fn now() -> Handle {
-            Box::new(move |binder, mut inputs| {
-                binder.ensure_now_function_allowed()?;
-                if !binder.in_create_mv {
-                    inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
-                        DataType::Timestamptz,
-                    )));
-                }
-                raw_call(ExprType::Now)(binder, inputs)
-            })
+            guard_by_len(
+                0,
+                raw(move |binder, _inputs| {
+                    binder.ensure_now_function_allowed()?;
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
+                }),
+            )
         }
+
         fn pi() -> Handle {
             raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
+
+        fn proctime() -> Handle {
+            Box::new(move |binder, inputs| {
+                binder.ensure_proctime_function_allowed()?;
+                raw_call(ExprType::Proctime)(binder, inputs)
+            })
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -342,10 +415,40 @@ impl Binder {
                 // "power" is the function name used in PG.
                 ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
+                ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
+                ("trunc", raw_call(ExprType::Trunc)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
+                ("ln", raw_call(ExprType::Ln)),
+                ("log", raw_call(ExprType::Log10)),
+                ("log10", raw_call(ExprType::Log10)),
                 ("mod", raw_call(ExprType::Modulus)),
+                ("sin", raw_call(ExprType::Sin)),
+                ("cos", raw_call(ExprType::Cos)),
+                ("tan", raw_call(ExprType::Tan)),
+                ("cot", raw_call(ExprType::Cot)),
+                ("asin", raw_call(ExprType::Asin)),
+                ("acos", raw_call(ExprType::Acos)),
+                ("atan", raw_call(ExprType::Atan)),
+                ("atan2", raw_call(ExprType::Atan2)),
+                ("sind", raw_call(ExprType::Sind)),
+                ("cosd", raw_call(ExprType::Cosd)),
+                ("cotd", raw_call(ExprType::Cotd)),
+                ("tand", raw_call(ExprType::Tand)),
+                ("sinh", raw_call(ExprType::Sinh)),
+                ("cosh", raw_call(ExprType::Cosh)), 
+                ("tanh", raw_call(ExprType::Tanh)), 
+                ("coth", raw_call(ExprType::Coth)), 
+                ("asinh", raw_call(ExprType::Asinh)), 
+                ("acosh", raw_call(ExprType::Acosh)), 
+                ("atanh", raw_call(ExprType::Atanh)), 
+                ("asind", raw_call(ExprType::Asind)),
+                ("degrees", raw_call(ExprType::Degrees)),
+                ("radians", raw_call(ExprType::Radians)),
+                ("sqrt", raw_call(ExprType::Sqrt)),
+                ("cbrt", raw_call(ExprType::Cbrt)),
+
                 (
                     "to_timestamp",
                     dispatch_by_len(vec![
@@ -354,6 +457,7 @@ impl Binder {
                     ]),
                 ),
                 ("date_trunc", raw_call(ExprType::DateTrunc)),
+                ("date_part", raw_call(ExprType::DatePart)),
                 // string
                 ("substr", raw_call(ExprType::Substr)),
                 ("length", raw_call(ExprType::Length)),
@@ -362,7 +466,7 @@ impl Binder {
                 ("trim", raw_call(ExprType::Trim)),
                 ("replace", raw_call(ExprType::Replace)),
                 ("overlay", raw_call(ExprType::Overlay)),
-                ("position", raw_call(ExprType::Position)),
+                ("btrim", raw_call(ExprType::Trim)),
                 ("ltrim", raw_call(ExprType::Ltrim)),
                 ("rtrim", raw_call(ExprType::Rtrim)),
                 ("md5", raw_call(ExprType::Md5)),
@@ -372,6 +476,7 @@ impl Binder {
                     rewrite(ExprType::ConcatWs, Binder::rewrite_concat_to_concat_ws),
                 ),
                 ("concat_ws", raw_call(ExprType::ConcatWs)),
+                ("translate", raw_call(ExprType::Translate)),
                 ("split_part", raw_call(ExprType::SplitPart)),
                 ("char_length", raw_call(ExprType::CharLength)),
                 ("character_length", raw_call(ExprType::CharLength)),
@@ -380,6 +485,24 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("chr", raw_call(ExprType::Chr)),
+                ("starts_with", raw_call(ExprType::StartsWith)),
+                ("initcap", raw_call(ExprType::Initcap)),
+                ("lpad", raw_call(ExprType::Lpad)),
+                ("rpad", raw_call(ExprType::Rpad)),
+                ("reverse", raw_call(ExprType::Reverse)),
+                ("strpos", raw_call(ExprType::Position)),
+                ("to_ascii", raw_call(ExprType::ToAscii)),
+                ("to_hex", raw_call(ExprType::ToHex)),
+                ("quote_ident", raw_call(ExprType::QuoteIdent)),
+                ("string_to_array", raw_call(ExprType::StringToArray)),
+                ("encode", raw_call(ExprType::Encode)),
+                ("decode", raw_call(ExprType::Decode)),
+                ("sha1", raw_call(ExprType::Sha1)),
+                ("sha224", raw_call(ExprType::Sha224)),
+                ("sha256", raw_call(ExprType::Sha256)),
+                ("sha384", raw_call(ExprType::Sha384)),
+                ("sha512", raw_call(ExprType::Sha512)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -387,6 +510,13 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_length", raw_call(ExprType::ArrayLength)),
+                ("cardinality", raw_call(ExprType::Cardinality)),
+                ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("trim_array", raw_call(ExprType::TrimArray)),
+                // int256
+                ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -399,14 +529,14 @@ impl Binder {
                 // System information operations.
                 (
                     "pg_typeof",
-                    raw(|_binder, inputs| {
+                    guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
                         let v = match input.is_unknown() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
                         Ok(ExprImpl::literal_varchar(v))
-                    }),
+                    })),
                 ),
                 ("current_database", guard_by_len(0, raw(|binder, _inputs| {
                     Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
@@ -443,9 +573,7 @@ impl Binder {
                     };
 
                     let Some(bool) = literal.get_data().as_ref().map(|bool| bool.clone().into_bool()) else {
-                        return Ok(ExprImpl::literal_null(DataType::List {
-                            datatype: Box::new(DataType::Varchar),
-                        }));
+                        return Ok(ExprImpl::literal_null(DataType::List(Box::new(DataType::Varchar))));
                     };
 
                     let paths = if bool {
@@ -524,17 +652,19 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),
                 // non-deterministic
                 ("now", now()),
-                ("current_timestamp", now())
+                ("current_timestamp", now()),
+                ("proctime", proctime())
             ]
             .into_iter()
             .collect()
@@ -640,7 +770,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_create_mv
+        if self.is_for_stream()
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)
@@ -650,6 +780,16 @@ impl Binder {
                 "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
             ))
+            .into());
+        }
+        Ok(())
+    }
+
+    fn ensure_proctime_function_allowed(&self) -> Result<()> {
+        if !self.is_for_ddl() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?".to_string(),
+            )
             .into());
         }
         Ok(())
@@ -692,7 +832,7 @@ impl Binder {
         arg_expr: FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
-            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
+            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
             FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::Wildcard => Ok(vec![]),

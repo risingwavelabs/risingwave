@@ -16,37 +16,40 @@ use std::collections::HashMap;
 use std::io::{self, Error as IoError, ErrorKind};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::str;
 use std::str::Utf8Error;
 use std::sync::Arc;
-use std::{str, vec};
+use std::time::Instant;
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
 use futures::Stream;
+use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::parser::Parser;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
-use tracing::log::trace;
 use tracing::{error, warn};
 
 use crate::error::{PsqlError, PsqlResult};
-use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
-use crate::pg_field_descriptor::PgFieldDescriptor;
+use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::{RowSetResult, StatementType};
+use crate::pg_response::RowSetResult;
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
-pub struct PgProtocol<S, SM, VS>
+pub struct PgProtocol<S, SM, VS, PS, PO>
 where
-    SM: SessionManager<VS>,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
+    SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     /// Used for write/read pg messages.
@@ -59,15 +62,21 @@ where
     session_mgr: Arc<SM>,
     session: Option<Arc<SM::Session>>,
 
-    unnamed_statement: Option<PgStatement>,
-    unnamed_portal: Option<PgPortal<VS>>,
-    named_statements: HashMap<String, PgStatement>,
-    named_portals: HashMap<String, PgPortal<VS>>,
+    result_cache: HashMap<String, ResultCache<VS>>,
+    unnamed_prepare_statement: Option<PS>,
+    prepare_statement_store: HashMap<String, PS>,
+    unnamed_portal: Option<PO>,
+    portal_store: HashMap<String, PO>,
+    // Used to store the dependency of portal and prepare statement.
+    // When we close a prepare statement, we need to close all the portals that depend on it.
+    statement_portal_dependency: HashMap<String, Vec<String>>,
 
     // Used for ssl connection.
     // If None, not expected to build ssl connection (panic).
     tls_context: Option<SslContext>,
 }
+
+const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
 
 /// Configures TLS encryption for connections.
 #[derive(Debug, Clone)]
@@ -94,9 +103,11 @@ impl TlsConfig {
     }
 }
 
-impl<S, SM, VS> Drop for PgProtocol<S, SM, VS>
+impl<S, SM, VS, PS, PO> Drop for PgProtocol<S, SM, VS, PS, PO>
 where
-    SM: SessionManager<VS>,
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
+    SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     fn drop(&mut self) {
@@ -125,10 +136,12 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
-impl<S, SM, VS> PgProtocol<S, SM, VS>
+impl<S, SM, VS, PS, PO> PgProtocol<S, SM, VS, PS, PO>
 where
+    PS: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
     S: AsyncWrite + AsyncRead + Unpin,
-    SM: SessionManager<VS>,
+    SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send,
 {
     pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
@@ -141,13 +154,15 @@ where
             state: PgProtocolState::Startup,
             session_mgr,
             session: None,
-            unnamed_statement: None,
-            unnamed_portal: None,
-            named_statements: Default::default(),
-            named_portals: Default::default(),
             tls_context: tls_config
                 .as_ref()
                 .and_then(|e| build_ssl_ctx_from_config(e).ok()),
+            result_cache: Default::default(),
+            unnamed_prepare_statement: Default::default(),
+            prepare_statement_store: Default::default(),
+            unnamed_portal: Default::default(),
+            portal_store: Default::default(),
+            statement_portal_dependency: Default::default(),
         }
     }
 
@@ -218,7 +233,7 @@ where
             FeMessage::Query(query_msg) => self.process_query_msg(query_msg.get_sql()).await?,
             FeMessage::CancelQuery(m) => self.process_cancel_msg(m)?,
             FeMessage::Terminate => self.process_terminate(),
-            FeMessage::Parse(m) => self.process_parse_msg(m).await?,
+            FeMessage::Parse(m) => self.process_parse_msg(m)?,
             FeMessage::Bind(m) => self.process_bind_msg(m)?,
             FeMessage::Execute(m) => self.process_execute_msg(m).await?,
             FeMessage::Describe(m) => self.process_describe_msg(m)?,
@@ -311,6 +326,7 @@ where
 
     fn process_cancel_msg(&mut self, m: FeCancelMessage) -> PsqlResult<()> {
         let session_id = (m.target_process_id, m.target_secret_key);
+        tracing::trace!("cancel query in session: {:?}", session_id);
         self.session_mgr.cancel_queries_in_session(session_id);
         self.session_mgr.cancel_creating_jobs_in_session(session_id);
         self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
@@ -319,12 +335,30 @@ where
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
-        tracing::trace!(
-            target: "pgwire_query_log",
-            "(simple query)receive query: {}", sql);
-
+        let start = Instant::now();
         let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
+        let result = self.inner_process_query_msg(sql, session).await;
 
+        let mills = start.elapsed().as_millis();
+        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+        tracing::info!(
+            target: PGWIRE_QUERY_LOG,
+            mode = %"(simple query)",
+            session = %session_id,
+            status = %if result.is_ok() { "ok" } else { "err" },
+            time = %format!("{}ms", mills),
+            sql = %truncated_sql,
+        );
+
+        result
+    }
+
+    async fn inner_process_query_msg(
+        &mut self,
+        sql: &str,
+        session: Arc<SM::Session>,
+    ) -> PsqlResult<()> {
         // Parse sql.
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
@@ -333,16 +367,17 @@ where
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
             let session = session.clone();
-
             // execute query
-            let mut res = session
-                .run_one_query(stmt, Format::Text)
-                .await
-                .map_err(|err| PsqlError::QueryError(err))?;
-
-            if let Some(notice) = res.get_notice() {
+            let res = session.clone().run_one_query(stmt, Format::Text).await;
+            for notice in session.take_notices() {
                 self.stream
                     .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
+            }
+            let mut res = res.map_err(|err| PsqlError::QueryError(err))?;
+
+            for notice in res.get_notices() {
+                self.stream
+                    .write_no_flush(&BeMessage::NoticeResponse(notice))?;
             }
 
             if res.is_query() {
@@ -392,16 +427,45 @@ where
         self.is_terminate = true;
     }
 
-    async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
+    fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
+        let session = self.session.clone().unwrap();
+        let session_id = session.id().0;
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
-        tracing::trace!(
-            "(extended query)parse query: {}, statement name: {}",
-            sql,
-            statement_name
+        let start = Instant::now();
+
+        let result = self.inner_process_parse_msg(session, sql, statement_name, msg.type_ids);
+
+        let mills = start.elapsed().as_millis();
+        let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+        tracing::info!(
+            target: PGWIRE_QUERY_LOG,
+            mode = %"(extended query parse)",
+            session = %session_id,
+            status = %if result.is_ok() { "ok" } else { "err" },
+            time = %format!("{}ms", mills),
+            sql = %truncated_sql,
         );
 
-        let is_query_sql = {
+        result
+    }
+
+    fn inner_process_parse_msg(
+        &mut self,
+        session: Arc<SM::Session>,
+        sql: &str,
+        statement_name: String,
+        type_ids: Vec<i32>,
+    ) -> PsqlResult<()> {
+        if statement_name.is_empty() {
+            // Remove the unnamed prepare statement first, in case the unsupported sql binds a wrong
+            // prepare statement.
+            self.unnamed_prepare_statement.take();
+        } else if self.prepare_statement_store.contains_key(&statement_name) {
+            return Err(PsqlError::ParseError("Duplicated statement name".into()));
+        }
+
+        let stmt = {
             let stmts = Parser::parse_sql(sql)
                 .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
                 .map_err(|err| PsqlError::ParseError(err.into()))?;
@@ -412,37 +476,38 @@ where
                 ));
             }
 
+            // TODO: This behavior is not compatible with Postgres.
             if stmts.is_empty() {
-                false
-            } else {
-                StatementType::infer_from_statement(&stmts[0])
-                    .map_or(false, |stmt_type| stmt_type.is_query())
+                return Err(PsqlError::ParseError(
+                    "Empty statement is parsed in extended query mode".into(),
+                ));
             }
+
+            stmts.into_iter().next().unwrap()
         };
 
-        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;
+        let param_types = type_ids
+            .iter()
+            .map(|&id| DataType::from_oid(id))
+            .try_collect()
+            .map_err(|err| PsqlError::ParseError(err.into()))?;
 
-        // Create the row description.
-        let fields: Vec<PgFieldDescriptor> = if is_query_sql {
-            let sql = prepared_statement.instance_default()?;
+        let prepare_statement = session
+            .parse(stmt, param_types)
+            .map_err(PsqlError::ParseError)?;
 
-            let session = self.session.clone().unwrap();
-            session
-                .infer_return_type(&sql)
-                .await
-                .map_err(PsqlError::ParseError)?
+        if statement_name.is_empty() {
+            self.unnamed_prepare_statement.replace(prepare_statement);
         } else {
-            vec![]
-        };
-
-        let statement = PgStatement::new(statement_name, prepared_statement, fields, is_query_sql);
-
-        let name = statement.name();
-        if name.is_empty() {
-            self.unnamed_statement.replace(statement);
-        } else {
-            self.named_statements.insert(name, statement);
+            self.prepare_statement_store
+                .insert(statement_name.clone(), prepare_statement);
         }
+
+        self.statement_portal_dependency
+            .entry(statement_name)
+            .or_insert_with(Vec::new)
+            .clear();
+
         self.stream.write_no_flush(&BeMessage::ParseComplete)?;
         Ok(())
     }
@@ -450,21 +515,13 @@ where
     fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
-        // 1. Get statement.
-        trace!(
-            target: "pgwire_query_log",
-            "(extended query)bind: statement name: {}, portal name: {}",
-            &statement_name,&portal_name
-        );
-        let statement = if statement_name.is_empty() {
-            self.unnamed_statement
-                .as_ref()
-                .ok_or_else(PsqlError::no_statement)?
-        } else {
-            self.named_statements
-                .get(&statement_name)
-                .ok_or_else(PsqlError::no_statement)?
-        };
+        let session = self.session.clone().unwrap();
+
+        if self.portal_store.contains_key(&portal_name) {
+            return Err(PsqlError::Internal("Duplicated portal name".into()));
+        }
+
+        let prepare_statement = self.get_statement(&statement_name)?;
 
         let result_formats = msg
             .result_format_codes
@@ -477,109 +534,121 @@ where
             .map(|&format_code| Format::from_i16(format_code))
             .try_collect()?;
 
-        // 2. Instance the statement to get the portal.
-        let portal = statement.instance(
-            portal_name.clone(),
-            &msg.params,
-            result_formats,
-            param_formats,
-        )?;
+        let portal = session
+            .bind(prepare_statement, msg.params, param_formats, result_formats)
+            .map_err(PsqlError::Internal)?;
 
-        // 3. Insert the Portal.
         if portal_name.is_empty() {
+            self.result_cache.remove(&portal_name);
             self.unnamed_portal.replace(portal);
         } else {
-            self.named_portals.insert(portal_name, portal);
+            assert!(
+                self.result_cache.get(&portal_name).is_none(),
+                "Named portal never can be overridden."
+            );
+            self.portal_store.insert(portal_name.clone(), portal);
         }
+
+        self.statement_portal_dependency
+            .get_mut(&statement_name)
+            .unwrap()
+            .push(portal_name);
+
         self.stream.write_no_flush(&BeMessage::BindComplete)?;
         Ok(())
     }
 
     async fn process_execute_msg(&mut self, msg: FeExecuteMessage) -> PsqlResult<()> {
-        // 1. Get portal.
         let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
-        let portal = if msg.portal_name.is_empty() {
-            self.unnamed_portal
-                .as_mut()
-                .ok_or_else(PsqlError::no_portal)?
-        } else {
-            // NOTE Error handle need modify later.
-            self.named_portals
-                .get_mut(&portal_name)
-                .ok_or_else(PsqlError::no_portal)?
-        };
-
-        tracing::trace!(target: "pgwire_query_log", "(extended query)execute query: {}, portal name: {}", portal.query_string(),portal_name);
-
-        // 2. Execute instance statement using portal.
+        let row_max = msg.max_rows as usize;
         let session = self.session.clone().unwrap();
-        portal
-            .execute::<SM, S>(session, msg.max_rows.try_into().unwrap(), &mut self.stream)
-            .await?;
+        let session_id = session.id().0;
 
-        // NOTE there is no ReadyForQuery message.
+        if let Some(mut result_cache) = self.result_cache.remove(&portal_name) {
+            assert!(self.portal_store.contains_key(&portal_name));
+
+            let is_cosume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
+
+            if !is_cosume_completed {
+                self.result_cache.insert(portal_name, result_cache);
+            }
+        } else {
+            let start = Instant::now();
+            let portal = self.get_portal(&portal_name)?;
+            let sql = format!("{}", portal);
+            let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
+
+            let result = session.execute(portal).await;
+
+            let mills = start.elapsed().as_millis();
+
+            tracing::info!(
+                target: PGWIRE_QUERY_LOG,
+                mode = %"(extended query execute)",
+                session = %session_id,
+                status = %if result.is_ok() { "ok" } else { "err" },
+                time = %format!("{}ms", mills),
+                sql = %truncated_sql,
+            );
+
+            let pg_response = match result {
+                Ok(pg_response) => pg_response,
+                Err(err) => return Err(PsqlError::ExecuteError(err)),
+            };
+            let mut result_cache = ResultCache::new(pg_response);
+            let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
+            if !is_consume_completed {
+                self.result_cache.insert(portal_name, result_cache);
+            }
+        }
+
         Ok(())
     }
 
     fn process_describe_msg(&mut self, msg: FeDescribeMessage) -> PsqlResult<()> {
+        let name = cstr_to_str(&msg.name).unwrap().to_string();
+        let session = self.session.clone().unwrap();
         //  b'S' => Statement
         //  b'P' => Portal
-        tracing::trace!(
-            target: "pgwire_query_log",
-            "(extended query)describe name: {}",
-            cstr_to_str(&msg.name).unwrap()
-        );
 
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
-            let name = cstr_to_str(&msg.name).unwrap().to_string();
-            let statement = if name.is_empty() {
-                self.unnamed_statement
-                    .as_ref()
-                    .ok_or_else(PsqlError::no_statement)?
-            } else {
-                // NOTE Error handle need modify later.
-                self.named_statements
-                    .get(&name)
-                    .ok_or_else(PsqlError::no_statement)?
-            };
+            let prepare_statement = self.get_statement(&name)?;
 
-            // 1. Send parameter description.
+            let (param_types, row_descriptions) = self
+                .session
+                .clone()
+                .unwrap()
+                .describe_statement(prepare_statement)
+                .map_err(PsqlError::Internal)?;
+
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
-                    &statement.param_oid_desc(),
+                    &param_types.iter().map(|t| t.to_oid()).collect_vec(),
                 ))?;
 
-            // 2. Send row description.
-            if statement.is_query() {
-                self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&statement.row_desc()))?;
-            } else {
+            if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
                 // return NoData message if the statement is not a query.
                 self.stream.write_no_flush(&BeMessage::NoData)?;
+            } else {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&row_descriptions))?;
             }
         } else if msg.kind == b'P' {
-            let name = cstr_to_str(&msg.name).unwrap().to_string();
-            let portal = if name.is_empty() {
-                self.unnamed_portal
-                    .as_ref()
-                    .ok_or_else(PsqlError::no_portal)?
-            } else {
-                // NOTE Error handle need modify later.
-                self.named_portals
-                    .get(&name)
-                    .ok_or_else(PsqlError::no_portal)?
-            };
+            let portal = self.get_portal(&name)?;
 
-            // 3. Send row description.
-            if portal.is_query() {
-                self.stream
-                    .write_no_flush(&BeMessage::RowDescription(&portal.row_desc()))?;
-            } else {
+            let row_descriptions = session
+                .describe_portral(portal)
+                .map_err(PsqlError::Internal)?;
+
+            if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
                 // return NoData message if the statement is not a query.
                 self.stream.write_no_flush(&BeMessage::NoData)?;
+            } else {
+                self.stream
+                    .write_no_flush(&BeMessage::RowDescription(&row_descriptions))?;
             }
         }
         Ok(())
@@ -589,12 +658,70 @@ where
         let name = cstr_to_str(&msg.name).unwrap().to_string();
         assert!(msg.kind == b'S' || msg.kind == b'P');
         if msg.kind == b'S' {
-            self.named_statements.remove_entry(&name);
+            if name.is_empty() {
+                self.unnamed_prepare_statement = None;
+            } else {
+                self.prepare_statement_store.remove(&name);
+            }
+            for portal_name in self
+                .statement_portal_dependency
+                .remove(&name)
+                .unwrap_or(vec![])
+            {
+                self.remove_portal(&portal_name);
+            }
         } else if msg.kind == b'P' {
-            self.named_portals.remove_entry(&name);
+            self.remove_portal(&name);
         }
         self.stream.write_no_flush(&BeMessage::CloseComplete)?;
         Ok(())
+    }
+
+    fn remove_portal(&mut self, portal_name: &str) {
+        if portal_name.is_empty() {
+            self.unnamed_portal = None;
+        } else {
+            self.portal_store.remove(portal_name);
+        }
+        self.result_cache.remove(portal_name);
+    }
+
+    fn get_portal(&self, portal_name: &str) -> PsqlResult<PO> {
+        if portal_name.is_empty() {
+            Ok(self
+                .unnamed_portal
+                .as_ref()
+                .ok_or_else(|| PsqlError::Internal("unnamed portal not found".into()))?
+                .clone())
+        } else {
+            Ok(self
+                .portal_store
+                .get(portal_name)
+                .ok_or_else(|| {
+                    PsqlError::Internal(format!("Portal {} not found", portal_name).into())
+                })?
+                .clone())
+        }
+    }
+
+    fn get_statement(&self, statement_name: &str) -> PsqlResult<PS> {
+        if statement_name.is_empty() {
+            Ok(self
+                .unnamed_prepare_statement
+                .as_ref()
+                .ok_or_else(|| PsqlError::Internal("unnamed prepare statement not found".into()))?
+                .clone())
+        } else {
+            Ok(self
+                .prepare_statement_store
+                .get(statement_name)
+                .ok_or_else(|| {
+                    PsqlError::Internal(
+                        format!("Prepare statement {} not found", statement_name).into(),
+                    )
+                })?
+                .clone())
+        }
     }
 }
 
@@ -626,7 +753,7 @@ where
             BeParameterStatusMessage::StandardConformingString("on"),
         ))?;
         self.write_no_flush(&BeMessage::ParameterStatus(
-            BeParameterStatusMessage::ServerVersion("9.5.0"),
+            BeParameterStatusMessage::ServerVersion("8.3.0"),
         ))?;
         Ok(())
     }

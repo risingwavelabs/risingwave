@@ -22,10 +22,10 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::array::{JsonbVal, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
-use risingwave_common::types::Scalar;
+use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -38,8 +38,8 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
-    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
-    POSTGRES_CDC_CONNECTOR,
+    CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, CITUS_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
@@ -116,10 +116,13 @@ impl SourceContext {
             return Err(e);
         }
         let mut err_str = e.inner().to_string();
-        if let Some(suppressor) = &self.error_suppressor &&
-            suppressor.lock().suppress_error(&err_str)
+        if let Some(suppressor) = &self.error_suppressor
+            && suppressor.lock().suppress_error(&err_str)
         {
-            err_str = format!("error msg suppressed (due to per-actor error limit: {})", suppressor.lock().max());
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                suppressor.lock().max()
+            );
         }
         self.metrics
             .user_source_error_count
@@ -159,6 +162,7 @@ pub enum SourceFormat {
     Csv,
     Native,
     DebeziumAvro,
+    DebeziumMongoJson,
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
@@ -214,6 +218,7 @@ pub enum ConnectorProperties {
     S3(Box<S3Properties>),
     MySqlCdc(Box<CdcProperties>),
     PostgresCdc(Box<CdcProperties>),
+    CitusCdc(Box<CdcProperties>),
     GooglePubsub(Box<PubsubProperties>),
     Dummy(Box<()>),
 }
@@ -234,6 +239,11 @@ impl ConnectorProperties {
                 source_type: "postgres".to_string(),
                 ..Default::default()
             }))),
+            CITUS_CDC_CONNECTOR => Ok(Self::CitusCdc(Box::new(CdcProperties {
+                props: properties,
+                source_type: "citus".to_string(),
+                ..Default::default()
+            }))),
             _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
         }
     }
@@ -245,7 +255,9 @@ impl ConnectorProperties {
         table_schema: Option<TableSchema>,
     ) {
         match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
+            ConnectorProperties::MySqlCdc(c)
+            | ConnectorProperties::PostgresCdc(c)
+            | ConnectorProperties::CitusCdc(c) => {
                 c.source_id = source_id;
                 c.connector_node_addr = rpc_addr;
                 c.table_schema = table_schema;
@@ -265,6 +277,7 @@ pub enum SplitImpl {
     GooglePubsub(PubsubSplit),
     MySqlCdc(CdcSplit),
     PostgresCdc(CdcSplit),
+    CitusCdc(CdcSplit),
     S3(FsSplit),
 }
 
@@ -296,6 +309,7 @@ pub enum SplitReaderImpl {
     Datagen(Box<DatagenSplitReader>),
     MySqlCdc(Box<CdcSplitReader>),
     PostgresCdc(Box<CdcSplitReader>),
+    CitusCdc(Box<CdcSplitReader>),
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
@@ -307,6 +321,7 @@ pub enum SplitEnumeratorImpl {
     Datagen(DatagenSplitEnumerator),
     MySqlCdc(DebeziumSplitEnumerator),
     PostgresCdc(DebeziumSplitEnumerator),
+    CitusCdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
     S3(S3SplitEnumerator),
 }
@@ -320,6 +335,7 @@ impl_connector_properties! {
     { S3, S3_CONNECTOR },
     { MySqlCdc, MYSQL_CDC_CONNECTOR },
     { PostgresCdc, POSTGRES_CDC_CONNECTOR },
+    { CitusCdc, CITUS_CDC_CONNECTOR },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR}
 }
 
@@ -331,6 +347,7 @@ impl_split_enumerator! {
     { Datagen, DatagenSplitEnumerator },
     { MySqlCdc, DebeziumSplitEnumerator },
     { PostgresCdc, DebeziumSplitEnumerator },
+    { CitusCdc, DebeziumSplitEnumerator },
     { GooglePubsub, PubsubSplitEnumerator},
     { S3, S3SplitEnumerator }
 }
@@ -344,6 +361,7 @@ impl_split! {
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
     { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
     { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
+    { CitusCdc, CITUS_CDC_CONNECTOR, CdcSplit },
     { S3, S3_CONNECTOR, FsSplit }
 }
 
@@ -356,6 +374,7 @@ impl_split_reader! {
     { Datagen, DatagenSplitReader },
     { MySqlCdc, CdcSplitReader},
     { PostgresCdc, CdcSplitReader},
+    { CitusCdc, CdcSplitReader },
     { GooglePubsub, PubsubSplitReader },
     { Dummy, DummySplitReader }
 }
@@ -376,7 +395,7 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
-    pub payload: Option<Bytes>,
+    pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
 

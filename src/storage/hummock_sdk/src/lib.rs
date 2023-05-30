@@ -18,11 +18,10 @@
 #![feature(lint_reasons)]
 #![feature(map_many_mut)]
 #![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
-
-#[macro_use]
-extern crate num_derive;
 
 use std::cmp::Ordering;
 
@@ -36,7 +35,6 @@ use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMa
 
 pub mod compact;
 pub mod compaction_group;
-pub mod filter_key_extractor;
 pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
@@ -52,6 +50,9 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
+pub const OBJECT_SUFFIX: &str = "data";
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -239,16 +240,27 @@ impl SstObjectIdRange {
 
 pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
-    for i in 0..len - 1 {
-        if ssts[i]
+    for i in 1..len {
+        if ssts[i - 1]
             .key_range
             .as_ref()
             .unwrap()
-            .compare_right_with(&ssts[i + 1].key_range.as_ref().unwrap().left)
+            .compare_right_with(&ssts[i].key_range.as_ref().unwrap().left)
             != Ordering::Less
         {
             return false;
         }
     }
     true
+}
+
+const CHECKPOINT_DIR: &str = "checkpoint";
+const CHECKPOINT_NAME: &str = "0";
+
+pub fn version_checkpoint_path(root_dir: &str) -> String {
+    format!("{}/{}/{}", root_dir, CHECKPOINT_DIR, CHECKPOINT_NAME)
+}
+
+pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
+    checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }

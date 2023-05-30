@@ -19,9 +19,6 @@ function clean_etcd_data() {
 
 function start_cluster() {
   cargo make d ci-meta-backup-test 1>/dev/null 2>&1
-  execute_sql_and_expect \
-  "alter system set  backup_storage_url to \"minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001\";" \
-  "ALTER_SYSTEM"
   sleep 5
 }
 
@@ -76,8 +73,8 @@ function restore() {
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \
-  --storage-directory backup \
-  --storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
+  --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   1>/dev/null
 }
 
@@ -102,12 +99,12 @@ function execute_sql_and_expect() {
 }
 
 function get_max_committed_epoch() {
-  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
+  mce=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep max_committed_epoch | sed -n 's/^.*max_committed_epoch: \(.*\),/\1/p')
   echo "${mce}"
 }
 
 function get_safe_epoch() {
-  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
+  safe_epoch=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock list-version --verbose | grep safe_epoch | sed -n 's/^.*safe_epoch: \(.*\),/\1/p')
   echo "${safe_epoch}"
 }
 

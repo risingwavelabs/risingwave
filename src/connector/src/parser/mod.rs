@@ -125,7 +125,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -148,7 +148,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -171,8 +171,8 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append_datum(&output.0);
-        builder.append_datum(&output.1);
+        builder.append(&output.0);
+        builder.append(&output.1);
     }
 
     #[inline(always)]
@@ -197,7 +197,7 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
-        let mut modify_col = vec![];
+        let mut modify_col = Vec::with_capacity(self.descs.len());
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
@@ -257,7 +257,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq_fast(self.builders.iter_mut())
             .for_each(|(desc, builder)| {
                 if let Some(output) = f(desc) {
-                    builder.append_datum(output);
+                    builder.append(output);
                 }
             });
 
@@ -313,6 +313,7 @@ pub enum ByteStreamSourceParserImpl {
     Json(JsonParser),
     Protobuf(ProtobufParser),
     DebeziumJson(DebeziumJsonParser),
+    DebeziumMongoJson(DebeziumMongoJsonParser),
     Avro(AvroParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
@@ -328,6 +329,7 @@ impl ByteStreamSourceParser for ByteStreamSourceParserImpl {
             Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Protobuf(parser) => parser.into_stream(msg_stream),
             Self::DebeziumJson(parser) => parser.into_stream(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.into_stream(msg_stream),
             Self::Avro(parser) => parser.into_stream(msg_stream),
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
@@ -358,6 +360,9 @@ impl ByteStreamSourceParserImpl {
             }
             SpecificParserConfig::DebeziumJson => {
                 DebeziumJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumJson)
+            }
+            SpecificParserConfig::DebeziumMongoJson => {
+                DebeziumMongoJsonParser::new(rw_columns, source_ctx).map(Self::DebeziumMongoJson)
             }
             SpecificParserConfig::Maxwell => {
                 MaxwellParser::new(rw_columns, source_ctx).map(Self::Maxwell)
@@ -392,6 +397,7 @@ pub enum SpecificParserConfig {
     Json,
     UpsertJson,
     DebeziumJson,
+    DebeziumMongoJson,
     Maxwell,
     CanalJson,
     #[default]
@@ -413,7 +419,15 @@ impl SpecificParserConfig {
             SpecificParserConfig::CanalJson => SourceFormat::CanalJson,
             SpecificParserConfig::Native => SourceFormat::Native,
             SpecificParserConfig::DebeziumAvro(_) => SourceFormat::DebeziumAvro,
+            SpecificParserConfig::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
         }
+    }
+
+    pub fn is_upsert(&self) -> bool {
+        matches!(
+            self,
+            SpecificParserConfig::UpsertJson | SpecificParserConfig::UpsertAvro(_)
+        )
     }
 
     pub async fn new(
@@ -462,6 +476,7 @@ impl SpecificParserConfig {
             SourceFormat::Json => SpecificParserConfig::Json,
             SourceFormat::UpsertJson => SpecificParserConfig::UpsertJson,
             SourceFormat::DebeziumJson => SpecificParserConfig::DebeziumJson,
+            SourceFormat::DebeziumMongoJson => SpecificParserConfig::DebeziumMongoJson,
             SourceFormat::Maxwell => SpecificParserConfig::Maxwell,
             SourceFormat::CanalJson => SpecificParserConfig::CanalJson,
             SourceFormat::Native => SpecificParserConfig::Native,

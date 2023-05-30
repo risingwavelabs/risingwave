@@ -22,7 +22,6 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-#[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
@@ -119,16 +118,19 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        sink_id: u64,
     ) -> Result<Self> {
         let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
         })?;
         let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
         let client = ConnectorClient::new(host_addr).await.map_err(|err| {
-            SinkError::Remote(format!(
+            let msg = format!(
                 "failed to connect to connector endpoint `{}`: {:?}",
                 &address, err
-            ))
+            );
+            tracing::warn!(msg);
+            SinkError::Remote(msg)
         })?;
 
         let table_schema = Some(TableSchema {
@@ -145,13 +147,28 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let (request_sender, mut response) = client
             .start_sink_stream(
                 config.connector_type.clone(),
+                sink_id,
                 config.properties.clone(),
                 table_schema,
                 connector_params.sink_payload_format,
             )
             .await
             .map_err(SinkError::from)?;
-        let _ = response.next().await.unwrap();
+        response.next().await.unwrap().map_err(|e| {
+            let msg = format!(
+                "failed to start sink stream for connector `{}` with error code: {}, message: {:?}",
+                &config.connector_type,
+                e.code(),
+                e.message()
+            );
+            tracing::warn!(msg);
+            SinkError::Remote(msg)
+        })?;
+        tracing::info!(
+            "{:?} sink stream started with properties: {:?}",
+            &config.connector_type,
+            &config.properties
+        );
 
         Ok(RemoteSink {
             connector_type: config.connector_type,
@@ -171,6 +188,37 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         sink_catalog: SinkCatalog,
         connector_rpc_endpoint: Option<String>,
     ) -> Result<()> {
+        // FIXME: support struct and array in stream sink
+        let columns = sink_catalog
+            .columns
+            .iter()
+            .map(|column| {
+                if matches!(
+                column.column_desc.data_type,
+                DataType::Int16
+                    | DataType::Int32
+                    | DataType::Int64
+                    | DataType::Float32
+                    | DataType::Float64
+                    | DataType::Boolean
+                    | DataType::Decimal
+                    | DataType::Timestamp
+                    | DataType::Varchar
+            ) {
+                Ok( Column {
+                    name: column.column_desc.name.clone(),
+                    data_type: column.column_desc.data_type.to_protobuf().type_name,
+                })
+                } else {
+                    Err(SinkError::Remote(format!(
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Timestamp and Varchar, got {:?}: {:?}",
+                        column.column_desc.name,
+                        column.column_desc.data_type
+                    )))
+                }
+               })
+            .collect::<Result<Vec<_>>>()?;
+
         let address = connector_rpc_endpoint.ok_or_else(|| {
             SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
         })?;
@@ -181,15 +229,6 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 &address, err
             ))
         })?;
-
-        let columns = sink_catalog
-            .columns
-            .iter()
-            .map(|column| Column {
-                name: column.column_desc.name.clone(),
-                data_type: column.column_desc.data_type.to_protobuf().type_name,
-            })
-            .collect_vec();
         let table_schema = TableSchema {
             columns,
             pk_indices: sink_catalog
@@ -332,12 +371,10 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
     use std::time::Duration;
 
-    use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, StreamChunk, Utf8Array};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_pb::connector_service::sink_response::{
         Response, StartEpochResponse, SyncResponse, WriteResponse,
     };
@@ -356,16 +393,10 @@ mod test {
         let (_, resp_recv) = mpsc::unbounded_channel();
 
         let mut sink = RemoteSink::<true>::for_test(resp_recv, request_sender);
-        let chunk = StreamChunk::new(
-            vec![Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(I32Array, [Some(1)])))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("Ripper")]
-                )))),
-            ],
-            None,
+        let chunk = StreamChunk::from_pretty(
+            " i T
+            + 1 Ripper
+        ",
         );
 
         // test epoch check
@@ -400,34 +431,19 @@ mod test {
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
         let mut sink = RemoteSink::<true>::for_test(response_receiver, request_sender);
 
-        let chunk_a = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("Alice"), Some("Bob"), Some("Clare")]
-                )))),
-            ],
-            None,
+        let chunk_a = StreamChunk::from_pretty(
+            " i T
+            + 1 Alice
+            + 2 Bob
+            + 3 Clare
+        ",
         );
-
-        let chunk_b = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(4), Some(5), Some(6)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("David"), Some("Eve"), Some("Frank")]
-                )))),
-            ],
-            None,
+        let chunk_b = StreamChunk::from_pretty(
+            " i T
+            + 4 David
+            + 5 Eve
+            + 6 Frank
+        ",
         );
 
         // test write batch

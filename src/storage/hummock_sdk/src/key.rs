@@ -372,9 +372,7 @@ pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TableKey")
-            .field("table_key", &self.0.as_ref().to_vec())
-            .finish()
+        write!(f, "TableKey {{ {} }}", hex::encode(self.0.as_ref()))
     }
 }
 
@@ -408,12 +406,22 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
     pub table_key: TableKey<T>,
+}
+
+impl<T: AsRef<[u8]>> Debug for UserKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "UserKey {{ {}, {:?} }}",
+            self.table_id.table_id, self.table_key
+        )
+    }
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
@@ -547,10 +555,16 @@ impl UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> Debug for FullKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+    }
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
@@ -702,6 +716,47 @@ impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
 impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PointRange<T: AsRef<[u8]>> {
+    // When comparing `PointRange`, we first compare `left_user_key`, then
+    // `is_exclude_left_key`. Therefore the order of declaration matters.
+    pub left_user_key: UserKey<T>,
+    /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
+    /// while represents the right δ Neighborhood of the left user key if
+    /// `is_exclude_left_key==true`.
+    pub is_exclude_left_key: bool,
+}
+
+impl<T: AsRef<[u8]>> PointRange<T> {
+    pub fn from_user_key(left_user_key: UserKey<T>, is_exclude_left_key: bool) -> Self {
+        Self {
+            left_user_key,
+            is_exclude_left_key,
+        }
+    }
+
+    pub fn as_ref(&self) -> PointRange<&[u8]> {
+        PointRange::from_user_key(self.left_user_key.as_ref(), self.is_exclude_left_key)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.left_user_key.is_empty()
+    }
+}
+
+impl<'a> PointRange<&'a [u8]> {
+    pub fn to_vec(&self) -> PointRange<Vec<u8>> {
+        self.copy_into()
+    }
+
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> PointRange<T> {
+        PointRange {
+            left_user_key: self.left_user_key.copy_into(),
+            is_exclude_left_key: self.is_exclude_left_key,
+        }
     }
 }
 

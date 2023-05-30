@@ -20,16 +20,14 @@ await-tree = "0.1.1"
 clap = { version = "4", features = ["derive"] }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
 pprof = { version = "0.11", features = ["flamegraph"] }
-pretty-bytes = "0.2.2"
 prometheus = { version = "0.13" }
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
-risingwave_common_proc_macro = { path = "../common/proc_macro" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
@@ -39,6 +37,7 @@ risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
 risingwave_stream = { path = "../stream" }
 risingwave_tracing = { path = "../tracing" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -53,6 +52,7 @@ tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
+uuid = "1.2.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemalloc-ctl = "0.5"
@@ -61,6 +61,6 @@ tikv-jemalloc-ctl = "0.5"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 rand = "0.8"
 tempfile = "3"

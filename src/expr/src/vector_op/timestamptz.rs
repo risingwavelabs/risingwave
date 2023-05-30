@@ -16,10 +16,10 @@ use std::fmt::Write;
 
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use num_traits::ToPrimitive;
-use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
+use risingwave_common::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
+use risingwave_common::types::{IntoOrdered, Timestamp, F64};
+use risingwave_expr_macro::function;
 
-use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -31,17 +31,17 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
     })
 }
 
-#[inline(always)]
-pub fn f64_sec_to_timestamptz(elem: OrderedF64) -> Result<i64> {
+#[function("to_timestamp(float64) -> timestamptz")]
+pub fn f64_sec_to_timestamptz(elem: F64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
-    (elem * 1e6)
-        .round() // TODO(#5576): should round to even
-        .to_i64()
-        .ok_or(ExprError::NumericOutOfRange)
+    (elem.0 * 1e6)
+        .into_ordered()
+        .try_into()
+        .map_err(|_| ExprError::NumericOutOfRange)
 }
 
-#[inline(always)]
-pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
+#[function("at_time_zone(timestamp, varchar) -> timestamptz")]
+pub fn timestamp_at_time_zone(input: Timestamp, time_zone: &str) -> Result<i64> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -65,6 +65,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
     Ok(usec)
 }
 
+#[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = elem.div_euclid(1_000_000);
@@ -82,26 +83,29 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
 
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
 // timestamp and then adjusts it with the session timezone.
+#[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
-    str_with_time_zone_to_timestamptz(elem)
-        .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
+    str_with_time_zone_to_timestamptz(elem).or_else(|_| {
+        timestamp_at_time_zone(
+            str_to_timestamp(elem).map_err(|err| ExprError::Parse(err.into()))?,
+            time_zone,
+        )
+    })
 }
 
-#[inline(always)]
-pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
+pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = input.div_euclid(1_000_000);
     let nsecs = input.rem_euclid(1_000_000) * 1000;
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
-    Ok(NaiveDateTimeWrapper(naive))
+    Ok(Timestamp(naive))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
@@ -157,7 +161,7 @@ mod tests {
             let local = str_to_timestamp(local).unwrap();
 
             let actual = timestamp_at_time_zone(local, zone);
-            assert_matches!(actual, Err(_));
+            assert!(actual.is_err());
         }
     }
 

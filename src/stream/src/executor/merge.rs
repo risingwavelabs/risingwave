@@ -144,6 +144,21 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
+                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    {
+                        if select_all
+                            .upstream_actor_ids()
+                            .iter()
+                            .any(|actor_id| dispatchers.contains_key(actor_id))
+                        {
+                            // `Watermark` of upstream may become stale after downstream scaling.
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
+                    }
+
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
@@ -330,7 +345,7 @@ impl Stream for SelectReceivers {
         // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
         // next call would return `Poll::Ready(None)` due to `is_terminated`.
         let upstreams = std::mem::take(&mut self.blocked);
-        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+        if barrier.is_stop(self.actor_id) {
             drop(upstreams);
         } else {
             self.extend_active(upstreams);
@@ -434,7 +449,7 @@ mod tests {
         ExchangeService, ExchangeServiceServer,
     };
     use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
+        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits,
     };
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
@@ -676,7 +691,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 1,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();
@@ -690,7 +705,7 @@ mod tests {
                         ),
                     ),
                 }),
-                permits: 0,
+                permits: Some(PbPermits::default()),
             }))
             .await
             .unwrap();

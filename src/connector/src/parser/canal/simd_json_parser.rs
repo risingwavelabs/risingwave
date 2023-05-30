@@ -16,16 +16,17 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
+use risingwave_common::cast::{
+    str_to_date, str_to_time, str_to_timestamp, str_with_time_zone_to_timestamptz,
+};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use crate::parser::canal::operators::*;
+use crate::parser::common::json_object_smart_get_value;
 use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -34,7 +35,7 @@ use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
-const IS_DDL: &str = "isddl";
+const IS_DDL: &str = "isDdl";
 
 impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
@@ -54,11 +55,10 @@ impl CanalJsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
@@ -96,7 +96,10 @@ impl CanalJsonParser {
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.to_ascii_lowercase().as_str()),
+                                crate::parser::common::json_object_smart_get_value(
+                                    v,
+                                    (&column.name).into(),
+                                ),
                             )
                         })
                     })
@@ -135,15 +138,15 @@ impl CanalJsonParser {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
-                            let col_name_lc = column.name.to_ascii_lowercase();
-                            let before_value = before
-                                .get(col_name_lc.as_str())
-                                .or_else(|| after.get(col_name_lc.as_str()));
+                            let before_value =
+                                json_object_smart_get_value(before, (&column.name).into()).or_else(
+                                    || json_object_smart_get_value(after, (&column.name).into()),
+                                );
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                after.get(col_name_lc.as_str()),
+                                json_object_smart_get_value(after, (&column.name).into()),
                             )?;
                             Ok((before, after))
                         })
@@ -169,7 +172,7 @@ impl CanalJsonParser {
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.to_ascii_lowercase().as_str()),
+                                json_object_smart_get_value(v, (&column.name).into()),
                             )
                         })
                     })
@@ -217,7 +220,7 @@ fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> R
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
-        DataType::Time => str_to_date(ensure_str!(v, "time"))?.into(),
+        DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
         DataType::Timestamptz => {
             str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
@@ -238,13 +241,65 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
+    use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
-    use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
     use crate::source::SourceColumnDesc;
+
+    #[tokio::test]
+    async fn test_data_types() {
+        let payload = br#"{"id":0,"database":"test","table":"data_type","pkNames":["id"],"isDdl":false,"type":"INSERT","es":1682057341424,"ts":1682057382913,"sql":"","sqlType":{"id":4,"tinyint":-6,"smallint":5,"mediumint":4,"int":4,"bigint":-5,"float":7,"double":8,"decimal":3,"date":91,"datetime":93,"time":92,"timestamp":93,"char":1,"varchar":12,"binary":2004,"varbinary":2004,"blob":2004,"text":2005,"enum":4,"set":-7},"mysqlType":{"binary":"binary","varbinary":"varbinary","enum":"enum","set":"set","bigint":"bigint","float":"float","datetime":"datetime","varchar":"varchar","smallint":"smallint","mediumint":"mediumint","double":"double","date":"date","char":"char","id":"int","tinyint":"tinyint","decimal":"decimal","blob":"blob","text":"text","int":"int","time":"time","timestamp":"timestamp"},"old":null,"data":[{"id":"1","tinyint":"5","smallint":"136","mediumint":"172113","int":"1801160058","bigint":"3916589616287113937","float":"0","double":"0.15652","decimal":"1.20364700","date":"2023-04-20","datetime":"2023-02-15 13:01:36","time":"20:23:41","timestamp":"2022-10-13 12:12:54","char":"Kathleen","varchar":"atque esse fugiat et quibusdam qui.","binary":"Joseph\u0000\u0000\u0000\u0000","varbinary":"Douglas","blob":"ducimus ut in commodi necessitatibus error magni repellat exercitationem!","text":"rerum sunt nulla quo quibusdam velit doloremque.","enum":"1","set":"1"}]}"#;
+        let descs = vec![
+            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("date", DataType::Date, 1.into()),
+            SourceColumnDesc::simple("datetime", DataType::Timestamp, 2.into()),
+            SourceColumnDesc::simple("time", DataType::Time, 3.into()),
+            SourceColumnDesc::simple("timestamp", DataType::Timestamp, 4.into()),
+            SourceColumnDesc::simple("char", DataType::Varchar, 5.into()),
+        ];
+        let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+
+        let writer = builder.row_writer();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
+
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+        assert_eq!(
+            row.datum_at(1).to_owned_datum(),
+            Some(ScalarImpl::Date(
+                chrono::NaiveDate::from_ymd_opt(2023, 4, 20).unwrap().into()
+            ))
+        );
+        assert_eq!(
+            row.datum_at(2).to_owned_datum(),
+            Some(ScalarImpl::Timestamp(
+                str_to_timestamp("2023-02-15 13:01:36").unwrap()
+            ))
+        );
+        assert_eq!(
+            row.datum_at(3).to_owned_datum(),
+            Some(ScalarImpl::Time(
+                chrono::NaiveTime::from_hms_opt(20, 23, 41).unwrap().into()
+            ))
+        );
+        assert_eq!(
+            row.datum_at(4).to_owned_datum(),
+            Some(ScalarImpl::Timestamp(
+                str_to_timestamp("2022-10-13 12:12:54").unwrap()
+            ))
+        );
+        assert_eq!(
+            row.datum_at(5).to_owned_datum(),
+            Some(ScalarImpl::Utf8(Box::from("Kathleen".to_string())))
+        );
+    }
 
     #[tokio::test]
     async fn test_json_parser() {
@@ -264,7 +319,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 
@@ -288,7 +343,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -316,7 +371,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDateTime(
+                (Some(ScalarImpl::Timestamp(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
@@ -341,7 +396,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 

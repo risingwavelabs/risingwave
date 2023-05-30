@@ -7,7 +7,7 @@ import "common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message IntervalUnit {
+message Interval {
   int32 months = 1;
   int32 days = 2;
   int64 usecs = 3;
@@ -51,6 +51,7 @@ message DataType {
     BYTEA = 17;
     JSONB = 18;
     SERIAL = 19;
+    INT256 = 20;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -99,6 +100,7 @@ enum ArrayType {
   BYTEA = 15;
   JSONB = 16;
   SERIAL = 17;
+  INT256 = 18;
 }
 
 message Array {
@@ -117,16 +119,9 @@ message Datum {
   bytes body = 1;
 }
 
-// New column proto def to replace fixed width column. This def
-// aims to include all column type. Currently it do not support struct/array
-// but capable of extending in future by add other fields.
-message Column {
-  Array array = 2;
-}
-
 message DataChunk {
   uint32 cardinality = 1;
-  repeated Column columns = 2;
+  repeated Array columns = 2;
 }
 
 enum Op {
@@ -138,10 +133,10 @@ enum Op {
 }
 
 message StreamChunk {
-  // for Column::from_protobuf(), may not need later
+  // for Array::from_protobuf(), may not need later
   uint32 cardinality = 1;
   repeated Op ops = 2;
-  repeated Column columns = 3;
+  repeated Array columns = 3;
 }
 
 message Epoch {

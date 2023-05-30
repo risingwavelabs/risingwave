@@ -12,26 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Global Streaming Hash Aggregators
+//! Streaming Hash Aggregator
 
 use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
+use risingwave_expr::agg::AggCall;
 use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{
-    build_agg_call_from_prost, build_agg_state_storages_from_proto,
-    build_distinct_dedup_table_from_proto,
+    build_agg_state_storages_from_proto, build_distinct_dedup_table_from_proto,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
-use crate::executor::agg_common::{AggExecutorArgs, AggExecutorArgsExtra};
-use crate::executor::aggregation::AggCall;
+use crate::executor::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use crate::executor::HashAggExecutor;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
-    args: AggExecutorArgs<S>,
+    args: AggExecutorArgs<S, HashAggExecutorExtraArgs>,
     group_key_types: Vec<DataType>,
 }
 
@@ -73,7 +72,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
-            .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
+            .map(AggCall::from_protobuf)
             .try_collect()?;
 
         let vnodes = Some(Arc::new(
@@ -102,7 +101,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 pk_indices: params.pk_indices,
                 executor_id: params.executor_id,
 
-                extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+                extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
@@ -110,13 +109,12 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 result_table,
                 distinct_dedup_tables,
                 watermark_epoch: stream.get_watermark_epoch(),
-
-                extra: Some(AggExecutorArgsExtra {
+                metrics: params.executor_stats,
+                extra: HashAggExecutorExtraArgs {
                     group_key_indices,
-
-                    metrics: params.executor_stats,
-                    chunk_size: params.env.config().developer.stream_chunk_size,
-                }),
+                    chunk_size: params.env.config().developer.chunk_size,
+                    emit_on_window_close: false,
+                },
             },
             group_key_types,
         }

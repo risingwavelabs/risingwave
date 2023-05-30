@@ -1,0 +1,92 @@
+[tasks.build-image]
+script = "docker compose build"
+dependencies = ["clean-all"]
+
+[tasks.start-cluster]
+script = """
+docker compose up -d;
+sleep 20
+"""
+dependencies = ["build-image"]
+
+[tasks.setup-kafka]
+script = """
+docker compose exec message_queue \
+    /usr/bin/rpk topic create -p 2 counts
+"""
+dependencies = ["start-cluster"]
+
+[tasks.setup-pg]
+script = """
+PGPASSWORD=123456 psql -h localhost -p 5432 -d mydb -U myuser -f pg.sql
+"""
+dependencies = ["start-cluster"]
+
+[tasks.setup-risingwave]
+script = """
+psql -h localhost -p 4566 -d dev -U root -f risingwave.sql
+"""
+dependencies = ["setup-kafka"]
+
+[tasks.setup-flink]
+script = """
+docker compose run flink-sql-client /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
+"""
+dependencies = ["setup-kafka", "setup-pg"]
+
+[tasks.setup-connect]
+script = '''
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/pg-sink.json
+curl -i -X POST -H "Accept:application/json" -H  "Content-Type:application/json" http://localhost:8083/connectors/ -d @jsons/mysql-sink.json
+sleep 1
+'''
+dependencies = ["setup-flink"]
+
+[tasks.setup]
+dependencies = [
+    "clean-all",
+    "build-image",
+    "start-cluster",
+    "setup-pg",
+    "setup-kafka",
+    "setup-risingwave",
+    "setup-flink",
+    "setup-connect"
+]
+
+[tasks.clean-all]
+script = """
+docker compose down --remove-orphans -v
+"""
+
+[tasks.show-json-logs]
+script = """
+docker run --network host \
+    bitnami/kafka:latest \
+    /opt/bitnami/kafka/bin/kafka-console-consumer.sh \
+    --bootstrap-server localhost:9092 \
+    --topic counts --from-beginning
+"""
+description = "Show produces kafka json logs"
+
+[tasks.check-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from counts"'
+'''
+
+[tasks.check-mysql]
+script = '''
+docker exec mysql bash -c 'mysql -u $MYSQL_USER  -p$MYSQL_PASSWORD mydb -e "select * from counts"'
+'''
+
+[tasks.check-flink-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from flinkcounts"'
+'''
+
+[tasks.check-db]
+dependencies = [
+    "check-pg",
+    "check-mysql",
+    "check-flink-pg"
+]

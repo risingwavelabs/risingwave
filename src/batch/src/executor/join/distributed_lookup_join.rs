@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -33,13 +34,14 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
+use tokio::sync::watch::Receiver;
 
 use crate::executor::join::JoinType;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, BufferChunkExecutor, Executor,
     ExecutorBuilder, LookupExecutorBuilder, LookupJoinBase,
 };
-use crate::task::BatchTaskContext;
+use crate::task::{BatchTaskContext, ShutdownMsg};
 
 /// Distributed Lookup Join Executor.
 /// High level Execution flow:
@@ -167,7 +169,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
 
         let null_safe = distributed_lookup_join_node.get_null_safe().to_vec();
 
-        let chunk_size = source.context.get_config().developer.batch_chunk_size;
+        let chunk_size = source.context.get_config().developer.chunk_size;
 
         let table_id = TableId {
             table_id: table_desc.table_id,
@@ -241,6 +243,8 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 chunk_size,
             );
 
+            let identity = source.plan_node().get_identity().clone();
+
             Ok(DistributedLookupJoinExecutorArgs {
                 join_type,
                 condition,
@@ -256,7 +260,9 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 schema: actual_schema,
                 output_indices,
                 chunk_size,
-                identity: source.plan_node().get_identity().clone(),
+                identity: identity.clone(),
+                shutdown_rx: Some(source.shutdown_rx.clone()),
+                mem_ctx: source.context.create_executor_mem_context(&identity),
             }
             .dispatch())
         })
@@ -279,6 +285,8 @@ struct DistributedLookupJoinExecutorArgs {
     output_indices: Vec<usize>,
     chunk_size: usize,
     identity: String,
+    shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    mem_ctx: MemoryContext,
 }
 
 impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
@@ -302,6 +310,8 @@ impl HashKeyDispatcher for DistributedLookupJoinExecutorArgs {
                 output_indices: self.output_indices,
                 chunk_size: self.chunk_size,
                 identity: self.identity,
+                shutdown_rx: self.shutdown_rx,
+                mem_ctx: self.mem_ctx,
                 _phantom: PhantomData,
             },
         ))

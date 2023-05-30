@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{DatabaseId, SchemaId, UserId};
+use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::Result;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -25,19 +26,21 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
+use crate::utils::resolve_connection_in_with_option;
 use crate::Planner;
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
-        for_system_time_as_of_now: false,
+        for_system_time_as_of_proctime: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -74,44 +77,55 @@ pub fn gen_sink_plan(
     };
 
     let (sink_database_id, sink_schema_id) =
-        session.get_database_and_schema_id_for_create(sink_schema_name)?;
+        session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
-        let mut binder = Binder::new(session);
-        binder.bind_query(*query)?
+    let (dependent_relations, bound) = {
+        let mut binder = Binder::new_for_stream(session);
+        let bound = binder.bind_query(*query)?;
+        (binder.included_relations(), bound)
     };
 
-    // If colume names not specified, use the name in materialized view.
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
+
+    // If column names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.with_options().clone();
+    let mut with_options = context.with_options().clone();
+    let connection_id = {
+        let conn_id =
+            resolve_connection_in_with_option(&mut with_options, &sink_schema_name, session)?;
+        conn_id.map(ConnectionId)
+    };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
-
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, with_options)?;
     let sink_desc = sink_plan.sink_desc().clone();
-    let sink_catalog = sink_desc.into_catalog(
-        SchemaId::new(sink_schema_id),
-        DatabaseId::new(sink_database_id),
-        UserId::new(session.user_id()),
-        vec![],
-    );
-
     let sink_plan: PlanRef = sink_plan.into();
 
     let ctx = sink_plan.ctx();
-
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Sink:");
         ctx.trace(sink_plan.explain_to_string().unwrap());
     }
+
+    let dependent_relations =
+        RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone());
+
+    let sink_catalog = sink_desc.into_catalog(
+        SchemaId::new(sink_schema_id),
+        DatabaseId::new(sink_database_id),
+        UserId::new(session.user_id()),
+        connection_id,
+        dependent_relations.into_iter().collect_vec(),
+    );
 
     Ok((sink_plan, sink_catalog))
 }

@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
 
-use crate::hummock::compaction::CompactionInput;
+use super::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
 const MIN_TTL_EXPIRE_INTERVAL_MS: u64 = 60 * 60 * 1000; // 1h
@@ -85,19 +85,19 @@ impl TtlReclaimCompactionPicker {
         }
     }
 
-    fn filter(&self, sst: &SstableInfo, current_epoch_time: u64) -> bool {
+    fn filter(&self, sst: &SstableInfo, current_epoch_physical_time: u64) -> bool {
         let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
         let expire_epoch =
-            Epoch::from_physical_time(current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS);
+            Epoch::from_physical_time(current_epoch_physical_time - MIN_TTL_EXPIRE_INTERVAL_MS);
 
         for table_id in table_id_in_sst {
             match self.table_id_to_ttl.get(&table_id) {
                 Some(ttl_second_u32) => {
                     assert!(*ttl_second_u32 != TABLE_OPTION_DUMMY_RETENTION_SECOND);
                     // default to zero.
-                    let ttl_mill = (*ttl_second_u32 * 1000) as u64;
+                    let ttl_mill = *ttl_second_u32 as u64 * 1000;
                     let min_epoch = expire_epoch.subtract_ms(ttl_mill);
-                    if Epoch(sst.min_epoch) <= min_epoch {
+                    if Epoch(sst.min_epoch) < min_epoch {
                         return false;
                     }
                 }
@@ -153,7 +153,7 @@ impl TtlReclaimCompactionPicker {
             state.init(key_range_this_round);
         }
 
-        let current_epoch_time = Epoch::now().0;
+        let current_epoch_physical_time = Epoch::now().physical_time();
         let mut select_file_size = 0;
 
         for sst in &reclaimed_level.table_infos {
@@ -165,7 +165,7 @@ impl TtlReclaimCompactionPicker {
 
             if unmatched_sst
                 || level_handler.is_pending_compact(&sst.sst_id)
-                || self.filter(sst, current_epoch_time)
+                || self.filter(sst, current_epoch_physical_time)
             {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
@@ -243,7 +243,7 @@ mod test {
         let l0 = generate_l0_nonoverlapping_sublevels(vec![]);
         assert_eq!(l0.sub_levels.len(), 0);
 
-        let current_epoch_time = Epoch::now().0;
+        let current_epoch_time = Epoch::now().physical_time();
         let expired_epoch = Epoch::from_physical_time(
             current_epoch_time - MIN_TTL_EXPIRE_INTERVAL_MS - (1000 * 1000),
         )

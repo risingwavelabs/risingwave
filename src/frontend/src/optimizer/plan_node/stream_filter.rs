@@ -17,7 +17,8 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
-use super::{ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::stream::StreamPlanRef;
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -27,30 +28,26 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
     pub base: PlanBase,
-    logical: LogicalFilter,
+    logical: generic::Filter<PlanRef>,
 }
 
 impl StreamFilter {
-    pub fn new(logical: LogicalFilter) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let pk_indices = logical.base.logical_pk.to_vec();
+    pub fn new(logical: generic::Filter<PlanRef>) -> Self {
+        let input = logical.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            logical.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             dist,
-            logical.input().append_only(),
-            logical.input().watermark_columns().clone(),
+            input.append_only(),
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
         );
         StreamFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {
-        self.logical.predicate()
+        &self.logical.predicate
     }
 }
 
@@ -62,11 +59,13 @@ impl fmt::Display for StreamFilter {
 
 impl PlanTreeNodeUnary for StreamFilter {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut logical = self.logical.clone();
+        logical.input = input;
+        Self::new(logical)
     }
 }
 
@@ -86,13 +85,8 @@ impl ExprRewritable for StreamFilter {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        Self::new(
-            self.logical
-                .rewrite_exprs(r)
-                .as_logical_filter()
-                .unwrap()
-                .clone(),
-        )
-        .into()
+        let mut logical = self.logical.clone();
+        logical.rewrite_exprs(r);
+        Self::new(logical).into()
     }
 }

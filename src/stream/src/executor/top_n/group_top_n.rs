@@ -27,17 +27,16 @@ use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
-use super::TopNCache;
-use crate::cache::{cache_may_stale, new_unbounded, ExecutorCache};
+use super::{ManagedTopNState, TopNCache};
+use crate::cache::{new_unbounded, ManagedLruCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
-    TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
+    TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
@@ -55,8 +54,8 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         let info = input.info();
         Ok(TopNExecutorWrapper {
             input,
-            ctx,
-            inner: InnerGroupTopNExecutorNew::new(
+            ctx: ctx.clone(),
+            inner: InnerGroupTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -65,12 +64,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 group_by,
                 state_table,
                 watermark_epoch,
+                ctx,
             )?,
         })
     }
 }
 
-pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES: bool> {
+pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// `LIMIT XXX`. None means no limit.
@@ -92,9 +92,11 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
 
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
+
+    ctx: ActorContextRef,
 }
 
-impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<K, S, WITH_TIES> {
+impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -104,14 +106,14 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64Ref,
+        watermark_epoch: AtomicU64Ref,
+        ctx: ActorContextRef,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
 
-        let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+        let cache_key_serde = create_cache_key_serde(&storage_key, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
@@ -125,25 +127,26 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager),
+            caches: GroupTopNCache::new(watermark_epoch),
             cache_key_serde,
+            ctx,
         })
     }
 }
 
 pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
-    data: ExecutorCache<K, TopNCache<WITH_TIES>>,
+    data: ManagedLruCache<K, TopNCache<WITH_TIES>>,
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: AtomicU64Ref) -> Self {
-        let cache = ExecutorCache::new(new_unbounded(lru_manager));
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = new_unbounded(watermark_epoch);
         Self { data: cache }
     }
 }
 
 impl<K: HashKey, const WITH_TIES: bool> Deref for GroupTopNCache<K, WITH_TIES> {
-    type Target = ExecutorCache<K, TopNCache<WITH_TIES>>;
+    type Target = ManagedLruCache<K, TopNCache<WITH_TIES>>;
 
     fn deref(&self) -> &Self::Target {
         &self.data
@@ -158,7 +161,7 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
 
 #[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
-    for InnerGroupTopNExecutorNew<K, S, WITH_TIES>
+    for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
@@ -167,24 +170,36 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
         let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
-
+        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
-
+            self.ctx
+                .streaming_metrics
+                .group_top_n_total_query_cache_count
+                .with_label_values(&[&table_id_str, &actor_id_str])
+                .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                let mut topn_cache = TopNCache::new(self.offset, self.limit);
+                self.ctx
+                    .streaming_metrics
+                    .group_top_n_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str])
+                    .inc();
+                let mut topn_cache =
+                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
-            let cache = self.caches.get_mut(group_cache_key).unwrap();
+
+            let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
             match op {
@@ -208,7 +223,11 @@ where
                 }
             }
         }
-
+        self.ctx
+            .streaming_metrics
+            .group_top_n_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str])
+            .set(self.caches.len() as i64);
         generate_output(res_rows, res_ops, self.schema())
     }
 
@@ -220,13 +239,17 @@ where
         &self.info
     }
 
+    fn update_epoch(&mut self, epoch: u64) {
+        self.caches.update_epoch(epoch);
+    }
+
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self
+        let (_previous_vnode_bitmap, cache_may_stale) = self
             .managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+            .update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.caches.clear();
         }
     }
@@ -244,7 +267,7 @@ where
         if watermark.col_idx == self.group_by[0] {
             self.managed_state
                 .state_table
-                .update_watermark(watermark.val.clone());
+                .update_watermark(watermark.val.clone(), false);
             Some(watermark)
         } else {
             None

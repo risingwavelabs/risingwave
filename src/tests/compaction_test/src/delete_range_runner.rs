@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::ops::Bound;
-use std::pin::Pin;
+use std::ops::{Bound, RangeBounds};
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,14 +23,13 @@ use bytes::Bytes;
 use futures::StreamExt;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, RwConfig, NO_OVERRIDE};
-use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
-use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-use risingwave_hummock_sdk::filter_key_extractor::{
-    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+use risingwave_common::config::{
+    extract_storage_memory_config, load_config, RwConfig, NO_OVERRIDE,
 };
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_test::get_notification_client_for_test;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
@@ -41,10 +40,14 @@ use risingwave_pb::catalog::PbTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::filter_key_extractor::{
+    FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
+};
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
+use risingwave_storage::hummock::utils::cmp_delete_range_left_bounds;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
+    CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -163,7 +166,12 @@ async fn compaction_test(
         ..Default::default()
     }
     .into();
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let storage_memory_config = extract_storage_memory_config(&config);
+    let storage_opts = Arc::new(StorageOpts::from((
+        &config,
+        &system_params,
+        &storage_memory_config,
+    )));
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
@@ -176,8 +184,9 @@ async fn compaction_test(
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
         system_params.data_directory().to_string(),
-        config.storage.block_cache_capacity_mb * (1 << 20),
-        config.storage.meta_cache_capacity_mb * (1 << 20),
+        storage_memory_config.block_cache_capacity_mb * (1 << 20),
+        storage_memory_config.meta_cache_capacity_mb * (1 << 20),
+        0,
         TieredCache::none(),
     ));
 
@@ -186,6 +195,7 @@ async fn compaction_test(
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
+        Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
@@ -274,8 +284,8 @@ async fn run_compare_result(
             if op == 0 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 overlap_ranges.push((key_number, end_key, epoch, idx));
-                let start_key = format!("{:010}", key_number);
-                let end_key = format!("{:010}", end_key);
+                let start_key = format!("\0\0{:010}", key_number);
+                let end_key = format!("\0\0{:010}", end_key);
                 normal
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
@@ -283,7 +293,7 @@ async fn run_compare_result(
                     .delete_range(start_key.as_bytes(), end_key.as_bytes())
                     .await;
             } else if op < 5 {
-                let key = format!("{:010}", key_number);
+                let key = format!("\0\0{:010}", key_number);
                 let a = normal.get(key.as_bytes()).await;
                 let b = delete_range.get(key.as_bytes()).await;
                 assert!(
@@ -296,8 +306,8 @@ async fn run_compare_result(
                 );
             } else if op < 10 {
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
-                let start_key = format!("{:010}", key_number);
-                let end_key = format!("{:010}", end_key);
+                let start_key = format!("\0\0{:010}", key_number);
+                let end_key = format!("\0\0{:010}", end_key);
                 let ret1 = normal.scan(start_key.as_bytes(), end_key.as_bytes()).await;
                 let ret2 = delete_range
                     .scan(start_key.as_bytes(), end_key.as_bytes())
@@ -310,7 +320,7 @@ async fn run_compare_result(
                 if overlap {
                     continue;
                 }
-                let key = format!("{:010}", key_number);
+                let key = format!("\0\0{:010}", key_number);
                 let val = format!("val-{:010}-{:016}-{:016}", idx, key_number, epoch);
                 normal.insert(key.as_bytes(), val.as_bytes());
                 delete_range.insert(key.as_bytes(), val.as_bytes());
@@ -339,7 +349,7 @@ struct NormalState {
 
 struct DeleteRangeState {
     inner: NormalState,
-    delete_ranges: Vec<(Bytes, Bytes)>,
+    delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
 }
 
 impl DeleteRangeState {
@@ -370,7 +380,7 @@ impl NormalState {
 
     async fn commit_impl(
         &mut self,
-        delete_ranges: Vec<(Bytes, Bytes)>,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         next_epoch: u64,
     ) -> Result<(), String> {
         self.storage
@@ -392,6 +402,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
             .await
@@ -404,25 +415,25 @@ impl NormalState {
         right: &[u8],
         ignore_range_tombstone: bool,
     ) -> Vec<(Bytes, Bytes)> {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)),
-                        Bound::Excluded(Bytes::copy_from_slice(right)),
-                    ),
-                    ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone,
-                        retention_seconds: None,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = pin!(self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)),
+                    Bound::Excluded(Bytes::copy_from_slice(right)),
+                ),
+                ReadOptions {
+                    prefix_hint: None,
+                    ignore_range_tombstone,
+                    retention_seconds: None,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                },
+            )
+            .await
+            .unwrap(),);
         let mut ret = vec![];
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();
@@ -450,6 +461,7 @@ impl CheckState for NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )
                 .await
@@ -488,13 +500,15 @@ impl CheckState for NormalState {
 #[async_trait::async_trait]
 impl CheckState for DeleteRangeState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        self.delete_ranges
-            .push((Bytes::copy_from_slice(left), Bytes::copy_from_slice(right)));
+        self.delete_ranges.push((
+            Bound::Included(Bytes::copy_from_slice(left)),
+            Bound::Excluded(Bytes::copy_from_slice(right)),
+        ));
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
-        for (left, right) in &self.delete_ranges {
-            if left.as_ref().le(key) && right.as_ref().gt(key) {
+        for delete_range in &self.delete_ranges {
+            if delete_range.contains(key) {
                 return None;
             }
         }
@@ -504,8 +518,8 @@ impl CheckState for DeleteRangeState {
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
         let mut ret = self.inner.scan_impl(left, right, false).await;
         ret.retain(|(key, _)| {
-            for (left, right) in &self.delete_ranges {
-                if left.as_ref().le(key) && right.as_ref().gt(key) {
+            for delete_range in &self.delete_ranges {
+                if delete_range.contains(key) {
                     return false;
                 }
             }
@@ -520,7 +534,7 @@ impl CheckState for DeleteRangeState {
 
     async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
         let mut delete_ranges = std::mem::take(&mut self.delete_ranges);
-        delete_ranges.sort();
+        delete_ranges.sort_by(|a, b| cmp_delete_range_left_bounds(a.0.as_ref(), b.0.as_ref()));
         self.inner.commit_impl(delete_ranges, next_epoch).await
     }
 }
@@ -544,12 +558,9 @@ fn run_compactor_thread(
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
-        read_memory_limiter: MemoryLimiter::unlimit(),
+        output_memory_limiter: MemoryLimiter::unlimit(),
         sstable_object_id_manager,
         task_progress_manager: Default::default(),
-        compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
-            max_concurrent_task_number: 4,
-        })),
     });
     risingwave_storage::hummock::compactor::Compactor::start_compactor(
         compactor_context,

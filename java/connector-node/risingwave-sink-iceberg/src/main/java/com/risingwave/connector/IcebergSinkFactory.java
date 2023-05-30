@@ -14,16 +14,17 @@
 
 package com.risingwave.connector;
 
-import static io.grpc.Status.INVALID_ARGUMENT;
 import static io.grpc.Status.UNIMPLEMENTED;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.common.S3Utils;
+import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Map;
 import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
@@ -39,39 +40,37 @@ public class IcebergSinkFactory implements SinkFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFactory.class);
 
-    public static final String SINK_TYPE_PROP = "type";
-    public static final String WAREHOUSE_PATH_PROP = "warehouse.path";
-    public static final String DATABASE_NAME_PROP = "database.name";
-    public static final String TABLE_NAME_PROP = "table.name";
-    public static final String S3_ACCESS_KEY_PROP = "s3.access.key";
-    public static final String S3_SECRET_KEY_PROP = "s3.secret.key";
-    public static final String S3_ENDPOINT_PROP = "s3.endpoint";
     public static final FileFormat FILE_FORMAT = FileFormat.PARQUET;
 
     // hadoop catalog config
-    private static final String confEndpoint = "fs.s3a.endpoint";
-    private static final String confKey = "fs.s3a.access.key";
-    private static final String confSecret = "fs.s3a.secret.key";
+
     private static final String confIoImpl = "io-impl";
-    private static final String confPathStyleAccess = "fs.s3a.path.style.access";
     private static final String s3FileIOImpl = "org.apache.iceberg.aws.s3.S3FileIO";
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String mode = tableProperties.get(SINK_TYPE_PROP);
-        String warehousePath = getWarehousePath(tableProperties);
-        String databaseName = tableProperties.get(DATABASE_NAME_PROP);
-        String tableName = tableProperties.get(TABLE_NAME_PROP);
+        ObjectMapper mapper = new ObjectMapper();
+        IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
+        String warehousePath = getWarehousePath(config);
+        config.setWarehousePath(warehousePath);
 
-        String scheme = parseWarehousePathScheme(warehousePath);
+        String scheme = UrlParser.parseLocationScheme(warehousePath);
+        TableIdentifier tableIdentifier =
+                TableIdentifier.of(config.getDatabaseName(), config.getTableName());
+        Configuration hadoopConf = createHadoopConf(scheme, config);
+        SinkBase sink = null;
 
-        TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
-        Configuration hadoopConf = createHadoopConf(scheme, tableProperties);
-        HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
-        Table icebergTable;
-        try {
-            icebergTable = hadoopCatalog.loadTable(tableIdentifier);
-            hadoopCatalog.close();
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+            Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+            String sinkType = config.getSinkType();
+            if (sinkType.equals("append-only")) {
+                sink = new IcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
+            } else if (sinkType.equals("upsert")) {
+                sink =
+                        new UpsertIcebergSink(
+                                tableSchema, hadoopCatalog,
+                                icebergTable, FILE_FORMAT);
+            }
         } catch (Exception e) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
@@ -80,43 +79,26 @@ public class IcebergSinkFactory implements SinkFactory {
                     .asRuntimeException();
         }
 
-        if (mode.equals("append-only")) {
-            return new IcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
-        } else if (mode.equals("upsert")) {
-            return new UpsertIcebergSink(
-                    tableSchema, hadoopCatalog,
-                    icebergTable, FILE_FORMAT);
+        if (sink == null) {
+            throw UNIMPLEMENTED
+                    .withDescription("unsupported mode: " + config.getSinkType())
+                    .asRuntimeException();
         }
-        throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
+        return sink;
     }
 
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (!tableProperties.containsKey(SINK_TYPE_PROP) // only append-only, upsert
-                || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
-                || !tableProperties.containsKey(DATABASE_NAME_PROP)
-                || !tableProperties.containsKey(TABLE_NAME_PROP)) {
-            throw INVALID_ARGUMENT
-                    .withDescription(
-                            String.format(
-                                    "%s, %s, %s or %s is not specified",
-                                    SINK_TYPE_PROP,
-                                    WAREHOUSE_PATH_PROP,
-                                    DATABASE_NAME_PROP,
-                                    TABLE_NAME_PROP))
-                    .asRuntimeException();
-        }
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
 
-        String mode = tableProperties.get(SINK_TYPE_PROP);
-        String databaseName = tableProperties.get(DATABASE_NAME_PROP);
-        String tableName = tableProperties.get(TABLE_NAME_PROP);
-        String warehousePath = getWarehousePath(tableProperties);
-
-        String schema = parseWarehousePathScheme(warehousePath);
-
-        TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
-        Configuration hadoopConf = createHadoopConf(schema, tableProperties);
+        String warehousePath = getWarehousePath(config);
+        String scheme = UrlParser.parseLocationScheme(warehousePath);
+        TableIdentifier tableIdentifier =
+                TableIdentifier.of(config.getDatabaseName(), config.getTableName());
+        Configuration hadoopConf = createHadoopConf(scheme, config);
 
         try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
 
@@ -153,8 +135,10 @@ public class IcebergSinkFactory implements SinkFactory {
                     .asRuntimeException();
         }
 
-        if (!mode.equals("append-only") && !mode.equals("upsert")) {
-            throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
+        if (!config.getSinkType().equals("append-only") && !config.getSinkType().equals("upsert")) {
+            throw UNIMPLEMENTED
+                    .withDescription("unsupported mode: " + config.getSinkType())
+                    .asRuntimeException();
         }
 
         switch (sinkType) {
@@ -174,8 +158,8 @@ public class IcebergSinkFactory implements SinkFactory {
         }
     }
 
-    private static String getWarehousePath(Map<String, String> tableProperties) {
-        String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
+    private static String getWarehousePath(IcebergSinkConfig config) {
+        String warehousePath = config.getWarehousePath();
         // unify s3 and s3a
         if (warehousePath.startsWith("s3://")) {
             return warehousePath.replace("s3://", "s3a://");
@@ -183,48 +167,13 @@ public class IcebergSinkFactory implements SinkFactory {
         return warehousePath;
     }
 
-    private static String parseWarehousePathScheme(String warehousePath) {
-        try {
-            URI uri = new URI(warehousePath);
-            String scheme = uri.getScheme();
-            if (scheme == null) {
-                throw INVALID_ARGUMENT
-                        .withDescription("warehouse path should set scheme (e.g. s3a://)")
-                        .asRuntimeException();
-            }
-            return scheme;
-        } catch (URISyntaxException e) {
-            throw INVALID_ARGUMENT
-                    .withDescription(
-                            String.format("invalid warehouse path uri: %s", e.getMessage()))
-                    .withCause(e)
-                    .asRuntimeException();
-        }
-    }
-
-    private Configuration createHadoopConf(String scheme, Map<String, String> tableProperties) {
+    private Configuration createHadoopConf(String scheme, IcebergSinkConfig config) {
         switch (scheme) {
             case "file":
                 return new Configuration();
             case "s3a":
-                Configuration hadoopConf = new Configuration();
+                Configuration hadoopConf = S3Utils.getHadoopConf(config);
                 hadoopConf.set(confIoImpl, s3FileIOImpl);
-                hadoopConf.setBoolean(confPathStyleAccess, true);
-                if (!tableProperties.containsKey(S3_ENDPOINT_PROP)) {
-                    throw INVALID_ARGUMENT
-                            .withDescription(
-                                    String.format(
-                                            "Should set %s for warehouse with scheme %s",
-                                            S3_ENDPOINT_PROP, scheme))
-                            .asRuntimeException();
-                }
-                hadoopConf.set(confEndpoint, tableProperties.get(S3_ENDPOINT_PROP));
-                if (tableProperties.containsKey(S3_ACCESS_KEY_PROP)) {
-                    hadoopConf.set(confKey, tableProperties.get(S3_ACCESS_KEY_PROP));
-                }
-                if (tableProperties.containsKey(S3_SECRET_KEY_PROP)) {
-                    hadoopConf.set(confSecret, tableProperties.get(S3_SECRET_KEY_PROP));
-                }
                 return hadoopConf;
             default:
                 throw UNIMPLEMENTED

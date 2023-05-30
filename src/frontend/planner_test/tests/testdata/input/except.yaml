@@ -1,0 +1,48 @@
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select * from t1 except all select * from t2;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select * from t1 except select * from t2;
+  expected_outputs:
+  - stream_dist_plan
+  - stream_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint, primary key(a));
+    create table t2 (a int, b numeric, c bigint, primary key(a));
+    select * from t1 except select * from t2;
+  expected_outputs:
+  - stream_dist_plan
+  - stream_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    (select * from t1 limit 1) except (select * from t2 limit 1);
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - batch_plan
+- sql: |
+    create table t1 (a int, b numeric, c bigint);
+    create table t2 (a int, b numeric, c bigint);
+    select a from ((select * from t1 limit 1) except (select * from t2 limit 1)) T;
+  expected_outputs:
+  - batch_plan
+  - optimized_logical_plan_for_batch
+- sql: |
+    select 1 except select 2 except select 3 except select 4 except select 5 except select 5
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - batch_plan
+- sql: |
+    select 1 except (select 2 except select 1);
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - batch_plan

@@ -26,12 +26,11 @@ use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
-use risingwave_common::array::{Array, DataChunk, F64Array, I64Array};
+use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
@@ -106,7 +105,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Float64),
         ],
     };
@@ -120,15 +119,9 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.max" => "1000",
         "fields.v1.seed" => "12345",
     ));
-    let pk_column_ids = vec![0];
     let row_id_index: usize = 0;
-    let source_builder = create_source_desc_builder(
-        &schema,
-        pk_column_ids,
-        Some(row_id_index),
-        source_info,
-        properties,
-    );
+    let source_builder =
+        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
 
     // Ensure the source exists.
     let source_desc = source_builder.build().await.unwrap();
@@ -157,6 +150,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             name: field.name,
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_or_default_column: None,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
@@ -234,7 +228,8 @@ async fn test_table_materialize() -> StreamResult<()> {
         insert_inner,
         1024,
         "InsertExecutor".to_string(),
-        vec![], // ignore insertion order
+        vec![0], // ignore insertion order
+        vec![],
         Some(row_id_index),
         false,
     ));
@@ -292,11 +287,11 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].as_serial();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
         }
@@ -332,7 +327,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
 
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -343,8 +338,8 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
-        column_nonnull! { F64Array, [1.14] },
+        SerialArray::from_iter([col_row_ids[0]]).into_ref(), // row id column
+        F64Array::from_iter([1.14]).into_ref(),
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
@@ -371,10 +366,10 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].as_serial();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
         }
         Message::Barrier(_) => panic!(),
@@ -407,7 +402,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 
@@ -482,21 +477,11 @@ async fn test_row_seq_scan() -> Result<()> {
 
     assert_eq!(res_chunk.dimension(), 3);
     assert_eq!(
-        res_chunk
-            .column_at(0)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(0).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(1)]
     );
     assert_eq!(
-        res_chunk
-            .column_at(1)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(1).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(4)]
     );
 
@@ -505,7 +490,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(0)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),
@@ -514,7 +498,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(1)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),

@@ -17,7 +17,7 @@ use std::str::{from_utf8, Chars};
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_common::types::{DataType, DateTimeField, Decimal, Interval, ScalarImpl};
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
@@ -78,7 +78,7 @@ impl Binder {
         leading_field: Option<AstDateTimeField>,
     ) -> Result<Literal> {
         let interval =
-            IntervalUnit::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
+            Interval::parse_with_fields(&s, leading_field.map(Self::bind_date_time_field))?;
         let datum = Some(ScalarImpl::Interval(interval));
         let literal = Literal::new(datum, DataType::Interval);
 
@@ -105,15 +105,13 @@ impl Binder {
         }
         let mut exprs = exprs
             .into_iter()
-            .map(|e| self.bind_expr(e))
+            .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let element_type = align_types(exprs.iter_mut())?;
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             exprs,
-            DataType::List {
-                datatype: Box::new(element_type),
-            },
+            DataType::List(Box::new(element_type)),
         )
         .into();
         Ok(expr)
@@ -125,14 +123,12 @@ impl Binder {
                 ExprType::Array,
                 vec![],
                 // Treat `array[]` as `varchar[]` temporarily before applying cast.
-                DataType::List {
-                    datatype: Box::new(DataType::Varchar),
-                },
+                DataType::List(Box::new(DataType::Varchar)),
             )
             .into();
             return lhs.cast_explicit(ty).map_err(Into::into);
         }
-        let inner_type = if let DataType::List { datatype } = &ty {
+        let inner_type = if let DataType::List(datatype) = &ty {
             *datatype.clone()
         } else {
             return Err(ErrorCode::BindError(format!(
@@ -152,13 +148,11 @@ impl Binder {
     }
 
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
-        let obj = self.bind_expr(obj)?;
+        let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List {
-                datatype: return_type,
-            } => Ok(FunctionCall::new_unchecked(
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
-                vec![obj, self.bind_expr(index)?],
+                vec![obj, self.bind_expr_inner(index)?],
                 *return_type,
             )
             .into()),
@@ -170,11 +164,47 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_array_range_index(
+        &mut self,
+        obj: Expr,
+        start: Option<Box<Expr>>,
+        end: Option<Box<Expr>>,
+    ) -> Result<ExprImpl> {
+        let obj = self.bind_expr_inner(obj)?;
+        let start = match start {
+            None => ExprImpl::literal_int(1),
+            Some(expr) => self
+                .bind_expr_inner(*expr)?
+                .cast_implicit(DataType::Int32)?,
+        };
+        // Don't worry, the backend implementation will stop iterating once it encounters the end
+        // of the array.
+        let end = match end {
+            None => ExprImpl::literal_int(i32::MAX),
+            Some(expr) => self
+                .bind_expr_inner(*expr)?
+                .cast_implicit(DataType::Int32)?,
+        };
+        match obj.return_type() {
+            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+                ExprType::ArrayRangeAccess,
+                vec![obj, start, end],
+                DataType::List(return_type),
+            )
+            .into()),
+            data_type => Err(ErrorCode::BindError(format!(
+                "array range index applied to type {}, which is not a composite type",
+                data_type
+            ))
+            .into()),
+        }
+    }
+
     /// `Row(...)` is represented as an function call at the binder stage.
     pub(super) fn bind_row(&mut self, exprs: Vec<Expr>) -> Result<ExprImpl> {
         let exprs = exprs
             .into_iter()
-            .map(|e| self.bind_expr(e))
+            .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let data_type =
             DataType::new_struct(exprs.iter().map(|e| e.return_type()).collect_vec(), vec![]);
@@ -201,7 +231,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..len {
             if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -245,7 +275,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
         for _ in 0..2 {
             if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
                 unicode_seq.push(chars.next().unwrap());
-            }else{
+            } else {
                 break;
             }
         }
@@ -292,7 +322,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
+    use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;
@@ -390,15 +420,13 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List { datatype } => {
+            DataType::List(datatype) => {
                 assert_eq!(datatype, Box::new(DataType::Int32));
             }
             _ => panic!("unexpected type"),
@@ -410,9 +438,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List {
-                datatype: Box::new(DataType::Int32),
-            },
+            DataType::List(Box::new(DataType::Int32)),
         )
         .into();
 
@@ -443,27 +469,27 @@ mod tests {
         ];
         let data = vec![
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(60))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_ymd(1, 0, 0))),
+                Some(ScalarImpl::Interval(Interval::from_ymd(1, 0, 0))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_millis(6 * 1000))),
+                Some(ScalarImpl::Interval(Interval::from_millis(6 * 1000))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_minutes(2))),
+                Some(ScalarImpl::Interval(Interval::from_minutes(2))),
                 DataType::Interval,
             )),
             Ok(Literal::new(
-                Some(ScalarImpl::Interval(IntervalUnit::from_month(1))),
+                Some(ScalarImpl::Interval(Interval::from_month(1))),
                 DataType::Interval,
             )),
         ];

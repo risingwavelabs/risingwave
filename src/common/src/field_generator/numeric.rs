@@ -22,7 +22,7 @@ use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, OrderedF32, OrderedF64, Scalar};
+use crate::types::{Datum, Scalar, F32, F64};
 
 trait NumericType
 where
@@ -33,7 +33,8 @@ where
         + PartialOrd
         + num_traits::Num
         + num_traits::NumAssignOps
-        + num_traits::NumCast
+        + From<i16>
+        + TryFrom<u64>
         + serde::Serialize
         + SampleUniform,
 {
@@ -72,7 +73,7 @@ where
         Self: Sized,
     {
         let mut min = T::zero();
-        let mut max = T::from(i16::MAX).unwrap();
+        let mut max = T::from(i16::MAX);
 
         if let Some(min_option) = min_option {
             min = min_option.parse::<T>()?;
@@ -101,18 +102,20 @@ impl<T> NumericFieldSequenceGenerator for NumericFieldSequenceConcrete<T>
 where
     T: NumericType + Scalar,
     <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    <T as TryFrom<u64>>::Error: Debug,
 {
     fn new(
         star_option: Option<String>,
         end_option: Option<String>,
         offset: u64,
         step: u64,
+        event_offset: u64,
     ) -> Result<Self>
     where
         Self: Sized,
     {
         let mut start = T::zero();
-        let mut end = T::from(i16::MAX).unwrap();
+        let mut end = T::from(i16::MAX);
 
         if let Some(star_optiont) = star_option {
             start = star_optiont.parse::<T>()?;
@@ -127,13 +130,16 @@ where
             end,
             offset,
             step,
-            ..Default::default()
+            cur: T::try_from(event_offset).map_err(|_| {
+                anyhow::anyhow!("event offset is too big, offset: {}", event_offset,)
+            })?,
         })
     }
 
     fn generate(&mut self) -> serde_json::Value {
-        let partition_result =
-            self.start + T::from(self.offset).unwrap() + T::from(self.step).unwrap() * self.cur;
+        let partition_result = self.start
+            + T::try_from(self.offset).unwrap()
+            + T::try_from(self.step).unwrap() * self.cur;
         let partition_result = if partition_result > self.end {
             None
         } else {
@@ -144,8 +150,9 @@ where
     }
 
     fn generate_datum(&mut self) -> Datum {
-        let partition_result =
-            self.start + T::from(self.offset).unwrap() + T::from(self.step).unwrap() * self.cur;
+        let partition_result = self.start
+            + T::try_from(self.offset).unwrap()
+            + T::try_from(self.step).unwrap() * self.cur;
         self.cur += T::one();
         if partition_result > self.end {
             None
@@ -162,8 +169,8 @@ macro_rules! for_all_fields_variants {
             { I16RandomField,I16SequenceField,i16 },
             { I32RandomField,I32SequenceField,i32 },
             { I64RandomField,I64SequenceField,i64 },
-            { F32RandomField,F32SequenceField,OrderedF32 },
-            { F64RandomField,F64SequenceField,OrderedF64 }
+            { F32RandomField,F32SequenceField,F32 },
+            { F64RandomField,F64SequenceField,F64 }
         }
     };
 }
@@ -191,10 +198,12 @@ for_all_fields_variants! { gen_sequence_field_alias }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::DefaultOrd;
+
     #[test]
     fn test_sequence_field_generator() {
         let mut i16_field =
-            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1).unwrap();
+            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }
@@ -222,12 +231,13 @@ mod tests {
     #[test]
     fn test_sequence_datum_generator() {
         let mut f32_field =
-            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1).unwrap();
+            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1, 0)
+                .unwrap();
 
         for i in 5..=10 {
             assert_eq!(
                 f32_field.generate_datum(),
-                Some(OrderedF32::from(i as f32).to_scalar_value())
+                Some(F32::from(i as f32).to_scalar_value())
             );
         }
     }
@@ -240,20 +250,20 @@ mod tests {
             let res = i32_field.generate_datum(i as u64);
             assert!(res.is_some());
             let res = res.unwrap();
-            assert!(lower <= res && res <= upper);
+            assert!(lower.default_cmp(&res).is_le() && res.default_cmp(&upper).is_le());
         }
     }
 
     #[test]
     fn test_sequence_field_generator_float() {
         let mut f64_field =
-            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1).unwrap();
+            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
         for i in 0..=10 {
             assert_eq!(f64_field.generate(), json!(i as f64));
         }
 
         let mut f32_field =
-            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1).unwrap();
+            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1, 0).unwrap();
         for i in -5..=5 {
             assert_eq!(f32_field.generate(), json!(i as f32));
         }

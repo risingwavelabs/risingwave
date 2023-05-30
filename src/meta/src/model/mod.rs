@@ -15,8 +15,8 @@
 mod barrier;
 mod catalog;
 mod cluster;
-mod connection;
 mod error;
+mod migration_plan;
 mod notification;
 mod stream;
 mod user;
@@ -31,6 +31,7 @@ pub use barrier::*;
 pub use catalog::*;
 pub use cluster::*;
 pub use error::*;
+pub use migration_plan::*;
 pub use notification::*;
 use prost::Message;
 pub use stream::*;

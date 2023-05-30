@@ -13,12 +13,19 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
+use futures::future::join_all;
+use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -31,6 +38,7 @@ use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
+use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
@@ -53,7 +61,7 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
+use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -61,10 +69,12 @@ use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::meta_member_service::MetaMemberServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::system_params_service::SystemParamsServiceImpl;
+use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::{hummock, MetaResult};
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
+use crate::{hummock, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -123,10 +133,16 @@ pub async fn rpc_serve(
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
+            // `with_keep_alive` option will break the long connection in election client.
+            let mut election_options = ConnectOptions::default();
+            if let Some((username, password)) = &credentials {
+                election_options = election_options.with_user(username, password)
+            }
+
             let election_client = Arc::new(
                 EtcdElectionClient::new(
                     endpoints,
-                    Some(options),
+                    Some(election_options),
                     auth_enabled,
                     address_info.advertise_addr.clone(),
                 )
@@ -324,6 +340,17 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
 
+    let data_directory = system_params_reader.data_directory();
+    if !is_correct_data_directory(data_directory) {
+        return Err(MetaError::system_param(format!(
+            "The data directory {:?} is misconfigured. 
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            The string cannot start or end with '/', and consecutive '/' are not allowed.
+            The data directory cannot be empty and its length should not exceed 800 characters.",
+            data_directory
+        )));
+    }
+
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
@@ -373,6 +400,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
         hummock_manager.clone(),
+        meta_metrics.clone(),
         system_params_reader.checkpoint_frequency() as usize,
     );
 
@@ -382,6 +410,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),
+            meta_metrics.clone(),
         )
         .await
         .unwrap(),
@@ -419,10 +448,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     hummock_manager
         .purge(
-            &fragment_manager
-                .list_table_fragments()
+            &catalog_manager
+                .list_tables()
                 .await
-                .expect("list_table_fragments"),
+                .into_iter()
+                .map(|t| t.id)
+                .collect_vec(),
         )
         .await?;
 
@@ -430,7 +461,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        meta_metrics.registry().clone(),
+        meta_metrics.clone(),
         system_params_reader.backup_storage_url(),
         system_params_reader.backup_storage_directory(),
     )
@@ -443,7 +474,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id && let Some(security_group_id) = &env.opts.security_group_id {
+    if let Some(my_vpc_id) = &env.opts.vpc_id
+        && let Some(security_group_id) = &env.opts.security_group_id
+    {
         let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
         aws_cli = Some(cli);
     }
@@ -480,7 +513,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        compactor_manager.clone(),
         vacuum_manager.clone(),
         fragment_manager.clone(),
     );
@@ -494,6 +526,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
+    let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -510,13 +543,25 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager.clone(),
+        vacuum_manager,
+        compaction_scheduler,
+        &env.opts,
+    );
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),
             election_client.clone(),
             Duration::from_secs(env.opts.node_num_monitor_interval_sec),
+            meta_metrics.clone(),
+        )
+        .await,
+    );
+    sub_tasks.push(
+        start_fragment_info_monitor(
+            cluster_manager.clone(),
+            fragment_manager.clone(),
             meta_metrics.clone(),
         )
         .await,
@@ -527,7 +572,11 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     if cfg!(not(test)) {
         sub_tasks.push(
-            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
+            ClusterManager::start_heartbeat_checker(
+                cluster_manager.clone(),
+                Duration::from_secs(1),
+            )
+            .await,
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
@@ -546,24 +595,63 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     });
     sub_tasks.push((stream_abort_handler, abort_sender));
 
+    let local_system_params_manager = LocalSystemParamsManager::new(system_params_reader.clone());
+
+    let mgr = TelemetryManager::new(
+        local_system_params_manager.watch_params(),
+        Arc::new(MetaTelemetryInfoFetcher::new(env.cluster_id().clone())),
+        Arc::new(MetaReportCreator::new(
+            cluster_manager,
+            meta_store.meta_store_type(),
+        )),
+    );
+
+    // May start telemetry reporting
+    if env.opts.telemetry_enabled && telemetry_env_enabled() {
+        if system_params_reader.telemetry_enabled() {
+            mgr.start_telemetry_reporting().await;
+        }
+        sub_tasks.push(mgr.watch_params_change());
+    } else {
+        tracing::info!("Telemetry didn't start due to meta backend or config");
+    }
+
     let shutdown_all = async move {
+        let mut handles = Vec::with_capacity(sub_tasks.len());
+
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
                 continue;
             }
-            // The barrier manager can't be shutdown gracefully if it's under recovering, try to
-            // abort it using timeout.
-            match tokio::time::timeout(Duration::from_secs(1), join_handle).await {
-                Ok(Err(err)) => {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
+
+            handles.push(join_handle);
+        }
+
+        // The barrier manager can't be shutdown gracefully if it's under recovering, try to
+        // abort it using timeout.
+        match tokio::time::timeout(Duration::from_secs(1), join_all(handles)).await {
+            Ok(results) => {
+                for result in results {
+                    if let Err(err) = result {
+                        tracing::warn!("Failed to join shutdown: {:?}", err);
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Join shutdown timeout: {:?}", e);
-                }
-                _ => {}
+            }
+            Err(e) => {
+                tracing::warn!("Join shutdown timeout: {:?}", e);
             }
         }
     };
+
+    // Persist params before starting services so that invalid params that cause meta node
+    // to crash will not be persisted.
+    system_params_manager.flush_params().await?;
+    env.cluster_id()
+        .put_at_meta_store(meta_store.deref())
+        .await?;
+
+    tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
+    tracing::info!("Starting meta services");
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
@@ -579,6 +667,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
+        .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {
@@ -596,4 +685,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await
         .unwrap();
     Ok(())
+}
+
+fn is_correct_data_directory(data_directory: &str) -> bool {
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/]{1,}$").unwrap();
+    if data_directory.is_empty()
+        || !data_directory_regex.is_match(data_directory)
+        || data_directory.ends_with('/')
+        || data_directory.starts_with('/')
+        || data_directory.contains("//")
+        || data_directory.len() > 800
+    {
+        return false;
+    }
+    true
 }

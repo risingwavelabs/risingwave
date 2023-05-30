@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use agg_call::*;
 pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::AggKind;
+use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::StateStore;
 
 use super::ActorContextRef;
@@ -30,13 +28,13 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
 
-mod agg_call;
 mod agg_group;
 pub mod agg_impl;
 mod agg_state;
+mod agg_state_cache;
 mod distinct;
 mod minput;
-mod state_cache;
+mod minput_agg_impl;
 mod table;
 mod value;
 
@@ -69,7 +67,7 @@ pub async fn agg_call_filter_res(
     ctx: &ActorContextRef,
     identity: &str,
     agg_call: &AggCall,
-    columns: &[Column],
+    columns: &[ArrayRef],
     base_visibility: Option<&Bitmap>,
     capacity: usize,
 ) -> StreamExecutorResult<Option<Bitmap>> {
@@ -79,7 +77,7 @@ pub async fn agg_call_filter_res(
     ) {
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
-        let agg_col_bitmap = columns[agg_col_idx].array_ref().null_bitmap();
+        let agg_col_bitmap = columns[agg_col_idx].null_bitmap();
         Some(agg_col_bitmap)
     } else {
         None
