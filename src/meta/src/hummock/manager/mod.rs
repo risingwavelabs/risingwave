@@ -16,6 +16,7 @@ use core::panic;
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -119,6 +120,7 @@ pub struct HummockManager<S: MetaStore> {
 
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
+    pause_version_checkpoint: AtomicBool,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -342,6 +344,7 @@ where
             event_sender: tx,
             object_store,
             version_checkpoint_path: checkpoint_path,
+            pause_version_checkpoint: AtomicBool::new(false),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;

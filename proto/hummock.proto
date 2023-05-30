@@ -579,6 +579,20 @@ message SplitCompactionGroupResponse {
   uint64 new_group_id = 1;
 }
 
+message RiseCtlPauseVersionCheckpointRequest {}
+
+message RiseCtlPauseVersionCheckpointResponse {}
+
+message RiseCtlResumeVersionCheckpointRequest {}
+
+message RiseCtlResumeVersionCheckpointResponse {}
+
+message RiseCtlGetCheckpointVersionRequest {}
+
+message RiseCtlGetCheckpointVersionResponse {
+  HummockVersion checkpoint_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -604,6 +618,9 @@ service HummockManagerService {
   rpc RiseCtlGetPinnedSnapshotsSummary(RiseCtlGetPinnedSnapshotsSummaryRequest) returns (RiseCtlGetPinnedSnapshotsSummaryResponse);
   rpc RiseCtlListCompactionGroup(RiseCtlListCompactionGroupRequest) returns (RiseCtlListCompactionGroupResponse);
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
+  rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
+  rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
+  rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
