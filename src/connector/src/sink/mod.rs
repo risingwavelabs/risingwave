@@ -259,15 +259,21 @@ impl From<SinkError> for RwError {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum TimestampHandlingMode {
+    Milli,
+    String,
+}
+
 pub fn record_to_json(
     row: RowRef<'_>,
     schema: &[Field],
-    timestamp_handling_string: bool,
+    timestamp_handling_mode: TimestampHandlingMode,
 ) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
     for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
         let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref, timestamp_handling_string)
+        let value = datum_to_json_object(field, datum_ref, timestamp_handling_mode)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
@@ -277,7 +283,7 @@ pub fn record_to_json(
 fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
-    timestamp_handling_string: bool,
+    timestamp_handling_mode: TimestampHandlingMode,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
         None => return Ok(Value::Null),
@@ -329,9 +335,9 @@ fn datum_to_json_object(
         (DataType::Date, ScalarRefImpl::Date(v)) => {
             json!(v.0.num_days_from_ce())
         }
-        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_string {
-            true => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
-            false => json!(v.0.timestamp_millis()),
+        (DataType::Timestamp, ScalarRefImpl::Timestamp(v)) => match timestamp_handling_mode {
+            TimestampHandlingMode::Milli => json!(v.0.timestamp_millis()),
+            TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         },
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
             json!(hex::encode(v))
@@ -348,7 +354,11 @@ fn datum_to_json_object(
             let mut vec = Vec::with_capacity(elems.len());
             let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
             for sub_datum_ref in elems {
-                let value = datum_to_json_object(&inner_field, sub_datum_ref, true)?;
+                let value = datum_to_json_object(
+                    &inner_field,
+                    sub_datum_ref,
+                    TimestampHandlingMode::String,
+                )?;
                 vec.push(value);
             }
             json!(vec)
@@ -361,7 +371,8 @@ fn datum_to_json_object(
                     .zip_eq_fast(st.field_names.iter())
                     .map(|(dt, name)| Field::with_name(dt.clone(), name)),
             ) {
-                let value = datum_to_json_object(&sub_field, sub_datum_ref, true)?;
+                let value =
+                    datum_to_json_object(&sub_field, sub_datum_ref, TimestampHandlingMode::String)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
@@ -397,7 +408,7 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(boolean_value, json!(false));
@@ -408,7 +419,7 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(int16_value, json!(16));
@@ -419,7 +430,7 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(
@@ -436,7 +447,7 @@ mod tests {
                 ..mock_field.clone()
             },
             Some(ScalarImpl::Int64(tstz_inner).as_scalar_ref_impl()),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
@@ -450,7 +461,7 @@ mod tests {
                 ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(1000, 0))
                     .as_scalar_ref_impl(),
             ),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(ts_value, json!("1970-01-01 00:16:40.000000".to_string()));
@@ -465,7 +476,7 @@ mod tests {
                 ScalarImpl::Time(Time::from_num_seconds_from_midnight_uncheck(1000, 0))
                     .as_scalar_ref_impl(),
             ),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(time_value, json!(1000 * 1000));
@@ -479,7 +490,7 @@ mod tests {
                 ScalarImpl::Interval(Interval::from_month_day_usec(13, 2, 1000000))
                     .as_scalar_ref_impl(),
             ),
-            true,
+            TimestampHandlingMode::String,
         )
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));

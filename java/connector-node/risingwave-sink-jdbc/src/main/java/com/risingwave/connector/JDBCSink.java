@@ -207,6 +207,15 @@ public class JDBCSink extends SinkBase {
         }
     }
 
+    /**
+     * Generates sql statement for insert/update
+     *
+     * @param inputStmt insert/update template string
+     * @param row column values to fill into statement
+     * @param updateDeleteValueBuffer pk values for update condition, pass null for insert
+     * @return prepared sql statement for insert/delete
+     * @throws SQLException
+     */
     private PreparedStatement generatePreparedStatement(
             String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
         PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);

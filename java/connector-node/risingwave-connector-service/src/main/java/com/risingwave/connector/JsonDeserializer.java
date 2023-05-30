@@ -214,7 +214,7 @@ public class JsonDeserializer implements Deserializer {
             case BYTEA:
                 if (!(value instanceof String)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected jsonb, got " + value.getClass())
+                            .withDescription("Expected bytea, got " + value.getClass())
                             .asRuntimeException();
                 }
                 String s = (String) value;

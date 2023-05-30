@@ -31,7 +31,8 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{
-    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, TimestampHandlingMode, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::{datum_to_json_object, record_to_json, Result};
@@ -256,7 +257,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row, &schema.fields, false)?,
+                        "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                         "op": "c",
                         "ts_ms": ts_ms,
                         "source": source_field,
@@ -265,7 +266,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields, false)?,
+                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
@@ -273,7 +274,11 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields, false)?);
+                    update_cache = Some(record_to_json(
+                        row,
+                        &schema.fields,
+                        TimestampHandlingMode::Milli,
+                    )?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -282,7 +287,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row, &schema.fields, false)?,
+                                "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
                                 "source": source_field,
@@ -324,15 +329,27 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
             let event_object = match op {
-                Op::Insert => Some(Value::Object(record_to_json(row, &schema.fields, false)?)),
+                Op::Insert => Some(Value::Object(record_to_json(
+                    row,
+                    &schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?)),
                 Op::Delete => Some(Value::Null),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields, false)?);
+                    update_cache = Some(record_to_json(
+                        row,
+                        &schema.fields,
+                        TimestampHandlingMode::Milli,
+                    )?);
                     continue;
                 }
                 Op::UpdateInsert => {
                     if update_cache.take().is_some() {
-                        Some(Value::Object(record_to_json(row, &schema.fields, false)?))
+                        Some(Value::Object(record_to_json(
+                            row,
+                            &schema.fields,
+                            TimestampHandlingMode::Milli,
+                        )?))
                     } else {
                         warn!(
                             "not found UpdateDelete in prev row, skipping, row index {:?}",
@@ -360,8 +377,12 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
-                let record =
-                    Value::Object(record_to_json(row, &self.schema.fields, false)?).to_string();
+                let record = Value::Object(record_to_json(
+                    row,
+                    &self.schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?)
+                .to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
@@ -451,7 +472,7 @@ fn pk_to_json(
     for idx in pk_indices {
         let field = &schema[*idx];
         let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx), false)
+        let value = datum_to_json_object(field, row.datum_at(*idx), TimestampHandlingMode::Milli)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
@@ -461,7 +482,11 @@ fn pk_to_json(
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(row, &schema.fields, false)?);
+        let record = Value::Object(record_to_json(
+            row,
+            &schema.fields,
+            TimestampHandlingMode::Milli,
+        )?);
         records.push(record.to_string());
     }
 
