@@ -61,7 +61,8 @@ impl LogicalProjectSet {
 
     /// `create` will analyze select exprs with table functions and construct a plan.
     ///
-    /// When there is no table functions in the select list, it will return a simple LogicalProject.
+    /// When there is no table functions in the select list, it will return a simple
+    /// `LogicalProject`.
     ///
     /// When table functions are used as arguments of a table function or a usual function, the
     /// arguments will be put at a lower `ProjectSet` while the call will be put at a higher
