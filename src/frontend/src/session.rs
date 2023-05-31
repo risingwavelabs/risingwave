@@ -668,8 +668,7 @@ impl SessionImpl {
             } else {
                 handle_fut.await
             }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        }?;
         Ok(rsp)
     }
 
@@ -852,8 +851,7 @@ impl Session<PgResponseStream, PrepareStatement, Portal> for SessionImpl {
             } else {
                 handle_fut.await
             }
-        }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql_str, e))?;
+        }?;
         Ok(rsp)
     }
 

@@ -346,7 +346,7 @@ where
             target: PGWIRE_QUERY_LOG,
             mode = %"(simple query)",
             session = %session_id,
-            status = %if result.is_ok() { "ok" } else { "err" },
+            status = %match &result { Ok(_) => "ok".to_string(), Err(err) => format!("{err}\n") },
             time = %format!("{}ms", mills),
             sql = %truncated_sql,
         );
@@ -360,9 +360,10 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(sql)
-            .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-            .map_err(|err| PsqlError::QueryError(err.into()))?;
+        let stmts = Parser::parse_sql(sql).map_err(|err| PsqlError::QueryError(err.into()))?;
+        if stmts.is_empty() {
+            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+        }
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
@@ -442,7 +443,7 @@ where
             target: PGWIRE_QUERY_LOG,
             mode = %"(extended query parse)",
             session = %session_id,
-            status = %if result.is_ok() { "ok" } else { "err" },
+            status = %match &result { Ok(_) => "ok".to_string(), Err(err) => format!("{err}\n") },
             time = %format!("{}ms", mills),
             sql = %truncated_sql,
         );
@@ -466,9 +467,7 @@ where
         }
 
         let stmt = {
-            let stmts = Parser::parse_sql(sql)
-                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-                .map_err(|err| PsqlError::ParseError(err.into()))?;
+            let stmts = Parser::parse_sql(sql).map_err(|err| PsqlError::ParseError(err.into()))?;
 
             if stmts.len() > 1 {
                 return Err(PsqlError::ParseError(
@@ -586,7 +585,7 @@ where
                 target: PGWIRE_QUERY_LOG,
                 mode = %"(extended query execute)",
                 session = %session_id,
-                status = %if result.is_ok() { "ok" } else { "err" },
+                status = %match &result { Ok(_) => "ok".to_string(), Err(err) => format!("{err}\n") },
                 time = %format!("{}ms", mills),
                 sql = %truncated_sql,
             );
