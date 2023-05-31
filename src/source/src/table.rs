@@ -18,8 +18,6 @@ use anyhow::{anyhow, Context};
 use futures::FutureExt;
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
-use rand::seq::IteratorRandom;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_message::TxnMsg;
@@ -175,17 +173,18 @@ impl TableStreamReader {
         }
     }
 
-    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    #[try_stream(boxed, ok = TxnMsg, error = RwError)]
     pub async fn into_stream(mut self) {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
-            match txn_msg {
+            match &txn_msg {
                 TxnMsg::Begin(_) | TxnMsg::End(_) => {
                     _ = notifier.send(0);
+                    yield txn_msg;
                 }
                 TxnMsg::Data(_, chunk) => {
                     _ = notifier.send(chunk.cardinality());
-                    yield chunk;
+                    yield txn_msg;
                 }
             }
         }
@@ -199,7 +198,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::{Array, I64Array, Op};
+    use risingwave_common::array::{Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::transaction::TxnId;
     use risingwave_common::types::DataType;
@@ -243,9 +242,12 @@ mod tests {
 
         macro_rules! check_next_chunk {
             ($i: expr) => {
-                assert_matches!(reader.next().await.unwrap()?, chunk => {
+                assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+                assert_matches!(reader.next().await.unwrap()?, txn_msg => {
+                    let chunk = txn_msg.as_stream_chunk().unwrap();
                     assert_eq!(chunk.columns()[0].as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
+                assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
             }
         }
 

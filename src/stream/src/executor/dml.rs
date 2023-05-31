@@ -16,6 +16,7 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
+use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
@@ -123,9 +124,16 @@ impl DmlExecutor {
                     }
                     yield msg;
                 }
-                Either::Right(chunk) => {
+                Either::Right(txn_msg) => {
                     // Batch data.
-                    yield Message::Chunk(chunk);
+                    match txn_msg {
+                        TxnMsg::Begin(_) | TxnMsg::End(_) => {
+                            // TODO(dylan): process txn
+                        }
+                        TxnMsg::Data(_, chunk) => {
+                            yield Message::Chunk(chunk);
+                        }
+                    }
                 }
             }
         }

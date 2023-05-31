@@ -19,15 +19,15 @@ use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
-use risingwave_connector::source::BoxStreamChunkStream;
+use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_connector::source::BoxTxnMsgStream;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Message;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 
-type DmlReaderData = StreamExecutorResult<Either<Message, StreamChunk>>;
+type DmlReaderData = StreamExecutorResult<Either<Message, TxnMsg>>;
 type DmlReaderArm = BoxStream<'static, DmlReaderData>;
 type DmlReaderWithPauseInner =
     SelectWithStrategy<DmlReaderArm, DmlReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
@@ -44,13 +44,13 @@ pub(super) struct DmlReaderWithPause {
 }
 
 impl DmlReaderWithPause {
-    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn data_stream(stream: BoxStreamChunkStream) {
+    #[try_stream(ok = TxnMsg, error = StreamExecutorError)]
+    async fn data_stream(stream: BoxTxnMsgStream) {
         // TODO: support stack trace for Stream
         #[for_await]
-        for chunk in stream {
-            match chunk {
-                Ok(chunk) => yield chunk,
+        for txn_msg in stream {
+            match txn_msg {
+                Ok(txn_msg) => yield txn_msg,
                 Err(err) => {
                     return Err(StreamExecutorError::dml_error(err));
                 }
@@ -60,7 +60,7 @@ impl DmlReaderWithPause {
 
     /// Construct a `DmlReaderWithPause` with one stream receiving barrier messages (and maybe
     /// other types of messages) and the other receiving data only (no barrier).
-    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxStreamChunkStream) -> Self {
+    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxTxnMsgStream) -> Self {
         let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
         let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
         let inner = Self::new_inner(message_stream_arm, data_stream_arm);

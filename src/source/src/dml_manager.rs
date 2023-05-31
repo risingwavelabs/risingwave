@@ -19,12 +19,10 @@ use std::sync::{Arc, Weak};
 
 use anyhow::Context;
 use parking_lot::RwLock;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::transaction::TxnId;
 use tokio::sync::oneshot;
 
 use crate::{TableDmlHandle, TableDmlHandleRef};
@@ -160,8 +158,10 @@ impl DmlManager {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
+    use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::transaction::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;

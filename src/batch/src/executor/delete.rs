@@ -201,6 +201,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::Array;
@@ -274,25 +275,23 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?;
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
-        assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
+            assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 
-        assert_eq!(
-            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-        );
+            assert_eq!(
+                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
+                vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+            );
 
-        assert_eq!(
-            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
-            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-        );
-
-        // Note: We need to keep calling `next()`, so that the executor can collect the `End`
-        // notification.
-        tokio::spawn(async move {
-            reader.next().await.unwrap().unwrap();
+            assert_eq!(
+                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
+                vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+            );
         });
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
 
         handle.await.unwrap();
 

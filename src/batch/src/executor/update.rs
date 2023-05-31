@@ -249,6 +249,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
 mod tests {
     use std::sync::Arc;
 
+    use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::Array;
     use risingwave_common::catalog::{
@@ -330,41 +331,39 @@ mod tests {
             );
         });
 
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+
         // Read
         // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
         // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
         for updated_rows in [1..=3, 4..=5] {
-            let chunk = reader.next().await.unwrap()?;
+            assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
+                assert_eq!(
+                    chunk.ops().chunks(2).collect_vec(),
+                    vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
+                );
 
-            assert_eq!(
-                chunk.ops().chunks(2).collect_vec(),
-                vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
-            );
+                assert_eq!(
+                    chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
+                    updated_rows
+                        .clone()
+                        .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
+                        .map(Some)
+                        .collect_vec()
+                );
 
-            assert_eq!(
-                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-                updated_rows
-                    .clone()
-                    .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
-                    .map(Some)
-                    .collect_vec()
-            );
-
-            assert_eq!(
-                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
-                updated_rows
-                    .clone()
-                    .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
-                    .map(Some)
-                    .collect_vec()
-            );
+                assert_eq!(
+                    chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
+                    updated_rows
+                        .clone()
+                        .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
+                        .map(Some)
+                        .collect_vec()
+                );
+            });
         }
 
-        // Note: We need to keep calling `next()`, so that the executor can collect the `End`
-        // notification.
-        tokio::spawn(async move {
-            reader.next().await.unwrap().unwrap();
-        });
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
 
         handle.await.unwrap();
 

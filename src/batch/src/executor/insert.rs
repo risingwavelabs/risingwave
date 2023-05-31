@@ -275,6 +275,7 @@ mod tests {
     use std::ops::Bound;
     use std::sync::Arc;
 
+    use assert_matches::assert_matches;
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
@@ -371,30 +372,33 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?;
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
-        assert_eq!(
-            chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
-            vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
-        );
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
+            assert_eq!(
+                chunk.columns()[0].as_int32().iter().collect::<Vec<_>>(),
+                vec![Some(1), Some(3), Some(5), Some(7), Some(9)]
+            );
 
-        assert_eq!(
-            chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
-            vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
-        );
+            assert_eq!(
+                chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
+                vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
+            );
 
-        let array: ArrayImpl = StructArray::from_slices(
-            &[true, false, false, false, false],
-            vec![
-                I32Array::from_iter([Some(1), None, None, None, None]).into(),
-                I32Array::from_iter([Some(2), None, None, None, None]).into(),
-                I32Array::from_iter([Some(3), None, None, None, None]).into(),
-            ],
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
-        )
-        .into();
-        assert_eq!(*chunk.columns()[2], array);
+            let array: ArrayImpl = StructArray::from_slices(
+                &[true, false, false, false, false],
+                vec![
+                    I32Array::from_iter([Some(1), None, None, None, None]).into(),
+                    I32Array::from_iter([Some(2), None, None, None, None]).into(),
+                    I32Array::from_iter([Some(3), None, None, None, None]).into(),
+                ],
+                vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            )
+            .into();
+            assert_eq!(*chunk.columns()[2], array);
+        });
 
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_));
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
@@ -414,12 +418,6 @@ mod tests {
             )
             .await?;
         assert!(store_content.is_empty());
-
-        // Note: We need to keep calling `next()`, so that the executor can collect the `End`
-        // notification.
-        tokio::spawn(async move {
-            reader.next().await.unwrap().unwrap();
-        });
 
         handle.await.unwrap();
 

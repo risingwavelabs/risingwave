@@ -25,6 +25,7 @@ use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
+use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
@@ -167,7 +168,7 @@ pub enum SourceFormat {
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-pub type BoxStreamChunkStream = BoxStream<'static, Result<StreamChunk, RwError>>;
+pub type BoxTxnMsgStream = BoxStream<'static, Result<TxnMsg, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
