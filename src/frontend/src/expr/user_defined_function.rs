@@ -74,7 +74,7 @@ impl Expr for UserDefinedFunction {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: Type::Unspecified.into(),
+            function_type: Type::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::Udf(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),

@@ -96,7 +96,7 @@ impl Expr for Literal {
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: ExprType::Unspecified as i32,
+            function_type: ExprType::Unspecified as i32,
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(literal_to_value_encoding(self.get_data())),
         }

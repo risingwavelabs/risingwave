@@ -46,7 +46,7 @@ use crate::MetaResult;
 
 fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
-        expr_type: Type::Unspecified as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -247,7 +247,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     let filter_node = StreamNode {
         node_body: Some(NodeBody::Filter(FilterNode {
             search_condition: Some(ExprNode {
-                expr_type: GreaterThan as i32,
+                function_type: GreaterThan as i32,
                 return_type: Some(DataType {
                     type_name: TypeName::Boolean as i32,
                     ..Default::default()
@@ -333,7 +333,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             select_list: vec![
                 ExprNode {
                     rex_node: Some(RexNode::FuncCall(function_call_1)),
-                    expr_type: Add as i32,
+                    function_type: Add as i32,
                     return_type: Some(DataType {
                         type_name: TypeName::Int64 as i32,
                         ..Default::default()

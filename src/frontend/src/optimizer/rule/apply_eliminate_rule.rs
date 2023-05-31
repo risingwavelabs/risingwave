@@ -145,7 +145,7 @@ impl ApplyEliminateRule {
     /// `LogicalApply`'s left and right.
     fn check(func_call: &FunctionCall, apply_left_len: usize) -> Option<(usize, usize, DataType)> {
         let inputs = func_call.inputs();
-        if func_call.get_expr_type() == ExprType::Equal && inputs.len() == 2 {
+        if func_call.gett_expr_type() == ExprType::Equal && inputs.len() == 2 {
             let left = &inputs[0];
             let right = &inputs[1];
             match (left, right) {

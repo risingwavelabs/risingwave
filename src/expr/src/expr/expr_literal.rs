@@ -111,7 +111,7 @@ mod tests {
         ]);
         let body = serialize_datum(Some(value.clone().to_scalar_value()).as_ref());
         let expr = ExprNode {
-            expr_type: Type::Unspecified as i32,
+            function_type: Type::Unspecified as i32,
             return_type: Some(PbDataType {
                 type_name: TypeName::Struct as i32,
                 field_type: vec![
@@ -205,7 +205,7 @@ mod tests {
 
     fn make_expression(bytes: Option<Vec<u8>>, data_type: TypeName) -> ExprNode {
         ExprNode {
-            expr_type: Type::Unspecified as i32,
+            function_type: Type::Unspecified as i32,
             return_type: Some(PbDataType {
                 type_name: data_type as i32,
                 interval_type: IntervalType::Month as i32,

@@ -40,7 +40,7 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Vnode);
+        ensure!(prost.get_function_type().unwrap() == Type::Vnode);
         ensure!(DataType::from(prost.get_return_type().unwrap()) == DataType::Int16);
 
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -99,7 +99,7 @@ mod tests {
 
     pub fn make_vnode_function(children: Vec<ExprNode>) -> ExprNode {
         ExprNode {
-            expr_type: Vnode as i32,
+            function_type: Vnode as i32,
             return_type: Some(PbDataType {
                 type_name: TypeName::Int16 as i32,
                 ..Default::default()

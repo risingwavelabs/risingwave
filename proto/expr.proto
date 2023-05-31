@@ -191,7 +191,7 @@ message ExprNode {
     // Non-deterministic functions
     PROCTIME = 2023;
   }
-  Type expr_type = 1;
+  Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
     uint32 input_ref = 4;

@@ -49,7 +49,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         RexNode::FuncCall(func_call) => func_call,
     };
 
-    let func_type = prost.expr_type();
+    let func_type = prost.function_type();
 
     match func_type {
         E::Unspecified => unreachable!(),
@@ -71,7 +71,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from_boxed(prost)
         }
         E::Vnode => VnodeExpression::try_from_boxed(prost),
-        E::ArrayRemove => ArrayRemoveExpression::try_from_boxed(prost),
         E::Proctime => ProcTimeExpression::try_from_boxed(prost),
 
         _ => {

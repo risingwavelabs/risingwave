@@ -200,17 +200,17 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        let outer_expr_type = prost.get_expr_type().unwrap();
+        let outer_expr_type = prost.get_function_type().unwrap();
         let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;
         ensure!(matches!(outer_return_type, DataType::Boolean));
 
-        let mut inner_expr_type = outer_children[0].get_expr_type().unwrap();
+        let mut inner_expr_type = outer_children[0].get_function_type().unwrap();
         let (mut inner_children, mut inner_return_type) =
             get_children_and_return_type(&outer_children[0])?;
         let mut stack = vec![];
         while inner_children.len() != 2 {
             stack.push((inner_expr_type, inner_return_type));
-            inner_expr_type = inner_children[0].get_expr_type().unwrap();
+            inner_expr_type = inner_children[0].get_function_type().unwrap();
             (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
         }
 
@@ -223,17 +223,17 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
 
         let eval_func = {
             let left_expr_input_ref = ExprNode {
-                expr_type: Type::Unspecified as i32,
+                function_type: Type::Unspecified as i32,
                 return_type: Some(left_expr.return_type().to_protobuf()),
                 rex_node: Some(RexNode::InputRef(0)),
             };
             let right_expr_input_ref = ExprNode {
-                expr_type: Type::Unspecified as i32,
+                function_type: Type::Unspecified as i32,
                 return_type: Some(right_expr_return_type.to_protobuf()),
                 rex_node: Some(RexNode::InputRef(1)),
             };
             let mut root_expr_node = ExprNode {
-                expr_type: inner_expr_type as i32,
+                function_type: inner_expr_type as i32,
                 return_type: Some(inner_return_type.to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left_expr_input_ref, right_expr_input_ref],
@@ -241,7 +241,7 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
             };
             while let Some((expr_type, return_type)) = stack.pop() {
                 root_expr_node = ExprNode {
-                    expr_type: expr_type as i32,
+                    function_type: expr_type as i32,
                     return_type: Some(return_type.to_protobuf()),
                     rex_node: Some(RexNode::FuncCall(FunctionCall {
                         children: vec![root_expr_node],

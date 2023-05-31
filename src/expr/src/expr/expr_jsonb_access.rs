@@ -307,7 +307,7 @@ mod tests {
         let values = FunctionCall {
             children: vec![
                 ExprNode {
-                    expr_type: Type::Unspecified as i32,
+                    function_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
@@ -317,7 +317,7 @@ mod tests {
                     })),
                 },
                 ExprNode {
-                    expr_type: Type::Unspecified as i32,
+                    function_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
@@ -331,7 +331,7 @@ mod tests {
         let array_index = FunctionCall {
             children: vec![
                 ExprNode {
-                    expr_type: Type::Array as i32,
+                    function_type: Type::Array as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::List as i32,
                         field_type: vec![ProstDataType {
@@ -343,7 +343,7 @@ mod tests {
                     rex_node: Some(RexNode::FuncCall(values)),
                 },
                 ExprNode {
-                    expr_type: Type::Unspecified as i32,
+                    function_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
@@ -355,7 +355,7 @@ mod tests {
             ],
         };
         let access = ExprNode {
-            expr_type: Type::ArrayAccess as i32,
+            function_type: Type::ArrayAccess as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()

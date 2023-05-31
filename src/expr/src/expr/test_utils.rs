@@ -30,7 +30,7 @@ use crate::ExprError;
 
 pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> ExprNode {
     ExprNode {
-        expr_type: kind as i32,
+        function_type: kind as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
@@ -41,7 +41,7 @@ pub fn make_func_call(kind: Type, ret: TypeName, children: Vec<ExprNode>) -> Exp
 
 pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     ExprNode {
-        expr_type: Type::Unspecified as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
@@ -52,7 +52,7 @@ pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
 
 pub fn make_i32_literal(data: i32) -> ExprNode {
     ExprNode {
-        expr_type: Type::Unspecified as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
@@ -65,7 +65,7 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
 
 fn make_interval_literal(data: Interval) -> ExprNode {
     ExprNode {
-        expr_type: Type::Unspecified as i32,
+        function_type: Type::Unspecified as i32,
         return_type: Some(PbDataType {
             type_name: TypeName::Interval as i32,
             ..Default::default()
@@ -78,7 +78,7 @@ fn make_interval_literal(data: Interval) -> ExprNode {
 
 pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
     ExprNode {
-        expr_type: Field as i32,
+        function_type: Field as i32,
         return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()

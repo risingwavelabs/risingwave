@@ -98,7 +98,7 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::In);
+        ensure!(prost.get_function_type().unwrap() == Type::In);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_in_expr() {
         let input_ref_expr_node = ExprNode {
-            expr_type: Type::Unspecified as i32,
+            function_type: Type::Unspecified as i32,
             return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
@@ -151,7 +151,7 @@ mod tests {
         };
         let constant_values = vec![
             ExprNode {
-                expr_type: Type::Unspecified as i32,
+                function_type: Type::Unspecified as i32,
                 return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
@@ -161,7 +161,7 @@ mod tests {
                 })),
             },
             ExprNode {
-                expr_type: Type::Unspecified as i32,
+                function_type: Type::Unspecified as i32,
                 return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
@@ -177,7 +177,7 @@ mod tests {
             children: in_children,
         };
         let p = ExprNode {
-            expr_type: Type::In as i32,
+            function_type: Type::In as i32,
             return_type: Some(PbDataType {
                 type_name: TypeName::Boolean as i32,
                 ..Default::default()
