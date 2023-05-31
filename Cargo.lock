@@ -3578,12 +3578,11 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.17"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=2cf3fb0#2cf3fb0fdf590bcb67a814e67d963dd773fa33f4"
+version = "0.2.23+0.28"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=b2ab7dd#b2ab7ddac1ccca7b16dfdd02d939f4b5664e08fc"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
- "aws-smithy-types",
  "aws-types",
  "bytes",
  "http",
@@ -3626,8 +3625,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.14-alpha"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=6d342a9#6d342a98df0916ad115e06fd848a8f460730253f"
+version = "0.2.22"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=b2ab7dd#b2ab7ddac1ccca7b16dfdd02d939f4b5664e08fc"
 dependencies = [
  "async-channel",
  "async-trait",
