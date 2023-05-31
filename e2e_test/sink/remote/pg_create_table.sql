@@ -7,6 +7,5 @@ CREATE TABLE t_remote (
     v_decimal decimal,
     v_float real,
     v_double double precision,
-    v_timestamp timestamp,
-    v_timestamptz timestamptz
+    v_timestamp timestamp
 );
