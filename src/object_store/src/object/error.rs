@@ -18,6 +18,7 @@ use std::marker::{Send, Sync};
 
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
+use aws_sdk_s3::primitives::ByteStreamError;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
@@ -127,6 +128,12 @@ impl From<opendal::Error> for ObjectError {
 
 impl From<RecvError> for ObjectError {
     fn from(e: RecvError) -> Self {
+        ObjectErrorInner::Internal(e.to_string()).into()
+    }
+}
+
+impl From<ByteStreamError> for ObjectError {
+    fn from(e: ByteStreamError) -> Self {
         ObjectErrorInner::Internal(e.to_string()).into()
     }
 }

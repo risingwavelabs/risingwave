@@ -16,10 +16,9 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use aws_sdk_kinesis::error::GetRecordsError;
-use aws_sdk_kinesis::model::ShardIteratorType;
-use aws_sdk_kinesis::output::GetRecordsOutput;
-use aws_sdk_kinesis::types::SdkError;
+use aws_sdk_kinesis::error::SdkError;
+use aws_sdk_kinesis::operation::get_records::{GetRecordsError, GetRecordsOutput};
+use aws_sdk_kinesis::types::ShardIteratorType;
 use aws_sdk_kinesis::Client as KinesisClient;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -145,7 +144,7 @@ impl KinesisSplitReader {
                     );
                     yield chunk;
                 }
-                Err(SdkError::ServiceError { err, .. })
+                Err(SdkError::ServiceError { err, ..})
                     if err.is_resource_not_found_exception() =>
                 {
                     tracing::warn!("shard {:?} is closed, stop reading", self.shard_id);
@@ -161,7 +160,7 @@ impl KinesisSplitReader {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
-                Err(SdkError::ServiceError { err, .. })
+                Err(SdkError::ServiceError { eeerr, .. })
                     if err.is_provisioned_throughput_exceeded_exception() =>
                 {
                     tracing::warn!(

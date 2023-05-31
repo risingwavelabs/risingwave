@@ -59,7 +59,7 @@ impl AwsConfigInfo {
                 access_key_id,
                 secret_access_key,
                 session_token,
-            }) => SharedCredentialsProvider::new(aws_types::Credentials::from_keys(
+            }) => SharedCredentialsProvider::new(aws_credential_types::Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
                 session_token.clone(),
