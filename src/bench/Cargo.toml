@@ -10,7 +10,7 @@ repository = { workspace = true }
 [dependencies]
 async-trait = "0.1"
 aws-config = { workspace = true }
-aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-credential-types = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
