@@ -22,11 +22,13 @@ import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
+import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.Map;
 
 public class JsonDeserializer implements Deserializer {
@@ -146,8 +148,8 @@ public class JsonDeserializer implements Deserializer {
 
     private static Date castDate(Object value) {
         try {
-            Long days = castLong(value);
-            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days - 1));
+            Long days = castLong(value) - 1;
+            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days));
         } catch (RuntimeException e) {
             throw io.grpc.Status.INVALID_ARGUMENT
                     .withDescription("unable to cast into date from " + value.getClass())
@@ -156,6 +158,10 @@ public class JsonDeserializer implements Deserializer {
     }
 
     private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
+        // value might be null
+        if (value == null) {
+            return null;
+        }
         switch (typeName) {
             case INT16:
                 return castLong(value).shortValue();
@@ -210,6 +216,14 @@ public class JsonDeserializer implements Deserializer {
                             .asRuntimeException();
                 }
                 return value;
+            case BYTEA:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected bytea, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                byte[] bytes = Base64.getDecoder().decode((String) value);
+                return new ByteArrayInputStream(bytes);
             case LIST:
                 if (!(value instanceof java.util.ArrayList<?>)) {
                     throw io.grpc.Status.INVALID_ARGUMENT

@@ -33,7 +33,7 @@ use risingwave_storage::StateStore;
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
-    OnlyOutputIfHasInput,
+    GroupKey, OnlyOutputIfHasInput,
 };
 use super::sort_buffer::SortBuffer;
 use super::{
@@ -41,6 +41,7 @@ use super::{
     Watermark,
 };
 use crate::cache::{cache_may_stale, new_with_hasher, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggGroup as GenericAggGroup};
@@ -82,6 +83,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     group_key_indices: Vec<usize>,
+
+    // The projection from group key in table schema to table pk.
+    group_key_table_pk_projection: Arc<[usize]>,
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
@@ -198,6 +202,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             &args.agg_calls,
             Some(&args.extra.group_key_indices),
         );
+
+        let group_key_len = args.extra.group_key_indices.len();
+        // NOTE: we assume the prefix of table pk is exactly the group key
+        let group_key_table_pk_projection = &args.result_table.pk_indices()[..group_key_len];
+        assert!(group_key_table_pk_projection
+            .iter()
+            .sorted()
+            .copied()
+            .eq(0..group_key_len));
+
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
@@ -211,6 +225,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
+                group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
@@ -269,7 +284,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         // Create `AggGroup` for the current group if not exists. This will
                         // fetch previous agg result from the result table.
                         let agg_group = AggGroup::create(
-                            Some(key.deserialize(group_key_types)?),
+                            Some(GroupKey::new(
+                                key.deserialize(group_key_types)?,
+                                Some(this.group_key_table_pk_projection.clone()),
+                            )),
                             &this.agg_calls,
                             &this.storages,
                             &this.result_table,
@@ -532,19 +550,35 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             inner: mut this,
         } = self;
 
+        let window_col_idx_in_group_key = this.result_table.pk_indices()[0];
+        let window_col_idx = this.group_key_indices[window_col_idx_in_group_key];
+
+        let agg_group_cache_metrics_info = MetricsInfo::new(
+            this.metrics.clone(),
+            this.result_table.table_id(),
+            this.actor_ctx.id,
+            "agg result table",
+        );
+
         let mut vars = ExecutionVars {
             stats: ExecutionStats::new(),
-            agg_group_cache: new_with_hasher(this.watermark_epoch.clone(), PrecomputedBuildHasher),
+            agg_group_cache: new_with_hasher(
+                this.watermark_epoch.clone(),
+                agg_group_cache_metrics_info,
+                PrecomputedBuildHasher,
+            ),
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(
                 &this.agg_calls,
                 &this.watermark_epoch,
+                &this.distinct_dedup_tables,
+                this.actor_ctx.id,
                 this.metrics.clone(),
             ),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
             window_watermark: None,
             chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
-            buffer: SortBuffer::new(0, &this.result_table),
+            buffer: SortBuffer::new(window_col_idx_in_group_key, &this.result_table),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type
@@ -577,7 +611,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
-                        if group_key_seq == 0 {
+                        if watermark.col_idx == window_col_idx {
                             vars.window_watermark = Some(watermark.val.clone());
                         }
                         vars.buffered_watermarks[group_key_seq] =
@@ -595,7 +629,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     if this.emit_on_window_close {
                         // ignore watermarks on other columns
-                        if let Some(watermark) = vars.buffered_watermarks[0].take() {
+                        if let Some(watermark) =
+                            vars.buffered_watermarks[window_col_idx_in_group_key].take()
+                        {
                             yield Message::Watermark(watermark);
                         }
                     } else {

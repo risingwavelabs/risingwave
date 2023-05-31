@@ -20,14 +20,12 @@ use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 use std::sync::LazyLock;
 
-use anyhow::Context;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use regex::Regex;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_pb::data::PbInterval;
 use rust_decimal::prelude::Decimal;
 
@@ -1027,42 +1025,31 @@ impl Interval {
         });
         // wrap into a closure to simplify error handling
         let f = || {
-            let caps = ISO_8601_REGEX
-                .captures(s)
-                .context("regex capture failure")?;
-            let years: i32 = caps[1].parse()?;
-            let months: i32 = caps[2].parse()?;
-            let days = caps[3].parse()?;
-            let hours: i64 = caps[4].parse()?;
-            let minutes: i64 = caps[5].parse()?;
+            let caps = ISO_8601_REGEX.captures(s)?;
+            let years: i32 = caps[1].parse().ok()?;
+            let months: i32 = caps[2].parse().ok()?;
+            let days = caps[3].parse().ok()?;
+            let hours: i64 = caps[4].parse().ok()?;
+            let minutes: i64 = caps[5].parse().ok()?;
             // usecs = sec * 1000000, use decimal to be exact
-            let usecs: i64 = (Decimal::from_str_exact(&caps[6])?
-                .checked_mul(Decimal::from_str_exact("1000000").unwrap()))
-            .context("checked_mul failure")?
-            .try_into()?;
-            Ok(Interval::from_month_day_usec(
+            let usecs: i64 = (Decimal::from_str_exact(&caps[6])
+                .ok()?
+                .checked_mul(Decimal::from_str_exact("1000000").unwrap()))?
+            .try_into()
+            .ok()?;
+            Some(Interval::from_month_day_usec(
                 // months = years * 12 + months
-                years
-                    .checked_mul(12)
-                    .context("checked_mul failure")?
-                    .checked_add(months)
-                    .context("checked_add failure")?,
+                years.checked_mul(12)?.checked_add(months)?,
                 days,
                 // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
                 (hours
-                    .checked_mul(3_600)
-                    .context("checked_mul failure")?
-                    .checked_add(minutes.checked_mul(60).ok_or_else(|| {
-                        ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}", s))
-                    })?)
-                    .context("checked_add failure")?)
-                .checked_mul(USECS_PER_SEC)
-                .context("checked_mul failure")?
-                .checked_add(usecs)
-                .context("checked_add failure")?,
+                    .checked_mul(3_600)?
+                    .checked_add(minutes.checked_mul(60)?))?
+                .checked_mul(USECS_PER_SEC)?
+                .checked_add(usecs)?,
             ))
         };
-        f().map_err(|_: Box<dyn Error>| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
+        f().ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
     }
 }
 

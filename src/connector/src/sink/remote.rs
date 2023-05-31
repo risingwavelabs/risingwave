@@ -41,7 +41,7 @@ use tokio_stream::StreamExt;
 use tonic::{Status, Streaming};
 
 use super::catalog::SinkCatalog;
-use crate::sink::{record_to_json, Result, Sink, SinkError};
+use crate::sink::{record_to_json, Result, Sink, SinkError, TimestampHandlingMode};
 use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
@@ -208,6 +208,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                     | DataType::Time
                     | DataType::Interval
                     | DataType::Jsonb
+                    | DataType::Bytea
                     | DataType::List(_)
             ) {
                 Ok( Column {
@@ -216,7 +217,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 })
                 } else {
                     Err(SinkError::Remote(format!(
-                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, List, Timestamp and Varchar, got {:?}: {:?}",
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, List, Bytea, Timestamp and Varchar, got {:?}: {:?}",
                         column.column_desc.name,
                         column.column_desc.data_type
                     )))
@@ -304,7 +305,11 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
                 for (op, row_ref) in chunk.rows() {
-                    let map = record_to_json(row_ref, &self.schema.fields)?;
+                    let map = record_to_json(
+                        row_ref,
+                        &self.schema.fields,
+                        TimestampHandlingMode::String,
+                    )?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)

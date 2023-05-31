@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{unnested_list_type, DataType};
+use super::DataType;
 use crate::error::ErrorCode;
 
 /// Get type information compatible with Postgres type, such as oid, type length.
@@ -102,7 +102,7 @@ impl DataType {
             DataType::Struct(_) => 1043,
             DataType::Jsonb => 3802,
             DataType::Bytea => 17,
-            DataType::List(datatype) => match unnested_list_type(datatype.as_ref().clone()) {
+            DataType::List(inner) => match inner.unnest_list() {
                 DataType::Boolean => 1000,
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,

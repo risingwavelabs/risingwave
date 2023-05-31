@@ -143,7 +143,7 @@ impl<T> From<T> for Pointer<'static, T> {
     fn from(value: T) -> Self {
         Pointer {
             pointer: Box::into_raw(Box::new(value)) as jlong,
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -152,7 +152,7 @@ impl<T> Pointer<'static, T> {
     fn null() -> Self {
         Pointer {
             pointer: 0,
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -235,12 +235,9 @@ pub enum JavaBindingRowInner {
 #[derive(Default)]
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
+    byte_array_input_stream_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    // short_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    // int_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    // long_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    // float_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    // double_ctor: OnceCell<(GlobalRef, JMethodID)>,
+
     date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
     time_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
 }
@@ -680,6 +677,41 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimeValue<
             }));
         };
         Ok(obj)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let bytes = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_bytea();
+        let bytes_value = env.byte_array_from_slice(bytes)?;
+        let (ts_class_ref, constructor) = pointer
+            .as_ref()
+            .class_cache
+            .byte_array_input_stream_ctor
+            .get_or_try_init(|| {
+                let cls = env.find_class("java/io/ByteArrayInputStream")?;
+                let init_method = env.get_method_id(cls, "<init>", "([B)V")?;
+                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
+            })?;
+        let ts_class = JClass::from(ts_class_ref.as_obj());
+        unsafe {
+            let input_stream_obj = env.new_object_unchecked(
+                ts_class,
+                *constructor,
+                &[JValue::Object(JObject::from_raw(bytes_value))],
+            )?;
+
+            Ok(input_stream_obj)
+        }
     })
 }
 

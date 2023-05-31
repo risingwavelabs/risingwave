@@ -2,8 +2,8 @@
 - sql: |
     select generate_series('2'::INT,'10'::INT,'2'::INT);
   batch_plan: |
-    BatchProject { exprs: [Generate(2:Int32, 10:Int32, 2:Int32)] }
-    └─BatchProjectSet { select_list: [Generate(2:Int32, 10:Int32, 2:Int32)] }
+    BatchProject { exprs: [GenerateSeries(2:Int32, 10:Int32, 2:Int32)] }
+    └─BatchProjectSet { select_list: [GenerateSeries(2:Int32, 10:Int32, 2:Int32)] }
       └─BatchValues { rows: [[]] }
 - sql: |
     select unnest(Array[1,2,3]);
@@ -53,8 +53,8 @@
     select -generate_series(x,x,x) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [Neg(Generate($0, $0, $0)) as $expr1] }
-      └─BatchProjectSet { select_list: [Generate($0, $0, $0)] }
+    └─BatchProject { exprs: [Neg(GenerateSeries($0, $0, $0)) as $expr1] }
+      └─BatchProjectSet { select_list: [GenerateSeries($0, $0, $0)] }
         └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
 - name: table functions as parameters of usual functions
   sql: |
@@ -78,9 +78,9 @@
     create table t(x int[]);
     select generate_series(unnest(x),100,1) from t;
   batch_plan: |
-    BatchProject { exprs: [Generate($0, 100:Int32, 1:Int32)] }
+    BatchProject { exprs: [GenerateSeries($0, 100:Int32, 1:Int32)] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchProjectSet { select_list: [Generate($0, 100:Int32, 1:Int32)] }
+      └─BatchProjectSet { select_list: [GenerateSeries($0, 100:Int32, 1:Int32)] }
         └─BatchProject { exprs: [Unnest($0)] }
           └─BatchProjectSet { select_list: [Unnest($0)] }
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }

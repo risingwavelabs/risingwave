@@ -728,7 +728,6 @@ impl HummockVersionReader {
         );
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
-        let mut overlapping_iter_count = 0;
         let timer = self
             .state_store_metrics
             .iter_fetch_meta_duration
@@ -761,12 +760,23 @@ impl HummockVersionReader {
                     continue;
                 }
                 if sstables.len() > 1 {
-                    delete_range_iter.add_concat_iter(sstables.clone(), self.sstable_store.clone());
+                    let ssts_which_have_delete_range = sstables
+                        .iter()
+                        .filter(|sst| sst.get_range_tombstone_count() > 0)
+                        .cloned()
+                        .collect_vec();
+                    if !ssts_which_have_delete_range.is_empty() {
+                        delete_range_iter.add_concat_iter(
+                            ssts_which_have_delete_range,
+                            self.sstable_store.clone(),
+                        );
+                    }
                     non_overlapping_iters.push(ConcatIterator::new(
                         sstables,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
+                    local_stats.non_overlapping_iter_count += 1;
                 } else {
                     let sstable = self
                         .sstable_store
@@ -785,11 +795,17 @@ impl HummockVersionReader {
                             continue;
                         }
                     }
+                    // Since there is only one sst to be included for the current non-overlapping
+                    // level, there is no need to create a ConcatIterator on it.
+                    // We put the SstableIterator in `overlapping_iters` just for convenience since
+                    // it overlaps with SSTs in other levels. In metrics reporting, we still count
+                    // it in `non_overlapping_iter_count`.
                     overlapping_iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
+                    local_stats.non_overlapping_iter_count += 1;
                 }
             } else {
                 let table_infos = prune_overlapping_ssts(
@@ -826,7 +842,7 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
                     ));
-                    overlapping_iter_count += 1;
+                    local_stats.overlapping_iter_count += 1;
                 }
             }
         }
@@ -838,8 +854,6 @@ impl HummockVersionReader {
                 .iter_slow_fetch_meta_cache_unhits
                 .set(local_stats.cache_meta_block_miss as i64);
         }
-        local_stats.overlapping_iter_count = overlapping_iter_count;
-        local_stats.non_overlapping_iter_count = non_overlapping_iters.len() as u64;
 
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(

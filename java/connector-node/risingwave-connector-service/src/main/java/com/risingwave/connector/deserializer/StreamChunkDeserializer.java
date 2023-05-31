@@ -163,6 +163,16 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return row.getJsonb(index);
                             };
                     break;
+
+                case BYTEA:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getBytea(index);
+                            };
+                    break;
                 case LIST:
                     var fieldType = columnDesc.getDataType().getFieldType(0);
                     switch (fieldType.getTypeName()) {
@@ -212,7 +222,6 @@ public class StreamChunkDeserializer implements Deserializer {
                                 return objArray;
                             };
                     break;
-
                 default:
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription(

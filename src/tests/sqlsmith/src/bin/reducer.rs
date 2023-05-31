@@ -12,15 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::CtlContext;
+use clap::Parser;
+use risingwave_sqlsmith::reducer::shrink_file;
 
-pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let version = meta_client.disable_commit_epoch().await?;
-    println!(
-        "Disabled.\
-        Current version: id {}, max_committed_epoch {}",
-        version.id, version.max_committed_epoch
-    );
-    Ok(())
+/// Reduce an sql query
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Input file
+    #[arg(short, long)]
+    input_file: String,
+
+    /// Output file
+    #[arg(short, long)]
+    output_file: String,
+}
+
+fn main() {
+    let args = Args::parse();
+    shrink_file(&args.input_file, &args.output_file).unwrap();
 }

@@ -46,6 +46,16 @@ pub fn chr(code: i32, writer: &mut dyn Write) {
 /// select starts_with('abcdef', 'abc');
 /// ----
 /// t
+///
+/// query T
+/// select 'abcdef' ^@ 'abc';
+/// ----
+/// t
+///
+/// query T
+/// select 'abcdef' ^@ some(array['x', 'a', 't']);
+/// ----
+/// t
 /// ```
 #[function("starts_with(varchar, varchar) -> boolean")]
 pub fn starts_with(s: &str, prefix: &str) -> bool {

@@ -14,6 +14,8 @@
 
 package com.risingwave.java.binding;
 
+import java.io.ByteArrayInputStream;
+
 public class BaseRow implements AutoCloseable {
     protected final long pointer;
     private boolean isClosed;
@@ -79,6 +81,10 @@ public class BaseRow implements AutoCloseable {
     // string representation of jsonb: '{"key": "value"}'
     public String getJsonb(int index) {
         return Binding.rowGetJsonbValue(pointer, index);
+    }
+
+    public ByteArrayInputStream getBytea(int index) {
+        return Binding.rowGetByteaValue(pointer, index);
     }
 
     /**
