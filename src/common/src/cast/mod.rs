@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use itertools::Itertools;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
 use crate::types::{Date, Time, Timestamp};
@@ -207,51 +208,32 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
 }
 
 /// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
-#[expect(clippy::identity_op)]
 pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
-    let bytes = s.as_bytes();
+    let mut bytes = s.bytes();
 
-    let mut capacity = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'\\' {
-            i += 1;
-        } else if (bytes[i + 0] == b'\\')
-            && (bytes[i + 1] >= b'0' && bytes[i + 1] <= b'3')
-            && (bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7')
-            && (bytes[i + 3] >= b'0' && bytes[i + 3] <= b'7')
-        {
-            i += 4;
-        } else if (bytes[i + 0] == b'\\') && (bytes[i + 1] == b'\\') {
-            i += 2;
+    let mut res = Vec::new();
+    while let Some(b) = bytes.next() {
+        if b != b'\\' {
+            res.push(b);
         } else {
-            // one backslash, not followed by another or ### valid octal
-            return Err("invalid input syntax for type bytea".to_string());
-        }
-        capacity += 1;
-    }
-
-    let mut res = Vec::with_capacity(capacity);
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'\\' {
-            res.push(bytes[i]);
-            i += 1;
-        } else if (bytes[i + 0] == b'\\')
-            && (bytes[i + 1] >= b'0' && bytes[i + 1] <= b'3')
-            && (bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7')
-            && (bytes[i + 3] >= b'0' && bytes[i + 3] <= b'7')
-        {
-            res.push(
-                ((bytes[i + 1] - b'0') << 6) + ((bytes[i + 2] - b'0') << 3) + (bytes[i + 3] - b'0'),
-            );
-            i += 4;
-        } else if (bytes[i + 0] == b'\\') && (bytes[i + 1] == b'\\') {
-            res.push(b'\\');
-            i += 2;
-        } else {
-            // one backslash, not followed by another or ### valid octal
-            return Err("invalid input syntax for type bytea".to_string());
+            match bytes.next() {
+                Some(b'\\') => {
+                    res.push(b'\\');
+                }
+                Some(b1) => match bytes.next_tuple() {
+                    Some((b2, b3)) => {
+                        res.push(((b1 - b'0') << 6) + ((b2 - b'0') << 3) + (b3 - b'0'));
+                    }
+                    _ => {
+                        // one backslash, not followed by another or ### valid octal
+                        return Err("invalid input syntax for type bytea".to_string());
+                    }
+                },
+                None => {
+                    // one backslash, not followed by another or ### valid octal
+                    return Err("invalid input syntax for type bytea".to_string());
+                }
+            }
         }
     }
 
@@ -336,5 +318,19 @@ mod tests {
             str_to_bytea(r"De\\000dBeEf").unwrap().as_ref().to_text(),
             r"\x44655c3030306442654566"
         );
+
+        assert_eq!(str_to_bytea(r"\123").unwrap().as_ref().to_text(), r"\x53");
+        assert_eq!(str_to_bytea(r"\\").unwrap().as_ref().to_text(), r"\x5c");
+        assert_eq!(
+            str_to_bytea(r"123").unwrap().as_ref().to_text(),
+            r"\x313233"
+        );
+        assert_eq!(
+            str_to_bytea(r"\\123").unwrap().as_ref().to_text(),
+            r"\x5c313233"
+        );
+
+        assert!(str_to_bytea(r"\1").is_err());
+        assert!(str_to_bytea(r"\12").is_err());
     }
 }
