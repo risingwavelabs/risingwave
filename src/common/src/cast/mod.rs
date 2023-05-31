@@ -220,8 +220,8 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
                 Some(b'\\') => {
                     res.push(b'\\');
                 }
-                Some(b1) => match bytes.next_tuple() {
-                    Some((b2, b3)) => {
+                Some(b1 @ b'0'..=b'3') => match bytes.next_tuple() {
+                    Some((b2 @ b'0'..=b'7', b3 @ b'0'..=b'7')) => {
                         res.push(((b1 - b'0') << 6) + ((b2 - b'0') << 3) + (b3 - b'0'));
                     }
                     _ => {
@@ -229,7 +229,7 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
                         return Err("invalid input syntax for type bytea".to_string());
                     }
                 },
-                None => {
+                _ => {
                     // one backslash, not followed by another or ### valid octal
                     return Err("invalid input syntax for type bytea".to_string());
                 }
@@ -332,5 +332,9 @@ mod tests {
 
         assert!(str_to_bytea(r"\1").is_err());
         assert!(str_to_bytea(r"\12").is_err());
+        assert!(str_to_bytea(r"\400").is_err());
+        assert!(str_to_bytea(r"\378").is_err());
+        assert!(str_to_bytea(r"\387").is_err());
+        assert!(str_to_bytea(r"\377").is_ok());
     }
 }
