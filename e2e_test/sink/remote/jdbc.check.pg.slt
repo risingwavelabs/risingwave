@@ -12,8 +12,8 @@ select * from t_remote_0 order by id;
 query II
 select * from t_remote_1 order by id;
 ----
-1 Alex Text value 1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 {"key": "value"} \xdeadbeef     
-3 Varchar value 3 Text value 3 345 678 901 34.56 78.9 12.34 t 2023-05-24 12:34:56 2023-05-24 12:34:56 {"key": "value3"} \xcafebabe
-4 Varchar value 4 Text value 4 456 789 12 45.67 89.01 23.45 f 2023-05-25 23:45:01 2023-05-25 23:45:01 {"key": "value4"} \xbabec0de
-5 Varchar value 5 Text value 5 567 890 123 56.78 90.12 34.56 t 2023-05-26 12:34:56 2023-05-26 12:34:56 {"key": "value5"} \xdeadbabe
-6 Varchar value 6 Text value 6 789 123 456 67.89 34.56 78.91 f 2023-05-27 23:45:01 2023-05-27 23:45:01 {"key": "value6"} \xdeadbabe
+1 Alex Text value 1 123 456 789 12.34 56.78 90.12 t 2023-05-22 12:34:56 2023-05-22 12:34:56 2023-05-22 12:34:56+00 {"key": "value"} \xdeadbeef     
+3 Varchar value 3 Text value 3 345 678 901 34.56 78.9 12.34 t 2023-05-24 12:34:56 2023-05-24 12:34:56 2023-05-24 12:34:56+00 {"key": "value3"} \xcafebabe
+4 Varchar value 4 Text value 4 456 789 12 45.67 89.01 23.45 f 2023-05-25 23:45:01 2023-05-25 23:45:01 2023-05-25 23:45:01+00 {"key": "value4"} \xbabec0de
+5 Varchar value 5 Text value 5 567 890 123 56.78 90.12 34.56 t 2023-05-26 12:34:56 2023-05-26 12:34:56 2023-05-26 12:34:56+00 {"key": "value5"} \xdeadbabe
+6 Varchar value 6 Text value 6 789 123 456 67.89 34.56 78.91 f 2023-05-27 23:45:01 2023-05-27 23:45:01 2023-05-27 23:45:01+00 {"key": "value6"} \xdeadbabe

@@ -26,6 +26,7 @@ CREATE TABLE t_remote_1 (
     v_date DATE,
     v_time TIME,
     v_timestamp TIMESTAMP,
+    v_timestamptz TIMESTAMPTZ,
     v_jsonb JSONB,
     v_bytea BYTEA
 );
@@ -82,15 +83,15 @@ INSERT INTO t_remote_0 VALUES
 
 statement ok
 INSERT INTO t_remote_1 VALUES
-    (1, 'Varchar value 1', 'Text value 1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '{"key": "value"}', E'\\xDEADBEEF'),
-    (2, 'Varchar value 2', 'Text value 2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '{"key": "value2"}', E'\\xFEEDBEEF'),
-    (3, 'Varchar value 3', 'Text value 3', 345, 678, 901, 34.56, 78.90, 12.34, TRUE, '2023-05-24', '12:34:56', '2023-05-24 12:34:56', '{"key": "value3"}', E'\\xCAFEBABE');
+    (1, 'Varchar value 1', 'Text value 1', 123, 456, 789, 12.34, 56.78, 90.12, TRUE, '2023-05-22', '12:34:56', '2023-05-22 12:34:56', '2023-05-22 12:34:56Z', '{"key": "value"}', E'\\xDEADBEEF'),
+    (2, 'Varchar value 2', 'Text value 2', 234, 567, 890, 23.45, 67.89, 01.23, FALSE, '2023-05-23', '23:45:01', '2023-05-23 23:45:01', '2023-05-23 23:45:01Z', '{"key": "value2"}', E'\\xFEEDBEEF'),
+    (3, 'Varchar value 3', 'Text value 3', 345, 678, 901, 34.56, 78.90, 12.34, TRUE, '2023-05-24', '12:34:56', '2023-05-24 12:34:56', '2023-05-24 12:34:56Z', '{"key": "value3"}', E'\\xCAFEBABE');
 
 statement ok
 INSERT INTO t_remote_1 VALUES
-    (4, 'Varchar value 4', 'Text value 4', 456, 789, 012, 45.67, 89.01, 23.45, FALSE, '2023-05-25', '23:45:01', '2023-05-25 23:45:01', '{"key": "value4"}', E'\\xBABEC0DE'),
-    (5, 'Varchar value 5', 'Text value 5', 567, 890, 123, 56.78, 90.12, 34.56, TRUE, '2023-05-26', '12:34:56', '2023-05-26 12:34:56', '{"key": "value5"}', E'\\xDEADBABE'),
-    (6, 'Varchar value 6', 'Text value 6', 789, 123, 456, 67.89, 34.56, 78.91, FALSE, '2023-05-27', '23:45:01', '2023-05-27 23:45:01', '{"key": "value6"}', E'\\xDEADBABE');
+    (4, 'Varchar value 4', 'Text value 4', 456, 789, 012, 45.67, 89.01, 23.45, FALSE, '2023-05-25', '23:45:01', '2023-05-25 23:45:01', '2023-05-25 23:45:01Z', '{"key": "value4"}', E'\\xBABEC0DE'),
+    (5, 'Varchar value 5', 'Text value 5', 567, 890, 123, 56.78, 90.12, 34.56, TRUE, '2023-05-26', '12:34:56', '2023-05-26 12:34:56', '2023-05-26 12:34:56Z', '{"key": "value5"}', E'\\xDEADBABE'),
+    (6, 'Varchar value 6', 'Text value 6', 789, 123, 456, 67.89, 34.56, 78.91, FALSE, '2023-05-27', '23:45:01', '2023-05-27 23:45:01', '2023-05-27 23:45:01Z', '{"key": "value6"}', E'\\xDEADBABE');
 
 statement ok
 FLUSH;
