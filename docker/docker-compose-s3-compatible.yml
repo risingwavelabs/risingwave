@@ -25,14 +25,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    environment:
-      - RUST_BACKTRACE="1"
-      - S3_COMPATIBLE_REGION=your_region
-      - S3_COMPATIBLE_ENDPOINT=your_endpoint
-      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
-      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      - ENABLE_TELEMETRY=${ENABLE_TELEMETRY:-true}
+    env_file: s3-compatible.env
     container_name: compactor-0
     healthcheck:
       test:
@@ -69,13 +62,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    environment:
-      - RUST_BACKTRACE="1"
-      - S3_COMPATIBLE_REGION=your_region
-      - S3_COMPATIBLE_ENDPOINT=your_endpoint
-      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
-      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+    env_file: s3-compatible.env
     container_name: compute-node-0
     healthcheck:
       test:
@@ -227,14 +214,7 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    environment:
-      - RUST_BACKTRACE="1"
-      - S3_COMPATIBLE_REGION=your_region
-      - S3_COMPATIBLE_ENDPOINT=your_endpoint
-      - S3_COMPATIBLE_ACCESS_KEY_ID=your_access_key
-      - S3_COMPATIBLE_SECRET_ACCESS_KEY=your_secret_key
-      # If ENABLE_TELEMETRY is not set, telemetry will start by default
-      - ENABLE_TELEMETRY=${ENABLE_TELEMETRY:-true}
+    env_file: s3-compatible.env
     container_name: meta-node-0
     healthcheck:
       test:
