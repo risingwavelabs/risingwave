@@ -33,7 +33,7 @@
   expected_outputs:
   - stream_error
   - logical_plan
-  - batch_error
+  - batch_plan
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
@@ -226,6 +226,15 @@
   - optimized_logical_plan_for_batch
   - batch_error
   - stream_error
+- id: over window to agg and join
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select x, y, sum(x) over(partition by y), max(x) over(partition by y), min(w) over(partition by y) from t;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
 - id: create_bid
   sql: |
     /*
