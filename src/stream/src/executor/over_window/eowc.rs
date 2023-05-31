@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -72,13 +70,6 @@ impl Partition {
     fn is_ready(&self) -> bool {
         debug_assert!(self.is_aligned());
         self.states.iter().all(|state| state.curr_window().is_ready)
-    }
-
-    fn curr_window_key(&self) -> Option<&StateKey> {
-        debug_assert!(self.is_aligned());
-        self.states
-            .first()
-            .and_then(|state| state.curr_window().key)
     }
 }
 
