@@ -157,6 +157,8 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
+    use risingwave_common::transaction::TxnId;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
 
@@ -223,8 +225,29 @@ mod tests {
         tx.push_chunk(stream_chunk3);
 
         // Message from batch
+        const TEST_TRANSACTION_ID: TxnId = 1;
         dml_manager
-            .write_chunk(table_id, INITIAL_TABLE_VERSION_ID, batch_chunk)
+            .write_txn_msg(
+                table_id,
+                INITIAL_TABLE_VERSION_ID,
+                TxnMsg::Begin(TEST_TRANSACTION_ID),
+            )
+            .await
+            .unwrap();
+        dml_manager
+            .write_txn_msg(
+                table_id,
+                INITIAL_TABLE_VERSION_ID,
+                TxnMsg::Data(TEST_TRANSACTION_ID, batch_chunk),
+            )
+            .await
+            .unwrap();
+        dml_manager
+            .write_txn_msg(
+                table_id,
+                INITIAL_TABLE_VERSION_ID,
+                TxnMsg::End(TEST_TRANSACTION_ID),
+            )
             .await
             .unwrap();
 

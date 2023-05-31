@@ -61,6 +61,7 @@ pub mod row;
 pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
+pub mod transaction;
 
 pub mod metrics;
 pub mod test_utils;

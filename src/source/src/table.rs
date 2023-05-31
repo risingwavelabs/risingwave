@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use futures::FutureExt;
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
@@ -22,6 +22,7 @@ use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_connector::source::StreamChunkWithState;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
@@ -34,7 +35,7 @@ struct TableDmlHandleCore {
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::Sender<(StreamChunk, oneshot::Sender<usize>)>>,
+    changes_txs: Vec<mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>>,
 }
 
 /// The buffer size of the channel between each [`TableDmlHandle`] and the source executors.
@@ -80,7 +81,7 @@ impl TableDmlHandle {
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
     /// and the `usize` represents the cardinality of this chunk.
-    pub async fn write_chunk(&self, mut chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+    pub async fn write_txn_msg(&self, mut txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
         loop {
             // The `changes_txs` should not be empty normally, since we ensured that the channels
             // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
@@ -89,34 +90,42 @@ impl TableDmlHandle {
             // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
             // error instead of asserting here.
             // TODO: may reject DML when streaming executors are not recovered.
-            let tx = self
-                .core
-                .read()
-                .changes_txs
-                .iter()
-                .choose(&mut rand::thread_rng())
-                .context("no available table reader in streaming source executors")?
-                .clone();
+            let tx = {
+                let guard = self.core.read();
+                if guard.changes_txs.is_empty() {
+                    return Err(RwError::from(anyhow!(
+                        "no available table reader in streaming source executors"
+                    )));
+                }
+                let len = guard.changes_txs.len();
+                guard
+                    .changes_txs
+                    .get((txn_msg.txn_id() % len as u64) as usize)
+                    .context("no available table reader in streaming source executors")?
+                    .clone()
+            };
 
             #[cfg(debug_assertions)]
-            risingwave_common::util::schema_check::schema_check(
-                self.column_descs
-                    .iter()
-                    .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
-                chunk.columns(),
-            )
-            .expect("table source write chunk schema check failed");
+            if let TxnMsg::Data(_, chunk) = &txn_msg {
+                risingwave_common::util::schema_check::schema_check(
+                    self.column_descs
+                        .iter()
+                        .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
+                    chunk.columns(),
+                )
+                .expect("table source write chunk schema check failed");
+            }
 
             let (notifier_tx, notifier_rx) = oneshot::channel();
 
-            match tx.send((chunk, notifier_tx)).await {
+            match tx.send((txn_msg, notifier_tx)).await {
                 Ok(_) => return Ok(notifier_rx),
 
                 // It's possible that the source executor is scaled in or migrated, so the channel
                 // is closed. In this case, we should remove the closed channel and retry.
-                Err(SendError((chunk_, _))) => {
+                Err(SendError((txn_msg_, _))) => {
                     tracing::info!("find one closed table source channel, retry");
-                    chunk = chunk_;
+                    txn_msg = txn_msg_;
 
                     // Remove all closed channels.
                     self.core.write().changes_txs.retain(|tx| !tx.is_closed());
@@ -134,8 +143,8 @@ impl TableDmlHandle {
 #[easy_ext::ext(TableDmlHandleTestExt)]
 impl TableDmlHandle {
     /// Write a chunk and assert that the chunk channel is not blocking.
-    fn write_chunk_ready(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
-        self.write_chunk(chunk).now_or_never().unwrap()
+    fn write_txn_msg_ready(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
+        self.write_txn_msg(txn_msg).now_or_never().unwrap()
     }
 }
 
@@ -146,25 +155,39 @@ impl TableDmlHandle {
 #[derive(Debug)]
 pub struct TableStreamReader {
     /// The receiver of the changes channel.
-    rx: mpsc::Receiver<(StreamChunk, oneshot::Sender<usize>)>,
+    rx: mpsc::Receiver<(TxnMsg, oneshot::Sender<usize>)>,
 }
 
 impl TableStreamReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream_for_source_reader_test(mut self) {
-        while let Some((chunk, notifier)) = self.rx.recv().await {
+        while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
-            _ = notifier.send(chunk.cardinality());
-            yield chunk.into();
+            match txn_msg {
+                TxnMsg::Begin(_) | TxnMsg::End(_) => {
+                    _ = notifier.send(0);
+                }
+                TxnMsg::Data(_, chunk) => {
+                    _ = notifier.send(chunk.cardinality());
+                    yield chunk.into();
+                }
+            }
         }
     }
 
     #[try_stream(boxed, ok = StreamChunk, error = RwError)]
     pub async fn into_stream(mut self) {
-        while let Some((chunk, notifier)) = self.rx.recv().await {
+        while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
-            _ = notifier.send(chunk.cardinality());
-            yield chunk;
+            match txn_msg {
+                TxnMsg::Begin(_) | TxnMsg::End(_) => {
+                    _ = notifier.send(0);
+                }
+                TxnMsg::Data(_, chunk) => {
+                    _ = notifier.send(chunk.cardinality());
+                    yield chunk;
+                }
+            }
         }
     }
 }
@@ -178,6 +201,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::catalog::ColumnId;
+    use risingwave_common::transaction::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -193,6 +217,7 @@ mod tests {
     async fn test_table_dml_handle() -> Result<()> {
         let source = Arc::new(new_source());
         let mut reader = source.stream_reader().into_stream();
+        const TEST_TRANSACTION_ID: TxnId = 1;
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -202,7 +227,15 @@ mod tests {
                     vec![I64Array::from_iter([$i]).into_ref()],
                     None,
                 );
-                source.write_chunk_ready(chunk).unwrap();
+                source
+                    .write_txn_msg_ready(TxnMsg::Begin(TEST_TRANSACTION_ID))
+                    .unwrap();
+                source
+                    .write_txn_msg_ready(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
+                    .unwrap();
+                source
+                    .write_txn_msg_ready(TxnMsg::End(TEST_TRANSACTION_ID))
+                    .unwrap();
             }};
         }
 

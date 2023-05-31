@@ -21,6 +21,8 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::transaction::transaction_message::{generate_txn_id, TxnMsg};
+use risingwave_common::transaction::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -48,6 +50,7 @@ pub struct UpdateExecutor {
     schema: Schema,
     identity: String,
     returning: bool,
+    txn_id: TxnId,
 }
 
 impl UpdateExecutor {
@@ -87,6 +90,7 @@ impl UpdateExecutor {
             },
             identity,
             returning,
+            txn_id: generate_txn_id(),
         }
     }
 }
@@ -114,7 +118,7 @@ impl UpdateExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_chunk = |chunk: DataChunk| async {
+        let write_txn_data = |chunk: DataChunk| async {
             // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
@@ -124,9 +128,23 @@ impl UpdateExecutor {
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
             self.dml_manager
-                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::Data(self.txn_id, stream_chunk),
+                )
                 .await
         };
+
+        notifiers.push(
+            self.dml_manager
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::Begin(self.txn_id),
+                )
+                .await?,
+        );
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -153,14 +171,24 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    notifiers.push(write_chunk(chunk).await?);
+                    notifiers.push(write_txn_data(chunk).await?);
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_chunk(chunk).await?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
+
+        notifiers.push(
+            self.dml_manager
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::End(self.txn_id),
+                )
+                .await?,
+        );
 
         // Wait for all chunks to be taken / written.
         let rows_updated = try_join_all(notifiers)
@@ -331,6 +359,12 @@ mod tests {
                     .collect_vec()
             );
         }
+
+        // Note: We need to keep calling `next()`, so that the executor can collect the `End`
+        // notification.
+        tokio::spawn(async move {
+            reader.next().await.unwrap().unwrap();
+        });
 
         handle.await.unwrap();
 

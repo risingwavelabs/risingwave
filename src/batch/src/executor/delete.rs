@@ -20,6 +20,8 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::transaction::transaction_message::{generate_txn_id, TxnMsg};
+use risingwave_common::transaction::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -44,6 +46,7 @@ pub struct DeleteExecutor {
     schema: Schema,
     identity: String,
     returning: bool,
+    txn_id: TxnId,
 }
 
 impl DeleteExecutor {
@@ -72,6 +75,7 @@ impl DeleteExecutor {
             },
             identity,
             returning,
+            txn_id: generate_txn_id(),
         }
     }
 }
@@ -99,14 +103,28 @@ impl DeleteExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let write_chunk = |chunk: DataChunk| async {
+        let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
 
             self.dml_manager
-                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::Data(self.txn_id, stream_chunk),
+                )
                 .await
         };
+
+        notifiers.push(
+            self.dml_manager
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::Begin(self.txn_id),
+                )
+                .await?,
+        );
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -115,13 +133,23 @@ impl DeleteExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                notifiers.push(write_chunk(chunk).await?);
+                notifiers.push(write_txn_data(chunk).await?);
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            notifiers.push(write_chunk(chunk).await?);
+            notifiers.push(write_txn_data(chunk).await?);
         }
+
+        notifiers.push(
+            self.dml_manager
+                .write_txn_msg(
+                    self.table_id,
+                    self.table_version_id,
+                    TxnMsg::End(self.txn_id),
+                )
+                .await?,
+        );
 
         // Wait for all chunks to be taken / written.
         let rows_deleted = try_join_all(notifiers)
@@ -259,6 +287,12 @@ mod tests {
             chunk.columns()[1].as_int32().iter().collect::<Vec<_>>(),
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
+
+        // Note: We need to keep calling `next()`, so that the executor can collect the `End`
+        // notification.
+        tokio::spawn(async move {
+            reader.next().await.unwrap().unwrap();
+        });
 
         handle.await.unwrap();
 

@@ -23,6 +23,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::error::Result;
+use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::transaction::TxnId;
 use tokio::sync::oneshot;
 
 use crate::{TableDmlHandle, TableDmlHandleRef};
@@ -114,11 +116,11 @@ impl DmlManager {
         Ok(handle)
     }
 
-    pub async fn write_chunk(
+    pub async fn write_txn_msg(
         &self,
         table_id: TableId,
         table_version_id: TableVersionId,
-        chunk: StreamChunk,
+        txn_msg: TxnMsg,
     ) -> Result<oneshot::Receiver<usize>> {
         let handle = {
             let table_readers = self.table_readers.read();
@@ -147,7 +149,7 @@ impl DmlManager {
         }
         .with_context(|| format!("no reader for dml in table `{table_id:?}`"))?;
 
-        handle.write_chunk(chunk).await
+        handle.write_txn_msg(txn_msg).await
     }
 
     pub fn clear(&self) {
@@ -173,9 +175,26 @@ mod tests {
             table_version_id: TableVersionId,
             chunk: StreamChunk,
         ) -> Result<oneshot::Receiver<usize>> {
-            self.write_chunk(table_id, table_version_id, chunk)
+            const TEST_TRANSACTION_ID: TxnId = 1;
+            self.write_txn_msg(
+                table_id,
+                table_version_id,
+                TxnMsg::Begin(TEST_TRANSACTION_ID),
+            )
+            .now_or_never()
+            .unwrap()?;
+            let result = self
+                .write_txn_msg(
+                    table_id,
+                    table_version_id,
+                    TxnMsg::Data(TEST_TRANSACTION_ID, chunk),
+                )
                 .now_or_never()
-                .unwrap()
+                .unwrap();
+            self.write_txn_msg(table_id, table_version_id, TxnMsg::End(TEST_TRANSACTION_ID))
+                .now_or_never()
+                .unwrap()?;
+            result
         }
     }
 

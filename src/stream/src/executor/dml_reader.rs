@@ -116,6 +116,8 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
+    use risingwave_common::transaction::TxnId;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
@@ -144,8 +146,17 @@ mod tests {
         }
 
         // Write a chunk, and we should receive it.
+        const TEST_TRANSACTION_ID: TxnId = 1;
         table_dml_handle
-            .write_chunk(StreamChunk::default())
+            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
+            .await
+            .unwrap();
+        table_dml_handle
+            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
+            .await
+            .unwrap();
+        table_dml_handle
+            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();
         assert_matches!(next!().unwrap(), Either::Right(_));
@@ -160,7 +171,15 @@ mod tests {
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
         table_dml_handle
-            .write_chunk(StreamChunk::default())
+            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
+            .await
+            .unwrap();
+        table_dml_handle
+            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
+            .await
+            .unwrap();
+        table_dml_handle
+            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();
 
