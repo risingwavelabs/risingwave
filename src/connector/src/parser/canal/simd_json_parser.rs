@@ -199,13 +199,13 @@ fn cannal_simd_json_parse_value(
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
     use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, Decimal, JsonbVal, ScalarImpl, ToOwnedDatum};
+    use serde_json::Value;
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
@@ -213,7 +213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_types() {
-        let payload = br#"{"id":0,"database":"test","table":"data_type","pkNames":["id"],"isDdl":false,"type":"INSERT","es":1682057341424,"ts":1682057382913,"sql":"","sqlType":{"id":4,"tinyint":-6,"smallint":5,"mediumint":4,"int":4,"bigint":-5,"float":7,"double":8,"decimal":3,"date":91,"datetime":93,"time":92,"timestamp":93,"char":1,"varchar":12,"binary":2004,"varbinary":2004,"blob":2004,"text":2005,"enum":4,"set":-7},"mysqlType":{"binary":"binary","varbinary":"varbinary","enum":"enum","set":"set","bigint":"bigint","float":"float","datetime":"datetime","varchar":"varchar","smallint":"smallint","mediumint":"mediumint","double":"double","date":"date","char":"char","id":"int","tinyint":"tinyint","decimal":"decimal","blob":"blob","text":"text","int":"int","time":"time","timestamp":"timestamp"},"old":null,"data":[{"id":"1","tinyint":"5","smallint":"136","mediumint":"172113","int":"1801160058","bigint":"3916589616287113937","float":"0","double":"0.15652","decimal":"1.20364700","date":"2023-04-20","datetime":"2023-02-15 13:01:36","time":"20:23:41","timestamp":"2022-10-13 12:12:54","char":"Kathleen","varchar":"atque esse fugiat et quibusdam qui.","binary":"Joseph\u0000\u0000\u0000\u0000","varbinary":"Douglas","blob":"ducimus ut in commodi necessitatibus error magni repellat exercitationem!","text":"rerum sunt nulla quo quibusdam velit doloremque.","enum":"1","set":"1"}]}"#;
+        let payload = br#"{"id":0,"database":"test","table":"data_type","pkNames":["id"],"isDdl":false,"type":"INSERT","es":1682057341424,"ts":1682057382913,"sql":"","sqlType":{"id":4,"tinyint":-6,"smallint":5,"mediumint":4,"int":4,"bigint":-5,"float":7,"double":8,"decimal":3,"date":91,"datetime":93,"time":92,"timestamp":93,"char":1,"varchar":12,"binary":2004,"varbinary":2004,"blob":2004,"text":2005,"enum":4,"set":-7,"json":12},"mysqlType":{"binary":"binary","varbinary":"varbinary","enum":"enum","set":"set","bigint":"bigint","float":"float","datetime":"datetime","varchar":"varchar","smallint":"smallint","mediumint":"mediumint","double":"double","date":"date","char":"char","id":"int","tinyint":"tinyint","decimal":"decimal","blob":"blob","text":"text","int":"int","time":"time","timestamp":"timestamp","json":"json"},"old":null,"data":[{"id":"1","tinyint":"5","smallint":"136","mediumint":"172113","int":"1801160058","bigint":"3916589616287113937","float":"0","double":"0.15652","decimal":"1.20364700","date":"2023-04-20","datetime":"2023-02-15 13:01:36","time":"20:23:41","timestamp":"2022-10-13 12:12:54","char":"Kathleen","varchar":"atque esse fugiat et quibusdam qui.","binary":"Joseph\u0000\u0000\u0000\u0000","varbinary":"Douglas","blob":"ducimus ut in commodi necessitatibus error magni repellat exercitationem!","text":"rerum sunt nulla quo quibusdam velit doloremque.","enum":"1","set":"1","json":"{\"a\": 1, \"b\": 2}"}]}"#;
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("date", DataType::Date, 1.into()),
@@ -222,6 +222,7 @@ mod tests {
             SourceColumnDesc::simple("timestamp", DataType::Timestamp, 4.into()),
             SourceColumnDesc::simple("char", DataType::Varchar, 5.into()),
             SourceColumnDesc::simple("binary", DataType::Bytea, 6.into()),
+            SourceColumnDesc::simple("json", DataType::Jsonb, 7.into()),
         ];
         let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
 
@@ -267,6 +268,12 @@ mod tests {
             Some(ScalarImpl::Bytea(Box::from(
                 "Joseph\u{0}\u{0}\u{0}\u{0}".as_bytes()
             )))
+        );
+        assert_eq!(
+            row.datum_at(7).to_owned_datum(),
+            Some(ScalarImpl::Jsonb(JsonbVal::from(Value::from(
+                "{\"a\": 1, \"b\": 2}".to_string()
+            ))))
         );
     }
 
