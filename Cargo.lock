@@ -5684,6 +5684,7 @@ version = "1.0.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
+ "aws-credential-types",
  "aws-sdk-s3",
  "aws-smithy-http",
  "bcc",
