@@ -162,6 +162,9 @@ statement ok
 DROP SINK s2_postgres;
 
 statement ok
+DROP SINK s2_mysql;
+
+statement ok
 DROP SINK s_mysql_0;
 
 statement ok
