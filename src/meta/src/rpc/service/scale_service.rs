@@ -103,9 +103,35 @@ where
             .get_schedule(Request::new(GetScheduleRequest {}))
             .await?
             .into_inner();
+
+        // TODO: remove. Only for debugging
+        println!("fragments running on workers according to schedule: ");
+        for w in schedule.clone().worker_list {
+            let mut actors: Vec<u32> = vec![];
+            let pus = w.get_parallel_units().iter().map(|pu| pu.id).collect_vec();
+            for frag in schedule.clone().get_fragment_list() {
+                for act in frag.get_actor_list() {
+                    let act_pu = act.parallel_units_id;
+                    if pus.contains(&act_pu) {
+                        actors.push(act.actor_id);
+                    }
+                }
+            }
+            actors.sort();
+            println!("worker {} running actors: {:?}", w.id, actors);
+        }
+
         println!("got schedule"); // TODO: remove println
 
-        let mut pu_list_all: Vec<u32> = vec![];
+        let mut pu_deleting: Vec<u32> = vec![];
+        let pu_all = schedule
+            .clone()
+            .get_worker_list()
+            .iter()
+            .map(|worker| worker.parallel_units.iter().map(|pu| pu.id).collect_vec())
+            .flatten()
+            .dedup()
+            .collect_vec();
 
         // TODO: right now this is O(n*m). We can do better than that
         for host_address in request.into_inner().host_addresses {
@@ -130,11 +156,21 @@ where
             }
 
             let mut pu_list = pu_list.iter().map(|pu| pu.id).collect_vec();
-            pu_list_all.append(&mut pu_list);
+            pu_deleting.append(&mut pu_list);
         }
 
-        // Determine which fragment uses which PU on the to be cleared workers.
+        let pu_deleting = pu_deleting.iter().unique().map(|u| u.clone()).collect_vec();
+        let pu_all = pu_all.iter().unique().map(|u| u.clone()).collect_vec();
 
+        // TODO: use smarter rescheduling mechanism
+        // TODO: use hash maps here
+        let pu_keep = pu_all
+            .iter()
+            .filter(|&x| !pu_deleting.contains(x))
+            .cloned()
+            .collect_vec();
+
+        // Determine which fragment uses which PU on the to be cleared workers.
         let mut remove_map = std::collections::HashMap::new();
         for fragment in schedule.get_fragment_list() {
             // TODO: be fancy and do this with map?
@@ -143,7 +179,7 @@ where
             for actor in fragment.get_actor_list() {
                 // Number of PU o a worker is small, iterating is ok
                 let pu_id = actor.parallel_units_id;
-                if pu_list_all.contains(&pu_id) {
+                if pu_deleting.contains(&pu_id) {
                     remove_list.push(pu_id);
                 }
             }
@@ -167,13 +203,13 @@ where
             match reschedule_map.get_mut(fragment_id) {
                 Some(reschedule) => {
                     reschedule.removed_parallel_units.append(remove_pus)
-                    //                     reschedule.removed_parallel_units = remove_pus.clone()
+                    // reschedule.removed_parallel_units = remove_pus.clone()
                 }
                 None => {
                     reschedule_map.insert(
                         *fragment_id,
                         reschedule_request::Reschedule {
-                            added_parallel_units: vec![],
+                            added_parallel_units: pu_keep.clone(),
                             removed_parallel_units: remove_pus.clone(),
                         },
                     );

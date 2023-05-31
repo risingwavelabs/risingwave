@@ -127,6 +127,12 @@ async fn nexmark_scaling_up_down_common(
     drop: &str,
     number_of_nodes: usize,
 ) -> Result<()> {
+    //  tokio::task::spawn(async move {
+    //      tokio::time::sleep(Duration::from_secs(120)).await;
+    //      println!("max runtime is over");
+    //      assert!(false);
+    //  });
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -218,12 +224,18 @@ async fn nexmark_scaling_up_down_common(
     //  }
 
     cluster
-        .clear_worker_nodes(addrs)
+        .clear_worker_nodes(addrs.clone())
         .await
         .expect("failed to clear worker nodes");
 
     // TODO: this should work without sleep
     sleep(Duration::from_secs(sleep_sec)).await;
+
+    // TODO: remove below
+    cluster
+        .clear_worker_nodes(addrs.clone())
+        .await
+        .expect("failed to clear worker nodes");
 
     println!("unregistered nodes cleared"); // TODO: remove line
 
