@@ -207,6 +207,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
 }
 
 /// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
+#[expect(clippy::identity_op)]
 pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     let bytes = s.as_bytes();
 
