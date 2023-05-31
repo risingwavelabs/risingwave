@@ -10,6 +10,11 @@ option optimize_for = SPEED;
 
 message ExprNode {
   enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
     UNSPECIFIED = 0;
     // arithmetics operators
     ADD = 3;
