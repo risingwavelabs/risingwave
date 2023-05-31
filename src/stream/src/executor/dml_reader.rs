@@ -159,7 +159,9 @@ mod tests {
             .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();
-        assert_matches!(next!().unwrap(), Either::Right(_));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::Begin(_)));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::Data(_, _)));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::End(_)));
         // Write a barrier, and we should receive it.
         barrier_tx.send(Barrier::new_test_barrier(1)).unwrap();
         assert_matches!(next!().unwrap(), Either::Left(_));
@@ -191,6 +193,8 @@ mod tests {
         // Resume the stream.
         stream.resume_stream();
         // Then we can receive the chunk sent when the stream is paused.
-        assert_matches!(next!().unwrap(), Either::Right(_));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::Begin(_)));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::Data(_, _)));
+        assert_matches!(next!().unwrap(), Either::Right(TxnMsg::End(_)));
     }
 }
