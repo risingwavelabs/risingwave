@@ -182,6 +182,9 @@ impl fmt::Debug for IndicesDisplay<'_> {
     }
 }
 
+/// Call `debug_struct` on the given formatter to create a debug struct builder.
+/// If a property list is provided, properties in it will be added to the struct name according to
+/// the condition of that property.
 macro_rules! formatter_debug_plan_node {
     ($formatter:ident, $name:literal) => {
         $formatter.debug_struct($name)
