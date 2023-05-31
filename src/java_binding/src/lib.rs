@@ -39,6 +39,7 @@ use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -539,13 +540,11 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move || {
-        let millis = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_timestamp()
-            .0
-            .timestamp_millis();
+        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
+        let millis = match scalar_value {
+            ScalarRefImpl::Int64(v) => v,
+            _ => scalar_value.into_timestamp().0.timestamp_millis(),
+        };
         let (ts_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
