@@ -163,70 +163,98 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
     ))
 }
 
-// #[function("cast(varchar) -> bytea")]
+/// Refer to PostgreSQL's implementation <https://github.com/postgres/postgres/blob/5cb54fc310fb84287cbdc74533f3420490a2f63a/src/backend/utils/adt/varlena.c#L276-L288>
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    // Padded with whitespace str is not allowed.
-    if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
-        Err(PARSE_ERROR_STR_TO_BYTEA.to_string())
-    } else if let Some(remainder) = elem.strip_prefix(r"\x") {
+    if let Some(remainder) = elem.strip_prefix(r"\x") {
         Ok(parse_bytes_hex(remainder)?.into())
     } else {
         Ok(parse_bytes_traditional(elem)?.into())
     }
 }
 
-// Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
-pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
-    // Can't use `hex::decode` here, as it doesn't tolerate whitespace
-    // between encoded bytes.
-
-    let decode_nibble = |b| match b {
-        b'a'..=b'f' => Ok::<u8, String>(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        b'0'..=b'9' => Ok(b - b'0'),
-        _ => Err(PARSE_ERROR_STR_TO_BYTEA.to_string()),
-    };
-
-    let mut buf = vec![];
-    let mut nibbles = s.as_bytes().iter().copied();
-    while let Some(n) = nibbles.next() {
-        if let b' ' | b'\n' | b'\t' | b'\r' = n {
-            continue;
-        }
-        let n = decode_nibble(n)?;
-        let n2 = match nibbles.next() {
-            None => return Err(PARSE_ERROR_STR_TO_BYTEA.to_string()),
-            Some(n2) => decode_nibble(n2)?,
-        };
-        buf.push((n << 4) | n2);
+/// Ref: <https://docs.rs/hex/0.4.3/src/hex/lib.rs.html#175-185>
+fn get_hex(c: u8) -> Result<u8> {
+    match c {
+        b'A'..=b'F' => Ok(c - b'A' + 10),
+        b'a'..=b'f' => Ok(c - b'a' + 10),
+        b'0'..=b'9' => Ok(c - b'0'),
+        _ => Err(format!("invalid hexadecimal digit: \"{}\"", c as char)),
     }
-    Ok(buf)
 }
 
-// Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
-pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
-    // Bytes are interpreted literally, save for the special escape sequences
-    // "\\", which represents a single backslash, and "\NNN", where each N
-    // is an octal digit, which represents the byte whose octal value is NNN.
-    let mut out = Vec::new();
-    let mut bytes = s.as_bytes().iter().fuse();
-    while let Some(&b) = bytes.next() {
-        if b != b'\\' {
-            out.push(b);
+/// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
+pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
+    let mut res = Vec::with_capacity(s.len() / 2);
+
+    let mut bytes = s.bytes();
+    while let Some(c) = bytes.next() {
+        // white spaces are tolerated
+        if c == b' ' || c == b'\n' || c == b'\t' || c == b'\r' {
             continue;
         }
+        let v1 = get_hex(c)?;
+
         match bytes.next() {
-            None => return Err(PARSE_ERROR_STR_TO_BYTEA.to_string()),
-            Some(b'\\') => out.push(b'\\'),
-            b => match (b, bytes.next(), bytes.next()) {
-                (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
-                    out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
-                }
-                _ => return Err(PARSE_ERROR_STR_TO_BYTEA.to_string()),
-            },
+            Some(c) => {
+                let v2 = get_hex(c)?;
+                res.push((v1 << 4) | v2);
+            }
+            None => return Err("invalid hexadecimal data: odd number of digits".to_string()),
         }
     }
-    Ok(out)
+
+    Ok(res)
+}
+
+/// Refer to <https://www.postgresql.org/docs/current/datatype-binary.html#id-1.5.7.12.10> for specification.
+pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
+    let bytes = s.as_bytes();
+
+    let mut capacity = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+        } else if (bytes[i + 0] == b'\\')
+            && (bytes[i + 1] >= b'0' && bytes[i + 1] <= b'3')
+            && (bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7')
+            && (bytes[i + 3] >= b'0' && bytes[i + 3] <= b'7')
+        {
+            i += 4;
+        } else if (bytes[i + 0] == b'\\') && (bytes[i + 1] == b'\\') {
+            i += 2;
+        } else {
+            // one backslash, not followed by another or ### valid octal
+            return Err("invalid input syntax for type bytea".to_string());
+        }
+        capacity += 1;
+    }
+
+    let mut res = Vec::with_capacity(capacity);
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            res.push(bytes[i]);
+            i += 1;
+        } else if (bytes[i + 0] == b'\\')
+            && (bytes[i + 1] >= b'0' && bytes[i + 1] <= b'3')
+            && (bytes[i + 2] >= b'0' && bytes[i + 2] <= b'7')
+            && (bytes[i + 3] >= b'0' && bytes[i + 3] <= b'7')
+        {
+            res.push(
+                ((bytes[i + 1] - b'0') << 6) + ((bytes[i + 2] - b'0') << 3) + (bytes[i + 3] - b'0'),
+            );
+            i += 4;
+        } else if (bytes[i + 0] == b'\\') && (bytes[i + 1] == b'\\') {
+            res.push(b'\\');
+            i += 2;
+        } else {
+            // one backslash, not followed by another or ### valid octal
+            return Err("invalid input syntax for type bytea".to_string());
+        }
+    }
+
+    Ok(res)
 }
 
 #[cfg(test)]
