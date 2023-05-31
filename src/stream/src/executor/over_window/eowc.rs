@@ -266,7 +266,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
             for state in &mut partition.states {
-                state.output()?;
+                state.slide_forward();
             }
             partition.curr_row_buffer.pop_front();
         }
@@ -344,7 +344,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     let tmp: Vec<_> = partition
                         .states
                         .iter_mut()
-                        .map(|state| state.output().map(|o| (o.return_value, o.evict_hint)))
+                        .map(|state| -> StreamExecutorResult<_> {
+                            let ret_val = state.curr_output()?;
+                            let evict_hint = state.slide_forward();
+                            Ok((ret_val, evict_hint))
+                        })
                         .try_collect()?;
                     tmp.into_iter().unzip()
                 };
