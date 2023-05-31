@@ -302,7 +302,7 @@ impl fmt::Display for StreamHashJoin {
             f, "StreamHashJoin"
             , { "window", self.left().watermark_columns().contains(ljk) && self.right().watermark_columns().contains(rjk) }
             , { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() }
-            , { "append_only", self.is_append_only }
+            , { "in_append_only", self.is_append_only }
         );
 
         let verbose = self.base.ctx.is_explain_verbose();
