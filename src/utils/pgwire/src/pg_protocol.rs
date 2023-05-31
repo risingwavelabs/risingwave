@@ -342,7 +342,7 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::info!(
+        tracing::debug!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(simple query)",
             session = %session_id,
@@ -438,7 +438,7 @@ where
 
         let mills = start.elapsed().as_millis();
         let truncated_sql = &sql[..std::cmp::min(sql.len(), 1024)];
-        tracing::info!(
+        tracing::debug!(
             target: PGWIRE_QUERY_LOG,
             mode = %"(extended query parse)",
             session = %session_id,
@@ -582,7 +582,7 @@ where
 
             let mills = start.elapsed().as_millis();
 
-            tracing::info!(
+            tracing::debug!(
                 target: PGWIRE_QUERY_LOG,
                 mode = %"(extended query execute)",
                 session = %session_id,

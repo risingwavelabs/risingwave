@@ -63,7 +63,8 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_compute", Level::INFO)
         .with_target("risingwave_compactor", Level::INFO)
         .with_target("risingwave_hummock_sdk", Level::INFO)
-        .with_target("pgwire", Level::ERROR)
+        // set the logging level to DEBUG for pgwire to track all queries when testing.
+        .with_target(PGWIRE_QUERY_LOG, Level::DEBUG)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`
         // .with_target("events::stream::mview::scan", Level::TRACE)
