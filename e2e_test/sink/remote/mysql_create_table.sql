@@ -43,6 +43,7 @@ CREATE TABLE t_types (
    date_column DATE,
    time_column TIME,
    timestamp_column TIMESTAMP,
+   interval_column VARCHAR(100),
    jsonb_column JSON,
    array_column LONGTEXT,
    array_column2 LONGTEXT

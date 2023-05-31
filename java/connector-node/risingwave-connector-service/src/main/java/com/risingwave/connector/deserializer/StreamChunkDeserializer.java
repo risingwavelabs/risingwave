@@ -179,6 +179,7 @@ public class StreamChunkDeserializer implements Deserializer {
                         case INT16:
                         case INT32:
                         case INT64:
+                        case FLOAT:
                         case DOUBLE:
                         case VARCHAR:
                             break;
@@ -189,7 +190,6 @@ public class StreamChunkDeserializer implements Deserializer {
                                                     + fieldType.getTypeName())
                                     .asRuntimeException();
                     }
-
                     ret[i] =
                             row -> {
                                 if (row.isNull(index)) {
