@@ -1,34 +1,60 @@
 use std::str::FromStr;
 
-use risingwave_common::array::StructValue;
+use base64::Engine;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
     str_with_time_zone_to_timestamptz,
 };
-use risingwave_common::types::{DataType, Date, Datum, Decimal, Interval, ScalarImpl, Time};
+use risingwave_common::types::{
+    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
 
 use super::{AccessError, AccessResult};
 use crate::parser::common::json_object_smart_get_value;
 
-enum ByteaHandling {
+pub enum ByteaHandling {
     Standard,
     // debezium converts postgres bytea to base64 format
-    Debezium,
+    Base64,
 }
 
-enum TimeHandling {
+pub enum TimeHandling {
     Milli,
     Micro,
 }
-struct JsonParseOptions {
-    bytea_handling: ByteaHandling,
-    time_handling: TimeHandling,
+
+pub enum JsonValueHandling {
+    AsValue,
+    AsString,
+}
+
+pub struct JsonParseOptions {
+    pub bytea_handling: ByteaHandling,
+    pub time_handling: TimeHandling,
+    pub json_value_handling: JsonValueHandling,
+}
+
+impl Default for JsonParseOptions {
+    fn default() -> Self {
+        Self {
+            bytea_handling: ByteaHandling::Standard,
+            time_handling: TimeHandling::Micro,
+            json_value_handling: JsonValueHandling::AsValue,
+        }
+    }
 }
 
 impl JsonParseOptions {
-    fn parse(&self, value: &BorrowedValue<'_>, shape: &DataType) -> AccessResult {
+    pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
+        bytea_handling: ByteaHandling::Base64,
+        time_handling: TimeHandling::Micro,
+        json_value_handling: JsonValueHandling::AsString,
+    };
+
+    pub fn parse(&self, value: &BorrowedValue<'_>, shape: &DataType) -> AccessResult {
         let create_error = || AccessError::TypeError {
             expected: shape.to_string(),
             got: value.value_type().to_string(),
@@ -150,68 +176,50 @@ impl JsonParseOptions {
                             field_type,
                         )
                     })
-                    .collect::<Result<_,_>>()?,
-            ).into(),
-            (DataType::List(_), ValueType::Null) => todo!(),
-            (DataType::List(_), ValueType::Bool) => todo!(),
-            (DataType::List(_), ValueType::I64) => todo!(),
-            (DataType::List(_), ValueType::I128) => todo!(),
-            (DataType::List(_), ValueType::U64) => todo!(),
-            (DataType::List(_), ValueType::U128) => todo!(),
-            (DataType::List(_), ValueType::F64) => todo!(),
-            (DataType::List(_), ValueType::String) => todo!(),
-            (DataType::List(_), ValueType::Array) => todo!(),
-            (DataType::List(_), ValueType::Object) => todo!(),
-            (DataType::List(_), ValueType::Extended(_)) => todo!(),
-            (DataType::List(_), ValueType::Custom(_)) => todo!(),
-            (DataType::Bytea, ValueType::Null) => todo!(),
-            (DataType::Bytea, ValueType::Bool) => todo!(),
-            (DataType::Bytea, ValueType::I64) => todo!(),
-            (DataType::Bytea, ValueType::I128) => todo!(),
-            (DataType::Bytea, ValueType::U64) => todo!(),
-            (DataType::Bytea, ValueType::U128) => todo!(),
-            (DataType::Bytea, ValueType::F64) => todo!(),
-            (DataType::Bytea, ValueType::String) => todo!(),
-            (DataType::Bytea, ValueType::Array) => todo!(),
-            (DataType::Bytea, ValueType::Object) => todo!(),
-            (DataType::Bytea, ValueType::Extended(_)) => todo!(),
-            (DataType::Bytea, ValueType::Custom(_)) => todo!(),
-            (DataType::Jsonb, ValueType::Null) => todo!(),
-            (DataType::Jsonb, ValueType::Bool) => todo!(),
-            (DataType::Jsonb, ValueType::I64) => todo!(),
-            (DataType::Jsonb, ValueType::I128) => todo!(),
-            (DataType::Jsonb, ValueType::U64) => todo!(),
-            (DataType::Jsonb, ValueType::U128) => todo!(),
-            (DataType::Jsonb, ValueType::F64) => todo!(),
-            (DataType::Jsonb, ValueType::String) => todo!(),
-            (DataType::Jsonb, ValueType::Array) => todo!(),
-            (DataType::Jsonb, ValueType::Object) => todo!(),
-            (DataType::Jsonb, ValueType::Extended(_)) => todo!(),
-            (DataType::Jsonb, ValueType::Custom(_)) => todo!(),
-            (DataType::Serial, ValueType::Null) => todo!(),
-            (DataType::Serial, ValueType::Bool) => todo!(),
-            (DataType::Serial, ValueType::I64) => todo!(),
-            (DataType::Serial, ValueType::I128) => todo!(),
-            (DataType::Serial, ValueType::U64) => todo!(),
-            (DataType::Serial, ValueType::U128) => todo!(),
-            (DataType::Serial, ValueType::F64) => todo!(),
-            (DataType::Serial, ValueType::String) => todo!(),
-            (DataType::Serial, ValueType::Array) => todo!(),
-            (DataType::Serial, ValueType::Object) => todo!(),
-            (DataType::Serial, ValueType::Extended(_)) => todo!(),
-            (DataType::Serial, ValueType::Custom(_)) => todo!(),
-            (DataType::Int256, ValueType::Null) => todo!(),
-            (DataType::Int256, ValueType::Bool) => todo!(),
-            (DataType::Int256, ValueType::I64) => todo!(),
-            (DataType::Int256, ValueType::I128) => todo!(),
-            (DataType::Int256, ValueType::U64) => todo!(),
-            (DataType::Int256, ValueType::U128) => todo!(),
-            (DataType::Int256, ValueType::F64) => todo!(),
-            (DataType::Int256, ValueType::String) => todo!(),
-            (DataType::Int256, ValueType::Array) => todo!(),
-            (DataType::Int256, ValueType::Object) => todo!(),
-            (DataType::Int256, ValueType::Extended(_)) => todo!(),
-            (DataType::Int256, ValueType::Custom(_)) => todo!(),
+                    .collect::<Result<_, _>>()?,
+            )
+            .into(),
+            (DataType::List(item_type), ValueType::Array) => ListValue::new(
+                value
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| self.parse(v, item_type))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+            .into(),
+            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
+                ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
+                    .map_err(|_| create_error())?
+                    .into(),
+                ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
+                    .decode(value.as_str().unwrap())
+                    .map_err(|_| create_error())?
+                    .into_boxed_slice()
+                    .into(),
+            },
+            (DataType::Jsonb, ValueType::String)
+                if matches!(self.json_value_handling, JsonValueHandling::AsString) =>
+            {
+                JsonbVal::from_str(value.as_str().unwrap())
+                    .map_err(|_| create_error())?
+                    .into()
+            }
+            (DataType::Jsonb, _)
+                if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>
+            {
+                JsonbVal::from_serde(value.clone().try_into().map_err(|_| create_error())?).into()
+            }
+
+            (
+                DataType::Int64,
+                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
+            ) => Int256::from(value.try_as_i64()?).into(),
+
+            (DataType::Int256, ValueType::String) => Int256::from_str(value.as_str().unwrap())
+                .map_err(|_| create_error())?
+                .into(),
+
             (expected, got) => Err(create_error())?,
         };
         Ok(Some(v))
