@@ -389,7 +389,7 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: PbType::ConstantValue as i32,
+            expr_type: PbType::Unspecified as _,
             return_type: Some(DataType::Int64.to_protobuf()),
             rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),

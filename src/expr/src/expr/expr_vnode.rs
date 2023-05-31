@@ -47,10 +47,6 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
             bail!("Expected RexNode::FuncCall");
         };
 
-        for child in func_call_node.get_children() {
-            ensure!(child.get_expr_type().unwrap() == Type::InputRef);
-        }
-
         let dist_key_input_refs = func_call_node
             .get_children()
             .iter()

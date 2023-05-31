@@ -487,7 +487,7 @@ impl WatermarkAnalyzer {
 
     fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
         match func_call.get_expr_type() {
-            ExprType::Unspecified | ExprType::InputRef | ExprType::ConstantValue => unreachable!(),
+            ExprType::Unspecified => unreachable!(),
             ExprType::Add | ExprType::Multiply => match self.visit_binary_op(func_call.inputs()) {
                 (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
                     WatermarkDerivation::Constant

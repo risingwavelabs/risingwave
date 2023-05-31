@@ -142,7 +142,7 @@ mod tests {
     #[test]
     fn test_in_expr() {
         let input_ref_expr_node = ExprNode {
-            expr_type: Type::InputRef as i32,
+            expr_type: Type::Unspecified as i32,
             return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
@@ -151,7 +151,7 @@ mod tests {
         };
         let constant_values = vec![
             ExprNode {
-                expr_type: Type::ConstantValue as i32,
+                expr_type: Type::Unspecified as i32,
                 return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
@@ -161,7 +161,7 @@ mod tests {
                 })),
             },
             ExprNode {
-                expr_type: Type::ConstantValue as i32,
+                expr_type: Type::Unspecified as i32,
                 return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()

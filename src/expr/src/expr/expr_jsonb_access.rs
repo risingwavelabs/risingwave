@@ -307,7 +307,7 @@ mod tests {
         let values = FunctionCall {
             children: vec![
                 ExprNode {
-                    expr_type: Type::ConstantValue as i32,
+                    expr_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
@@ -317,7 +317,7 @@ mod tests {
                     })),
                 },
                 ExprNode {
-                    expr_type: Type::ConstantValue as i32,
+                    expr_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
@@ -343,7 +343,7 @@ mod tests {
                     rex_node: Some(RexNode::FuncCall(values)),
                 },
                 ExprNode {
-                    expr_type: Type::ConstantValue as i32,
+                    expr_type: Type::Unspecified as i32,
                     return_type: Some(ProstDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()

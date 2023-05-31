@@ -914,7 +914,7 @@ impl ExprImpl {
     pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {
         let rex_node = proto.get_rex_node()?;
         let ret_type = proto.get_return_type()?.into();
-        let expr_type = proto.get_expr_type()?;
+
         Ok(match rex_node {
             RexNode::InputRef(column_index) => Self::InputRef(Box::new(InputRef::from_expr_proto(
                 *column_index as _,
@@ -924,9 +924,13 @@ impl ExprImpl {
             RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
                 UserDefinedFunction::from_expr_proto(udf, ret_type)?,
             )),
-            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
-                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
-            )),
+            RexNode::FuncCall(function_call) => {
+                Self::FunctionCall(Box::new(FunctionCall::from_expr_proto(
+                    function_call,
+                    proto.get_expr_type()?, // only interpret if it's a function call
+                    ret_type,
+                )?))
+            }
         })
     }
 }

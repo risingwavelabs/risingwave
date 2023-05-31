@@ -223,12 +223,12 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
 
         let eval_func = {
             let left_expr_input_ref = ExprNode {
-                expr_type: Type::InputRef as i32,
+                expr_type: Type::Unspecified as i32,
                 return_type: Some(left_expr.return_type().to_protobuf()),
                 rex_node: Some(RexNode::InputRef(0)),
             };
             let right_expr_input_ref = ExprNode {
-                expr_type: Type::InputRef as i32,
+                expr_type: Type::Unspecified as i32,
                 return_type: Some(right_expr_return_type.to_protobuf()),
                 rex_node: Some(RexNode::InputRef(1)),
             };

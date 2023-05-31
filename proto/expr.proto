@@ -11,8 +11,6 @@ option optimize_for = SPEED;
 message ExprNode {
   enum Type {
     UNSPECIFIED = 0;
-    INPUT_REF = 1;
-    CONSTANT_VALUE = 2;
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
@@ -192,8 +190,6 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
-    // User defined functions
-    UDF = 3000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
