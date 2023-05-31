@@ -52,8 +52,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let func_type = prost.function_type();
 
     match func_type {
-        E::Unspecified => unreachable!(),
-
         // Dedicated types
         E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
         E::In => InExpression::try_from_boxed(prost),
