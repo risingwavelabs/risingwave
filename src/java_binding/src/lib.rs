@@ -542,7 +542,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     execute_and_catch(env, move || {
         let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
         let millis = match scalar_value {
-            ScalarRefImpl::Int64(v) => v,
+            ScalarRefImpl::Int64(v) => v / 1000,
             _ => scalar_value.into_timestamp().0.timestamp_millis(),
         };
         let (ts_class_ref, constructor) = pointer
