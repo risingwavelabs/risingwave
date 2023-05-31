@@ -110,6 +110,15 @@ else
   exit 1
 fi
 
+diff -u ./e2e_test/sink/remote/mysql_expected_result_2.tsv \
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_types ORDER BY id")
+if [ $? -eq 0 ]; then
+  echo "mysql sink check 0 passed"
+else
+  echo "The output is not as expected."
+  exit 1
+fi
+
 echo "--- testing kafka sink"
 ./ci/scripts/e2e-kafka-sink-test.sh
 if [ $? -eq 0 ]; then

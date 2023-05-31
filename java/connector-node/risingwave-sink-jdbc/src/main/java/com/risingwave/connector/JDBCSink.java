@@ -225,6 +225,9 @@ public class JDBCSink extends SinkBase {
         for (int i = 0; i < row.size(); i++) {
             var column = columnDescs.get(i);
             switch (column.getDataType().getTypeName()) {
+                case DECIMAL:
+                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+                    break;
                 case INTERVAL:
                     if (targetDbType == DatabaseType.POSTGRES) {
                         stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
@@ -247,16 +250,32 @@ public class JDBCSink extends SinkBase {
                     stmt.setBinaryStream(placeholderIdx++, (InputStream) row.get(i));
                     break;
                 case LIST:
-                    var fieldType = column.getDataType().getFieldType(0);
-                    var sqlType =
-                            JdbcUtils.getDbSqlType(
-                                    targetDbType, fieldType.getTypeName(), fieldType);
                     var val = row.get(i);
+                    // JSON payload returns a List, but JDBC expects an array
                     if (val instanceof java.util.List<?>) {
                         val = ((java.util.List<?>) val).toArray();
                     }
                     assert (val instanceof Object[]);
-                    stmt.setArray(i + 1, conn.createArrayOf(sqlType, (Object[]) val));
+                    Object[] objArray = (Object[]) val;
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        var fieldType = column.getDataType().getFieldType(0);
+                        var sqlType =
+                                JdbcUtils.getDbSqlType(
+                                        targetDbType, fieldType.getTypeName(), fieldType);
+                        stmt.setArray(i + 1, conn.createArrayOf(sqlType, objArray));
+                    } else {
+                        // convert Array type to a string for other database
+                        // reference:
+                        // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
+                        StringBuilder sb = new StringBuilder();
+                        for (int j = 0; j < objArray.length; j++) {
+                            sb.append('"').append(objArray[j].toString()).append('"');
+                            if (j != objArray.length - 1) {
+                                sb.append(",");
+                            }
+                        }
+                        stmt.setString(placeholderIdx++, sb.toString());
+                    }
                     break;
                 default:
                     stmt.setObject(placeholderIdx++, row.get(i));

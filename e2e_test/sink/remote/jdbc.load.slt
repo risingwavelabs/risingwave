@@ -12,6 +12,25 @@ create table t_remote_0 (
 );
 
 statement ok
+CREATE TABLE t_remote_1 (
+    id BIGINT PRIMARY KEY,
+    v_varchar VARCHAR,
+    v_text TEXT,
+    v_integer INTEGER,
+    v_smallint SMALLINT,
+    v_bigint BIGINT,
+    v_decimal DECIMAL,
+    v_real REAL,
+    v_double DOUBLE PRECISION,
+    v_boolean BOOLEAN,
+    v_date DATE,
+    v_time TIME,
+    v_timestamp TIMESTAMP,
+    v_jsonb JSONB,
+    v_bytea BYTEA
+);
+
+statement ok
 CREATE TABLE rw_types (
     id BIGINT PRIMARY KEY,
     varchar_column VARCHAR,
@@ -30,25 +49,6 @@ CREATE TABLE rw_types (
     jsonb_column JSONB,
     array_column VARCHAR[],
     array_column2 FLOAT[]
-);
-
-statement ok
-CREATE TABLE t_remote_1 (
-    id BIGINT PRIMARY KEY,
-    v_varchar VARCHAR,
-    v_text TEXT,
-    v_integer INTEGER,
-    v_smallint SMALLINT,
-    v_bigint BIGINT,
-    v_decimal DECIMAL,
-    v_real REAL,
-    v_double DOUBLE PRECISION,
-    v_boolean BOOLEAN,
-    v_date DATE,
-    v_time TIME,
-    v_timestamp TIMESTAMP,
-    v_jsonb JSONB,
-    v_bytea BYTEA
 );
 
 statement ok
@@ -93,6 +93,14 @@ statement ok
 CREATE SINK s2_postgres FROM rw_types WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t_types',
+    type='upsert'
+);
+
+statement ok
+CREATE SINK s2_mysql FROM rw_types WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_types',
     type='upsert'
 );
