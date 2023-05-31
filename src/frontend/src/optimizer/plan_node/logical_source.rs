@@ -384,7 +384,7 @@ fn expr_to_kafka_timestamp_range(
         ExprImpl::FunctionCall(function_call) => {
             if let Some((timestampz_literal, reverse)) = extract_timestampz_literal(&expr).unwrap()
             {
-                match function_call.get_expr_type() {
+                match function_call.func_type() {
                     ExprType::GreaterThan => {
                         if reverse {
                             range.1 = merge_upper_bound(range.1, Excluded(timestampz_literal));

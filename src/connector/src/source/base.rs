@@ -226,15 +226,6 @@ pub enum ConnectorProperties {
 }
 
 impl ConnectorProperties {
-    // Used to support the reduction of split
-    pub fn enable_split_reduction(&self) -> bool {
-        // for now, we only support kinesis
-        match self {
-            ConnectorProperties::Kinesis(prop) => prop.enable_split_reduction.unwrap_or(false),
-            _ => false,
-        }
-    }
-
     fn new_cdc_properties(
         connector_name: &str,
         properties: HashMap<String, String>,

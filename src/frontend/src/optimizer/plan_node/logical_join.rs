@@ -267,7 +267,7 @@ impl LogicalJoin {
 
         for expr in &predicate.conjunctions {
             if let ExprImpl::FunctionCall(func) = expr {
-                match func.get_expr_type() {
+                match func.func_type() {
                     ExprType::Equal
                     | ExprType::NotEqual
                     | ExprType::LessThan

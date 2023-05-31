@@ -90,6 +90,10 @@ impl Aggregator for Filter {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         self.inner.output(builder)
     }
+
+    fn estimated_size(&self) -> usize {
+        std::mem::size_of::<Self>() + self.inner.estimated_size()
+    }
 }
 
 #[cfg(test)]
@@ -126,6 +130,10 @@ mod tests {
 
         fn output(&mut self, _builder: &mut ArrayBuilderImpl) -> Result<()> {
             unimplemented!()
+        }
+
+        fn estimated_size(&self) -> usize {
+            std::mem::size_of::<AtomicUsize>()
         }
     }
 

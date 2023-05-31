@@ -78,6 +78,8 @@ install_all() {
   echo ">>> Installing addr2line"
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
+  git checkout 0.20.0
+  echo "nightly-2023-04-07" > rust-toolchain
   cargo b --examples -r
   mv ./target/release/examples/addr2line $(which addr2line)
   popd

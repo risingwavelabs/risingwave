@@ -486,7 +486,7 @@ where
         &self,
         history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
     ) {
-        const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 5;
+        const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 4;
         let mut group_infos = self
             .hummock_manager
             .calculate_compaction_group_statistic()
@@ -515,6 +515,7 @@ where
         table_infos.sort_by(|a, b| b.2.cmp(&a.2));
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let mut partition_vnode_count = self.env.opts.partition_vnode_count;
         for (table_id, parent_group_id, parent_group_size) in table_infos {
             let table_info = history_table_infos.get(&table_id).unwrap();
             let table_size = *table_info.back().unwrap();
@@ -571,6 +572,7 @@ where
                         target_compact_group_id = Some(group.group_id);
                     }
                     allow_split_by_table = true;
+                    partition_vnode_count = 1;
                 }
             }
 
@@ -581,13 +583,14 @@ where
                     &[table_id],
                     target_compact_group_id,
                     allow_split_by_table,
+                    partition_vnode_count,
                 )
                 .await;
             match ret {
                 Ok(_) => {
                     info!(
-                        "move state table [{}] from group-{} to group-{:?} success",
-                        table_id, parent_group_id, target_compact_group_id
+                        "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
+                        table_id, parent_group_id, target_compact_group_id, allow_split_by_table
                     );
                     return;
                 }
@@ -691,7 +694,9 @@ mod tests {
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
-    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
+    use crate::hummock::test_utils::{
+        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
+    };
     use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
@@ -724,7 +729,15 @@ mod tests {
                 .await
         );
 
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(3, hummock_manager.as_ref(), context_id).await;
 
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
@@ -758,7 +771,7 @@ mod tests {
         );
 
         // Add more SSTs for compaction.
-        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(4, hummock_manager.as_ref(), context_id).await;
 
         // No idle compactor
         assert_eq!(
@@ -813,6 +826,12 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
+        register_table_ids_to_compaction_group(
+            hummock_manager.as_ref(),
+            &[1],
+            StaticCompactionGroupId::StateDefault.into(),
+        )
+        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 

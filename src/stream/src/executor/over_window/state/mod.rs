@@ -17,7 +17,6 @@ use std::collections::{BTreeSet, VecDeque};
 use educe::Educe;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
@@ -164,7 +163,6 @@ impl<T: EstimateSize> EstimatedVecDeque<T> {
         self.inner.push_back(value)
     }
 
-    #[expect(dead_code)]
     pub fn push_front(&mut self, value: T) {
         self.heap_size = self.heap_size.saturating_add(value.estimated_heap_size());
         self.inner.push_front(value)

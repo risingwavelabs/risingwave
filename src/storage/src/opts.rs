@@ -45,9 +45,6 @@ pub struct StorageOpts {
     /// Percent of the ratio of high priority data in block-cache
     pub high_priority_ratio: usize,
     pub disable_remote_compactor: bool,
-    pub enable_local_spill: bool,
-    /// Local object store root. We should call `get_local_object_store` to get the object store.
-    pub local_object_store: String,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
     /// Capacity of sstable meta cache.
@@ -102,8 +99,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
-            enable_local_spill: c.storage.enable_local_spill,
-            local_object_store: c.storage.local_object_store.to_string(),
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
             compactor_memory_limit_mb: s.compactor_memory_limit_mb,
             sstable_id_remote_fetch_number: c.storage.sstable_id_remote_fetch_number,

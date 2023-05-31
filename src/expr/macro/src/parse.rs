@@ -40,6 +40,10 @@ impl FunctionAttr {
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
+        let (is_table_function, ret) = match ret.trim_start().strip_prefix("setof") {
+            Some(s) => (true, s),
+            None => (false, ret),
+        };
 
         let user_fn = UserFunctionAttr::parse(item)?;
 
@@ -51,9 +55,12 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
+            is_table_function,
             batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
             init_state: find_argument(attr, "init_state"),
+            prebuild: find_argument(attr, "prebuild"),
+            type_infer: find_argument(attr, "type_infer"),
             user_fn,
         })
     }
@@ -67,7 +74,6 @@ impl UserFunctionAttr {
             arg_option: args_are_all_option(item),
             return_type: return_type(item),
             generic: item.sig.generics.params.len(),
-            // prebuild: extract_prebuild_arg(item),
         })
     }
 }
@@ -109,19 +115,45 @@ fn return_type(item: &syn::ItemFn) -> ReturnType {
         ReturnType::ResultOption
     } else if return_value_is(item, "Result") {
         ReturnType::Result
-    } else if return_value_is(item, "Option") {
+    } else if return_value_is(item, "Option") || return_value_is(item, "DatumRef") {
         ReturnType::Option
     } else {
         ReturnType::T
     }
 }
 
-/// Check if the return value is `type_`.
+/// Check if the return value is `type_` or `impl Iterator<Item = type_>`.
 fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
+    let ty = match ty.as_ref() {
+        syn::Type::ImplTrait(_) => match iterator_item(ty) {
+            Some(ty) => ty,
+            None => return false,
+        },
+        ty => ty,
+    };
+    let syn::Type::Path(path) = ty else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == type_
+}
+
+/// Extract item from `impl Iterator<Item = ???>`
+fn iterator_item(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::ImplTrait(impl_trait) = ty else { return None; };
+    let syn::TypeParamBound::Trait(trait_bound) = impl_trait.bounds.first()? else { return None; };
+    let segment = trait_bound.path.segments.last().unwrap();
+    if segment.ident != "Iterator" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(angle_bracketed) = &segment.arguments else {
+        return None;
+    };
+    for arg in &angle_bracketed.args {
+        if let syn::GenericArgument::Binding(b) = arg && b.ident == "Item" {
+            return Some(&b.ty);
+        }
+    }
+    None
 }
 
 /// Check if the return value is `Result<Option<T>>`.
@@ -137,25 +169,6 @@ fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
     let syn::Type::Path(path) = ty else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == "Option"
-}
-
-/// Extract `#[prebuild("function_name")]` from arguments.
-fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
-    for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
-        let syn::FnArg::Typed(arg) = arg else { continue };
-        if let Some(idx) = arg
-            .attrs
-            .iter_mut()
-            .position(|att| att.path.is_ident("prebuild"))
-        {
-            let attr = arg.attrs.remove(idx);
-            // XXX: this is a hack to parse a string literal from token stream
-            let s = attr.tokens.to_string();
-            let s = s.trim_start_matches("(\"").trim_end_matches("\")");
-            return Some((i, s.to_string()));
-        }
-    }
-    None
 }
 
 /// Find argument `#[xxx(.., name = "value")]`.

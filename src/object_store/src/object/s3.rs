@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp;
-use std::iter::{Map, Take};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -537,7 +536,6 @@ impl S3ObjectStore {
             .load()
             .await;
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, &bucket).await;
 
         Self {
             client,
@@ -576,7 +574,6 @@ impl S3ObjectStore {
             .await;
 
         let client = Client::new(&sdk_config);
-        Self::configure_bucket_lifecycle(&client, bucket.as_str()).await;
 
         Self {
             client,
@@ -670,10 +667,12 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    async fn configure_bucket_lifecycle(client: &Client, bucket: &str) {
+    pub async fn configure_bucket_lifecycle(&self) {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
+        let bucket = self.bucket.as_str();
         let mut configured_rules = vec![];
-        let get_config_result = client
+        let get_config_result = self
+            .client
             .get_bucket_lifecycle_configuration()
             .bucket(bucket)
             .send()
@@ -708,7 +707,8 @@ impl S3ObjectStore {
             let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
                 .rules(bucket_lifecycle_rule)
                 .build();
-            if client
+            if self
+                .client
                 .put_bucket_lifecycle_configuration()
                 .bucket(bucket)
                 .lifecycle_configuration(bucket_lifecycle_config)
@@ -728,7 +728,7 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn get_retry_strategy() -> Map<Take<ExponentialBackoff>, fn(Duration) -> Duration> {
+    fn get_retry_strategy() -> impl Iterator<Item = Duration> {
         ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
             .max_delay(DEFAULT_RETRY_MAX_DELAY)
             .take(DEFAULT_RETRY_MAX_ATTEMPTS)

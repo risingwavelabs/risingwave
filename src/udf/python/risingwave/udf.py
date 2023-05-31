@@ -35,7 +35,11 @@ class ScalarFunction(UserDefinedFunction):
 
     def __init__(self, *args, **kwargs):
         self._io_threads = kwargs.pop("io_threads")
-        self._executor = ThreadPoolExecutor(max_workers=self._io_threads) if self._io_threads is not None else None
+        self._executor = (
+            ThreadPoolExecutor(max_workers=self._io_threads)
+            if self._io_threads is not None
+            else None
+        )
         super().__init__(*args, **kwargs)
 
     def eval(self, *args) -> Any:
@@ -48,34 +52,54 @@ class ScalarFunction(UserDefinedFunction):
         # parse value from json string for jsonb columns
         inputs = [[v.as_py() for v in array] for array in batch]
         inputs = [
-            _process_input_array(array, type)
+            _process_func(pa.list_(type), False)(array)
             for array, type in zip(inputs, self._input_schema.types)
         ]
         if self._executor is not None:
             # evaluate the function for each row
-            tasks = [self._executor.submit(self._func, *[col[i] for col in inputs])
-                    for i in range(batch.num_rows)]
-            column = [future.result() for future in concurrent.futures.as_completed(tasks)]
+            tasks = [
+                self._executor.submit(self._func, *[col[i] for col in inputs])
+                for i in range(batch.num_rows)
+            ]
+            column = [
+                future.result() for future in concurrent.futures.as_completed(tasks)
+            ]
         else:
             # evaluate the function for each row
-            column = [self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)]
+            column = [
+                self.eval(*[col[i] for col in inputs]) for i in range(batch.num_rows)
+            ]
 
-        # convert value to json for jsonb columns
-        if self._result_schema.types[0] == pa.large_string():
-            column = [(json.dumps(v) if v is not None else None) for v in column]
+        column = _process_func(pa.list_(self._result_schema.types[0]), True)(column)
+
         array = pa.array(column, type=self._result_schema.types[0])
         yield pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
-def _process_input_array(array: list, type: pa.DataType) -> list:
+def _process_func(type: pa.DataType, output: bool) -> Callable:
+    """Return a function to process input or output value."""
     if pa.types.is_list(type):
-        return [
-            (_process_input_array(v, type.value_type) if v is not None else None)
-            for v in array
-        ]
+        func = _process_func(type.value_type, output)
+        return lambda array: [(func(v) if v is not None else None) for v in array]
+    if pa.types.is_struct(type):
+        funcs = [_process_func(field.type, output) for field in type]
+        if output:
+            return lambda tup: tuple(
+                (func(v) if v is not None else None) for v, func in zip(tup, funcs)
+            )
+        else:
+            # the input value of struct type is a dict
+            # we convert it into tuple here
+            return lambda map: tuple(
+                (func(v) if v is not None else None)
+                for v, func in zip(map.values(), funcs)
+            )
     if pa.types.is_large_string(type):
-        return [(json.loads(v) if v is not None else None) for v in array]
-    return array
+        if output:
+            return lambda v: json.dumps(v)
+        else:
+            return lambda v: json.loads(v)
+    return lambda v: v
 
 
 class TableFunction(UserDefinedFunction):
@@ -166,6 +190,7 @@ class UserDefinedScalarFunctionWrapper(ScalarFunction):
     def eval(self, *args):
         return self._func(*args)
 
+
 class UserDefinedTableFunctionWrapper(TableFunction):
     """
     Base Wrapper for Python user-defined table function.
@@ -194,6 +219,7 @@ class UserDefinedTableFunctionWrapper(TableFunction):
 
     def eval(self, *args):
         return self._func(*args)
+
 
 def _to_list(x):
     if isinstance(x, list):
@@ -236,9 +262,13 @@ def udf(
     """
 
     if io_threads is not None and io_threads > 1:
-        return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name, io_threads=io_threads)
+        return lambda f: UserDefinedScalarFunctionWrapper(
+            f, input_types, result_type, name, io_threads=io_threads
+        )
     else:
-        return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
+        return lambda f: UserDefinedScalarFunctionWrapper(
+            f, input_types, result_type, name
+        )
 
 
 def udtf(

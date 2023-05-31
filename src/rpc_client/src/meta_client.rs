@@ -691,6 +691,27 @@ impl MetaClient {
             .await
     }
 
+    pub async fn risectl_get_checkpoint_hummock_version(
+        &self,
+    ) -> Result<RiseCtlGetCheckpointVersionResponse> {
+        let request = RiseCtlGetCheckpointVersionRequest {};
+        self.inner.rise_ctl_get_checkpoint_version(request).await
+    }
+
+    pub async fn risectl_pause_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlPauseVersionCheckpointResponse> {
+        let request = RiseCtlPauseVersionCheckpointRequest {};
+        self.inner.rise_ctl_pause_version_checkpoint(request).await
+    }
+
+    pub async fn risectl_resume_hummock_version_checkpoint(
+        &self,
+    ) -> Result<RiseCtlResumeVersionCheckpointResponse> {
+        let request = RiseCtlResumeVersionCheckpointRequest {};
+        self.inner.rise_ctl_resume_version_checkpoint(request).await
+    }
+
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<PbTable>,
@@ -1466,6 +1487,9 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_get_pinned_snapshots_summary, RiseCtlGetPinnedSnapshotsSummaryRequest, RiseCtlGetPinnedSnapshotsSummaryResponse }
             ,{ hummock_client, rise_ctl_list_compaction_group, RiseCtlListCompactionGroupRequest, RiseCtlListCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
+            ,{ hummock_client, rise_ctl_get_checkpoint_version, RiseCtlGetCheckpointVersionRequest, RiseCtlGetCheckpointVersionResponse }
+            ,{ hummock_client, rise_ctl_pause_version_checkpoint, RiseCtlPauseVersionCheckpointRequest, RiseCtlPauseVersionCheckpointResponse }
+            ,{ hummock_client, rise_ctl_resume_version_checkpoint, RiseCtlResumeVersionCheckpointRequest, RiseCtlResumeVersionCheckpointResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }

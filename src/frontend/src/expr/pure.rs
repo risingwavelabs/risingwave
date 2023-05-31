@@ -32,11 +32,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
-        match func_call.get_expr_type() {
-            expr_node::Type::Unspecified
-            | expr_node::Type::InputRef
-            | expr_node::Type::ConstantValue
-            | expr_node::Type::Add
+        match func_call.func_type() {
+            expr_node::Type::Unspecified => unreachable!(),
+            expr_node::Type::Add
             | expr_node::Type::Subtract
             | expr_node::Type::Multiply
             | expr_node::Type::Divide
@@ -89,6 +87,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::SplitPart
             | expr_node::Type::Ceil
             | expr_node::Type::Floor
+            | expr_node::Type::Trunc
             | expr_node::Type::ToChar
             | expr_node::Type::Md5
             | expr_node::Type::CharLength
@@ -101,6 +100,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpMatch
             | expr_node::Type::Pow
             | expr_node::Type::Exp
+            | expr_node::Type::Ln
+            | expr_node::Type::Log10
             | expr_node::Type::Chr
             | expr_node::Type::StartsWith
             | expr_node::Type::Initcap
@@ -120,6 +121,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Atan
             | expr_node::Type::Atan2
             | expr_node::Type::Sqrt
+            | expr_node::Type::Cbrt
             | expr_node::Type::Degrees
             | expr_node::Type::Radians
             | expr_node::Type::IsTrue
@@ -183,7 +185,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode | expr_node::Type::Proctime | expr_node::Type::Udf => true,
+            expr_node::Type::Vnode | expr_node::Type::Proctime => true,
         }
     }
 }
