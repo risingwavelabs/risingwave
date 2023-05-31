@@ -21,8 +21,8 @@ echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
 rustup show
-cargo install sccache --locked # we use sccache as the rustc wrapper
 source ci/scripts/common.sh
+unset RUSTC_WRAPPER # disable sccache
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip

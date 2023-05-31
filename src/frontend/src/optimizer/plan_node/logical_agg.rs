@@ -1235,7 +1235,7 @@ mod tests {
 
             assert_eq_input_ref!(&exprs[0], 0);
             if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
-                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                assert_eq!(func_call.func_type(), ExprType::Add);
                 let inputs = func_call.inputs();
                 assert_eq_input_ref!(&inputs[0], 1);
                 assert_eq_input_ref!(&inputs[1], 2);
