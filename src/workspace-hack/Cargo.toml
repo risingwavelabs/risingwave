@@ -21,9 +21,9 @@ publish = false
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
-aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
-aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
-aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
+aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
+aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -78,6 +78,7 @@ regex = { version = "1" }
 regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.20" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }
@@ -103,9 +104,9 @@ ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 auto_enums = { version = "0.8", features = ["futures03"] }
-aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
-aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
-aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
+aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
+aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
@@ -162,6 +163,7 @@ regex = { version = "1" }
 regex-syntax = { version = "0.7" }
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 rust_decimal = { version = "1", features = ["db-postgres", "maths"] }
+rustls = { version = "0.20" }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc"] }

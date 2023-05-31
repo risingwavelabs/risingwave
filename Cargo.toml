@@ -58,15 +58,16 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
-aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-ec2 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
-aws-sdk-sqs = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
-aws-smithy-http = "0.51"
-aws-smithy-types = "0.51"
-aws-endpoint = "0.51"
-aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
+aws-config = { version = "0.55", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
+aws-sdk-kinesis = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-ec2 = { version = "0.28", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.28", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-smithy-http = "0.55"
+aws-smithy-types = "0.55"
+aws-endpoint = "0.55"
+aws-types = "0.55"
 futures-async-stream = "0.2"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
@@ -122,3 +123,5 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad"
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
 madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }
+# madsim-aws-sdk-s3 = { path = "../madsim/madsim-aws-sdk-s3" }
+madsim-aws-sdk-s3 = { git = "https://github.com/madsim-rs/madsim.git", rev = "2cf3fb0" }

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
-use aws_types::credentials::SharedCredentialsProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use maplit::hashmap;
 use serde::{Deserialize, Serialize};
