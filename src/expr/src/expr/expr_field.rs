@@ -74,7 +74,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Field);
+        ensure!(prost.get_function_type().unwrap() == Type::Field);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
