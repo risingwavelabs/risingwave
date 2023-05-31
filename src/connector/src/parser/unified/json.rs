@@ -12,7 +12,7 @@ use risingwave_common::types::{
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
 
-use super::{AccessError, AccessResult};
+use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_smart_get_value;
 
 pub enum ByteaHandling {
@@ -223,6 +223,16 @@ impl JsonParseOptions {
             (expected, got) => Err(create_error())?,
         };
         Ok(Some(v))
+    }
+}
+
+// pub struct JsonAccess<'a> {
+
+// }
+
+impl Access for JsonParseOptions {
+    fn access(&self, path: &[&str], shape: DataType) -> AccessResult {
+        todo!()
     }
 }
 

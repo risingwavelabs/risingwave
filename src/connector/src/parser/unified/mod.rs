@@ -3,7 +3,7 @@ use thiserror::Error;
 
 pub mod avro;
 pub mod json;
-pub type AccessResult =  std::result::Result<Datum, AccessError>;
+pub type AccessResult = std::result::Result<Datum, AccessError>;
 pub trait Access {
     fn access(&self, path: &[&str], shape: DataType) -> AccessResult;
 }
