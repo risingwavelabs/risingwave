@@ -348,7 +348,7 @@ fn assemble_materialize(
                 .name
                 .clone(),
             ExprImpl::FunctionCall(func) => {
-                let func_name = func.gett_expr_type().as_str_name().to_string();
+                let func_name = func.func_type().as_str_name().to_string();
                 let mut name = func_name.clone();
                 while !col_names.insert(name.clone()) {
                     count += 1;

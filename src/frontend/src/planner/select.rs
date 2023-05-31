@@ -226,7 +226,7 @@ impl Planner {
                 .group_by::<_, 3>(|expr| match expr {
                     ExprImpl::Subquery(_) => 0,
                     ExprImpl::FunctionCall(func_call)
-                        if func_call.gett_expr_type() == ExprType::Not
+                        if func_call.func_type() == ExprType::Not
                             && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
                     {
                         1

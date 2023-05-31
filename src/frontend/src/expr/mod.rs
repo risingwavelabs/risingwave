@@ -594,7 +594,7 @@ impl ExprImpl {
     /// ordered by the canonical ordering (lower, higher), else returns None
     pub fn as_eq_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::Equal
+            && function_call.func_type() == ExprType::Equal
             && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
                 function_call.clone().decompose_as_binary()
         {
@@ -610,7 +610,7 @@ impl ExprImpl {
 
     pub fn as_is_not_distinct_from_cond(&self) -> Option<(InputRef, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::IsNotDistinctFrom
+            && function_call.func_type() == ExprType::IsNotDistinctFrom
             && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
                 function_call.clone().decompose_as_binary()
         {
@@ -637,7 +637,7 @@ impl ExprImpl {
 
     pub fn as_comparison_cond(&self) -> Option<(InputRef, ExprType, InputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.gett_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -667,7 +667,7 @@ impl ExprImpl {
     /// Canonicalizes to the first ordering and returns `(input_expr, cmp, now_expr)`
     pub fn as_now_comparison_cond(&self) -> Option<(ExprImpl, ExprType, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.gett_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -700,7 +700,7 @@ impl ExprImpl {
     /// `InputRef [+- const_expr] cmp InputRef`.
     pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.gett_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -749,7 +749,7 @@ impl ExprImpl {
         if let ExprImpl::Now(_) = self {
             true
         } else if let ExprImpl::FunctionCall(f) = self {
-            match f.gett_expr_type() {
+            match f.func_type() {
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
                     lhs.is_now_offset() && rhs.is_const()
@@ -767,7 +767,7 @@ impl ExprImpl {
         match self {
             ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),
             ExprImpl::FunctionCall(function_call) => {
-                let expr_type = function_call.gett_expr_type();
+                let expr_type = function_call.func_type();
                 match expr_type {
                     ExprType::Add | ExprType::Subtract => {
                         let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
@@ -795,7 +795,7 @@ impl ExprImpl {
 
     pub fn as_eq_const(&self) -> Option<(InputRef, ExprImpl)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::Equal
+            && function_call.func_type() == ExprType::Equal
         {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), y) if y.is_const() => Some((*x, y)),
@@ -809,7 +809,7 @@ impl ExprImpl {
 
     pub fn as_eq_correlated_input_ref(&self) -> Option<(InputRef, CorrelatedInputRef)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::Equal
+            && function_call.func_type() == ExprType::Equal
         {
             match function_call.clone().decompose_as_binary() {
                 (_, ExprImpl::InputRef(x), ExprImpl::CorrelatedInputRef(y)) => Some((*x, *y)),
@@ -823,7 +823,7 @@ impl ExprImpl {
 
     pub fn as_is_null(&self) -> Option<InputRef> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::IsNull
+            && function_call.func_type() == ExprType::IsNull
         {
             match function_call.clone().decompose_as_unary() {
                 (_, ExprImpl::InputRef(x)) => Some(*x),
@@ -846,7 +846,7 @@ impl ExprImpl {
         }
 
         if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.gett_expr_type() {
+            match function_call.func_type() {
                 ty @ (ExprType::LessThan
                 | ExprType::LessThanOrEqual
                 | ExprType::GreaterThan
@@ -869,7 +869,7 @@ impl ExprImpl {
 
     pub fn as_in_const_list(&self) -> Option<(InputRef, Vec<ExprImpl>)> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::In
+            && function_call.func_type() == ExprType::In
         {
             let mut inputs = function_call.inputs().iter().cloned();
             let input_ref = match inputs.next().unwrap() {
@@ -892,7 +892,7 @@ impl ExprImpl {
 
     pub fn as_or_disjunctions(&self) -> Option<Vec<ExprImpl>> {
         if let ExprImpl::FunctionCall(function_call) = self
-            && function_call.gett_expr_type() == ExprType::Or
+            && function_call.func_type() == ExprType::Or
         {
             Some(to_disjunctions(self.clone()))
         } else {

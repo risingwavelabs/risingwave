@@ -263,7 +263,7 @@ impl FunctionCall {
         (self.func_type, input)
     }
 
-    pub fn gett_expr_type(&self) -> ExprType {
+    pub fn func_type(&self) -> ExprType {
         self.func_type
     }
 
@@ -303,7 +303,7 @@ impl Expr for FunctionCall {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            function_type: self.gett_expr_type().into(),
+            function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
@@ -419,7 +419,7 @@ fn explain_verbose_binary_op(
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr {
-        if func.gett_expr_type() == ExprType::Row {
+        if func.func_type() == ExprType::Row {
             return true;
         }
     }

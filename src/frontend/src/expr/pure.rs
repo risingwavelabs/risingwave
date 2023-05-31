@@ -32,7 +32,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
-        match func_call.gett_expr_type() {
+        match func_call.func_type() {
             expr_node::Type::Unspecified => unreachable!(),
             expr_node::Type::Add
             | expr_node::Type::Subtract
