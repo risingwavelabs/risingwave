@@ -30,7 +30,7 @@ cd assembly/target && tar xvf risingwave-connector-1.0.0.tar.gz
 java -classpath "./libs/*" com.risingwave.connector.ConnectorService
 ```
 
-Sometimes, you need to speficy the shared library path. For example, when program want to run class related to java-binding, they need to call shared library file. If not, it will throw exception when running. You need:
+Sometimes, you need to specify the shared library path. For example, when program want to run class related to java-binding, they need to call shared library file. If not, it will throw exception when running. You need:
 
 ```
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
@@ -69,7 +69,7 @@ bash gen-stub.sh
 python3 integration_tests.py
 ```
 
-Or you can use conda and install the nessesary package `grpcio grpcio-tools psycopg2 psycopg2-binary`. 
+Or you can use conda and install the necessary package `grpcio grpcio-tools psycopg2 psycopg2-binary`. 
 
 The connector service is the server and Python integration test is a client, which will send gRPC request and get response from the connector server. So when running integration_tests, remember to launch the connector service in advance. You can get the gRPC response and check messages or errors in client part. And check the detailed exception information on server side.
 
