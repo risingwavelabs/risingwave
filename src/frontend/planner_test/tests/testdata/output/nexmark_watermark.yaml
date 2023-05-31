@@ -485,7 +485,7 @@
             |                 └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
             |                   └─StreamSource { source: "nexmark", columns: ["event_type", "person", "auction", "bid", "_row_id"] }
             └─StreamProject { exprs: [window_start, max(count)], output_watermarks: [window_start] }
-              └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count], output_watermarks: [window_start] }
+              └─StreamAppendOnlyHashAgg { group_key: [window_start], aggs: [max(count), count], output_watermarks: [window_start] }
                 └─StreamExchange { dist: HashShard(window_start) }
                   └─StreamShare { id = 9 }
                     └─StreamAppendOnlyHashAgg { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
