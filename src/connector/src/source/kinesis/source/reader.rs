@@ -144,13 +144,15 @@ impl KinesisSplitReader {
                     );
                     yield chunk;
                 }
-                Err(SdkError::ServiceError(e))
-                    if e.is_resource_not_found_exception() =>
+                Err(SdkError::ServiceError { 0: e })
+                    if e.err().is_resource_not_found_exception() =>
                 {
                     tracing::warn!("shard {:?} is closed, stop reading", self.shard_id);
                     break;
                 }
-                Err(SdkError::ServiceError { source, .. }) if source.is_expired_iterator_exception() => {
+                Err(SdkError::ServiceError { 0: e, .. })
+                    if e.err().is_expired_iterator_exception() =>
+                {
                     tracing::warn!(
                         "stream {:?} shard {:?} iterator expired, renew it",
                         self.stream_name,
@@ -160,8 +162,8 @@ impl KinesisSplitReader {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
                 }
-                Err(SdkError::ServiceError { source, .. })
-                    if source.is_provisioned_throughput_exceeded_exception() =>
+                Err(SdkError::ServiceError { 0: e, .. })
+                    if e.err().is_provisioned_throughput_exceeded_exception() =>
                 {
                     tracing::warn!(
                         "stream {:?} shard {:?} throughput exceeded, retry",

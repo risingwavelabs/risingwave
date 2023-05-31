@@ -18,9 +18,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::{Client};
 use aws_credential_types::Credentials;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
