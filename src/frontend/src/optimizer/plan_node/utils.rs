@@ -181,3 +181,23 @@ impl fmt::Debug for IndicesDisplay<'_> {
         f.finish()
     }
 }
+
+macro_rules! formatter_debug_plan_node {
+    ($formatter:ident, $name:literal) => {
+        $formatter.debug_struct($name)
+    };
+    ($formatter:ident, $name:literal, $( { $prop:literal, $cond:expr } ), *) => {
+        {
+            let mut properties: Vec<&str> = vec![];
+            $( if $cond { properties.push($prop); } )*
+            let mut name = $name.to_string();
+            if !properties.is_empty() {
+                name += " [";
+                name += &properties.join(", ");
+                name += "]";
+            }
+            $formatter.debug_struct(&name)
+        }
+    };
+}
+pub(crate) use formatter_debug_plan_node;

@@ -27,6 +27,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
+use crate::optimizer::plan_node::utils::formatter_debug_plan_node;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
@@ -83,7 +84,7 @@ impl fmt::Display for StreamWatermarkFilter {
             }
         }
 
-        let mut builder = f.debug_struct("StreamWatermarkFilter");
+        let mut builder = formatter_debug_plan_node!(f, "StreamWatermarkFilter");
         let input_schema = self.input.schema();
 
         let display_watermark_descs: Vec<_> = self
