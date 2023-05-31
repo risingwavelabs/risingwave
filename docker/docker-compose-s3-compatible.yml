@@ -211,7 +211,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+s3-compatible://risingwave-cos-wcy-1314496003"
+      - "hummock+s3-compatible://bucket-name"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"
