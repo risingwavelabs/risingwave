@@ -218,12 +218,14 @@ where
         }
 
         println!("send rescheduling request"); // TODO: remove println
-
-        // request clearing of all nodes at once
-        self.reschedule(Request::new(RescheduleRequest {
-            reschedules: reschedule_map,
-        }))
-        .await?;
+                                               // This is called multiple times?
+                                               // request clearing of all nodes at once
+        let response = self
+            .reschedule(Request::new(RescheduleRequest {
+                reschedules: reschedule_map,
+            }))
+            .await;
+        assert!(response.is_ok() == true);
         println!("clear_workers done"); // TODO: remove println
 
         Ok(Response::new(ClearWorkerNodesResponse { status: None }))
