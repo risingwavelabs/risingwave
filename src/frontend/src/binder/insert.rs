@@ -25,7 +25,7 @@ use super::statement::RewriteExprsRecursive;
 use super::BoundQuery;
 use crate::binder::Binder;
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
 
 #[derive(Debug, Clone)]
@@ -251,23 +251,15 @@ impl Binder {
         let default_columns = default_column_indices
             .into_iter()
             .map(|i| {
-                (i, {
-                    let expr = default_columns_from_catalog
+                (
+                    i,
+                    default_columns_from_catalog
                         .get(&i)
                         .cloned()
                         .unwrap_or_else(|| {
                             ExprImpl::literal_null(cols_to_insert_in_table[i].data_type().clone())
-                        });
-                    if let Some(inner) = expr.as_function_call() {
-                        if inner.get_expr_type() == risingwave_pb::expr::expr_node::Type::Now {
-                            Literal::new(Some(self.epoch.as_scalar()), DataType::Timestamptz).into()
-                        } else {
-                            expr
-                        }
-                    } else {
-                        expr
-                    }
-                })
+                        }),
+                )
             })
             .collect_vec();
 

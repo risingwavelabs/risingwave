@@ -24,7 +24,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -209,7 +209,21 @@ impl ColPrunable for LogicalInsert {
     }
 }
 
-impl ExprRewritable for LogicalInsert {}
+impl ExprRewritable for LogicalInsert {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        let mut new = self.clone();
+        new.default_columns = new
+            .default_columns
+            .into_iter()
+            .map(|(c, e)| (c, r.rewrite_expr(e)))
+            .collect();
+        new.into()
+    }
+}
 
 impl PredicatePushdown for LogicalInsert {
     fn predicate_pushdown(

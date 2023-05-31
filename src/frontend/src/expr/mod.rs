@@ -927,6 +927,7 @@ impl ExprImpl {
             RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
                 FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
             )),
+            RexNode::Now(_) => Self::Now(Box::new(Now {})),
         })
     }
 }

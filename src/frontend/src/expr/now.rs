@@ -34,9 +34,11 @@ impl Expr for Now {
     }
 
     fn to_expr_proto(&self) -> ExprNode {
-        FunctionCall::new(Type::Now, vec![])
-            .unwrap()
-            .to_expr_proto()
+        ExprNode {
+            expr_type: expr_node::Type::Now.into(),
+            return_type: Some(self.return_type().into()),
+            rex_node: Some(expr_node::RexNode::Now(true)),
+        }
     }
 }
 

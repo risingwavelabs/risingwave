@@ -203,6 +203,7 @@ message ExprNode {
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
+    bool now = 8;
   }
 }
 
