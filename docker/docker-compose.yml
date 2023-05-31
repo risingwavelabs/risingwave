@@ -120,9 +120,10 @@ services:
     healthcheck:
       test:
         - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/2388
+        - etcdctl
+        - --endpoints=http://localhost:2388
+        - endpoint
+        - health
       interval: 1s
       timeout: 5s
       retries: 5
