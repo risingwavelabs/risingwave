@@ -271,6 +271,18 @@ mod tests {
             )
         );
 
+        // TxnMsg::Begin is consumed implicitly
+
+        // Consume the 2nd message from upstream executor
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                " I I
+                + 88 43",
+            )
+        );
+
         // Consume the message from batch (because dml executor selects from the streams in a round
         // robin way)
         let msg = dml_executor.next().await.unwrap().unwrap();
@@ -280,16 +292,6 @@ mod tests {
                 "  I I
                 U+ 1 11
                 U+ 2 22",
-            )
-        );
-
-        // Consume the 2nd message from upstream executor
-        let msg = dml_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                " I I
-                + 88 43",
             )
         );
 
