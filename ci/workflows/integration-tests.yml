@@ -93,6 +93,7 @@ steps:
           - "twitter-pulsar"
           - "debezium-mongo"
           - "debezium-postgres"
+          - "tidb-cdc-sink"
         format:
           - "json"
           - "protobuf"
@@ -107,5 +108,9 @@ steps:
           skip: true
         - with:
             testcase: "debezium-postgres"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "tidb-cdc-sink"
             format: "protobuf"
           skip: true
