@@ -25,6 +25,7 @@ CREATE TABLE t_remote_1 (
     v_time TIME,
     v_timestamp TIMESTAMP,
     v_timestamptz TIMESTAMP,
+    v_interval VARCHAR(255),
     v_jsonb JSON,
     v_bytea BLOB
 );
