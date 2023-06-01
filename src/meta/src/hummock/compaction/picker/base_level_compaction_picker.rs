@@ -27,6 +27,7 @@ use crate::hummock::level_handler::LevelHandler;
 
 pub struct LevelCompactionPicker {
     target_level: usize,
+    is_compact_frequently: bool,
     config: Arc<CompactionConfig>,
 }
 
@@ -75,9 +76,14 @@ impl CompactionPicker for LevelCompactionPicker {
 }
 
 impl LevelCompactionPicker {
-    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
+    pub fn new(
+        target_level: usize,
+        is_compact_frequently: bool,
+        config: Arc<CompactionConfig>,
+    ) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
+            is_compact_frequently,
             config,
         }
     }
@@ -91,6 +97,11 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
+        let min_depth = if self.is_compact_frequently {
+            self.config.level0_sub_level_compact_level_count
+        } else {
+            1
+        };
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
@@ -99,7 +110,7 @@ impl LevelCompactionPicker {
                 self.config.max_bytes_for_level_base,
                 self.config.max_compaction_bytes / 2,
             ),
-            1,
+            min_depth as usize,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
@@ -393,7 +404,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        LevelCompactionPicker::new(1, config)
+        LevelCompactionPicker::new(1, true, config)
     }
 
     #[test]
@@ -493,7 +504,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
 
         let levels = vec![Level {
             level_idx: 1,
@@ -656,7 +667,7 @@ pub mod tests {
             .max_bytes_for_level_multiplier(1)
             .level0_sub_level_compact_level_count(2)
             .build();
-        let mut picker = LevelCompactionPicker::new(1, Arc::new(config));
+        let mut picker = LevelCompactionPicker::new(1, false, Arc::new(config));
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -723,7 +734,7 @@ pub mod tests {
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -748,7 +759,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(1)
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -813,7 +824,7 @@ pub mod tests {
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
-        let mut picker = LevelCompactionPicker::new(1, config.clone());
+        let mut picker = LevelCompactionPicker::new(1, false, config.clone());
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
         assert!(ret.is_none());
 
@@ -823,7 +834,7 @@ pub mod tests {
         }
 
         // No more pending sub-level so we can get a task now.
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -856,7 +867,7 @@ pub mod tests {
                 .build(),
         );
 
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -905,7 +916,7 @@ pub mod tests {
                     .level0_overlapping_sub_level_compact_level_count(4)
                     .build(),
             );
-            let mut picker = LevelCompactionPicker::new(1, config);
+            let mut picker = LevelCompactionPicker::new(1, false, config);
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -950,7 +961,7 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = LevelCompactionPicker::new(1, config);
+            let mut picker = LevelCompactionPicker::new(1, false, config);
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -1019,7 +1030,7 @@ pub mod tests {
                     .level0_sub_level_compact_level_count(1)
                     .build(),
             );
-            let mut picker = LevelCompactionPicker::new(1, config);
+            let mut picker = LevelCompactionPicker::new(1, false, config);
             let mut local_stats = LocalPickerStatistic::default();
             let ret = picker
                 .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -1071,7 +1082,7 @@ pub mod tests {
                 .level0_sub_level_compact_level_count(20) // reject intra
                 .build(),
         );
-        let mut picker = LevelCompactionPicker::new(1, config);
+        let mut picker = LevelCompactionPicker::new(1, false, config);
 
         // Cannot trivial move because there is only 1 sub-level.
         let l0 = generate_l0_overlapping_sublevels(vec![vec![

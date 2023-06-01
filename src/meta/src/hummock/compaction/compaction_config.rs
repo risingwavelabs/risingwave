@@ -17,8 +17,8 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
 const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
-const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
-const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
+const DEFAULT_MIN_COMPACTION_BYTES: u64 = 256 * 1024 * 1024; // 256MB
+const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 1280 * 1024 * 1024; // 1280MB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
 const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
@@ -29,7 +29,7 @@ const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
 const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 1000;
 const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
-const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
+const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 4;
 const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
 
 pub struct CompactionConfigBuilder {

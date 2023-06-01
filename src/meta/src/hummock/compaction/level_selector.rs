@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 //  Copyright 2023 RisingWave Labs
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +16,9 @@ use std::collections::HashMap;
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
@@ -78,8 +79,34 @@ pub struct DynamicLevelSelectorCore {
     config: Arc<CompactionConfig>,
 }
 
-#[derive(Default)]
-pub struct DynamicLevelSelector {}
+const SAMPLE_PICK_WINDOW_TIME: Duration = Duration::from_secs(4);
+const COMPACT_FREQUENTLY_COUNT: usize = 1;
+
+pub struct DynamicLevelSelector {
+    sample_window_start: Instant,
+    pick_count: usize,
+}
+
+impl DynamicLevelSelector {
+    pub fn new() -> Self {
+        Self {
+            sample_window_start: Instant::now(),
+            pick_count: 0,
+        }
+    }
+
+    pub fn may_switch_window(&mut self) {
+        if self.sample_window_start.elapsed() > SAMPLE_PICK_WINDOW_TIME {
+            self.sample_window_start = Instant::now();
+            self.pick_count = 0;
+        }
+        self.pick_count += 1;
+    }
+
+    pub fn is_compact_frequently(&self) -> bool {
+        self.pick_count > COMPACT_FREQUENTLY_COUNT
+    }
+}
 
 impl DynamicLevelSelectorCore {
     pub fn new(config: Arc<CompactionConfig>) -> Self {
@@ -94,6 +121,7 @@ impl DynamicLevelSelectorCore {
         &self,
         select_level: usize,
         target_level: usize,
+        is_compact_frequently: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
@@ -102,6 +130,7 @@ impl DynamicLevelSelectorCore {
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
+                    is_compact_frequently,
                     self.config.clone(),
                 ))
             }
@@ -370,6 +399,7 @@ impl LevelSelector for DynamicLevelSelector {
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
+        let is_compact_frequently = self.is_compact_frequently();
         for (score, select_level, target_level) in ctx.score_levels {
             if score <= SCORE_BASE {
                 return None;
@@ -377,11 +407,13 @@ impl LevelSelector for DynamicLevelSelector {
             let mut picker = dynamic_level_core.create_compaction_picker(
                 select_level,
                 target_level,
+                is_compact_frequently,
                 overlap_strategy.clone(),
             );
             let mut stats = LocalPickerStatistic::default();
             if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
                 ret.add_pending_task(task_id, level_handlers);
+                self.may_switch_window();
                 return Some(create_compaction_task(
                     dynamic_level_core.get_config(),
                     ret,
@@ -557,7 +589,7 @@ impl LevelSelector for TtlCompactionSelector {
 }
 
 pub fn default_level_selector() -> Box<dyn LevelSelector> {
-    Box::<DynamicLevelSelector>::default()
+    Box::new(DynamicLevelSelector::new())
 }
 
 #[cfg(test)]
@@ -904,7 +936,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let mut selector = DynamicLevelSelector::default();
+        let mut selector = DynamicLevelSelector::new();
         let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
         let compaction = selector
@@ -927,7 +959,7 @@ pub mod tests {
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
-        let mut selector = DynamicLevelSelector::default();
+        let mut selector = DynamicLevelSelector::new();
 
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.l0.as_mut().unwrap().total_file_size = 0;
