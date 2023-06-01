@@ -495,7 +495,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
     idx: jint,
 ) -> JString<'a> {
     execute_and_catch(env, move || {
-        Ok(env.new_string(pointer.as_ref().datum_at(idx as usize).unwrap().into_utf8())?)
+        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
+        match scalar_value {
+            // supports sinking rw interval to mysql string in iso_8601 format
+            ScalarRefImpl::Interval(v) => Ok(env.new_string(v.as_iso_8601())?),
+            _ => Ok(env.new_string(scalar_value.into_utf8())?),
+        }
     })
 }
 
@@ -542,6 +547,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     execute_and_catch(env, move || {
         let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
         let millis = match scalar_value {
+            // supports sinking rw timestamptz (ScalarRefImpl::Int64) to mysql timestamp
             ScalarRefImpl::Int64(v) => v / 1000,
             _ => scalar_value.into_timestamp().0.timestamp_millis(),
         };
