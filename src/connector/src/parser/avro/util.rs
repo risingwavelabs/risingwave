@@ -137,25 +137,6 @@ pub(crate) fn get_field_from_avro_value<'a>(
     }
 }
 
-pub(crate) fn get_option_field_from_avro_value<'a>(
-    avro_value: &'a Value,
-    field_name: &str,
-) -> Result<Option<&'a Value>> {
-    match avro_value {
-        Value::Record(fields) => Ok(fields
-            .iter()
-            .find(|val| val.0.eq(field_name) && val.1 != Value::Null)
-            .map(|entry| &entry.1)),
-        Value::Union(_, boxed_value) => {
-            get_option_field_from_avro_value(boxed_value.as_ref(), field_name)
-        }
-        _ => Err(RwError::from(ProtocolError(format!(
-            "avro parse unexpected field {}",
-            field_name
-        )))),
-    }
-}
-
 pub(crate) fn avro_decimal_to_rust_decimal(
     avro_decimal: AvroDecimal,
     precision: usize,

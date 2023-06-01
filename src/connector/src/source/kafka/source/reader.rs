@@ -175,11 +175,7 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                if self.enable_upsert {
-                    res.push(SourceMessage::from_kafka_message_upsert(msg));
-                } else {
-                    res.push(SourceMessage::from(msg));
-                }
+                res.push(SourceMessage::from(msg));
 
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {

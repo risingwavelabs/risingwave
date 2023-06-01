@@ -25,8 +25,8 @@ pub struct KafkaMeta {
     pub timestamp: Option<i64>,
 }
 
-impl SourceMessage {
-    pub fn from_kafka_message_upsert(message: BorrowedMessage<'_>) -> Self {
+impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
+    fn from(message: BorrowedMessage<'a>) -> Self {
         let encoded = bincode::serialize(&UpsertMessage {
             primary_key: message.key().unwrap_or_default().into(),
             record: message.payload().unwrap_or_default().into(),
@@ -35,20 +35,6 @@ impl SourceMessage {
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
             payload: Some(encoded),
-            offset: message.offset().to_string(),
-            split_id: message.partition().to_string().into(),
-            meta: SourceMeta::Kafka(KafkaMeta {
-                timestamp: message.timestamp().to_millis(),
-            }),
-        }
-    }
-}
-
-impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
-    fn from(message: BorrowedMessage<'a>) -> Self {
-        SourceMessage {
-            // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
