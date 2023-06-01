@@ -153,6 +153,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
+            .with_target("aws-smithy-types", Level::INFO)
+            .with_target("aws-credential-types", Level::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
