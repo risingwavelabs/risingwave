@@ -216,10 +216,12 @@ impl DebeziumAvroParser {
                         let before = from_avro_value(
                             get_field_from_avro_value(before, column.name.as_str())?.clone(),
                             field_schema,
+                            &column.data_type,
                         )?;
                         let after = from_avro_value(
                             get_field_from_avro_value(after, column.name.as_str())?.clone(),
                             field_schema,
+                            &column.data_type,
                         )?;
 
                         Ok((before, after))
@@ -234,6 +236,7 @@ impl DebeziumAvroParser {
                         from_avro_value(
                             get_field_from_avro_value(after, column.name.as_str())?.clone(),
                             field_schema,
+                            &column.data_type
                         )
                     })
                 }
@@ -251,6 +254,7 @@ impl DebeziumAvroParser {
                         from_avro_value(
                             get_field_from_avro_value(before, column.name.as_str())?.clone(),
                             field_schema,
+                            &column.data_type
                         )
                     })
                 }

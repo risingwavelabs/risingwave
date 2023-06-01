@@ -8,7 +8,7 @@ use risingwave_common::cast::{
     str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
+    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
@@ -252,7 +252,7 @@ impl JsonParseOptions {
                 .into(),
 
             (DataType::Decimal, ValueType::String) => ScalarImpl::Decimal(
-                Decimal::from_str(value.as_str().unwrap()).map_err(|err| create_error())?,
+                Decimal::from_str(value.as_str().unwrap()).map_err(|_err| create_error())?,
             ),
             // ---- Date -----
             (
@@ -370,7 +370,7 @@ impl JsonParseOptions {
                 .map_err(|_| create_error())?
                 .into(),
 
-            (expected, got) => Err(create_error())?,
+            (_expected, _got) => Err(create_error())?,
         };
         Ok(Some(v))
     }

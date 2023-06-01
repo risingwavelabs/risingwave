@@ -13,25 +13,22 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::str::FromStr;
+
 
 use anyhow::{anyhow, Result};
-use base64::Engine as _;
-use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::{
-    i64_to_timestamp, i64_to_timestamptz, str_to_bytea, str_to_date, str_to_time, str_to_timestamp,
-    str_with_time_zone_to_timestamptz,
-};
+
+
+
 use risingwave_common::types::{
-    DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
+    DataType, Datum, ScalarImpl,
 };
-use risingwave_common::util::iter_util::ZipEqFast;
+
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
 use super::unified::json::JsonParseOptions;
 use crate::source::SourceFormat;
-use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
+
 pub(crate) fn json_object_smart_get_value<'a, 'b>(
     v: &'b simd_json::BorrowedValue<'a>,
     key: Cow<'b, str>,

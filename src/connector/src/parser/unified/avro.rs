@@ -1,7 +1,7 @@
-use std::fmt::format;
+
 use std::str::FromStr;
 
-use apache_avro::types::{Record, Value};
+use apache_avro::types::{Value};
 use apache_avro::Schema;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::i64_to_timestamp;
@@ -102,7 +102,7 @@ impl<'a> AvroParseOptions<'a> {
                     .iter()
                     .zip_eq_fast(struct_type_info.fields.iter())
                     .map(|(field_name, field_type)| {
-                        let maybe_value = descs.iter().find(|(k, v)| k == field_name);
+                        let maybe_value = descs.iter().find(|(k, _v)| k == field_name);
                         if let Some((_, value)) = maybe_value {
                             let schema = self.extract_inner_schema(Some(field_name));
                             Ok(Self {
@@ -120,7 +120,7 @@ impl<'a> AvroParseOptions<'a> {
             // ---- List -----
             (DataType::List(item_type), Value::Array(arr)) => ListValue::new(
                 arr.iter()
-                    .map(|v| {
+                    .map(|_v| {
                         let schema = self.extract_inner_schema(None);
                         Ok(Self {
                             schema,
@@ -138,7 +138,7 @@ impl<'a> AvroParseOptions<'a> {
                 JsonbVal::from_str(s).map_err(|_| create_error())?.into()
             }
 
-            (expected, got) => Err(create_error())?,
+            (_expected, _got) => Err(create_error())?,
         };
         Ok(Some(v))
     }
