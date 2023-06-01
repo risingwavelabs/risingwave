@@ -196,7 +196,7 @@ impl SstableStore {
                         .get(&index)
                         .await?
                 {
-                    let block = Block::decode(Bytes::from(data),uncompressed_capacity)?;
+                    let block = Block::decode(Bytes::from(data), uncompressed_capacity)?;
                     return Ok(Box::new(block))
                 }
 
@@ -231,25 +231,10 @@ impl SstableStore {
             )),
             CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
-                None => match self
-                    .tiered_cache
-                    .get(&SstableBlockIndex {
-                        sst_id: object_id,
-                        block_index,
-                    })
-                    .await?
-                {
-                    Some(data) => {
-                        let block = Block::decode(Bytes::from(data), uncompressed_capacity)?;
-                        Ok(BlockResponse::Block(BlockHolder::from_owned_block(
-                            Box::new(block),
-                        )))
-                    }
-                    None => fetch_block()
-                        .await
-                        .map(BlockHolder::from_owned_block)
-                        .map(BlockResponse::Block),
-                },
+                None => fetch_block()
+                    .await
+                    .map(BlockHolder::from_owned_block)
+                    .map(BlockResponse::Block),
             },
             CachePolicy::Disable => fetch_block()
                 .await
