@@ -87,14 +87,16 @@ pub struct DynamicLevelSelector {
     pick_count: usize,
 }
 
-impl DynamicLevelSelector {
-    pub fn new() -> Self {
+impl Default for DynamicLevelSelector {
+    fn default() -> Self {
         Self {
             sample_window_start: Instant::now(),
             pick_count: 0,
         }
     }
+}
 
+impl DynamicLevelSelector {
     pub fn may_switch_window(&mut self) {
         if self.sample_window_start.elapsed() > SAMPLE_PICK_WINDOW_TIME {
             self.sample_window_start = Instant::now();
@@ -589,7 +591,7 @@ impl LevelSelector for TtlCompactionSelector {
 }
 
 pub fn default_level_selector() -> Box<dyn LevelSelector> {
-    Box::new(DynamicLevelSelector::new())
+    Box::<DynamicLevelSelector>::default()
 }
 
 #[cfg(test)]
@@ -936,7 +938,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let mut selector = DynamicLevelSelector::new();
+        let mut selector = DynamicLevelSelector::default();
         let mut levels_handlers = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
         let compaction = selector
@@ -959,7 +961,7 @@ pub mod tests {
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
-        let mut selector = DynamicLevelSelector::new();
+        let mut selector = DynamicLevelSelector::default();
 
         levels.l0.as_mut().unwrap().sub_levels.clear();
         levels.l0.as_mut().unwrap().total_file_size = 0;

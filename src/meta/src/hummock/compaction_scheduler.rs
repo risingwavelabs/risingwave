@@ -167,7 +167,7 @@ where
             HashMap::default();
         compaction_selectors.insert(
             compact_task::TaskType::Dynamic,
-            Box::new(DynamicLevelSelector::new()),
+            Box::<DynamicLevelSelector>::default(),
         );
         compaction_selectors.insert(
             compact_task::TaskType::SpaceReclaim,
