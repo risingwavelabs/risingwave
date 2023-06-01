@@ -26,48 +26,48 @@ use crate::Result;
 ///
 /// ```slt
 /// query T
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[1]);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], array[1]);
 /// ----
 /// {1}
 ///
 /// query T
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], array[2]);
 /// ----
 /// {2,4}
 ///
 /// query T
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], null);
 /// ----
 /// {5}
 ///
 /// query T
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[4]);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], array[4]);
 /// ----
 /// {}
 ///
 /// query T
-/// select array_positions(null::int[], 1);
+/// select array_positions(null, 1);
 /// ----
 /// NULL
 ///
 /// query T
-/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[3.14]);
+/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null], array[3.14]);
 /// ----
 /// {}
 ///
 /// query T
-/// select array_positions(array[1,NULL,NULL,3], NULL::int);
+/// select array_positions(array[1,NULL,NULL,3], NULL);
 /// ----
 /// {2,3}
 ///
 /// statement error
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], 1);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], 1);
 ///
 /// statement error
-/// select array_positions(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
+/// select array_positions(array[array[1],array[2],array[3],array[2],null], array[array[3]]);
 ///
 /// statement error
-/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
+/// select array_positions(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
 #[function("array_positions(list, *) -> list")]
 fn array_positions<'a, T: ScalarRef<'a>>(
