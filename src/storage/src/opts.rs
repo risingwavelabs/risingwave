@@ -47,7 +47,7 @@ pub struct StorageOpts {
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
-    /// Capacity of sstable meta cache.
+    /// Capacity of memory for sstable builder
     pub compactor_memory_limit_mb: usize,
     /// Number of SST ids fetched from meta per RPC
     pub sstable_id_remote_fetch_number: u32,
