@@ -361,7 +361,6 @@ mod tests {
             )
         );
 
-
         // After TxnMsg::End, we can consume dml data
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert_eq!(
