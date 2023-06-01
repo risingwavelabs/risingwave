@@ -37,7 +37,7 @@
       └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
-            └─StreamHashJoin [in_append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamFilter { predicate: (initial_bid = 1:Int32) }
               |   └─StreamShare { id = 4 }
@@ -127,7 +127,7 @@
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
           | └─StreamShare { id = 7 }
-          |   └─StreamHashAgg [in_append_only] { group_key: [auction, window_start], aggs: [count] }
+          |   └─StreamHashAgg [append_only] { group_key: [auction, window_start], aggs: [count] }
           |     └─StreamExchange { dist: HashShard(auction, window_start) }
           |       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
           |         └─StreamProject { exprs: [auction, date_time, _row_id] }
@@ -138,7 +138,7 @@
             └─StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
               └─StreamExchange { dist: HashShard(window_start) }
                 └─StreamShare { id = 7 }
-                  └─StreamHashAgg [in_append_only] { group_key: [auction, window_start], aggs: [count] }
+                  └─StreamHashAgg [append_only] { group_key: [auction, window_start], aggs: [count] }
                     └─StreamExchange { dist: HashShard(auction, window_start) }
                       └─StreamHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: [auction, window_start, _row_id] }
                         └─StreamProject { exprs: [auction, date_time, _row_id] }
@@ -199,7 +199,7 @@
       └─StreamAppendOnlySimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
-            └─StreamHashJoin [in_append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamShare { id = 3 }
               |   └─StreamProject { exprs: [id, _row_id] }

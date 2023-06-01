@@ -17,7 +17,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: "NoCheck", watermark_columns: [v1] }
     └─StreamProject { exprs: [v1, min(v2), count(distinct v3)], output_watermarks: [v1] }
-      └─StreamHashAgg [in_append_only] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
+      └─StreamHashAgg [append_only] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
             └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - 10:Int32)] }
@@ -25,7 +25,7 @@
   eowc_stream_plan: |
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: "NoCheck", watermark_columns: [v1] }
     └─StreamProject { exprs: [v1, min(v2), count(distinct v3)], output_watermarks: [v1] }
-      └─StreamHashAgg [in_append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
+      └─StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
         └─StreamExchange { dist: HashShard(v1) }
           └─StreamRowIdGen { row_id_index: 3 }
             └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - 10:Int32)] }
@@ -35,7 +35,7 @@
     StreamMaterialize { columns: [v1, min, agg], stream_key: [v1], pk_columns: [v1], pk_conflict: "NoCheck", watermark_columns: [v1] }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [v1, min(v2), count(distinct v3)], output_watermarks: [v1] }
-        └── StreamHashAgg [in_append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
+        └── StreamHashAgg [append_only, eowc] { group_key: [v1], aggs: [min(v2), count(distinct v3), count], output_watermarks: [v1] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: [ (distinct key: v3, table id: 1) ]
@@ -83,14 +83,14 @@
   stream_plan: |
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: "NoCheck", watermark_columns: [window_start] }
     └─StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [$expr1] }
-      └─StreamHashAgg [in_append_only] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
+      └─StreamHashAgg [append_only] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [$expr1] }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: "NoCheck", watermark_columns: [window_start] }
     └─StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [$expr1] }
-      └─StreamHashAgg [in_append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
+      └─StreamHashAgg [append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [TumbleStart(t.a, '01:00:00':Interval) as $expr1, t.b, t._row_id], output_watermarks: [$expr1] }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -99,7 +99,7 @@
     StreamMaterialize { columns: [window_start, max], stream_key: [window_start], pk_columns: [window_start], pk_conflict: "NoCheck", watermark_columns: [window_start] }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr1, max(t.b)], output_watermarks: [$expr1] }
-        └── StreamHashAgg [in_append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
+        └── StreamHashAgg [append_only, eowc] { group_key: [$expr1], aggs: [max(t.b), count], output_watermarks: [$expr1] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
