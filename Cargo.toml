@@ -70,7 +70,7 @@ aws-endpoint = "0.55"
 aws-types = "0.55"
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", version = "0.2.22", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 hashbrown = { version = "0.13.2", features = ["ahash", "inline-more", "nightly"] }
 
 [profile.dev]
@@ -122,5 +122,4 @@ getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "4538cd6" }
-madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "b2ab7dd" }
-madsim-aws-sdk-s3 = { git = "https://github.com/madsim-rs/madsim.git", rev = "b2ab7dd" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "6d342a9" }

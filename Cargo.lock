@@ -3579,7 +3579,8 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.2.23+0.28"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=b2ab7dd#b2ab7ddac1ccca7b16dfdd02d939f4b5664e08fc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eab6f17267ffa9ab9ea0f30c11b6829690e7112745958a45dfa57fd7f74929b3"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -3625,8 +3626,8 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.22"
-source = "git+https://github.com/madsim-rs/madsim.git?rev=b2ab7dd#b2ab7ddac1ccca7b16dfdd02d939f4b5664e08fc"
+version = "0.2.14-alpha"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=6d342a9#6d342a98df0916ad115e06fd848a8f460730253f"
 dependencies = [
  "async-channel",
  "async-trait",
