@@ -32,11 +32,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
-        match func_call.get_expr_type() {
-            expr_node::Type::Unspecified
-            | expr_node::Type::InputRef
-            | expr_node::Type::ConstantValue
-            | expr_node::Type::Add
+        match func_call.func_type() {
+            expr_node::Type::Unspecified => unreachable!(),
+            expr_node::Type::Add
             | expr_node::Type::Subtract
             | expr_node::Type::Multiply
             | expr_node::Type::Divide
@@ -187,7 +185,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
                 x
             }
             // expression output is not deterministic
-            expr_node::Type::Vnode | expr_node::Type::Proctime | expr_node::Type::Udf => true,
+            expr_node::Type::Vnode | expr_node::Type::Proctime => true,
         }
     }
 }

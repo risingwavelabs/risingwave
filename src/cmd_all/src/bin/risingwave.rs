@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::PlaygroundOpts;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
@@ -103,6 +104,7 @@ impl Component {
     }
 }
 
+#[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
     let risingwave = || {
         command!(BINARY_NAME)
@@ -132,33 +134,6 @@ fn main() -> Result<()> {
     component.start(matches);
 
     Ok(())
-}
-
-fn compute(opts: ComputeNodeOpts) {
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
-    );
-    risingwave_rt::main_okk(risingwave_compute::start(opts));
-}
-
-fn meta(opts: MetaNodeOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_meta::start(opts));
-}
-
-fn frontend(opts: FrontendOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_frontend::start(opts));
-}
-
-fn compactor(opts: CompactorOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_compactor::start(opts));
-}
-
-fn ctl(opts: CtlOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_ctl::start(opts)).unwrap();
 }
 
 fn playground(opts: PlaygroundOpts) {
