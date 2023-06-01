@@ -10,21 +10,6 @@
         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
     },
     // // ============================================================================
-    // // BEGIN SECTION: configurations for the development of dynamic linking 
-    // // dependencies (e.g., OpenSSL, zstd)
-    // // ============================================================================
-    // "rust-analyzer.cargo.noDefaultFeatures": true,
-    // "rust-analyzer.cargo.features": [
-    //     "rw-dynamic-link"
-    // ],
-    // "rust-analyzer.cargo.extraEnv": {
-    //     "OPENSSL_ROOT_DIR": "/opt/homebrew/opt/openssl@3"
-    // },
-    // // ===========================================================================
-    // // END SECTION
-    // // ===========================================================================
-    //
-    // // ============================================================================
     // // BEGIN SECTION: configurations for the development of deterministic testing
     // // ============================================================================
     // "rust-analyzer.cargo.extraEnv": {

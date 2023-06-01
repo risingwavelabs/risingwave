@@ -270,7 +270,6 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
-
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
@@ -280,7 +279,6 @@ async fn compact_shared_buffer(
             }
             level0.extend(ssts);
         }
-
         Ok(level0)
     } else {
         Err(err.unwrap())

@@ -90,7 +90,7 @@ mod tests {
         let col1 = I32Array::from_iter(&lhs).into_ref();
         let col2 = I32Array::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build(
+        let expr = build_func(
             kind,
             match kind {
                 Type::Add | Type::Subtract | Type::Multiply | Type::Divide => DataType::Int32,
@@ -200,7 +200,7 @@ mod tests {
         let col1 = DecimalArray::from_iter(&lhs).into_ref();
         let col2 = DecimalArray::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build(
+        let expr = build_func(
             kind,
             match kind {
                 Type::Add | Type::Subtract | Type::Multiply | Type::Divide => DataType::Decimal,

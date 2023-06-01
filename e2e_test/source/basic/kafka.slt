@@ -3,7 +3,7 @@ statement error CSV HEADER is not supported when creating table with Kafka conne
 create table s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format csv DELIMITED BY ',';
 
@@ -11,7 +11,7 @@ statement ok
 create table s0 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_csv_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format csv WITHOUT HEADER DELIMITED BY ',';
 
@@ -28,7 +28,7 @@ statement ok
 create table s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -39,7 +39,7 @@ statement ok
 create table s2 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_2_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -50,7 +50,7 @@ statement ok
 create table s3 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_3_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -61,7 +61,7 @@ statement ok
 create table s4 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -72,7 +72,7 @@ statement ok
 create table s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) append only with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
 ) row format json
 
@@ -83,7 +83,7 @@ statement ok
 create table s6 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_mv_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -94,7 +94,7 @@ statement ok
 create sink si
 from
   s5 with (
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     topic = 'sink_target',
     type = 'append-only',
     connector = 'kafka'
@@ -109,7 +109,7 @@ statement ok
 create table s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'sink_target',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -126,7 +126,7 @@ create table s8 (
 ) with (
   connector = 'kafka',
   topic = 'debezium_log',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format debezium_json
 
 statement ok
@@ -139,14 +139,14 @@ create table s8 (
 ) with (
   connector = 'kafka',
   topic = 'debezium_log',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format debezium_json
 
 statement ok
 create table s9 with (
   connector = 'kafka', 
   topic = 'avro_bin',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format avro 
 row schema location 'file:///risingwave/avro-simple-schema.avsc'
@@ -155,7 +155,7 @@ statement ok
 create table s10 with (
   connector = 'kafka', 
   topic = 'avro_c_bin',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format avro 
 row schema location 'file:///risingwave/avro-complex-schema.avsc'
@@ -164,7 +164,7 @@ statement ok
 create table s11 with (
   connector = 'kafka', 
   topic = 'proto_c_bin',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
@@ -180,7 +180,7 @@ CREATE TABLE s12(
 WITH (
     connector = 'kafka',
     topic = 'json_c',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest')
 ROW format JSON;
 
@@ -194,7 +194,7 @@ create table s13 (
 ) with (
   connector = 'kafka',
   topic = 'maxwell_json',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format maxwell;
 
 statement ok
@@ -207,7 +207,7 @@ create table s13 (
 ) with (
   connector = 'kafka',
   topic = 'maxwell_json',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format maxwell;
 
 statement ok
@@ -222,7 +222,7 @@ create table s14 (
 ) with (
   connector = 'kafka',
   topic = 'cannal_json',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format CANAL_JSON;
 
 statement ok
@@ -233,14 +233,14 @@ create table s15 (
 ) with (
   connector = 'kafka',
   topic = 'canal_json_double_field',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format CANAL_JSON;
 
 statement ok
 create table s16 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'latest'
 ) row format json
 
@@ -248,7 +248,7 @@ statement ok
 create source s17 with (
   connector = 'kafka', 
   topic = 'proto_c_bin',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest',
   proto.message = 'test.User'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
@@ -257,7 +257,7 @@ statement ok
 create source s18 with (
   connector = 'kafka', 
   topic = 'avro_c_bin',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format avro 
 row schema location 'file:///risingwave/avro-complex-schema.avsc'
@@ -268,7 +268,7 @@ create table s19
 with (
   connector = 'kinesis',
   topic = 'topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 )
 row format avro
 row schema location confluent schema registry 'http://127.0.0.1:8081'
@@ -284,7 +284,7 @@ create table s20 (
 ) with (
   connector = 'kafka',
   topic = 'debezium_log',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format debezium_json
 
 # create kafka source table with generated column
@@ -292,7 +292,7 @@ statement ok
 create table s21 (v1 int as v2-1, v2 int, v3 int as v2+1) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_generated_columns',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -301,10 +301,17 @@ statement ok
 create source s22 (v1 int as v2-1, v2 int, v3 int as v2+1, p timestamptz as proctime()) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_generated_columns',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
+statement ok
+create source s23 (bytea_example bytea) with (
+  connector = 'kafka',
+  topic = 'json_bytea',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) row format json
 
 statement ok
 CREATE TABLE mongo_customers (
@@ -313,7 +320,7 @@ CREATE TABLE mongo_customers (
 )
 WITH (
 	connector = 'kafka',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers')
 ROW FORMAT DEBEZIUM_MONGO_JSON
 
@@ -329,7 +336,7 @@ CREATE TABLE upsert_students (
 )
 WITH (
 	connector = 'kafka',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_json')
 ROW FORMAT UPSERT_JSON
 
@@ -344,7 +351,7 @@ CREATE TABLE upsert_students (
 )
 WITH (
 	connector = 'kafka',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
 	topic = 'upsert_json')
 ROW FORMAT UPSERT_JSON
 
@@ -362,6 +369,9 @@ select v1, v2 from s0;
 2 22
 3 333
 4 4444
+
+statement ok
+drop table s0
 
 query IT rowsort
 select * from s1
@@ -538,6 +548,12 @@ select v1, v2, v3, p >= date '2021-01-01' from s22;
 20 21 22 t
 NULL NULL NULL t
 
+query T rowsort
+select * from s23;
+----
+\x31324344
+\xdeadbeef
+
 query II 
 SELECT
 	*
@@ -616,7 +632,11 @@ statement ok
 drop source s22
 
 statement ok
+drop source s23
+
+statement ok
 DROP TABLE mongo_customers;
 
 statement ok
 DROP TABLE upsert_students;
+

@@ -25,12 +25,10 @@ pub const MIGRATION_PLAN_KEY: &[u8] = &[
     109, 105, 103, 114, 97, 116, 105, 111, 110, 95, 112, 108, 97, 110,
 ];
 
-type WorkerId = u32;
 type ParallelUnitId = u32;
 
 #[derive(Debug, Default, Clone)]
 pub struct MigrationPlan {
-    pub worker_plan: HashMap<WorkerId, WorkerId>,
     pub parallel_unit_plan: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
@@ -57,10 +55,6 @@ impl MigrationPlan {
             })
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.worker_plan.is_empty()
-    }
-
     pub async fn insert<S: MetaStore>(&self, store: &S) -> MetaStoreResult<()> {
         store
             .put_cf(
@@ -81,7 +75,6 @@ impl MigrationPlan {
 impl From<PbMigrationPlan> for MigrationPlan {
     fn from(plan: PbMigrationPlan) -> Self {
         MigrationPlan {
-            worker_plan: plan.migration_plan,
             parallel_unit_plan: plan.parallel_unit_migration_plan,
         }
     }
@@ -90,7 +83,6 @@ impl From<PbMigrationPlan> for MigrationPlan {
 impl From<MigrationPlan> for PbMigrationPlan {
     fn from(plan: MigrationPlan) -> Self {
         PbMigrationPlan {
-            migration_plan: plan.worker_plan,
             parallel_unit_migration_plan: plan.parallel_unit_plan,
         }
     }

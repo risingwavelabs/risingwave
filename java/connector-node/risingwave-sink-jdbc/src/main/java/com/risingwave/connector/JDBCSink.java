@@ -19,14 +19,22 @@ import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
+import java.io.InputStream;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.postgresql.util.PGInterval;
+import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+enum DatabaseType {
+    MYSQL,
+    POSTGRES,
+}
 
 public class JDBCSink extends SinkBase {
     public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
@@ -37,6 +45,7 @@ public class JDBCSink extends SinkBase {
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
+    private final DatabaseType targetDbType;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
     private String updateDeleteConditionBuffer;
@@ -46,6 +55,17 @@ public class JDBCSink extends SinkBase {
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
+
+        var jdbcUrl = config.getJdbcUrl().toLowerCase();
+        if (jdbcUrl.startsWith("jdbc:mysql")) {
+            this.targetDbType = DatabaseType.MYSQL;
+        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
+            this.targetDbType = DatabaseType.POSTGRES;
+        } else {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                    .asRuntimeException();
+        }
 
         this.config = config;
         try {
@@ -90,12 +110,7 @@ public class JDBCSink extends SinkBase {
                         String.format(
                                 INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
                 try {
-                    PreparedStatement stmt =
-                            conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (int i = 0; i < row.size(); i++) {
-                        stmt.setObject(i + 1, row.get(i));
-                    }
-                    return stmt;
+                    return generatePreparedStatement(insertStmt, row, null);
                 } catch (SQLException e) {
                     throw io.grpc.Status.INTERNAL
                             .withDescription(
@@ -174,14 +189,7 @@ public class JDBCSink extends SinkBase {
                                 updateDeleteConditionBuffer);
                 try {
                     PreparedStatement stmt =
-                            conn.prepareStatement(updateStmt, Statement.RETURN_GENERATED_KEYS);
-                    int placeholderIdx = 1;
-                    for (int i = 0; i < row.size(); i++) {
-                        stmt.setObject(placeholderIdx++, row.get(i));
-                    }
-                    for (Object value : updateDeleteValueBuffer) {
-                        stmt.setObject(placeholderIdx++, value);
-                    }
+                            generatePreparedStatement(updateStmt, row, updateDeleteValueBuffer);
                     updateDeleteConditionBuffer = null;
                     updateDeleteValueBuffer = null;
                     return stmt;
@@ -197,6 +205,56 @@ public class JDBCSink extends SinkBase {
                         .withDescription("unspecified row operation")
                         .asRuntimeException();
         }
+    }
+
+    /**
+     * Generates sql statement for insert/update
+     *
+     * @param inputStmt insert/update template string
+     * @param row column values to fill into statement
+     * @param updateDeleteValueBuffer pk values for update condition, pass null for insert
+     * @return prepared sql statement for insert/delete
+     * @throws SQLException
+     */
+    private PreparedStatement generatePreparedStatement(
+            String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
+        PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);
+        var columnNames = getTableSchema().getColumnNames();
+        int placeholderIdx = 1;
+        for (int i = 0; i < row.size(); i++) {
+            switch (getTableSchema().getColumnType(columnNames[i])) {
+                case INTERVAL:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
+                    } else {
+                        stmt.setObject(placeholderIdx++, row.get(i));
+                    }
+                    break;
+                case JSONB:
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        // reference: https://github.com/pgjdbc/pgjdbc/issues/265
+                        var pgObj = new PGobject();
+                        pgObj.setType("jsonb");
+                        pgObj.setValue((String) row.get(i));
+                        stmt.setObject(placeholderIdx++, pgObj);
+                    } else {
+                        stmt.setObject(placeholderIdx++, row.get(i));
+                    }
+                    break;
+                case BYTEA:
+                    stmt.setBinaryStream(placeholderIdx++, (InputStream) row.get(i));
+                    break;
+                default:
+                    stmt.setObject(placeholderIdx++, row.get(i));
+                    break;
+            }
+        }
+        if (updateDeleteValueBuffer != null) {
+            for (Object value : updateDeleteValueBuffer) {
+                stmt.setObject(placeholderIdx++, value);
+            }
+        }
+        return stmt;
     }
 
     @Override

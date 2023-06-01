@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod kv_log_store;
+
 use std::fmt::Debug;
 use std::future::Future;
 use std::sync::Arc;
@@ -20,6 +22,7 @@ use anyhow::anyhow;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_storage::error::StorageError;
 use tokio::sync::mpsc::{
     channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
@@ -38,6 +41,9 @@ pub enum LogStoreError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("Value encoding error: {0}")]
+    ValueEncoding(#[from] ValueEncodingError),
 }
 
 pub type LogStoreResult<T> = Result<T, LogStoreError>;

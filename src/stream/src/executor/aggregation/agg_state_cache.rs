@@ -18,7 +18,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, DatumRef};
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common_proc_macro::EstimateSize;
 use smallvec::SmallVec;
 
 use super::minput_agg_impl::MInputAggregator;

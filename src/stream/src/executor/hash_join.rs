@@ -206,7 +206,6 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         unimplemented!()
     }
 
-    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -821,10 +820,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             .join_cached_entries
                             .with_label_values(&[&actor_id_str, side])
                             .set(ht.entry_count() as i64);
-                        // self.metrics
-                        //     .join_cached_estimated_size
-                        //     .with_label_values(&[&actor_id_str, side])
-                        //     .set(ht.estimated_size() as i64);
                     }
 
                     self.metrics

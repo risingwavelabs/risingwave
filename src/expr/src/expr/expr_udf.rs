@@ -20,13 +20,12 @@ use arrow_schema::{Field, Schema, SchemaRef};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::ArrowFlightUdfClient;
 
 use super::{build_from_prost, BoxedExpression};
 use crate::expr::Expression;
-use crate::{bail, ensure, ExprError, Result};
+use crate::{bail, ExprError, Result};
 
 #[derive(Debug)]
 pub struct UdfExpression {
@@ -103,11 +102,9 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Udf);
         let return_type = DataType::from(prost.get_return_type().unwrap());
-        let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
-            bail!("expect UDF");
-        };
+        let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
+
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
                 .iter()

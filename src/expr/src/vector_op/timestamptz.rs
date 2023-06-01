@@ -106,8 +106,6 @@ pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<Timestamp
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
-
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
@@ -163,7 +161,7 @@ mod tests {
             let local = str_to_timestamp(local).unwrap();
 
             let actual = timestamp_at_time_zone(local, zone);
-            assert_matches!(actual, Err(_));
+            assert!(actual.is_err());
         }
     }
 

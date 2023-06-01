@@ -278,51 +278,65 @@ pub async fn handle(
             object_name,
             if_exists,
             drop_mode,
-        }) => match object_type {
-            ObjectType::Table => {
-                drop_table::handle_drop_table(handler_args, object_name, if_exists).await
-            }
-            ObjectType::MaterializedView => {
-                drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Index => {
-                drop_index::handle_drop_index(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Source => {
-                drop_source::handle_drop_source(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Sink => {
-                drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Database => {
-                drop_database::handle_drop_database(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::Schema => {
-                drop_schema::handle_drop_schema(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::User => {
-                drop_user::handle_drop_user(handler_args, object_name, if_exists, drop_mode.into())
+        }) => {
+            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+                return Err(
+                    ErrorCode::NotImplemented("DROP CASCADE".to_string(), None.into()).into(),
+                );
+            };
+            match object_type {
+                ObjectType::Table => {
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists).await
+                }
+                ObjectType::MaterializedView => {
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Index => {
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Source => {
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Sink => {
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Database => {
+                    drop_database::handle_drop_database(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
                     .await
+                }
+                ObjectType::Schema => {
+                    drop_schema::handle_drop_schema(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::User => {
+                    drop_user::handle_drop_user(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::View => {
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Connection => {
+                    drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
+                        .await
+                }
             }
-            ObjectType::View => {
-                drop_view::handle_drop_view(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Connection => {
-                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
-            }
-        },
+        }
+        // XXX: should we reuse Statement::Drop for DROP FUNCTION?
         Statement::DropFunction {
             if_exists,
             func_desc,
