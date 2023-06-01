@@ -14,6 +14,8 @@
 
 use std::collections::{btree_map, BTreeMap};
 
+use risingwave_common::estimate_size::KvSize;
+
 use super::*;
 
 #[expect(dead_code)]
@@ -34,32 +36,28 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 pub struct JoinEntryState {
     /// The full copy of the state.
     cached: BTreeMap<PkType, StateValueType>,
-    kv_heap_size: usize,
+    kv_heap_size: KvSize,
 }
 
 impl EstimateSize for JoinEntryState {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size.
         // https://github.com/risingwavelabs/risingwave/issues/9713
-        self.kv_heap_size
+        self.kv_heap_size.size()
     }
 }
 
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(key.estimated_heap_size() + value.estimated_heap_size());
+        self.kv_heap_size.add(&key, &value);
         self.cached.try_insert(key, value).unwrap();
     }
 
     /// Delete from the cache.
     pub fn remove(&mut self, pk: PkType) {
         if let Some(value) = self.cached.remove(&pk) {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(pk.estimated_heap_size() + value.estimated_heap_size());
+            self.kv_heap_size.sub(&pk, &value);
         } else {
             panic!("pk {:?} should be in the cache", pk);
         }

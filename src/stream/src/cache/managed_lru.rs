@@ -104,11 +104,11 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        let key_size = k.estimated_heap_size();
-        self.kv_heap_size_inc(key_size + v.estimated_heap_size());
+        let key_size = k.estimated_size();
+        self.kv_heap_size_inc(key_size + v.estimated_size());
         let old_val = self.inner.put(k, v);
         if let Some(old_val) = &old_val {
-            self.kv_heap_size_dec(key_size + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(key_size + old_val.estimated_size());
         }
         old_val
     }
@@ -158,12 +158,12 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.kv_heap_size_inc(k.estimated_heap_size() + v.estimated_heap_size());
+        self.kv_heap_size_inc(k.estimated_size() + v.estimated_size());
 
         let old_kv = self.inner.push(k, v);
 
         if let Some((old_key, old_val)) = &old_kv {
-            self.kv_heap_size_dec(old_key.estimated_heap_size() + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(old_key.estimated_size() + old_val.estimated_size());
         }
         old_kv
     }
@@ -199,6 +199,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn report_memory_usage(&mut self) -> bool {
+        dbg!(&self.kv_heap_size, &self.last_reported_size_bytes);
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
