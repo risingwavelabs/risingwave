@@ -32,7 +32,6 @@ const BEFORE: &str = "old";
 const OP: &str = "type";
 const IS_DDL: &str = "isDdl";
 
-impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
@@ -194,6 +193,24 @@ fn cannal_simd_json_parse_value(
                 anyhow!("failed to parse type '{}' from json: {}", dtype, e)
             })?,
         )),
+    }
+}
+
+impl ByteStreamSourceParser for CanalJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 
