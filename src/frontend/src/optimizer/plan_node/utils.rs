@@ -186,11 +186,9 @@ impl fmt::Debug for IndicesDisplay<'_> {
 /// If a property list is provided, properties in it will be added to the struct name according to
 /// the condition of that property.
 macro_rules! formatter_debug_plan_node {
-    ($formatter:ident, $name:literal) => {
-        $formatter.debug_struct($name)
-    };
-    ($formatter:ident, $name:literal, $( { $prop:literal, $cond:expr } ), *) => {
+    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
+            #[allow(unused_mut)]
             let mut properties: Vec<&str> = vec![];
             $( if $cond { properties.push($prop); } )*
             let mut name = $name.to_string();
