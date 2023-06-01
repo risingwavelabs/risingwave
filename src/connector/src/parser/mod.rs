@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use auto_enums::auto_enum;
-pub use avro::*;
+pub use avro::{AvroParser, AvroParserConfig};
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
@@ -397,12 +397,13 @@ pub enum ByteStreamSourceParserImpl {
     DebeziumAvro(DebeziumAvroParser),
 }
 
-pub type ParserStream = impl SourceWithStateStream;
+pub type ParserStream = impl SourceWithStateStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
-    #[auto_enum(futures03::Stream)]
+    /// Converts this parser into a stream of [`StreamChunk`].
     pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParserStream {
-        match self {
+        #[auto_enum(futures03::Stream)]
+        let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
             Self::Protobuf(parser) => parser.into_stream(msg_stream),
@@ -412,7 +413,8 @@ impl ByteStreamSourceParserImpl {
             Self::Maxwell(parser) => parser.into_stream(msg_stream),
             Self::CanalJson(parser) => parser.into_stream(msg_stream),
             Self::DebeziumAvro(parser) => parser.into_stream(msg_stream),
-        }
+        };
+        Box::pin(stream)
     }
 }
 

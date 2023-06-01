@@ -13,19 +13,17 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
-use crate::impl_common_parser_logic;
 use crate::parser::canal::operators::*;
 use crate::parser::common::{do_parse_simd_json_value, json_object_smart_get_value};
 use crate::parser::util::at_least_one_ok;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
