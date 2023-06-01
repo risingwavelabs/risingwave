@@ -33,7 +33,7 @@
   expected_outputs:
   - stream_error
   - logical_plan
-  - batch_error
+  - batch_plan
 - sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS 10 PRECEDING) from t;
@@ -217,6 +217,24 @@
   - logical_plan
   - batch_error
   - stream_error
+- id: split diff order_by and partition_by in window
+  sql: |
+    create table t(x int, y int, z int);
+    select *, rank() over(PARTITION BY x ORDER BY y) w0, sum(x) over(PARTITION BY z ORDER BY y) w1, row_number() over(PARTITION BY x ORDER BY y) w2, rank() over(PARTITION BY y ORDER BY x) w3 from t;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_error
+  - stream_error
+- id: over window to agg and join
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select x, y, sum(x) over(partition by y), max(x) over(partition by y), min(w) over(partition by y) from t;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_batch
+  - batch_plan
+  - stream_plan
 - id: create_bid
   sql: |
     /*
@@ -329,9 +347,19 @@
   sql: |
     create table t(x int, y int, z int, w int);
     select * from (
-        SELECT x, y, z, avg(z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
+        SELECT x, y, z, avg(z * z) OVER (PARTITION BY y + 1 order by abs(w)) as res FROM t
     )
-    WHERE z > 0 and y > 0 and x > 0 and res <= 3;
+    WHERE z > 0 and y > 0 and x > 0 and res <= 3.0;
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - logical_plan
+- name: stddev_samp
+  sql: |
+    create table t(x int, y int, z int, w int);
+    select * from (
+        SELECT x, y, z, stddev_pop(x - y) OVER (PARTITION BY z order by x) as res0, stddev_samp(x) OVER (PARTITION BY z order by x) as res1 FROM t
+    )
+    WHERE z > 0 and y > 0 and x > 0 and res0 <= 3.0 and res1 > 1.0;
   expected_outputs:
   - optimized_logical_plan_for_batch
   - logical_plan

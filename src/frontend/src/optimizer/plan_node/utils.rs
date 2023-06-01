@@ -181,3 +181,24 @@ impl fmt::Debug for IndicesDisplay<'_> {
         f.finish()
     }
 }
+
+/// Call `debug_struct` on the given formatter to create a debug struct builder.
+/// If a property list is provided, properties in it will be added to the struct name according to
+/// the condition of that property.
+macro_rules! formatter_debug_plan_node {
+    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+        {
+            #[allow(unused_mut)]
+            let mut properties: Vec<&str> = vec![];
+            $( if $cond { properties.push($prop); } )*
+            let mut name = $name.to_string();
+            if !properties.is_empty() {
+                name += " [";
+                name += &properties.join(", ");
+                name += "]";
+            }
+            $formatter.debug_struct(&name)
+        }
+    };
+}
+pub(crate) use formatter_debug_plan_node;

@@ -262,7 +262,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     (&row)
                         .project(call.args.val_indices())
                         .into_owned_row()
-                        .into_inner()
+                        .as_inner()
                         .into(),
                 );
             }
@@ -337,7 +337,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     input_row
                         .project(call.args.val_indices())
                         .into_owned_row()
-                        .into_inner()
+                        .as_inner()
                         .into(),
                 );
             }
@@ -368,7 +368,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 }
 
                 // Evict unneeded rows from state table.

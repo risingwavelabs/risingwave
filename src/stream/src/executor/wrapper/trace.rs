@@ -32,13 +32,12 @@ pub async fn trace(
     info: Arc<ExecutorInfo>,
     input_pos: usize,
     actor_id: ActorId,
-    executor_id: u64,
+    _executor_id: u64,
     metrics: Arc<StreamingMetrics>,
     input: impl MessageStream,
 ) {
     let span_name = format!("{}_{}_next", info.identity, input_pos);
     let actor_id_string = actor_id.to_string();
-    let executor_id_string = executor_id.to_string();
 
     let span = || {
         let mut span = Span::enter_with_local_parent("next");
@@ -56,7 +55,7 @@ pub async fn trace(
                 if enable_executor_row_count {
                     metrics
                         .executor_row_count
-                        .with_label_values(&[&actor_id_string, &executor_id_string])
+                        .with_label_values(&[&actor_id_string, &info.identity])
                         .inc_by(chunk.cardinality() as u64);
                 }
                 event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);

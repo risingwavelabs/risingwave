@@ -20,7 +20,6 @@ use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
-use super::expr_array_remove::ArrayRemoveExpression;
 use super::expr_case::CaseExpression;
 use super::expr_coalesce::CoalesceExpression;
 use super::expr_concat_ws::ConcatWsExpression;
@@ -32,68 +31,61 @@ use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_proctime::ProcTimeExpression;
-use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use crate::expr::{
+    BoxedExpression, Expression, InputRefExpression, LiteralExpression, TryFromExprNodeBoxed,
+};
 use crate::sig::func::FUNC_SIG_MAP;
+use crate::sig::FuncSigDebug;
 use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
-    if let Some(RexNode::FuncCall(call)) = &prost.rex_node {
-        let args = call
-            .children
-            .iter()
-            .map(|c| DataType::from(c.get_return_type().unwrap()).into())
-            .collect_vec();
-        let return_type = DataType::from(prost.get_return_type().unwrap());
+    let func_call = match prost.get_rex_node()? {
+        RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
+        RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
+        RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
+        RexNode::FuncCall(func_call) => func_call,
+    };
 
-        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args, (&return_type).into()) {
-            let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() else {
-                bail!("Expected RexNode::FuncCall");
-            };
+    let func_type = prost.function_type();
 
+    match func_type {
+        // Dedicated types
+        E::All | E::Some => SomeAllExpression::try_from_boxed(prost),
+        E::In => InExpression::try_from_boxed(prost),
+        E::Case => CaseExpression::try_from_boxed(prost),
+        E::Coalesce => CoalesceExpression::try_from_boxed(prost),
+        E::ConcatWs => ConcatWsExpression::try_from_boxed(prost),
+        E::Field => FieldExpression::try_from_boxed(prost),
+        E::Array => NestedConstructExpression::try_from_boxed(prost),
+        E::Row => NestedConstructExpression::try_from_boxed(prost),
+        E::RegexpMatch => RegexpMatchExpression::try_from_boxed(prost),
+        E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
+            // Now we implement these three functions as a single expression for the
+            // sake of simplicity. If performance matters at some time, we can split
+            // the implementation to improve performance.
+            ArrayConcatExpression::try_from_boxed(prost)
+        }
+        E::Vnode => VnodeExpression::try_from_boxed(prost),
+        E::Proctime => ProcTimeExpression::try_from_boxed(prost),
+
+        _ => {
+            let ret_type = DataType::from(prost.get_return_type().unwrap());
             let children = func_call
                 .get_children()
                 .iter()
                 .map(build_from_prost)
                 .try_collect()?;
-            return (desc.build)(return_type, children);
-        }
-    }
 
-    match prost.expr_type() {
-        // Dedicated types
-        E::All | E::Some => SomeAllExpression::try_from(prost).map(Expression::boxed),
-        E::In => InExpression::try_from(prost).map(Expression::boxed),
-        E::Case => CaseExpression::try_from(prost).map(Expression::boxed),
-        E::Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
-        E::ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
-        E::ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
-        E::InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
-        E::Field => FieldExpression::try_from(prost).map(Expression::boxed),
-        E::Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        E::Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        E::RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
-        E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
-            // Now we implement these three functions as a single expression for the
-            // sake of simplicity. If performance matters at some time, we can split
-            // the implementation to improve performance.
-            ArrayConcatExpression::try_from(prost).map(Expression::boxed)
+            build_func(func_type, ret_type, children)
         }
-        E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
-        E::ArrayRemove => ArrayRemoveExpression::try_from(prost).map(Expression::boxed),
-        E::Proctime => ProcTimeExpression::try_from(prost).map(Expression::boxed),
-        _ => Err(ExprError::UnsupportedFunction(format!(
-            "{:?}",
-            prost.get_expr_type()
-        ))),
     }
 }
 
-/// Build an expression.
-pub fn build(
+/// Build an expression in `FuncCall` variant.
+pub fn build_func(
     func: PbType,
     ret_type: DataType,
     children: Vec<BoxedExpression>,
@@ -106,10 +98,13 @@ pub fn build(
         .get(func, &args, (&ret_type).into())
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}({}) -> {:?}",
-                func,
-                args.iter().map(|t| format!("{:?}", t)).join(", "),
-                ret_type
+                "{:?}",
+                FuncSigDebug {
+                    func: func.as_str_name(),
+                    inputs_type: &args,
+                    ret_type: (&ret_type).into(),
+                    set_returning: false,
+                }
             ))
         })?;
     (desc.build)(ret_type, children)
@@ -179,7 +174,7 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
                 }
                 self.tokens.next(); // Consume the RParen
 
-                build(func, ty, children).expect("Failed to build")
+                build_func(func, ty, children).expect("Failed to build")
             }
             Token::Literal(value) => {
                 assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");

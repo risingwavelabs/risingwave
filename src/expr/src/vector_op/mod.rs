@@ -14,9 +14,14 @@
 
 pub mod arithmetic_op;
 pub mod array_access;
+pub mod array_distinct;
+pub mod array_length;
+pub mod array_positions;
 pub mod array_range_access;
+pub mod array_remove;
 pub mod ascii;
 pub mod bitwise_op;
+pub mod cardinality;
 pub mod cast;
 pub mod cmp;
 pub mod concat_op;
@@ -48,5 +53,6 @@ pub mod to_timestamp;
 pub mod translate;
 pub mod trigonometric;
 pub mod trim;
+pub mod trim_array;
 pub mod tumble;
 pub mod upper;

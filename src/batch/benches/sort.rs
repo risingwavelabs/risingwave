@@ -17,7 +17,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
 use risingwave_common::enable_jemalloc_on_unix;
-use risingwave_common::memory::MonitoredGlobalAlloc;
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use tokio::runtime::Runtime;
@@ -60,7 +60,7 @@ fn create_order_by_executor(
         column_orders,
         "SortExecutor".into(),
         CHUNK_SIZE,
-        MonitoredGlobalAlloc::for_test(),
+        MemoryContext::none(),
     ))
 }
 

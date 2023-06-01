@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use dyn_clone::DynClone;
-use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::types::{DataType, DataTypeName};
 
+use crate::sig::FuncSigDebug;
 use crate::{ExprError, Result};
 
 // aggregate definition
@@ -64,6 +64,9 @@ pub trait Aggregator: Send + DynClone + 'static {
     /// `output` the aggregator to `ArrayBuilder` with input with type checked at runtime.
     /// After `output` the aggregator is reset to initial state.
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()>;
+
+    /// The estimated size of the state.
+    fn estimated_size(&self) -> usize;
 }
 
 dyn_clone::clone_trait_object!(Aggregator);
@@ -77,16 +80,18 @@ pub fn build(agg: AggCall) -> Result<BoxedAggState> {
     let args = (agg.args.arg_types().iter())
         .map(|t| t.into())
         .collect::<Vec<DataTypeName>>();
+    let ret_type = (&agg.return_type).into();
     let desc = crate::sig::agg::AGG_FUNC_SIG_MAP
-        .get(agg.kind, &args, (&agg.return_type).into())
+        .get(agg.kind, &args, ret_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
-                "{:?}({}) -> {:?}",
-                agg.kind,
-                (agg.args.arg_types().iter())
-                    .map(|t| format!("{:?}", t))
-                    .join(", "),
-                agg.return_type,
+                "{:?}",
+                FuncSigDebug {
+                    func: agg.kind,
+                    inputs_type: &args,
+                    ret_type,
+                    set_returning: false
+                }
             ))
         })?;
 

@@ -142,7 +142,6 @@ impl PlanBase {
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,

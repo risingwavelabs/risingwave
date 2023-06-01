@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-pub use avro::*;
+pub use avro::{AvroParser, AvroParserConfig};
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;
@@ -125,7 +125,7 @@ impl OpAction for OpActionInsert {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -148,7 +148,7 @@ impl OpAction for OpActionDelete {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: Datum) {
-        builder.append_datum(&output)
+        builder.append(&output)
     }
 
     #[inline(always)]
@@ -171,8 +171,8 @@ impl OpAction for OpActionUpdate {
 
     #[inline(always)]
     fn apply(builder: &mut ArrayBuilderImpl, output: (Datum, Datum)) {
-        builder.append_datum(&output.0);
-        builder.append_datum(&output.1);
+        builder.append(&output.0);
+        builder.append(&output.1);
     }
 
     #[inline(always)]
@@ -257,7 +257,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq_fast(self.builders.iter_mut())
             .for_each(|(desc, builder)| {
                 if let Some(output) = f(desc) {
-                    builder.append_datum(output);
+                    builder.append(output);
                 }
             });
 

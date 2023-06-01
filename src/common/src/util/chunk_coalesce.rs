@@ -148,7 +148,7 @@ impl DataChunkBuilder {
 
     fn do_append_one_row_from_datums(&mut self, datums: impl Iterator<Item = impl ToDatumRef>) {
         for (array_builder, datum) in self.array_builders.iter_mut().zip_eq_debug(datums) {
-            array_builder.append_datum(datum);
+            array_builder.append(datum);
         }
         self.buffered_count += 1;
     }
@@ -438,13 +438,13 @@ mod tests {
 
         let mut left_array_builder = DataType::Int32.create_array_builder(5);
         for v in [1, 2, 3, 4, 5] {
-            left_array_builder.append_datum(&Some(ScalarImpl::Int32(v)));
+            left_array_builder.append(&Some(ScalarImpl::Int32(v)));
         }
         let left_arrays = vec![left_array_builder.finish()];
 
         let mut right_array_builder = DataType::Int64.create_array_builder(5);
         for v in [5, 4, 3, 2, 1] {
-            right_array_builder.append_datum(&Some(ScalarImpl::Int64(v)));
+            right_array_builder.append(&Some(ScalarImpl::Int64(v)));
         }
         let right_arrays = vec![right_array_builder.finish()];
 
