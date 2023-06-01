@@ -18,7 +18,7 @@ use risingwave_common::types::Datum;
 use risingwave_expr::function::window::{Frame, FrameBound, FrameBounds};
 use smallvec::SmallVec;
 
-use super::{EstimatedVecDeque, StateKey, StateOutput, StatePos, WindowState};
+use super::{EstimatedVecDeque, StateKey, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
 use crate::executor::StreamExecutorResult;
 
@@ -60,14 +60,15 @@ impl WindowState for LeadState {
         }
     }
 
-    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
-        debug_assert!(self.curr_window().is_ready);
-        let lead_value = self.buffer[self.offset].1.clone();
+    fn curr_output(&self) -> StreamExecutorResult<Datum> {
+        assert!(self.curr_window().is_ready);
+        Ok(self.buffer[self.offset].1.clone())
+    }
+
+    fn slide_forward(&mut self) -> StateEvictHint {
+        assert!(self.curr_window().is_ready);
         let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
-        Ok(StateOutput {
-            return_value: lead_value,
-            evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
-        })
+        StateEvictHint::CanEvict(std::iter::once(key).collect())
     }
 }
 
