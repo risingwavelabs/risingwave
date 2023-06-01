@@ -21,6 +21,7 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
@@ -69,7 +70,7 @@ impl StreamUnion {
 
 impl fmt::Display for StreamUnion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamUnion");
+        let mut builder = formatter_debug_plan_node!(f, "StreamUnion");
         self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;

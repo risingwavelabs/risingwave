@@ -9,10 +9,16 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // TODO: move this into `FunctionCall`.
   enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
+    // Used for `InputRef`, `Constant`, and `UserDefinedFunction`.
     UNSPECIFIED = 0;
-    INPUT_REF = 1;
-    CONSTANT_VALUE = 2;
+
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
@@ -192,10 +198,8 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
-    // User defined functions
-    UDF = 3000;
   }
-  Type expr_type = 1;
+  Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
     uint32 input_ref = 4;

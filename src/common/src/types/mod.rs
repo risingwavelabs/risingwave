@@ -61,7 +61,7 @@ mod to_text;
 
 // export data types
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal::Decimal;
+pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;

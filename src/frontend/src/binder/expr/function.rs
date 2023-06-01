@@ -656,7 +656,7 @@ impl Binder {
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),

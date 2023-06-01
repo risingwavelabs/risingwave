@@ -246,9 +246,9 @@
     └─StreamHashJoin { type: Inner, predicate: p_partkey IS NOT DISTINCT FROM p_partkey AND ps_supplycost = min(ps_supplycost), output: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment, _row_id, _row_id, r_regionkey, _row_id, _row_id, _row_id, ps_suppkey, n_nationkey, ps_supplycost, p_partkey] }
       ├─StreamExchange { dist: HashShard(p_partkey) }
       | └─StreamShare { id = 26 }
-      |   └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
+      |   └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
       |     ├─StreamExchange { dist: HashShard(n_nationkey) }
-      |     | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
+      |     | └─StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
       |     |   ├─StreamExchange { dist: HashShard(r_regionkey) }
       |     |   | └─StreamShare { id = 3 }
       |     |   |   └─StreamProject { exprs: [r_regionkey, _row_id] }
@@ -260,9 +260,9 @@
       |     |         └─StreamRowIdGen { row_id_index: 4 }
       |     |           └─StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] }
       |     └─StreamExchange { dist: HashShard(s_nationkey) }
-      |       └─StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] }
+      |       └─StreamHashJoin [append_only] { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] }
       |         ├─StreamExchange { dist: HashShard(ps_suppkey) }
-      |         | └─StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] }
+      |         | └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] }
       |         |   ├─StreamExchange { dist: HashShard(p_partkey) }
       |         |   | └─StreamRowIdGen { row_id_index: 9 }
       |         |   |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
@@ -283,9 +283,9 @@
             | └─StreamExchange { dist: HashShard(p_partkey) }
             |   └─StreamProject { exprs: [p_partkey] }
             |     └─StreamShare { id = 26 }
-            |       └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
+            |       └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] }
             |         ├─StreamExchange { dist: HashShard(n_nationkey) }
-            |         | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
+            |         | └─StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
             |         |   ├─StreamExchange { dist: HashShard(r_regionkey) }
             |         |   | └─StreamShare { id = 3 }
             |         |   |   └─StreamProject { exprs: [r_regionkey, _row_id] }
@@ -297,9 +297,9 @@
             |         |         └─StreamRowIdGen { row_id_index: 4 }
             |         |           └─StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] }
             |         └─StreamExchange { dist: HashShard(s_nationkey) }
-            |           └─StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] }
+            |           └─StreamHashJoin [append_only] { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] }
             |             ├─StreamExchange { dist: HashShard(ps_suppkey) }
-            |             | └─StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] }
+            |             | └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] }
             |             |   ├─StreamExchange { dist: HashShard(p_partkey) }
             |             |   | └─StreamRowIdGen { row_id_index: 9 }
             |             |   |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
@@ -314,9 +314,9 @@
             |                   └─StreamRowIdGen { row_id_index: 7 }
             |                     └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
             └─StreamExchange { dist: HashShard(ps_partkey) }
-              └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] }
+              └─StreamHashJoin [append_only] { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] }
                 ├─StreamExchange { dist: HashShard(s_nationkey) }
-                | └─StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] }
+                | └─StreamHashJoin [append_only] { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] }
                 |   ├─StreamExchange { dist: HashShard(ps_suppkey) }
                 |   | └─StreamFilter { predicate: IsNotNull(ps_partkey) }
                 |   |   └─StreamShare { id = 15 }
@@ -329,7 +329,7 @@
                 |         └─StreamRowIdGen { row_id_index: 7 }
                 |           └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
                 └─StreamExchange { dist: HashShard(n_nationkey) }
-                  └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] }
+                  └─StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] }
                     ├─StreamExchange { dist: HashShard(r_regionkey) }
                     | └─StreamShare { id = 3 }
                     |   └─StreamProject { exprs: [r_regionkey, _row_id] }
@@ -358,12 +358,12 @@
     └──  StreamExchange NoShuffle from 2
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [p_partkey, p_mfgr, s_name, s_address, s_phone, s_acctbal, s_comment, ps_supplycost, n_name, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, _row_id, ps_suppkey] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
     ├──  StreamExchange Hash([0]) from 3
     └──  StreamExchange Hash([5]) from 8
 
     Fragment 3
-    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] } { left table: 8, right table: 10, left degree table: 9, right degree table: 11 }
+    StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] } { left table: 8, right table: 10, left degree table: 9, right degree table: 11 }
     ├──  StreamExchange Hash([0]) from 4
     └──  StreamExchange Hash([2]) from 6
 
@@ -386,12 +386,12 @@
         └──  StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] } { source state table: 13 }
 
     Fragment 8
-    StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] } { left table: 14, right table: 16, left degree table: 15, right degree table: 17 }
+    StreamHashJoin [append_only] { type: Inner, predicate: ps_suppkey = s_suppkey, output: [p_partkey, p_mfgr, ps_supplycost, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment, _row_id, _row_id, ps_suppkey, _row_id] } { left table: 14, right table: 16, left degree table: 15, right degree table: 17 }
     ├──  StreamExchange Hash([2]) from 9
     └──  StreamExchange Hash([0]) from 13
 
     Fragment 9
-    StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] } { left table: 18, right table: 20, left degree table: 19, right degree table: 21 }
+    StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, p_mfgr, ps_suppkey, ps_supplycost, _row_id, _row_id] } { left table: 18, right table: 20, left degree table: 19, right degree table: 21 }
     ├──  StreamExchange Hash([0]) from 10
     └──  StreamExchange Hash([0]) from 11
 
@@ -422,12 +422,12 @@
     └──  StreamExchange NoShuffle from 2
 
     Fragment 16
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] } { left table: 32, right table: 34, left degree table: 33, right degree table: 35 }
+    StreamHashJoin [append_only] { type: Inner, predicate: s_nationkey = n_nationkey, output: [ps_partkey, ps_supplycost, _row_id, _row_id, ps_suppkey, s_nationkey, _row_id, _row_id, r_regionkey] } { left table: 32, right table: 34, left degree table: 33, right degree table: 35 }
     ├──  StreamExchange Hash([2]) from 17
     └──  StreamExchange Hash([0]) from 20
 
     Fragment 17
-    StreamAppendOnlyHashJoin { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] } { left table: 36, right table: 38, left degree table: 37, right degree table: 39 }
+    StreamHashJoin [append_only] { type: Inner, predicate: ps_suppkey = s_suppkey, output: [ps_partkey, ps_supplycost, s_nationkey, _row_id, ps_suppkey, _row_id] } { left table: 36, right table: 38, left degree table: 37, right degree table: 39 }
     ├──  StreamExchange Hash([1]) from 18
     └──  StreamExchange Hash([0]) from 19
 
@@ -440,7 +440,7 @@
     └──  StreamExchange NoShuffle from 14
 
     Fragment 20
-    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 40, right table: 42, left degree table: 41, right degree table: 43 }
+    StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 40, right table: 42, left degree table: 41, right degree table: 43 }
     ├──  StreamExchange Hash([0]) from 21
     └──  StreamExchange Hash([2]) from 22
 
@@ -627,12 +627,12 @@
   stream_plan: |
     StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [revenue, n_name], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [n_name, sum($expr1)] }
-      └─StreamAppendOnlyHashAgg { group_key: [n_name], aggs: [sum($expr1), count] }
+      └─StreamHashAgg [append_only] { group_key: [n_name], aggs: [sum($expr1), count] }
         └─StreamExchange { dist: HashShard(n_name) }
           └─StreamProject { exprs: [n_name, (l_extendedprice * (1:Decimal - l_discount)) as $expr1, _row_id, _row_id, r_regionkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey, n_nationkey] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey AND n_nationkey = c_nationkey, output: [n_name, l_extendedprice, l_discount, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey AND n_nationkey = c_nationkey, output: [n_name, l_extendedprice, l_discount, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey] }
               ├─StreamExchange { dist: HashShard(n_nationkey, n_nationkey) }
-              | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
+              | └─StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] }
               |   ├─StreamExchange { dist: HashShard(r_regionkey) }
               |   | └─StreamRowIdGen { row_id_index: 3 }
               |   |   └─StreamSource { source: "region", columns: ["r_regionkey", "r_name", "r_comment", "_row_id"] }
@@ -641,9 +641,9 @@
               |       └─StreamRowIdGen { row_id_index: 4 }
               |         └─StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] }
               └─StreamExchange { dist: HashShard(c_nationkey, s_nationkey) }
-                └─StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey AND c_nationkey = s_nationkey, output: [c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id, o_custkey, o_orderkey, _row_id, _row_id, l_suppkey] }
+                └─StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey AND c_nationkey = s_nationkey, output: [c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id, o_custkey, o_orderkey, _row_id, _row_id, l_suppkey] }
                   ├─StreamExchange { dist: HashShard(o_orderkey, c_nationkey) }
-                  | └─StreamAppendOnlyHashJoin { type: Inner, predicate: o_custkey = c_custkey, output: [o_orderkey, c_nationkey, _row_id, o_custkey, _row_id] }
+                  | └─StreamHashJoin [append_only] { type: Inner, predicate: o_custkey = c_custkey, output: [o_orderkey, c_nationkey, _row_id, o_custkey, _row_id] }
                   |   ├─StreamExchange { dist: HashShard(o_custkey) }
                   |   | └─StreamRowIdGen { row_id_index: 9 }
                   |   |   └─StreamSource { source: "orders", columns: ["o_orderkey", "o_custkey", "o_orderstatus", "o_totalprice", "o_orderdate", "o_orderpriority", "o_clerk", "o_shippriority", "o_comment", "_row_id"] }
@@ -651,7 +651,7 @@
                   |     └─StreamRowIdGen { row_id_index: 8 }
                   |       └─StreamSource { source: "customer", columns: ["c_custkey", "c_name", "c_address", "c_nationkey", "c_phone", "c_acctbal", "c_mktsegment", "c_comment", "_row_id"] }
                   └─StreamExchange { dist: HashShard(l_orderkey, s_nationkey) }
-                    └─StreamAppendOnlyHashJoin { type: Inner, predicate: l_suppkey = s_suppkey, output: [l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id] }
+                    └─StreamHashJoin [append_only] { type: Inner, predicate: l_suppkey = s_suppkey, output: [l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id] }
                       ├─StreamExchange { dist: HashShard(l_suppkey) }
                       | └─StreamRowIdGen { row_id_index: 16 }
                       |   └─StreamSource { source: "lineitem", columns: ["l_orderkey", "l_partkey", "l_suppkey", "l_linenumber", "l_quantity", "l_extendedprice", "l_discount", "l_tax", "l_returnflag", "l_linestatus", "l_shipdate", "l_commitdate", "l_receiptdate", "l_shipinstruct", "l_shipmode", "l_comment", "_row_id"] }
@@ -663,7 +663,7 @@
     StreamMaterialize { columns: [n_name, revenue], stream_key: [n_name], pk_columns: [revenue, n_name], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, sum($expr1)] }
-        └── StreamAppendOnlyHashAgg { group_key: [n_name], aggs: [sum($expr1), count] }
+        └── StreamHashAgg [append_only] { group_key: [n_name], aggs: [sum($expr1), count] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
@@ -671,7 +671,7 @@
 
     Fragment 1
     StreamProject { exprs: [n_name, (l_extendedprice * (1:Decimal - l_discount)) as $expr1, _row_id, _row_id, r_regionkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey, n_nationkey] }
-    └── StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey AND n_nationkey = c_nationkey, output: [n_name, l_extendedprice, l_discount, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey] }
+    └── StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey AND n_nationkey = c_nationkey, output: [n_name, l_extendedprice, l_discount, _row_id, _row_id, r_regionkey, n_nationkey, _row_id, _row_id, o_custkey, _row_id, _row_id, l_suppkey, o_orderkey, c_nationkey] }
         ├── left table: 1
         ├── right table: 3
         ├── left degree table: 2
@@ -680,7 +680,7 @@
         └──  StreamExchange Hash([0, 3]) from 5
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, n_name, _row_id, r_regionkey, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
     ├──  StreamExchange Hash([0]) from 3
     └──  StreamExchange Hash([2]) from 4
 
@@ -694,7 +694,7 @@
         └──  StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] } { source state table: 10 }
 
     Fragment 5
-    StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey AND c_nationkey = s_nationkey, output: [c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id, o_custkey, o_orderkey, _row_id, _row_id, l_suppkey] }
+    StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey AND c_nationkey = s_nationkey, output: [c_nationkey, l_extendedprice, l_discount, s_nationkey, _row_id, _row_id, o_custkey, o_orderkey, _row_id, _row_id, l_suppkey] }
     ├── left table: 11
     ├── right table: 13
     ├── left degree table: 12
@@ -703,7 +703,7 @@
     └──  StreamExchange Hash([0, 3]) from 9
 
     Fragment 6
-    StreamAppendOnlyHashJoin { type: Inner, predicate: o_custkey = c_custkey, output: [o_orderkey, c_nationkey, _row_id, o_custkey, _row_id] } { left table: 15, right table: 17, left degree table: 16, right degree table: 18 }
+    StreamHashJoin [append_only] { type: Inner, predicate: o_custkey = c_custkey, output: [o_orderkey, c_nationkey, _row_id, o_custkey, _row_id] } { left table: 15, right table: 17, left degree table: 16, right degree table: 18 }
     ├──  StreamExchange Hash([1]) from 7
     └──  StreamExchange Hash([0]) from 8
 
@@ -716,7 +716,7 @@
     └──  StreamSource { source: "customer", columns: ["c_custkey", "c_name", "c_address", "c_nationkey", "c_phone", "c_acctbal", "c_mktsegment", "c_comment", "_row_id"] } { source state table: 20 }
 
     Fragment 9
-    StreamAppendOnlyHashJoin { type: Inner, predicate: l_suppkey = s_suppkey, output: [l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
+    StreamHashJoin [append_only] { type: Inner, predicate: l_suppkey = s_suppkey, output: [l_orderkey, l_extendedprice, l_discount, s_nationkey, _row_id, l_suppkey, _row_id] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
     ├──  StreamExchange Hash([2]) from 10
     └──  StreamExchange Hash([0]) from 11
 
@@ -899,14 +899,14 @@
   stream_plan: |
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [n_name, n_name, $expr1, sum($expr2)] }
-      └─StreamAppendOnlyHashAgg { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] }
+      └─StreamHashAgg [append_only] { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(n_name, n_name, $expr1) }
           └─StreamProject { exprs: [n_name, n_name, Extract('YEAR':Varchar, l_shipdate) as $expr1, (l_extendedprice * (1:Decimal - l_discount)) as $expr2, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey, l_orderkey] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, l_shipdate, n_name, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, l_orderkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, l_shipdate, n_name, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, l_orderkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey] }
               ├─StreamExchange { dist: HashShard(l_orderkey) }
-              | └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id, n_nationkey, s_suppkey, _row_id] }
+              | └─StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id, n_nationkey, s_suppkey, _row_id] }
               |   ├─StreamExchange { dist: HashShard(s_suppkey) }
-              |   | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
+              |   | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
               |   |   ├─StreamExchange { dist: HashShard(n_nationkey) }
               |   |   | └─StreamShare { id = 3 }
               |   |   |   └─StreamProject { exprs: [n_nationkey, n_name, _row_id] }
@@ -919,9 +919,9 @@
               |     └─StreamRowIdGen { row_id_index: 16 }
               |       └─StreamSource { source: "lineitem", columns: ["l_orderkey", "l_partkey", "l_suppkey", "l_linenumber", "l_quantity", "l_extendedprice", "l_discount", "l_tax", "l_returnflag", "l_linestatus", "l_shipdate", "l_commitdate", "l_receiptdate", "l_shipinstruct", "l_shipmode", "l_comment", "_row_id"] }
               └─StreamExchange { dist: HashShard(o_orderkey) }
-                └─StreamAppendOnlyHashJoin { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, o_orderkey, _row_id, _row_id, n_nationkey, c_custkey, _row_id] }
+                └─StreamHashJoin [append_only] { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, o_orderkey, _row_id, _row_id, n_nationkey, c_custkey, _row_id] }
                   ├─StreamExchange { dist: HashShard(c_custkey) }
-                  | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = c_nationkey, output: [n_name, c_custkey, _row_id, n_nationkey, _row_id] }
+                  | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = c_nationkey, output: [n_name, c_custkey, _row_id, n_nationkey, _row_id] }
                   |   ├─StreamExchange { dist: HashShard(n_nationkey) }
                   |   | └─StreamShare { id = 3 }
                   |   |   └─StreamProject { exprs: [n_nationkey, n_name, _row_id] }
@@ -938,12 +938,12 @@
     StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, n_name, $expr1, sum($expr2)] }
-        └── StreamAppendOnlyHashAgg { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] } { result table: 0, state tables: [], distinct tables: [] }
+        └── StreamHashAgg [append_only] { group_key: [n_name, n_name, $expr1], aggs: [sum($expr2), count] } { result table: 0, state tables: [], distinct tables: [] }
             └──  StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
     StreamProject { exprs: [n_name, n_name, Extract('YEAR':Varchar, l_shipdate) as $expr1, (l_extendedprice * (1:Decimal - l_discount)) as $expr2, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey, l_orderkey] }
-    └── StreamAppendOnlyHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, l_shipdate, n_name, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, l_orderkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey] }
+    └── StreamHashJoin [append_only] { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, l_shipdate, n_name, _row_id, _row_id, n_nationkey, _row_id, s_suppkey, l_orderkey, _row_id, _row_id, n_nationkey, _row_id, c_custkey] }
         ├── left table: 1
         ├── right table: 3
         ├── left degree table: 2
@@ -952,7 +952,7 @@
         └──  StreamExchange Hash([1]) from 8
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id, n_nationkey, s_suppkey, _row_id] }
+    StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, l_shipdate, _row_id, _row_id, n_nationkey, s_suppkey, _row_id] }
     ├── left table: 5
     ├── right table: 7
     ├── left degree table: 6
@@ -961,7 +961,7 @@
     └──  StreamExchange Hash([2]) from 7
 
     Fragment 3
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
     ├──  StreamExchange Hash([0]) from 4
     └──  StreamExchange Hash([3]) from 6
 
@@ -984,12 +984,12 @@
         └── source state table: 15
 
     Fragment 8
-    StreamAppendOnlyHashJoin { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, o_orderkey, _row_id, _row_id, n_nationkey, c_custkey, _row_id] } { left table: 16, right table: 18, left degree table: 17, right degree table: 19 }
+    StreamHashJoin [append_only] { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, o_orderkey, _row_id, _row_id, n_nationkey, c_custkey, _row_id] } { left table: 16, right table: 18, left degree table: 17, right degree table: 19 }
     ├──  StreamExchange Hash([1]) from 9
     └──  StreamExchange Hash([1]) from 12
 
     Fragment 9
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = c_nationkey, output: [n_name, c_custkey, _row_id, n_nationkey, _row_id] } { left table: 20, right table: 22, left degree table: 21, right degree table: 23 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = c_nationkey, output: [n_name, c_custkey, _row_id, n_nationkey, _row_id] } { left table: 20, right table: 22, left degree table: 21, right degree table: 23 }
     ├──  StreamExchange Hash([0]) from 10
     └──  StreamExchange Hash([3]) from 11
 
@@ -1186,14 +1186,14 @@
   stream_plan: |
     StreamMaterialize { columns: [o_year, mkt_share], stream_key: [o_year], pk_columns: [o_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [$expr1, RoundDigit((sum($expr2) / sum($expr3)), 6:Int32) as $expr4] }
-      └─StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
+      └─StreamHashAgg [append_only] { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [Extract('YEAR':Varchar, o_orderdate) as $expr1, Case((n_name <> 'IRAN':Varchar), (l_extendedprice * (1:Decimal - l_discount)), 0:Decimal) as $expr2, (l_extendedprice * (1:Decimal - l_discount)) as $expr3, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey, c_custkey] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, l_extendedprice, l_discount, o_orderdate, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, c_custkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, l_extendedprice, l_discount, o_orderdate, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, c_custkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey] }
               ├─StreamExchange { dist: HashShard(c_custkey) }
-              | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = c_nationkey, output: [c_custkey, _row_id, _row_id, r_regionkey, n_nationkey, _row_id] }
+              | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = c_nationkey, output: [c_custkey, _row_id, _row_id, r_regionkey, n_nationkey, _row_id] }
               |   ├─StreamExchange { dist: HashShard(n_nationkey) }
-              |   | └─StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] }
+              |   | └─StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] }
               |   |   ├─StreamExchange { dist: HashShard(r_regionkey) }
               |   |   | └─StreamRowIdGen { row_id_index: 3 }
               |   |   |   └─StreamSource { source: "region", columns: ["r_regionkey", "r_name", "r_comment", "_row_id"] }
@@ -1206,11 +1206,11 @@
               |     └─StreamRowIdGen { row_id_index: 8 }
               |       └─StreamSource { source: "customer", columns: ["c_custkey", "c_name", "c_address", "c_nationkey", "c_phone", "c_acctbal", "c_mktsegment", "c_comment", "_row_id"] }
               └─StreamExchange { dist: HashShard(o_custkey) }
-                └─StreamAppendOnlyHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, l_orderkey, _row_id] }
+                └─StreamHashJoin [append_only] { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, l_orderkey, _row_id] }
                   ├─StreamExchange { dist: HashShard(l_orderkey) }
-                  | └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, p_partkey] }
+                  | └─StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, p_partkey] }
                   |   ├─StreamExchange { dist: HashShard(s_suppkey) }
-                  |   | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
+                  |   | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
                   |   |   ├─StreamExchange { dist: HashShard(n_nationkey) }
                   |   |   | └─StreamShare { id = 5 }
                   |   |   |   └─StreamProject { exprs: [n_nationkey, n_name, n_regionkey, _row_id] }
@@ -1220,7 +1220,7 @@
                   |   |     └─StreamRowIdGen { row_id_index: 7 }
                   |   |       └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
                   |   └─StreamExchange { dist: HashShard(l_suppkey) }
-                  |     └─StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = l_partkey, output: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id] }
+                  |     └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = l_partkey, output: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id] }
                   |       ├─StreamExchange { dist: HashShard(p_partkey) }
                   |       | └─StreamRowIdGen { row_id_index: 9 }
                   |       |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
@@ -1235,7 +1235,7 @@
     StreamMaterialize { columns: [o_year, mkt_share], stream_key: [o_year], pk_columns: [o_year], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [$expr1, RoundDigit((sum($expr2) / sum($expr3)), 6:Int32) as $expr4] }
-        └── StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
+        └── StreamHashAgg [append_only] { group_key: [$expr1], aggs: [sum($expr2), sum($expr3), count] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
@@ -1243,17 +1243,17 @@
 
     Fragment 1
     StreamProject { exprs: [Extract('YEAR':Varchar, o_orderdate) as $expr1, Case((n_name <> 'IRAN':Varchar), (l_extendedprice * (1:Decimal - l_discount)), 0:Decimal) as $expr2, (l_extendedprice * (1:Decimal - l_discount)) as $expr3, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey, c_custkey] }
-    └── StreamAppendOnlyHashJoin { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, l_extendedprice, l_discount, o_orderdate, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, c_custkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey] } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
+    └── StreamHashJoin [append_only] { type: Inner, predicate: c_custkey = o_custkey, output: [n_name, l_extendedprice, l_discount, o_orderdate, _row_id, _row_id, r_regionkey, _row_id, n_nationkey, c_custkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, _row_id, l_orderkey] } { left table: 1, right table: 3, left degree table: 2, right degree table: 4 }
         ├──  StreamExchange Hash([0]) from 2
         └──  StreamExchange Hash([3]) from 8
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = c_nationkey, output: [c_custkey, _row_id, _row_id, r_regionkey, n_nationkey, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = c_nationkey, output: [c_custkey, _row_id, _row_id, r_regionkey, n_nationkey, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
     ├──  StreamExchange Hash([0]) from 3
     └──  StreamExchange Hash([3]) from 7
 
     Fragment 3
-    StreamAppendOnlyHashJoin { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
+    StreamHashJoin [append_only] { type: Inner, predicate: r_regionkey = n_regionkey, output: [n_nationkey, _row_id, r_regionkey, _row_id] } { left table: 9, right table: 11, left degree table: 10, right degree table: 12 }
     ├──  StreamExchange Hash([0]) from 4
     └──  StreamExchange Hash([2]) from 5
 
@@ -1275,17 +1275,17 @@
     └──  StreamSource { source: "customer", columns: ["c_custkey", "c_name", "c_address", "c_nationkey", "c_phone", "c_acctbal", "c_mktsegment", "c_comment", "_row_id"] } { source state table: 15 }
 
     Fragment 8
-    StreamAppendOnlyHashJoin { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, l_orderkey, _row_id] } { left table: 16, right table: 18, left degree table: 17, right degree table: 19 }
+    StreamHashJoin [append_only] { type: Inner, predicate: l_orderkey = o_orderkey, output: [n_name, l_extendedprice, l_discount, o_custkey, o_orderdate, _row_id, _row_id, n_nationkey, _row_id, _row_id, p_partkey, s_suppkey, l_orderkey, _row_id] } { left table: 16, right table: 18, left degree table: 17, right degree table: 19 }
     ├──  StreamExchange Hash([1]) from 9
     └──  StreamExchange Hash([0]) from 16
 
     Fragment 9
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, p_partkey] } { left table: 20, right table: 22, left degree table: 21, right degree table: 23 }
+    StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, l_orderkey, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, p_partkey] } { left table: 20, right table: 22, left degree table: 21, right degree table: 23 }
     ├──  StreamExchange Hash([1]) from 10
     └──  StreamExchange Hash([1]) from 13
 
     Fragment 10
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 24, right table: 26, left degree table: 25, right degree table: 27 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 24, right table: 26, left degree table: 25, right degree table: 27 }
     ├──  StreamExchange Hash([0]) from 11
     └──  StreamExchange Hash([3]) from 12
 
@@ -1298,7 +1298,7 @@
     └──  StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] } { source state table: 28 }
 
     Fragment 13
-    StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = l_partkey, output: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id] } { left table: 29, right table: 31, left degree table: 30, right degree table: 32 }
+    StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = l_partkey, output: [l_orderkey, l_suppkey, l_extendedprice, l_discount, _row_id, p_partkey, _row_id] } { left table: 29, right table: 31, left degree table: 30, right degree table: 32 }
     ├──  StreamExchange Hash([0]) from 14
     └──  StreamExchange Hash([1]) from 15
 
@@ -1496,12 +1496,12 @@
   stream_plan: |
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [nation, o_year], pk_columns: [nation, o_year], pk_conflict: "NoCheck" }
     └─StreamProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
-      └─StreamAppendOnlyHashAgg { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
+      └─StreamHashAgg [append_only] { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(n_name, $expr1) }
           └─StreamProject { exprs: [n_name, Extract('YEAR':Varchar, o_orderdate) as $expr1, ((l_extendedprice * (1:Decimal - l_discount)) - (ps_supplycost * l_quantity)) as $expr2, _row_id, _row_id, p_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey, ps_suppkey, ps_partkey] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey, output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
+            └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey, output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
               ├─StreamExchange { dist: HashShard(ps_suppkey) }
-              | └─StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id] }
+              | └─StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id] }
               |   ├─StreamExchange { dist: HashShard(p_partkey) }
               |   | └─StreamRowIdGen { row_id_index: 9 }
               |   |   └─StreamSource { source: "part", columns: ["p_partkey", "p_name", "p_mfgr", "p_brand", "p_type", "p_size", "p_container", "p_retailprice", "p_comment", "_row_id"] }
@@ -1509,9 +1509,9 @@
               |     └─StreamFilter { predicate: (ps_suppkey = ps_suppkey) }
               |       └─StreamRowIdGen { row_id_index: 5 }
               |         └─StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] }
-              └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey] }
+              └─StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey] }
                 ├─StreamExchange { dist: HashShard(s_suppkey) }
-                | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
+                | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] }
                 |   ├─StreamExchange { dist: HashShard(n_nationkey) }
                 |   | └─StreamRowIdGen { row_id_index: 4 }
                 |   |   └─StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] }
@@ -1519,7 +1519,7 @@
                 |     └─StreamRowIdGen { row_id_index: 7 }
                 |       └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
                 └─StreamExchange { dist: HashShard(l_suppkey) }
-                  └─StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey, output: [o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id] }
+                  └─StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey, output: [o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id] }
                     ├─StreamExchange { dist: HashShard(o_orderkey) }
                     | └─StreamRowIdGen { row_id_index: 9 }
                     |   └─StreamSource { source: "orders", columns: ["o_orderkey", "o_custkey", "o_orderstatus", "o_totalprice", "o_orderdate", "o_orderpriority", "o_clerk", "o_shippriority", "o_comment", "_row_id"] }
@@ -1532,7 +1532,7 @@
     StreamMaterialize { columns: [nation, o_year, sum_profit], stream_key: [nation, o_year], pk_columns: [nation, o_year], pk_conflict: "NoCheck" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
-        └── StreamAppendOnlyHashAgg { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
+        └── StreamHashAgg [append_only] { group_key: [n_name, $expr1], aggs: [sum($expr2), count] }
             ├── result table: 0
             ├── state tables: []
             ├── distinct tables: []
@@ -1540,18 +1540,18 @@
 
     Fragment 1
     StreamProject { exprs: [n_name, Extract('YEAR':Varchar, o_orderdate) as $expr1, ((l_extendedprice * (1:Decimal - l_discount)) - (ps_supplycost * l_quantity)) as $expr2, _row_id, _row_id, p_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey, ps_suppkey, ps_partkey] }
-    └── StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey, output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
+    └── StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = l_partkey AND ps_suppkey = l_suppkey AND ps_partkey = l_partkey AND ps_suppkey = s_suppkey, output: [ps_supplycost, n_name, o_orderdate, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, p_partkey, ps_suppkey, ps_partkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
         ├── left table: 1
         ├── right table: 3
         ├── left degree table: 2
         ├── right degree table: 4
         ├──  StreamExchange Hash([2]) from 2
-        └── StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey] } { left table: 11, right table: 13, left degree table: 12, right degree table: 14 }
+        └── StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [n_name, s_suppkey, o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey] } { left table: 11, right table: 13, left degree table: 12, right degree table: 14 }
             ├──  StreamExchange Hash([1]) from 5
             └──  StreamExchange Hash([2]) from 8
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
+    StreamHashJoin [append_only] { type: Inner, predicate: p_partkey = ps_partkey, output: [p_partkey, ps_partkey, ps_suppkey, ps_supplycost, _row_id, _row_id] } { left table: 5, right table: 7, left degree table: 6, right degree table: 8 }
     ├──  StreamExchange Hash([0]) from 3
     └──  StreamExchange Hash([0]) from 4
 
@@ -1565,7 +1565,7 @@
         └──  StreamSource { source: "partsupp", columns: ["ps_partkey", "ps_suppkey", "ps_availqty", "ps_supplycost", "ps_comment", "_row_id"] } { source state table: 10 }
 
     Fragment 5
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 15, right table: 17, left degree table: 16, right degree table: 18 }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [n_name, s_suppkey, _row_id, n_nationkey, _row_id] } { left table: 15, right table: 17, left degree table: 16, right degree table: 18 }
     ├──  StreamExchange Hash([0]) from 6
     └──  StreamExchange Hash([3]) from 7
 
@@ -1578,7 +1578,7 @@
     └──  StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] } { source state table: 20 }
 
     Fragment 8
-    StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey, output: [o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
+    StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey, output: [o_orderdate, l_partkey, l_suppkey, l_quantity, l_extendedprice, l_discount, _row_id, o_orderkey, _row_id] } { left table: 21, right table: 23, left degree table: 22, right degree table: 24 }
     ├──  StreamExchange Hash([0]) from 9
     └──  StreamExchange Hash([0]) from 10
 
@@ -1773,7 +1773,7 @@
     StreamMaterialize { columns: [s_name, s_address, _row_id(hidden), _row_id#1(hidden), s_nationkey(hidden), s_suppkey(hidden)], stream_key: [_row_id, _row_id#1, s_nationkey, s_suppkey], pk_columns: [s_name, _row_id, _row_id#1, s_nationkey, s_suppkey], pk_conflict: "NoCheck" }
     └─StreamHashJoin { type: LeftSemi, predicate: s_suppkey = ps_suppkey, output: [s_name, s_address, _row_id, _row_id, s_nationkey, s_suppkey] }
       ├─StreamExchange { dist: HashShard(s_suppkey) }
-      | └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id] }
+      | └─StreamHashJoin [append_only] { type: Inner, predicate: s_nationkey = n_nationkey, output: [s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id] }
       |   ├─StreamExchange { dist: HashShard(s_nationkey) }
       |   | └─StreamRowIdGen { row_id_index: 7 }
       |   |   └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
@@ -1824,7 +1824,7 @@
         └──  StreamExchange Hash([0]) from 4
 
     Fragment 1
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_nationkey = n_nationkey, output: [s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    StreamHashJoin [append_only] { type: Inner, predicate: s_nationkey = n_nationkey, output: [s_suppkey, s_name, s_address, _row_id, s_nationkey, _row_id] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
     ├──  StreamExchange Hash([3]) from 2
     └──  StreamExchange Hash([0]) from 3
 
@@ -2050,9 +2050,9 @@
         └─StreamHashJoin { type: LeftAnti, predicate: l_orderkey = l_orderkey AND (l_suppkey <> l_suppkey), output: [s_name, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey, l_orderkey] }
           ├─StreamHashJoin { type: LeftSemi, predicate: l_orderkey = l_orderkey AND (l_suppkey <> l_suppkey), output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, _row_id, _row_id, o_orderkey, s_suppkey] }
           | ├─StreamExchange { dist: HashShard(l_orderkey) }
-          | | └─StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, o_orderkey] }
+          | | └─StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, o_orderkey] }
           | |   ├─StreamExchange { dist: HashShard(s_suppkey) }
-          | |   | └─StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [s_suppkey, s_name, _row_id, n_nationkey, _row_id] }
+          | |   | └─StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [s_suppkey, s_name, _row_id, n_nationkey, _row_id] }
           | |   |   ├─StreamExchange { dist: HashShard(n_nationkey) }
           | |   |   | └─StreamRowIdGen { row_id_index: 4 }
           | |   |   |   └─StreamSource { source: "nation", columns: ["n_nationkey", "n_name", "n_regionkey", "n_comment", "_row_id"] }
@@ -2060,7 +2060,7 @@
           | |   |     └─StreamRowIdGen { row_id_index: 7 }
           | |   |       └─StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] }
           | |   └─StreamExchange { dist: HashShard(l_suppkey) }
-          | |     └─StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey, output: [l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id] }
+          | |     └─StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey, output: [l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id] }
           | |       ├─StreamExchange { dist: HashShard(o_orderkey) }
           | |       | └─StreamRowIdGen { row_id_index: 9 }
           | |       |   └─StreamSource { source: "orders", columns: ["o_orderkey", "o_custkey", "o_orderstatus", "o_totalprice", "o_orderdate", "o_orderpriority", "o_clerk", "o_shippriority", "o_comment", "_row_id"] }
@@ -2106,7 +2106,7 @@
     └──  StreamExchange Hash([0]) from 11
 
     Fragment 2
-    StreamAppendOnlyHashJoin { type: Inner, predicate: s_suppkey = l_suppkey, output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, o_orderkey] }
+    StreamHashJoin [append_only] { type: Inner, predicate: s_suppkey = l_suppkey, output: [s_name, l_orderkey, l_suppkey, _row_id, _row_id, n_nationkey, s_suppkey, _row_id, _row_id, o_orderkey] }
     ├── left table: 9
     ├── right table: 11
     ├── left degree table: 10
@@ -2115,7 +2115,7 @@
     └──  StreamExchange Hash([1]) from 6
 
     Fragment 3
-    StreamAppendOnlyHashJoin { type: Inner, predicate: n_nationkey = s_nationkey, output: [s_suppkey, s_name, _row_id, n_nationkey, _row_id] }
+    StreamHashJoin [append_only] { type: Inner, predicate: n_nationkey = s_nationkey, output: [s_suppkey, s_name, _row_id, n_nationkey, _row_id] }
     ├── left table: 13
     ├── right table: 15
     ├── left degree table: 14
@@ -2132,7 +2132,7 @@
     └──  StreamSource { source: "supplier", columns: ["s_suppkey", "s_name", "s_address", "s_nationkey", "s_phone", "s_acctbal", "s_comment", "_row_id"] } { source state table: 18 }
 
     Fragment 6
-    StreamAppendOnlyHashJoin { type: Inner, predicate: o_orderkey = l_orderkey, output: [l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id] }
+    StreamHashJoin [append_only] { type: Inner, predicate: o_orderkey = l_orderkey, output: [l_orderkey, l_suppkey, _row_id, o_orderkey, _row_id] }
     ├── left table: 19
     ├── right table: 21
     ├── left degree table: 20

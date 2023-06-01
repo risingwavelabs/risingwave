@@ -2,7 +2,7 @@ statement error topic invalid_topic not found
 create source s with (
   connector = 'kafka',
   topic = 'invalid_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 statement error properties `scan_startup_mode` only support earliest and latest or leave it empty
@@ -10,7 +10,7 @@ create source invalid_startup_mode with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   scan.startup.mode = 'invalid',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 # TODO: Better to refine the error message.
@@ -19,7 +19,7 @@ create source invalid_startup_timestamp with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   scan.startup.timestamp_millis	= 'abc',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 statement ok
@@ -27,7 +27,7 @@ create source upsert_source with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   upsert = 'true',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 statement ok
@@ -38,14 +38,14 @@ statement error
 create source invalid_format with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format abc;
 
 statement ok
 create table s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 statement ok
@@ -63,7 +63,7 @@ statement ok
 create source s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 statement ok
@@ -90,7 +90,7 @@ statement ok
 create source s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 query T
@@ -109,7 +109,7 @@ statement ok
 create table s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092'
+  properties.bootstrap.server = 'message_queue:29092'
 ) row format json;
 
 # We should introduce `show connectors` to display all connectors created via both
@@ -136,7 +136,7 @@ statement error
 create source s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'nonexist',
 ) row format json;
 
@@ -144,7 +144,7 @@ statement ok
 CREATE TABLE mytable with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'mock'
 ) ROW FORMAT JSON;
 
@@ -160,7 +160,7 @@ create source s (
 ) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'nonexist',
 ) row format DEBEZIUM_MONGO_JSON;
 
@@ -172,7 +172,7 @@ create source s (
 ) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'nonexist',
 ) row format DEBEZIUM_MONGO_JSON;
 
@@ -184,7 +184,7 @@ create source s (
 ) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'nonexist',
 ) row format DEBEZIUM_MONGO_JSON;
 
@@ -192,7 +192,7 @@ statement ok
 create source s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   connection.name = 'mock',
 ) row format json;
 

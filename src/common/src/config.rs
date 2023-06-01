@@ -240,6 +240,13 @@ pub struct MetaConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Whether config object storage bucket lifecycle to purge stale data.
+    #[serde(default)]
+    pub do_not_config_object_storage_lifecycle: bool,
+
+    #[serde(default = "default::meta::partition_vnode_count")]
+    pub partition_vnode_count: u32,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -603,11 +610,15 @@ mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            5 * 1024 * 1024 * 1024 // 5GB
+            2 * 1024 * 1024 * 1024 // 2GB
         }
 
         pub fn split_group_size_limit() -> u64 {
             20 * 1024 * 1024 * 1024 // 20GB
+        }
+
+        pub fn partition_vnode_count() -> u32 {
+            64
         }
     }
 

@@ -41,14 +41,19 @@ echo_err() {
 
 # Get reason for generation crash.
 get_failure_reason() {
-  tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+  cat $1 | tac | grep -B 10000 -m1 "\[EXECUTING" | tac | tail -n+2
+}
+
+check_if_failed() {
+  grep -B 2 "$CRASH_MESSAGE" || true
 }
 
 # Extract queries from file $1, write to file $2
 extract_queries() {
   QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
-  FAIL_REASON=$(get_failure_reason < "$1")
-  if [[ -n "$FAIL_REASON" ]]; then
+  FAILED=$(check_if_failed < "$1")
+  if [[ -n "$FAILED" ]]; then
+    FAIL_REASON=$(get_failure_reason < "$1")
     echo_err "[WARN] Cluster crashed while generating queries. see $1 for more information."
     QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
   fi
@@ -59,8 +64,12 @@ extract_ddl() {
   grep "\[EXECUTING CREATE .*\]: " | sed -E 's/^.*\[EXECUTING CREATE .*\]: (.*)$/\1;/' | pg_format || true
 }
 
-extract_dml() {
+extract_inserts() {
   grep "\[EXECUTING INSERT\]: " | sed -E 's/^.*\[EXECUTING INSERT\]: (.*)$/\1;/' || true
+}
+
+extract_updates() {
+  grep "\[EXECUTING UPDATES\]: " | sed -E 's/^.*\[EXECUTING UPDATES\]: (.*)$/\1;/' || true
 }
 
 extract_last_session() {
@@ -82,20 +91,32 @@ extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "$LOGFILE_PREFIX")
   do
     LOGFILE="$LOGDIR/$LOGFILENAME"
-    REASON=$(get_failure_reason < "$LOGFILE")
-    if [[ -n "$REASON" ]]; then
-      echo_err "[INFO] $LOGFILE Encountered bug."
+    echo_err "[INFO] Checking $LOGFILE for bugs"
+    FAILED=$(check_if_failed < "$LOGFILE")
+    echo_err "[INFO] Checked $LOGFILE for bugs"
+    if [[ -n "$FAILED" ]]; then
+      echo_err "[WARN] $LOGFILE Encountered bug."
 
-      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
+      REASON=$(get_failure_reason "$LOGFILE")
       SEED=$(echo "$LOGFILENAME" | sed -E "s/${LOGFILE_PREFIX}\-(.*)\.log/\1/")
+
       DDL=$(extract_ddl < "$LOGFILE")
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
-      DML=$(extract_dml < "$LOGFILE")
+      # FIXME(kwannoel): Extract dml for updates too.
+      INSERTS=$(extract_inserts < "$LOGFILE")
+      UPDATES=$(extract_updates < "$LOGFILE")
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
       QUERY=$(extract_failing_query < "$LOGFILE")
+
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "\n\n$GLOBAL_SESSION" "\n\n$DML" "\n\n$TEST_SESSION" "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
+
+      echo -e "$DDL" \
+       "\n\n$GLOBAL_SESSION" \
+       "\n\n$INSERTS" \
+       "\n\n$UPDATES" \
+       "\n\n$TEST_SESSION" \
+       "\n\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
@@ -116,14 +137,18 @@ generate_deterministic() {
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
   seq "$TEST_NUM" | env_parallel "
-    mkdir -p $OUTDIR/{}; \
+    mkdir -p $OUTDIR/{}
+    echo '[INFO] Generating For Seed {}'
     MADSIM_TEST_SEED={} ./$MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{}.log; \
-    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
+      2>$LOGDIR/generate-{}.log
+    echo '[INFO] Finished Generating For Seed {}'
+    echo '[INFO] Extracting Queries For Seed {}'
+    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {}'
     "
   set -e
 }
@@ -193,6 +218,7 @@ build() {
 }
 
 generate() {
+  echo_err "[INFO] Generating"
   generate_deterministic
   echo_err "[INFO] Finished generation"
 }
@@ -214,8 +240,8 @@ validate() {
 # sync step
 # Some queries maybe be added
 sync_queries() {
-  set +x
   pushd $OUTDIR
+  git stash
   git checkout main
   git pull
   set +e
@@ -223,10 +249,10 @@ sync_queries() {
   set -e
   git checkout -b stage
   popd
-  set -x
 }
 
 sync() {
+  echo_err "[INFO] Syncing"
   sync_queries
   echo_err "[INFO] Synced"
 }
@@ -245,6 +271,7 @@ upload_queries() {
 }
 
 upload() {
+  echo_err "[INFO] Uploading Queries"
   upload_queries
   echo_err "[INFO] Uploaded"
 }
@@ -256,7 +283,7 @@ cleanup() {
 
 ################### ENTRY POINTS
 
-generate() {
+run_generate() {
   setup
 
   build
@@ -268,7 +295,7 @@ generate() {
   cleanup
 }
 
-extract() {
+run_extract() {
   LOGDIR="$PWD" OUTDIR="$PWD" extract_fail_info_from_logs "fuzzing"
   for QUERY_FOLDER in failed/*
   do
@@ -287,9 +314,9 @@ extract() {
 main() {
   if [[ $1 == "extract" ]]; then
     echo "[INFO] Extracting queries"
-    extract
+    run_extract
   elif [[ $1 == "generate" ]]; then
-    generate
+    run_generate
   else
     echo "
 ================================================================

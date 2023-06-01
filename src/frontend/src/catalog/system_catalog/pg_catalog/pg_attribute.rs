@@ -32,4 +32,5 @@ pub const PG_ATTRIBUTE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int16, "attnum"),
     (DataType::Boolean, "attnotnull"),
     (DataType::Boolean, "attisdropped"),
+    (DataType::Int32, "atttypmod"),
 ];

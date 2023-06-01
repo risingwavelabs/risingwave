@@ -108,12 +108,13 @@ impl LevelCompactionPicker {
         let l0_select_tables_vec = non_overlap_sub_level_picker
             .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
         if l0_select_tables_vec.is_empty() {
+            stats.skip_by_pending_files += 1;
             return None;
         }
 
         let mut skip_by_pending = false;
-        let mut skip_by_write_amp = false;
         let mut input_levels = vec![];
+        let mut min_write_amp_meet = false;
         for input in l0_select_tables_vec {
             let l0_select_tables = input
                 .sstable_infos
@@ -140,15 +141,8 @@ impl LevelCompactionPicker {
                 continue;
             }
 
-            if (!target_level_ssts.is_empty() || input.sstable_infos.len() > 1)
-                && input.sstable_infos.len()
-                    < self.config.level0_sub_level_compact_level_count as usize
-                && input.total_file_size < target_level_size
-                && input.total_file_count < self.config.level0_max_compact_file_number as usize
-            {
-                // not trivial move
-                skip_by_write_amp = true;
-                continue;
+            if input.total_file_size >= target_level_size {
+                min_write_amp_meet = true;
             }
 
             input_levels.push((input, target_level_size, target_level_ssts));
@@ -158,37 +152,12 @@ impl LevelCompactionPicker {
             if skip_by_pending {
                 stats.skip_by_pending_files += 1;
             }
-
-            if skip_by_write_amp {
-                stats.skip_by_write_amp_limit += 1;
-            }
             return None;
         }
 
-        const MB_SIZE: u64 = 1024 * 1024;
-        let mut min_score = u64::MAX;
-        let mut min_target_file_size = u64::MAX;
-        let max_base_level_compact_size = target_level.total_file_size / 4;
-        for (input, target_level_size, _) in &input_levels {
-            if input.total_file_size == 0 {
-                continue;
-            }
-            let score = *target_level_size * MB_SIZE / input.total_file_size;
-            min_score = std::cmp::min(min_score, score);
-            if score <= MB_SIZE {
-                min_target_file_size = std::cmp::min(*target_level_size, min_target_file_size);
-            }
-        }
-        let min_write_amp_meet = min_score <= MB_SIZE;
-        let min_target_files_meet = min_target_file_size <= max_base_level_compact_size;
         for (input, target_file_size, target_level_files) in input_levels {
-            if min_write_amp_meet && input.total_file_size < target_file_size {
-                continue;
-            }
-
-            if min_write_amp_meet
-                && min_target_files_meet
-                && target_file_size > max_base_level_compact_size
+            if (min_write_amp_meet || l0.total_file_size < self.config.max_bytes_for_level_base)
+                && input.total_file_size < target_file_size
             {
                 continue;
             }
@@ -214,6 +183,7 @@ impl LevelCompactionPicker {
                 target_sub_level_id: 0,
             });
         }
+        stats.skip_by_write_amp_limit += 1;
         None
     }
 
@@ -890,18 +860,17 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(2, ret.input_levels.len());
-        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(0, ret.input_levels[1].table_infos.len());
+        assert_eq!(3, ret.input_levels.len());
+        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
 
         // trivial move do not be limited by level0_sub_level_compact_level_count
         ret.add_pending_task(0, &mut levels_handler);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(3, ret.input_levels.len());
-        assert_eq!(6, ret.input_levels[0].table_infos[0].sst_id);
-        assert_eq!(4, ret.input_levels[1].table_infos[0].sst_id);
+        assert_eq!(2, ret.input_levels.len());
+        assert_eq!(5, ret.input_levels[0].table_infos[0].sst_id);
+        assert!(ret.input_levels[1].table_infos.is_empty());
     }
 
     #[test]

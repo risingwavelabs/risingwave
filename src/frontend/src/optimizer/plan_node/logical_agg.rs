@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -22,13 +21,12 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
-use super::generic::{self, Agg, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
-use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
@@ -53,25 +51,6 @@ pub struct LogicalAgg {
 }
 
 impl LogicalAgg {
-    /// Infer agg result table for streaming agg.
-    pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
-        self.core.infer_result_table(&self.base, vnode_col_idx)
-    }
-
-    /// Infer `AggCallState`s for streaming agg.
-    pub fn infer_stream_agg_state(&self, vnode_col_idx: Option<usize>) -> Vec<AggCallState> {
-        self.core.infer_stream_agg_state(&self.base, vnode_col_idx)
-    }
-
-    /// Infer dedup tables for distinct agg calls.
-    pub fn infer_distinct_dedup_tables(
-        &self,
-        vnode_col_idx: Option<usize>,
-    ) -> HashMap<usize, TableCatalog> {
-        self.core
-            .infer_distinct_dedup_tables(&self.base, vnode_col_idx)
-    }
-
     /// Generate plan for stateless 2-phase streaming agg.
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
@@ -1081,7 +1060,9 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let eowc = ctx.emit_on_window_close();
         let stream_input = self.input().to_stream(ctx)?;
+
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() {
             let input = if self.group_key().count_ones(..) != self.input().schema().len() {
@@ -1099,22 +1080,37 @@ impl ToStream for LogicalAgg {
             return logical_dedup.to_stream(ctx);
         }
 
-        let stream_agg = self.gen_dist_stream_agg_plan(stream_input)?;
+        let plan = self.gen_dist_stream_agg_plan(stream_input)?;
 
-        let final_agg_calls = if let Some(final_agg) = stream_agg.as_stream_simple_agg() {
-            final_agg.agg_calls()
-        } else if let Some(final_agg) = stream_agg.as_stream_hash_agg() {
-            final_agg.agg_calls()
+        let (plan, n_final_agg_calls) = if let Some(final_agg) = plan.as_stream_simple_agg() {
+            if eowc {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`EMIT ON WINDOW CLOSE` cannot be used for aggregation without `GROUP BY`"
+                        .to_string(),
+                )
+                .into());
+            }
+            (plan.clone(), final_agg.agg_calls().len())
+        } else if let Some(final_agg) = plan.as_stream_hash_agg() {
+            (
+                if eowc {
+                    final_agg.to_eowc_version()?
+                } else {
+                    plan.clone()
+                },
+                final_agg.agg_calls().len(),
+            )
         } else {
             panic!("the root PlanNode must be either StreamHashAgg or StreamSimpleAgg");
         };
-        if self.agg_calls().len() == final_agg_calls.len() {
+
+        if self.agg_calls().len() == n_final_agg_calls {
             // an existing `count(*)` is used as row count column in `StreamXxxAgg`
-            Ok(stream_agg)
+            Ok(plan)
         } else {
             // a `count(*)` is appended, should project the output
             Ok(StreamProject::new(generic::Project::with_out_col_idx(
-                stream_agg,
+                plan,
                 0..self.schema().len(),
             ))
             .into())
@@ -1239,7 +1235,7 @@ mod tests {
 
             assert_eq_input_ref!(&exprs[0], 0);
             if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
-                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                assert_eq!(func_call.func_type(), ExprType::Add);
                 let inputs = func_call.inputs();
                 assert_eq_input_ref!(&inputs[0], 1);
                 assert_eq_input_ref!(&inputs[1], 2);

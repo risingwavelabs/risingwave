@@ -16,6 +16,7 @@ use core::panic;
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -119,6 +120,7 @@ pub struct HummockManager<S: MetaStore> {
 
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
+    pause_version_checkpoint: AtomicBool,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -298,7 +300,6 @@ where
             )
             .await,
         );
-
         // Make sure data dir is not used by another cluster.
         // Skip this check in e2e compaction test, which needs to start a secondary cluster with
         // same bucket
@@ -309,6 +310,13 @@ where
                 object_store.clone(),
             )
             .await?;
+
+            // config bucket lifecycle for new cluster.
+            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
+                && !env.opts.do_not_config_object_storage_lifecycle
+            {
+                s3.inner().configure_bucket_lifecycle().await;
+            }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -336,6 +344,7 @@ where
             event_sender: tx,
             object_store,
             version_checkpoint_path: checkpoint_path,
+            pause_version_checkpoint: AtomicBool::new(false),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -928,15 +937,11 @@ where
                     "l0_trivial_move".to_string()
                 } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
                     "l0_overlapping".to_string()
-                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                } else if compact_task.target_level == 0 {
                     "l0_intra".to_string()
                 } else {
-                    let is_trivial_move = if compact_task
-                        .input_ssts
-                        .last()
-                        .unwrap()
-                        .table_infos
-                        .is_empty()
+                    let is_trivial_move = if compact_task.input_ssts.len() == 2
+                        && compact_task.input_ssts[1].table_infos.is_empty()
                     {
                         "trivial-move"
                     } else {

@@ -113,7 +113,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
                     chunk_size: params.env.config().developer.chunk_size,
-                    emit_on_window_close: false,
+                    emit_on_window_close: node.get_emit_on_window_close(),
                 },
             },
             group_key_types,

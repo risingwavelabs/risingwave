@@ -12,15 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::CtlContext;
+pub mod serde;
 
-pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let version = meta_client.disable_commit_epoch().await?;
-    println!(
-        "Disabled.\
-        Current version: id {}, max_committed_epoch {}",
-        version.id, version.max_committed_epoch
-    );
-    Ok(())
-}
+type SeqIdType = i32;
+type RowOpCodeType = i16;
+
+/// Readers truncate the offset at the granularity of epoch
+type ReaderTruncationOffsetType = u64;
