@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 use itertools::Itertools;
 
@@ -68,5 +69,30 @@ impl Display for StructType {
                     .join(",")
             )
         }
+    }
+}
+
+impl FromStr for StructType {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "record" {
+            return Ok(StructType::unnamed(Vec::new()));
+        }
+        let s = s.trim_start_matches("struct<").trim_end_matches('>');
+        let mut fields = Vec::new();
+        let mut field_names = Vec::new();
+        for field in s.split(',') {
+            let field = field.trim();
+            let mut iter = field.split_whitespace();
+            let field_name = iter.next().unwrap();
+            let field_type = iter.next().unwrap();
+            field_names.push(field_name.to_string());
+            fields.push(DataType::from_str(field_type)?);
+        }
+        Ok(StructType {
+            fields,
+            field_names,
+        })
     }
 }
