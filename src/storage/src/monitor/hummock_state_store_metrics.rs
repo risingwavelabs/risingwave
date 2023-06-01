@@ -304,8 +304,7 @@ impl StateStoreCollector {
         .unwrap();
         descs.extend(meta_cache_size.desc().into_iter().cloned());
         let uploading_memory_size = IntGauge::with_opts(Opts::new(
-            // TODO: rename the metrics to "uploading_memory_size"
-            "state_store_limit_memory_size",
+            "uploading_memory_size",
             "the size of uploading SSTs memory usage",
         ))
         .unwrap();
