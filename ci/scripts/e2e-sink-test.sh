@@ -28,6 +28,13 @@ download_java_binding "$profile"
 # TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
 export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
+# Change process number limit
+echo "process number limit"
+ulimit -a
+ulimit -u 1024
+echo "process number limit after changed"
+ulimit -a
+
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node

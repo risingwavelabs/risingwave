@@ -299,7 +299,7 @@ public class JDBCSink extends SinkBase {
                     continue;
                 }
                 if (stmt != null) {
-                    try {
+                    try (stmt) {
                         LOG.debug("Executing statement: {}", stmt);
                         stmt.executeUpdate();
                     } catch (SQLException e) {
