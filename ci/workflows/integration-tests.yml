@@ -23,6 +23,7 @@ steps:
           - "postgres-sink"
           - "iceberg-sink"
           - "debezium-mysql"
+          - "tidb-cdc-sink"
         format:
           - "json"
           - "protobuf"
