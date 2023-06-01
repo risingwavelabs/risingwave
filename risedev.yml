@@ -23,10 +23,8 @@ profile:
       # - use: minio
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
-      # - use: aws-s3
-      #   bucket: test-bucket
-      # If you want to use other s3 compatible object store, open this flag:
-      #   s3-compatible: false
+      - use: aws-s3
+        bucket: risingwave-cos-wcy-1314496003
 
       # If you want to create CDC source table, uncomment the following line
       # - use: connector-node
@@ -39,7 +37,7 @@ profile:
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      # - use: compactor
+      - use: compactor
 
       # If you want to enable metrics, uncomment those two lines.
       # - use: prometheus
@@ -1066,8 +1064,6 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-    # used to support other s3 compatible object store.
-    s3-compatible: false
 
   # Apache Kafka service
   kafka:

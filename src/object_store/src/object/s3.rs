@@ -23,7 +23,7 @@ use aws_sdk_s3::model::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::output::UploadPartOutput;
-use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
+use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -531,53 +531,24 @@ impl S3ObjectStore {
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config = aws_config::from_env()
-            .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .load()
-            .await;
+        let sdk_config_loader =
+            aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
+        let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or("".to_string());
+        let sdk_config = match endpoint.is_empty() {
+            false => {
+                sdk_config_loader
+                    .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+                    .load()
+                    .await
+            }
+            true => sdk_config_loader.load().await,
+        };
+
         let client = Client::new(&sdk_config);
 
         Self {
             client,
             bucket,
-            part_size: S3_PART_SIZE,
-            metrics,
-        }
-    }
-
-    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        // Retry 3 times if we get server-side errors or throttling errors
-        // load from env
-        let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_REGION not found from environment variables")
-        });
-        let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
-        });
-        let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
-        });
-        let access_key_secret =
-            std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap_or_else(|_| {
-                panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
-            });
-        let sdk_config = aws_config::from_env()
-            .region(Region::new(region))
-            .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .credentials_provider(Credentials::from_keys(
-                access_key_id,
-                access_key_secret,
-                None,
-            ))
-            .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
-            .load()
-            .await;
-
-        let client = Client::new(&sdk_config);
-
-        Self {
-            client,
-            bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
         }
