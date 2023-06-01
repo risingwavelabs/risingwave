@@ -158,7 +158,7 @@ impl PushCalculationOfJoinRule {
         };
         for (index, expr) in exprs.iter().enumerate() {
             let ExprImpl::FunctionCall(func) = expr else { continue };
-            if !is_comparison_type(func.get_expr_type()) {
+            if !is_comparison_type(func.func_type()) {
                 continue;
             }
             // Do not decompose the comparison if it contains `now()`

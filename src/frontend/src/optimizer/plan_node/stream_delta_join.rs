@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::{self, GenericPlanRef};
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -91,7 +92,7 @@ impl StreamDeltaJoin {
 impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamDeltaJoin");
+        let mut builder = formatter_debug_plan_node!(f, "StreamDeltaJoin");
         builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();

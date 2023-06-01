@@ -27,12 +27,12 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::operators::*;
 use crate::impl_common_parser_logic;
+use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::{
     avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
     get_field_from_avro_value,
 };
 use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};

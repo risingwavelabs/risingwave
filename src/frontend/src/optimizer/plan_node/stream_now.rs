@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::NowNode;
 
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::utils::{formatter_debug_plan_node, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -61,7 +61,7 @@ impl StreamNow {
 impl fmt::Display for StreamNow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamNow");
+        let mut builder = formatter_debug_plan_node!(f, "StreamNow");
 
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.
