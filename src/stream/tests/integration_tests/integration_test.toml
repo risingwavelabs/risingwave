@@ -1,0 +1,16 @@
+[tasks.update-stream-integration-test]
+description = "Update expect strings of stream integration tests"
+category = "RiseDev - Test"
+dependencies = ["install-nextest"]
+script = '''
+#!/usr/bin/env bash
+set -e
+
+UPDATE_EXPECT=1 cargo nextest run -p risingwave_stream --test integration_tests --retries 0
+
+echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
+echo "Tip: use the alias $(tput setaf 4)./risedev usit$(tput sgr0)."
+'''
+
+[tasks.usit]
+alias = "update-stream-integration-test"
