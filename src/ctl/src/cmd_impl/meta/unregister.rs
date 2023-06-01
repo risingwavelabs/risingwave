@@ -12,16 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The entry point to combine all integration tests into a single binary.
-//!
-//! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
-//! for the rationale behind this approach.
+use risingwave_common::util::addr::HostAddr;
 
-#![feature(stmt_expr_attributes)]
-#![cfg(madsim)]
-#![feature(lazy_cell)]
+use crate::CtlContext;
 
 // TODO: rename into cordon
-mod nexmark_scaling;
-mod recovery;
-mod scale;
+/// mark node as unschedulable
+pub async fn unregister_worker_node(context: &CtlContext, addr: HostAddr) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client.unregister(addr).await?;
+    // TODO: automatically call clear_worker_node here?
+    Ok(())
+}
