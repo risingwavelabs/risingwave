@@ -17,7 +17,7 @@ public class TestUdfServer {
     public void gcd() throws Exception {
         var allocator = new RootAllocator();
         try (var server = new UdfServer("localhost", 0)) {
-            server.addFunction("gcd", new Gcd());
+            server.addFunction("gcd", new UdfExample.Gcd());
             server.start();
 
             try (var client = new UdfClient("localhost", server.getPort())) {
