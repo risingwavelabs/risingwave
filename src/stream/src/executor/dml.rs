@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::transaction::TxnId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
@@ -49,6 +54,8 @@ pub struct DmlExecutor {
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
 }
+
+const MAX_CHUNK_FOR_ATOMICITY: usize = 32;
 
 impl DmlExecutor {
     #[allow(clippy::too_many_arguments)]
@@ -105,7 +112,13 @@ impl DmlExecutor {
             stream.pause_stream();
         }
 
+        // Current epoch
+        let mut current_epoch = Epoch(barrier.epoch.curr);
+
         yield Message::Barrier(barrier);
+
+        // Active transactions: txn_id -> rows have been sent.
+        let mut active_txn_map: BTreeMap<TxnId, (Epoch, Vec<StreamChunk>)> = Default::default();
 
         while let Some(input_msg) = stream.next().await {
             match input_msg? {
@@ -121,17 +134,64 @@ impl DmlExecutor {
                                 _ => {}
                             }
                         }
+
+                        current_epoch = barrier.epoch.curr.into();
+
+                        if !active_txn_map.is_empty() {
+                            for (txn_id, (_, mut vec)) in active_txn_map
+                                .drain_filter(|_, (epoch, _)| epoch.0 < barrier.epoch.prev)
+                            {
+                                tracing::warn!("txn_id={}. In case of late `TxnMsg::End`, drain those transaction chunks", txn_id);
+                                for chunk in vec.drain(..) {
+                                    yield Message::Chunk(chunk);
+                                }
+                            }
+                        }
                     }
                     yield msg;
                 }
                 Either::Right(txn_msg) => {
                     // Batch data.
                     match txn_msg {
-                        TxnMsg::Begin(_) | TxnMsg::End(_) => {
-                            // TODO(dylan): process txn
+                        TxnMsg::Begin(txn_id) => {
+                            if active_txn_map
+                                .insert(txn_id, (current_epoch, vec![]))
+                                .is_some()
+                            {
+                                tracing::warn!("txn_id={} already exists. Maybe transaction id collision happens.", txn_id);
+                            }
                         }
-                        TxnMsg::Data(_, chunk) => {
-                            yield Message::Chunk(chunk);
+                        TxnMsg::End(txn_id) => {
+                            match active_txn_map.remove(&txn_id) {
+                                Some((_, mut vec)) => {
+                                    for chunk in vec.drain(..) {
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+                                None => {
+                                    tracing::warn!("txn_id={} Maybe this transaction is too large to provide atomicity.", txn_id);
+                                }
+                            };
+                        }
+                        TxnMsg::Data(txn_id, chunk) => {
+                            match active_txn_map.get_mut(&txn_id) {
+                                Some((_, vec)) => {
+                                    vec.push(chunk);
+                                    if vec.len() > MAX_CHUNK_FOR_ATOMICITY {
+                                        // Too many chunks for atomicity. Drain can yield them.
+                                        for chunk in vec.drain(..) {
+                                            yield Message::Chunk(chunk);
+                                        }
+                                        // Remove this large transaction from map.
+                                        active_txn_map.remove(&txn_id);
+                                    }
+                                }
+                                None => {
+                                    // Maybe this transaction is too large, we can't provide
+                                    // atomicity, so yield chunk ASAP.
+                                    yield Message::Chunk(chunk);
+                                }
+                            };
                         }
                     }
                 }
@@ -271,6 +331,9 @@ mod tests {
             )
         );
 
+        // Consume the message from batch (because dml executor selects from the streams in a round
+        // robin way)
+
         // TxnMsg::Begin is consumed implicitly
 
         // Consume the 2nd message from upstream executor
@@ -283,17 +346,7 @@ mod tests {
             )
         );
 
-        // Consume the message from batch (because dml executor selects from the streams in a round
-        // robin way)
-        let msg = dml_executor.next().await.unwrap().unwrap();
-        assert_eq!(
-            msg.into_chunk().unwrap(),
-            StreamChunk::from_pretty(
-                "  I I
-                U+ 1 11
-                U+ 2 22",
-            )
-        );
+        // TxnMsg::Data is buffed
 
         // Consume the 3rd message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();
@@ -305,6 +358,18 @@ mod tests {
                 + 978 72
                 + 134 41
                 + 398 98",
+            )
+        );
+
+
+        // After TxnMsg::End, we can consume dml data
+        let msg = dml_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            msg.into_chunk().unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+                U+ 1 11
+                U+ 2 22",
             )
         );
     }
