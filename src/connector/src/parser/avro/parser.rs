@@ -277,7 +277,7 @@ impl AvroParser {
                             return from_avro_value(
                                 avro_key.as_ref().unwrap().clone(),
                                 self.key_schema.as_ref().unwrap(),
-                                &column.data_type
+                                &column.data_type,
                             )
                             .map_err(|e| {
                                 tracing::error!(
@@ -295,7 +295,7 @@ impl AvroParser {
                 };
 
                 let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
-                from_avro_value(tuple.1.clone(), field_schema,&column.data_type).map_err(|e| {
+                from_avro_value(tuple.1.clone(), field_schema, &column.data_type).map_err(|e| {
                     tracing::error!(
                         "failed to process value ({}): {}",
                         String::from_utf8_lossy(&payload),

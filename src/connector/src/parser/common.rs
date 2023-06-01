@@ -14,15 +14,8 @@
 
 use std::borrow::Cow;
 
-
 use anyhow::{anyhow, Result};
-
-
-
-use risingwave_common::types::{
-    DataType, Datum, ScalarImpl,
-};
-
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 

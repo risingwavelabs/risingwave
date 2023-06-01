@@ -1,7 +1,6 @@
-
 use std::str::FromStr;
 
-use apache_avro::types::{Value};
+use apache_avro::types::Value;
 use apache_avro::Schema;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::i64_to_timestamp;
