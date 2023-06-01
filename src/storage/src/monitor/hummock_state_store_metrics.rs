@@ -283,7 +283,7 @@ struct StateStoreCollector {
     descs: Vec<Desc>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
-    limit_memory_size: IntGauge,
+    uploading_memory_size: IntGauge,
 }
 
 impl StateStoreCollector {
@@ -303,19 +303,20 @@ impl StateStoreCollector {
         ))
         .unwrap();
         descs.extend(meta_cache_size.desc().into_iter().cloned());
-        let limit_memory_size = IntGauge::with_opts(Opts::new(
+        let uploading_memory_size = IntGauge::with_opts(Opts::new(
+            // TODO: rename the metrics to "uploading_memory_size"
             "state_store_limit_memory_size",
             "the size of uploading SSTs memory usage",
         ))
         .unwrap();
-        descs.extend(limit_memory_size.desc().into_iter().cloned());
+        descs.extend(uploading_memory_size.desc().into_iter().cloned());
 
         Self {
             memory_collector,
             descs,
             block_cache_size,
             meta_cache_size,
-            limit_memory_size,
+            uploading_memory_size,
         }
     }
 }
@@ -330,14 +331,14 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_data_memory_usage() as i64);
         self.meta_cache_size
             .set(self.memory_collector.get_meta_memory_usage() as i64);
-        self.limit_memory_size
+        self.uploading_memory_size
             .set(self.memory_collector.get_uploading_memory_usage() as i64);
 
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());
         mfs.extend(self.meta_cache_size.collect());
-        mfs.extend(self.limit_memory_size.collect());
+        mfs.extend(self.uploading_memory_size.collect());
         mfs
     }
 }
