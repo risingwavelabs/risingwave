@@ -1935,11 +1935,11 @@ def section_hummock(panels):
                 ),
                 panels.target(
                     f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),
