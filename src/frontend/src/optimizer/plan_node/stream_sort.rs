@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::TableCatalogBuilder;
+use super::utils::{formatter_debug_plan_node, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
@@ -34,7 +34,8 @@ pub struct StreamSort {
 
 impl fmt::Display for StreamSort {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StreamSort")
+        let mut builder = formatter_debug_plan_node!(f, "StreamSort");
+        builder
             .field("sort_column_index", &self.sort_column_index)
             .finish()
     }
