@@ -27,20 +27,11 @@ use super::{BoxedExpression, Expression};
 use crate::vector_op::conjunction::{and, or};
 use crate::Result;
 
+#[derive(Debug)]
 pub struct BinaryShortCircuitExpression {
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     expr_type: Type,
-}
-
-impl std::fmt::Debug for BinaryShortCircuitExpression {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BinaryShortCircuitExpression")
-            .field("expr_ia1", &self.expr_ia1)
-            .field("expr_ia2", &self.expr_ia2)
-            .field("expr_type", &self.expr_type)
-            .finish()
-    }
 }
 
 #[async_trait::async_trait]

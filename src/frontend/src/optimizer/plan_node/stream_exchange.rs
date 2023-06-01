@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::stream::StreamPlanRef;
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -79,11 +80,10 @@ impl StreamExchange {
 
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = if self.no_shuffle {
-            f.debug_struct("StreamNoShuffleExchange")
-        } else {
-            f.debug_struct("StreamExchange")
-        };
+        let mut builder = formatter_debug_plan_node!(
+            f, "StreamExchange"
+            , { "no_shuffle", self.no_shuffle }
+        );
 
         builder
             .field(

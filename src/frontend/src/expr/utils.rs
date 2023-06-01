@@ -21,7 +21,7 @@ use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
-        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == op => {
+        ExprImpl::FunctionCall(func_call) if func_call.func_type() == op => {
             let (_, exprs, _) = func_call.decompose();
             for expr in exprs {
                 split_expr_by(expr, op, rets);
@@ -486,8 +486,8 @@ impl WatermarkAnalyzer {
     }
 
     fn visit_function_call(&self, func_call: &FunctionCall) -> WatermarkDerivation {
-        match func_call.get_expr_type() {
-            ExprType::Unspecified | ExprType::InputRef | ExprType::ConstantValue => unreachable!(),
+        match func_call.func_type() {
+            ExprType::Unspecified => unreachable!(),
             ExprType::Add | ExprType::Multiply => match self.visit_binary_op(func_call.inputs()) {
                 (WatermarkDerivation::Constant, WatermarkDerivation::Constant) => {
                     WatermarkDerivation::Constant

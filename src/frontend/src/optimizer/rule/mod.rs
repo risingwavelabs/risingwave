@@ -66,6 +66,8 @@ pub use index_selection_rule::*;
 mod push_calculation_of_join_rule;
 pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
+mod over_window_to_agg_and_join_rule;
+pub use over_window_to_agg_and_join_rule::*;
 mod over_window_split_by_window_rule;
 pub use over_window_split_by_window_rule::*;
 mod over_agg_to_topn_rule;
@@ -142,6 +144,7 @@ macro_rules! for_all_rules {
             , { PushCalculationOfJoinRule }
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
+            , { OverWindowToAggAndJoinRule }
             , { OverWindowSplitByWindowRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }

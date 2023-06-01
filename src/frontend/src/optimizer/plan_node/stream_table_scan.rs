@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
+use super::utils::formatter_debug_plan_node;
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
@@ -170,7 +171,7 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamTableScan");
+        let mut builder = formatter_debug_plan_node!(f, "StreamTableScan");
 
         let v = match verbose {
             false => self.logical.column_names(),

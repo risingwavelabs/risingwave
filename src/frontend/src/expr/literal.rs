@@ -73,10 +73,6 @@ impl Literal {
         Literal { data, data_type }
     }
 
-    pub fn get_expr_type(&self) -> ExprType {
-        ExprType::ConstantValue
-    }
-
     pub fn get_data(&self) -> &Datum {
         &self.data
     }
@@ -100,7 +96,7 @@ impl Expr for Literal {
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: self.get_expr_type() as i32,
+            function_type: ExprType::Unspecified as i32,
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(literal_to_value_encoding(self.get_data())),
         }

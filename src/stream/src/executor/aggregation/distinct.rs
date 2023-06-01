@@ -25,7 +25,7 @@ use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
-use super::AggCall;
+use super::{AggCall, GroupKey};
 use crate::cache::{new_unbounded_with_metrics, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
@@ -57,7 +57,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         column: &ArrayRef,
         mut visibilities: Vec<&mut Vis>,
         dedup_table: &mut StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<()> {
         let column = column;
@@ -78,8 +78,10 @@ impl<S: StateStore> ColumnDeduplicater<S> {
             }
 
             // get counts of the distinct key of all agg calls that distinct on this column
-            let key = group_key.chain(row::once(datum));
-            let compacted_key = CompactedRow::from(&key); // TODO(rc): is it necessary to avoid recomputing here?
+            let row_prefix = group_key.map(GroupKey::table_row).chain(row::once(datum));
+            let table_pk = group_key.map(GroupKey::table_pk).chain(row::once(datum));
+            let cache_key =
+                CompactedRow::from(group_key.map(GroupKey::cache_key).chain(row::once(datum)));
 
             self.metrics_info
                 .metrics
@@ -88,8 +90,8 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 .inc();
             // TODO(yuhao): avoid this `contains`.
             // https://github.com/risingwavelabs/risingwave/issues/9233
-            let mut counts = if self.cache.contains(&compacted_key) {
-                self.cache.get_mut(&compacted_key).unwrap()
+            let mut counts = if self.cache.contains(&cache_key) {
+                self.cache.get_mut(&cache_key).unwrap()
             } else {
                 self.metrics_info
                     .metrics
@@ -98,7 +100,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                     .inc();
                 // load from table into the cache
                 let counts = if let Some(counts_row) =
-                    dedup_table.get_row(&key).await? as Option<OwnedRow>
+                    dedup_table.get_row(&table_pk).await? as Option<OwnedRow>
                 {
                     counts_row
                         .iter()
@@ -106,13 +108,14 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                         .collect()
                 } else {
                     // ensure there is a row in the dedup table for this distinct key
-                    dedup_table
-                        .insert((&key).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), n_calls)));
+                    dedup_table.insert(
+                        (&row_prefix).chain(row::repeat_n(Some(ScalarImpl::from(0i64)), n_calls)),
+                    );
                     vec![0; n_calls].into_boxed_slice()
                 };
-                self.cache.put(compacted_key.clone(), counts); // TODO(rc): can we avoid this clone?
+                self.cache.put(cache_key.clone(), counts); // TODO(rc): can we avoid this clone?
 
-                self.cache.get_mut(&compacted_key).unwrap()
+                self.cache.get_mut(&cache_key).unwrap()
             };
             debug_assert_eq!(counts.len(), visibilities.len());
 
@@ -154,10 +157,12 @@ impl<S: StateStore> ColumnDeduplicater<S> {
         prev_counts_map
             .into_iter()
             .for_each(|(datum, prev_counts)| {
-                let key = group_key.chain(row::once(datum));
+                let row_prefix = group_key.map(GroupKey::table_row).chain(row::once(datum));
+                let cache_key =
+                    CompactedRow::from(group_key.map(GroupKey::cache_key).chain(row::once(datum)));
                 let new_counts = OwnedRow::new(
                     self.cache
-                        .get(&CompactedRow::from(&key)) // TODO(rc): is it necessary to avoid recomputing here?
+                        .get(&cache_key)
                         .expect("distinct key in `prev_counts_map` must also exist in `self.cache`")
                         .iter()
                         .map(|&v| Some(v.into()))
@@ -165,7 +170,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                 );
                 let old_counts =
                     OwnedRow::new(prev_counts.iter().map(|&v| Some(v.into())).collect());
-                dedup_table.update(key.chain(old_counts), key.chain(new_counts));
+                dedup_table.update(row_prefix.chain(old_counts), row_prefix.chain(new_counts));
             });
 
         for (vis, vis_mask_inv) in visibilities.iter_mut().zip_eq(vis_masks_inv.into_iter()) {
@@ -257,7 +262,7 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         columns: &[ArrayRef],
         visibilities: Vec<Option<Bitmap>>,
         dedup_tables: &mut HashMap<usize, StateTable<S>>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<Vec<Option<Bitmap>>> {
         // convert `Option<Bitmap>` to `Vis` for convenience
@@ -625,7 +630,7 @@ mod tests {
         ];
 
         let group_key_types = [DataType::Int64];
-        let group_key = OwnedRow::new(vec![Some(100.into())]);
+        let group_key = GroupKey::new(OwnedRow::new(vec![Some(100.into())]), None);
 
         let store = MemoryStateStore::new();
         let mut epoch = EpochPair::new_test_epoch(1);

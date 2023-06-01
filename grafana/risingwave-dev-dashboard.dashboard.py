@@ -605,7 +605,7 @@ def section_streaming(panels):
             [
                 panels.target(
                     f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                    "source={{source_name}} actor={{actor_id}} @ {{instance}}",
                 ),
             ],
         ),
