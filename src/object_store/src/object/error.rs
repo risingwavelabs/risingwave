@@ -115,11 +115,6 @@ where
     }
 }
 
-// impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
-//     fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
-//         ObjectErrorInner::S3(e.into()).into()
-//     }
-// }
 impl From<opendal::Error> for ObjectError {
     fn from(e: opendal::Error) -> Self {
         ObjectErrorInner::Opendal(e).into()
