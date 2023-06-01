@@ -184,9 +184,19 @@ where
             .workers
             .get_mut(&WorkerKey(host_address.clone()))
             .ok_or_else(|| anyhow::anyhow!("Worker node does not exist!"))?;
-        let mut core = self.core.write().await;
-        let worker_node = worker.to_protobuf();
         let worker_type = worker.worker_type();
+        let worker_node = worker.to_protobuf();
+
+        // TODO: remove below code
+        let t = match worker_type {
+            WorkerType::Compactor => "Compactor",
+            WorkerType::Frontend => "Frontend",
+            WorkerType::ComputeNode => "ComputeNode",
+            WorkerType::Meta => "Meta",
+            WorkerType::RiseCtl => "RiseCtl",
+            WorkerType::Unspecified => "Unspecified",
+        };
+        println!("killing node of type {}", t);
 
         // TODO: write this as match statement
         if worker_type == WorkerType::ComputeNode {
@@ -212,10 +222,9 @@ where
                 .notify_frontend(Operation::Delete, Info::Node(worker_node.clone()))
                 .await;
         } else {
-            // Persist deletion.
+            // immediately delete non CN nodes
+            let mut core = self.core.write().await;
             Worker::delete(self.env.meta_store(), &host_address).await?;
-
-            // Update core.
             core.delete_worker_node(worker.clone());
         }
 
@@ -287,6 +296,9 @@ where
                             .filter(|worker| {
                                 worker.expire_at() < now
                                     && worker.worker_node.state != State::Deleting as i32
+                                    && worker.worker_type() != WorkerType::RiseCtl // TODO: Is this
+                                                                                   // correct?
+                                                                                   // Killing risectl breaks my tests :/
                             })
                             .map(|worker| (worker.worker_id(), worker.key().unwrap()))
                             .collect_vec(),

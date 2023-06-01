@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_pb::common::{ParallelUnit, WorkerType};
+use risingwave_pb::common::{Actor, ParallelUnit, WorkerType};
 use risingwave_pb::meta::reschedule_request::{self, Reschedule};
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -61,6 +61,104 @@ where
             stream_manager,
         }
     }
+}
+
+fn match_lists(pu_keep: &Vec<u32>, actors: &Vec<Actor>) -> (Vec<u32>, Vec<u32>) {
+    let mut add_list: Vec<u32> = vec![];
+    let mut remove_list: Vec<u32> = vec![];
+
+    let mut p = 0;
+    let mut a = 0;
+
+    while p < pu_keep.len() && a < actors.len() {
+        let p_id = pu_keep[p];
+        let a_id = actors[a].parallel_units_id;
+
+        if p_id < a_id {
+            add_list.push(p_id);
+        } else if p_id == a_id {
+        } else {
+            remove_list.push(a_id);
+        }
+
+        // else if?
+        if p_id <= a_id {
+            p = p + 1;
+        } else if p_id >= a_id {
+            // TODO: remove else if, just if
+            a = a + 1;
+        }
+    }
+
+    while p < pu_keep.len() {
+        let p_id = pu_keep[p];
+        add_list.push(p_id);
+        p = p + 1;
+    }
+
+    while a < actors.len() {
+        let a_id = actors[a].parallel_units_id;
+        remove_list.push(a_id);
+        a = a + 1;
+    }
+
+    (add_list, remove_list)
+}
+
+fn each_actor_in_all_first_k(
+    pu_delete: &Vec<u32>,
+    pu_keep: &Vec<u32>,
+    schedule: GetScheduleResponse,
+) -> std::collections::HashMap<u32, reschedule_request::Reschedule> {
+    let mut add_pus: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut remove_pus: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for fragment in schedule.get_fragment_list() {
+        let mut actors = fragment.actor_list.clone();
+        actors.sort_by_key(|x| x.parallel_units_id);
+        let (add_list, remove_list) = match_lists(pu_keep, &actors);
+        if add_list.len() > 0 {
+            add_pus.insert(fragment.id, add_list);
+        }
+        if remove_list.len() > 0 {
+            remove_pus.insert(fragment.id, remove_list);
+        }
+    }
+
+    make_reschedule_req(add_pus, remove_pus)
+}
+
+fn make_reschedule_req(
+    add_pus: std::collections::HashMap<u32, Vec<u32>>,
+    remove_pus: std::collections::HashMap<u32, Vec<u32>>,
+) -> std::collections::HashMap<u32, reschedule_request::Reschedule> {
+    let mut reschedule_map: std::collections::HashMap<u32, reschedule_request::Reschedule> =
+        std::collections::HashMap::new();
+
+    for (f_id, pu_ids) in add_pus {
+        reschedule_map.insert(
+            f_id,
+            reschedule_request::Reschedule {
+                added_parallel_units: pu_ids,
+                removed_parallel_units: vec![],
+            },
+        );
+    }
+
+    for (f_id, pu_ids) in remove_pus {
+        if reschedule_map.contains_key(&f_id) {
+            let tmp = reschedule_map.get_mut(&f_id).unwrap();
+            tmp.removed_parallel_units = pu_ids;
+        } else {
+            reschedule_map.insert(
+                f_id,
+                reschedule_request::Reschedule {
+                    added_parallel_units: vec![],
+                    removed_parallel_units: pu_ids,
+                },
+            );
+        }
+    }
+    reschedule_map
 }
 
 #[async_trait::async_trait]
@@ -159,16 +257,40 @@ where
             pu_deleting.append(&mut pu_list);
         }
 
-        let pu_deleting = pu_deleting.iter().unique().map(|u| u.clone()).collect_vec();
+        let mut pu_deleting = pu_deleting.iter().unique().map(|u| u.clone()).collect_vec();
         let pu_all = pu_all.iter().unique().map(|u| u.clone()).collect_vec();
 
         // TODO: use smarter rescheduling mechanism
         // TODO: use hash maps here
-        let pu_keep = pu_all
+        let mut pu_keep = pu_all
             .iter()
             .filter(|&x| !pu_deleting.contains(x))
             .cloned()
             .collect_vec();
+
+        pu_deleting.sort();
+        pu_keep.sort();
+
+        // TODO: remove this and all the functions belonging to it?
+        //        let reschedule_map: std::collections::HashMap<u32, reschedule_request::Reschedule>
+        // =              each_actor_in_all_first_k(&pu_deleting, &pu_keep,
+        // schedule.clone());
+        //
+        //        let response = self
+        //            .reschedule(Request::new(RescheduleRequest {
+        //                reschedules: reschedule_map,
+        //            }))
+        //            .await;
+        //
+        //        // TODO: remove this
+        //        match response {
+        //            Ok(_) => {}
+        //            Err(e) => {
+        //                println!("reschedule response {:?}", e);
+        //                assert!(false);
+        //            }
+        //        }
+        // return Ok(Response::new(ClearWorkerNodesResponse { status: None }));
 
         // Determine which fragment uses which PU on the to be cleared workers.
         let mut remove_map = std::collections::HashMap::new();
@@ -209,7 +331,7 @@ where
                     reschedule_map.insert(
                         *fragment_id,
                         reschedule_request::Reschedule {
-                            added_parallel_units: pu_keep.clone(),
+                            added_parallel_units: vec![], // we have to add PUs here
                             removed_parallel_units: remove_pus.clone(),
                         },
                     );
@@ -218,14 +340,23 @@ where
         }
 
         println!("send rescheduling request"); // TODO: remove println
-                                               // This is called multiple times?
-                                               // request clearing of all nodes at once
+
+        // request fails with "parallel unit x of fragment y is already in use"
         let response = self
             .reschedule(Request::new(RescheduleRequest {
                 reschedules: reschedule_map,
             }))
             .await;
-        assert!(response.is_ok() == true);
+
+        // TODO: remove this
+        match response {
+            Ok(_) => {}
+            Err(e) => {
+                println!("reschedule response {:?}", e);
+                assert!(false);
+            }
+        }
+
         println!("clear_workers done"); // TODO: remove println
 
         Ok(Response::new(ClearWorkerNodesResponse { status: None }))

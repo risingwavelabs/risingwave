@@ -231,11 +231,11 @@ async fn nexmark_scaling_up_down_common(
     // TODO: this should work without sleep
     sleep(Duration::from_secs(sleep_sec)).await;
 
-    // TODO: remove below
-    cluster
-        .clear_worker_nodes(addrs.clone())
-        .await
-        .expect("failed to clear worker nodes");
+    // // TODO: remove below
+    // cluster
+    //     .clear_worker_nodes(addrs.clone())
+    //     .await
+    //     .expect("failed to clear worker nodes");
 
     println!("unregistered nodes cleared"); // TODO: remove line
 
