@@ -294,7 +294,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9500; exit $?;'
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
