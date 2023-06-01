@@ -148,9 +148,9 @@ impl StreamHashAgg {
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(
-            f, "StreamHashAgg"
-            , { "append_only", self.input().append_only() }
-            , { "eowc", self.emit_on_window_close }
+            f, "StreamHashAgg",
+            { "append_only", self.input().append_only() },
+            { "eowc", self.emit_on_window_close },
         );
         self.logical.fmt_fields_with_builder(&mut builder);
 
