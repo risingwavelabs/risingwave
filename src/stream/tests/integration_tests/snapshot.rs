@@ -19,6 +19,11 @@ use risingwave_common::types::DataType;
 use risingwave_stream::executor::test_utils::MessageSender;
 use risingwave_stream::executor::{BoxedMessageStream, Message};
 
+#[derive(Debug, Clone, Default)]
+pub struct SnapshotOptions {
+    pub sort_chunk: bool,
+}
+
 /// Drives the executor until it is pending, and then asserts that the output matches
 /// `expect`.
 ///
@@ -45,8 +50,12 @@ use risingwave_stream::executor::{BoxedMessageStream, Message};
 /// # or
 /// UPDATE_EXPECT=1 risedev test -p risingwave_stream
 /// ```
-pub fn check_until_pending(executor: &mut BoxedMessageStream, expect: expect_test::Expect) {
-    let output = run_until_pending(executor);
+pub fn check_until_pending(
+    executor: &mut BoxedMessageStream,
+    expect: expect_test::Expect,
+    options: SnapshotOptions,
+) {
+    let output = run_until_pending(executor, options);
     let output = serde_yaml::to_string(&output).unwrap();
     expect.assert_eq(&output);
 }
@@ -58,11 +67,12 @@ pub async fn check_with_script<F, Fut>(
     create_executor: F,
     test_script: &str,
     expect: expect_test::Expect,
+    options: SnapshotOptions,
 ) where
     F: Fn() -> Fut,
     Fut: Future<Output = (MessageSender, BoxedMessageStream)>,
 {
-    let output = executor_snapshot(create_executor, test_script).await;
+    let output = executor_snapshot(create_executor, test_script, options).await;
     expect.assert_eq(&output);
 }
 
@@ -95,7 +105,11 @@ struct Snapshot {
     output: Vec<SnapshotEvent>,
 }
 
-async fn executor_snapshot<F, Fut>(create_executor: F, inputs: &str) -> String
+async fn executor_snapshot<F, Fut>(
+    create_executor: F,
+    inputs: &str,
+    options: SnapshotOptions,
+) -> String
 where
     F: Fn() -> Fut,
     Fut: Future<Output = (MessageSender, BoxedMessageStream)>,
@@ -126,14 +140,17 @@ where
 
         snapshot.push(Snapshot {
             input: event,
-            output: run_until_pending(&mut executor),
+            output: run_until_pending(&mut executor, options.clone()),
         });
     }
 
     serde_yaml::to_string(&snapshot).unwrap()
 }
 
-fn run_until_pending(executor: &mut BoxedMessageStream) -> Vec<SnapshotEvent> {
+fn run_until_pending(
+    executor: &mut BoxedMessageStream,
+    options: SnapshotOptions,
+) -> Vec<SnapshotEvent> {
     let mut output = vec![];
 
     while let Some(msg) = executor.try_next().now_or_never() {
@@ -143,7 +160,11 @@ fn run_until_pending(executor: &mut BoxedMessageStream) -> Vec<SnapshotEvent> {
             None => return output,
         };
         output.push(match msg {
-            Message::Chunk(chunk) => SnapshotEvent::Chunk(chunk.to_pretty_string()),
+            Message::Chunk(chunk) => SnapshotEvent::Chunk(if options.sort_chunk {
+                chunk.sort_rows().to_pretty_string()
+            } else {
+                chunk.to_pretty_string()
+            }),
             Message::Barrier(barrier) => SnapshotEvent::Barrier(barrier.epoch.curr),
             Message::Watermark(watermark) => SnapshotEvent::Watermark {
                 col_idx: watermark.col_idx,
