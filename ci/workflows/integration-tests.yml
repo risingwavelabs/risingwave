@@ -23,7 +23,6 @@ steps:
           - "postgres-sink"
           - "iceberg-sink"
           - "debezium-mysql"
-          - "tidb-cdc-sink"
         format:
           - "json"
           - "protobuf"
@@ -76,10 +75,6 @@ steps:
             testcase: "debezium-mysql"
             format: "protobuf"
           skip: true
-        - with:
-            testcase: "tidb-cdc-sink"
-            format: "protobuf"
-          skip: true
 
   # NOTE: buildkite matrix-limits
   # Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
@@ -98,6 +93,7 @@ steps:
           - "twitter-pulsar"
           - "debezium-mongo"
           - "debezium-postgres"
+          - "tidb-cdc-sink"
         format:
           - "json"
           - "protobuf"
@@ -112,5 +108,9 @@ steps:
           skip: true
         - with:
             testcase: "debezium-postgres"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "tidb-cdc-sink"
             format: "protobuf"
           skip: true
