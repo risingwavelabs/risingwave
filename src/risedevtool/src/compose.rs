@@ -167,6 +167,21 @@ fn health_check_port_etcd(port: u16) -> HealthCheck {
     }
 }
 
+fn health_check_port_prometheus(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
+            "CMD-SHELL".into(),
+            format!(
+                "sh -c 'printf \"GET /-/healthy HTTP/1.0\\n\\n\" | nc localhost {}; exit $?;'",
+                port
+            ),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
 impl Compose for ComputeNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compute-node");
@@ -416,7 +431,7 @@ impl Compose for PrometheusConfig {
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("{}:/prometheus", self.id)],
-            healthcheck: Some(health_check_port(self.port)),
+            healthcheck: Some(health_check_port_prometheus(self.port)),
             ..Default::default()
         };
 
