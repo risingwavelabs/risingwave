@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-pub use avro::*;
+pub use avro::{AvroParser, AvroParserConfig};
 pub use canal::*;
 use csv_parser::CsvParser;
 pub use debezium::*;

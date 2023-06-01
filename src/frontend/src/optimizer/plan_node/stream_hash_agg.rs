@@ -94,7 +94,7 @@ impl StreamHashAgg {
         let base = PlanBase::new_stream_with_logical(
             &logical,
             dist,
-            false,
+            emit_on_window_close, // in EOWC mode, we produce append only output
             emit_on_window_close,
             watermark_columns,
         );

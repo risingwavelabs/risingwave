@@ -472,7 +472,7 @@
     └─StreamSort { sort_column_index: 2 }
       └─StreamProject { exprs: [$expr2, count, window_start, window_start], output_watermarks: [window_start, window_start] }
         └─StreamFilter { predicate: (count >= max(count)) }
-          └─StreamHashJoin [window] { type: Inner, predicate: window_start = window_start, output_watermarks: [window_start, window_start], output: all }
+          └─StreamHashJoin [window, append_only] { type: Inner, predicate: window_start = window_start, output_watermarks: [window_start, window_start], output: all }
             ├─StreamExchange { dist: HashShard(window_start) }
             | └─StreamShare { id = 9 }
             |   └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
@@ -485,7 +485,7 @@
             |                 └─StreamProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id], output_watermarks: [_row_id] }
             |                   └─StreamSource { source: "nexmark", columns: ["event_type", "person", "auction", "bid", "_row_id"] }
             └─StreamProject { exprs: [window_start, max(count)], output_watermarks: [window_start] }
-              └─StreamHashAgg [eowc] { group_key: [window_start], aggs: [max(count), count], output_watermarks: [window_start] }
+              └─StreamHashAgg [append_only, eowc] { group_key: [window_start], aggs: [max(count), count], output_watermarks: [window_start] }
                 └─StreamExchange { dist: HashShard(window_start) }
                   └─StreamShare { id = 9 }
                     └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [window_start] }
@@ -624,7 +624,7 @@
   eowc_stream_plan: |
     StreamMaterialize { columns: [auction, price, bidder, date_time, _row_id(hidden), $expr5(hidden)], stream_key: [_row_id, $expr5, price], pk_columns: [_row_id, $expr5, price], pk_conflict: "NoCheck", watermark_columns: [date_time] }
     └─StreamSort { sort_column_index: 3 }
-      └─StreamHashJoin [interval] { type: Inner, predicate: $expr4 = max($expr4) AND ($expr1 >= $expr6) AND ($expr1 <= $expr5), conditions_to_clean_left_state_table: ($expr1 >= $expr6), conditions_to_clean_right_state_table: ($expr1 <= $expr5), output_watermarks: [$expr1, $expr5], output: [$expr2, $expr4, $expr3, $expr1, _row_id, $expr5] }
+      └─StreamHashJoin [interval, append_only] { type: Inner, predicate: $expr4 = max($expr4) AND ($expr1 >= $expr6) AND ($expr1 <= $expr5), conditions_to_clean_left_state_table: ($expr1 >= $expr6), conditions_to_clean_right_state_table: ($expr1 <= $expr5), output_watermarks: [$expr1, $expr5], output: [$expr2, $expr4, $expr3, $expr1, _row_id, $expr5] }
         ├─StreamExchange { dist: HashShard($expr4) }
         | └─StreamShare { id = 6 }
         |   └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1, _row_id], output_watermarks: [$expr1] }
