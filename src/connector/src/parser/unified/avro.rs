@@ -1,27 +1,49 @@
+use std::fmt::format;
+use std::str::FromStr;
+
 use apache_avro::types::{Record, Value};
 use apache_avro::Schema;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::cast::i64_to_timestamp;
+use risingwave_common::types::{DataType, Date, Interval, JsonbVal, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::AccessError;
-pub struct AvroParseOptions {
-    pub schema: Option<Schema>,
+use super::{AccessError, AccessResult};
+use crate::parser::avro::util::{
+    avro_decimal_to_rust_decimal, extract_inner_field_schema, unix_epoch_days,
+};
+#[derive(Clone)]
+pub struct AvroParseOptions<'a> {
+    pub schema: Option<&'a Schema>,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an AvroInt (int32) value.
     pub relax_numeric: bool,
 }
 
-impl AvroParseOptions {
-    pub fn parse(&self, value: &Value, shape: &DataType) -> AccessResult {
+impl<'a> AvroParseOptions<'a> {
+    fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
+        self.schema
+            .map(|schema| extract_inner_field_schema(schema, key))
+            .transpose()
+            .map_err(|err| tracing::error!(?err, "extract sub-schema"))
+            .ok()
+            .flatten()
+    }
+
+    pub fn parse<'b>(&self, value: &'b Value, shape: &'b DataType) -> AccessResult
+    where
+        'b: 'a,
+    {
         let create_error = || AccessError::TypeError {
             expected: shape.to_string(),
-            got: value.to_string(),
-            value: value.to_string(),
+            got: format!("{:?}", value),
+            value: String::new(),
         };
         let v: ScalarImpl = match (shape, value) {
             (_, Value::Null) => return Ok(None),
 
             // ---- Boolean -----
-            (DataType::Boolean, Value::Boolean(b)) => b.into(),
+            (DataType::Boolean, Value::Boolean(b)) => (*b).into(),
             // ---- Int16 -----
             (DataType::Int16, Value::Int(i)) if self.relax_numeric => (*i as i16).into(),
             (DataType::Int16, Value::Long(i)) if self.relax_numeric => (*i as i16).into(),
@@ -39,142 +61,85 @@ impl AvroParseOptions {
             (DataType::Float64, Value::Double(i)) => (*i).into(),
             (DataType::Float64, Value::Float(i)) => (*i as f64).into(),
             // ---- Decimal -----
-            (
-                DataType::Decimal,
-                Value::Decimal(avro_decimal)
-            ) => {
+            (DataType::Decimal, Value::Decimal(avro_decimal)) => {
                 let (precision, scale) = match self.schema {
-                    Schema::Decimal {
+                    Some(Schema::Decimal {
                         precision, scale, ..
-                    } => (*precision, *scale),
-                    _ => {
-                        return Err(RwError::from(InternalError(
-                            "avro value is and decimal but schema not".to_owned(),
-                        )));
-                    }
+                    }) => (*precision, *scale),
+                    _ => Err(create_error())?,
                 };
-                let decimal = avro_decimal_to_rust_decimal(avro_decimal, precision, scale)?;
+                let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
+                    .map_err(|_| create_error())?;
                 ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
             }
 
-          
             // ---- Date -----
-            (
-                DataType::Date,
-                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => Date::with_days_since_unix_epoch(value.try_as_i32()?)
-                .map_err(|_| create_error())?
-                .into(),
-            (DataType::Date, ValueType::String) => str_to_date(value.as_str().unwrap())
+            (DataType::Date, Value::Date(days)) => Date::with_days(days + unix_epoch_days())
                 .map_err(|_| create_error())?
                 .into(),
             // ---- Varchar -----
-            (DataType::Varchar, ValueType::String) => value.as_str().unwrap().into(),
-            // ---- Time -----
-            (DataType::Time, ValueType::String) => str_to_time(value.as_str().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
-            (
-                DataType::Time,
-                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value
-                .as_i64()
-                .map(|i| match self.time_handling {
-                    TimeHandling::Milli => Time::with_milli(i as u32),
-                    TimeHandling::Micro => Time::with_micro(i as u64),
-                })
-                .unwrap()
-                .map_err(|_| create_error())?
-                .into(),
+            (DataType::Varchar, Value::Enum(_, symbol)) => symbol.clone().into_boxed_str().into(),
+            (DataType::Varchar, Value::String(s)) => s.clone().into_boxed_str().into(),
             // ---- Timestamp -----
-            (DataType::Timestamp, ValueType::String) => str_to_timestamp(value.as_str().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
-            (
-                DataType::Timestamp,
-                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamp(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
-            // ---- Timestamptz -----
-            (DataType::Timestamptz, ValueType::String) => {
-                str_with_time_zone_to_timestamptz(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+            (DataType::Timestamp, Value::TimestampMillis(ms)) => {
+                i64_to_timestamp(*ms).map_err(|_| create_error())?.into()
             }
-            (
-                DataType::Timestamptz,
-                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => i64_to_timestamptz(value.as_i64().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
+            (DataType::Timestamp, Value::TimestampMicros(us)) => {
+                i64_to_timestamp(*us).map_err(|_| create_error())?.into()
+            }
+
             // ---- Interval -----
-            (DataType::Interval, ValueType::String) => {
-                Interval::from_iso_8601(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+            (DataType::Interval, Value::Duration(duration)) => {
+                let months = u32::from(duration.months()) as i32;
+                let days = u32::from(duration.days()) as i32;
+                let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+                ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
             }
             // ---- Struct -----
-            (DataType::Struct(struct_type_info), ValueType::Object) => StructValue::new(
+            (DataType::Struct(struct_type_info), Value::Record(descs)) => StructValue::new(
                 struct_type_info
                     .field_names
                     .iter()
                     .zip_eq_fast(struct_type_info.fields.iter())
                     .map(|(field_name, field_type)| {
-                        self.parse(
-                            json_object_smart_get_value(value, field_name.into())
-                                .unwrap_or(&BorrowedValue::Static(simd_json::StaticNode::Null)),
-                            field_type,
-                        )
+                        let maybe_value = descs.iter().find(|(k, v)| k == field_name);
+                        if let Some((_, value)) = maybe_value {
+                            let schema = self.extract_inner_schema(Some(field_name));
+                            Ok(Self {
+                                schema,
+                                relax_numeric: self.relax_numeric,
+                            }
+                            .parse(value, field_type)?)
+                        } else {
+                            Ok(None)
+                        }
                     })
-                    .collect::<Result<_, _>>()?,
+                    .collect::<Result<_, AccessError>>()?,
             )
             .into(),
             // ---- List -----
-            (DataType::List(item_type), ValueType::Array) => ListValue::new(
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| self.parse(v, item_type))
-                    .collect::<Result<Vec<_>, _>>()?,
+            (DataType::List(item_type), Value::Array(arr)) => ListValue::new(
+                arr.iter()
+                    .map(|v| {
+                        let schema = self.extract_inner_schema(None);
+                        Ok(Self {
+                            schema,
+                            relax_numeric: self.relax_numeric,
+                        }
+                        .parse(value, item_type)?)
+                    })
+                    .collect::<Result<Vec<_>, AccessError>>()?,
             )
             .into(),
             // ---- Bytea -----
-            (DataType::Bytea, ValueType::String) => match self.bytea_handling {
-                ByteaHandling::Standard => str_to_bytea(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into(),
-                ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
-                    .decode(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into_boxed_slice()
-                    .into(),
-            },
+            (DataType::Bytea, Value::Bytes(value)) => value.clone().into_boxed_slice().into(),
             // ---- Jsonb -----
-            (DataType::Jsonb, ValueType::String)
-                if matches!(self.json_value_handling, JsonValueHandling::AsString) =>
-            {
-                JsonbVal::from_str(value.as_str().unwrap())
-                    .map_err(|_| create_error())?
-                    .into()
+            (DataType::Jsonb, Value::String(s)) => {
+                JsonbVal::from_str(s).map_err(|_| create_error())?.into()
             }
-            (DataType::Jsonb, _)
-                if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>
-            {
-                JsonbVal::from_serde(value.clone().try_into().map_err(|_| create_error())?).into()
-            }
-            // ---- Int256 -----
-            (
-                DataType::Int256,
-                ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => Int256::from(value.try_as_i64()?).into(),
-
-            (DataType::Int256, ValueType::String) => Int256::from_str(value.as_str().unwrap())
-                .map_err(|_| create_error())?
-                .into(),
 
             (expected, got) => Err(create_error())?,
         };
+        Ok(Some(v))
     }
 }
