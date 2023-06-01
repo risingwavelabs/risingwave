@@ -286,6 +286,21 @@ impl Cluster {
         self.locate_one_fragment([predicate::id(id)]).await
     }
 
+    // mark a worker node as unschedulable
+    pub async fn cordon_worker(&self, addr: HostAddr) -> Result<()> {
+        let _ = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::cordon_worker(
+                    &risingwave_ctl::common::CtlContext::default(),
+                    addr,
+                )
+                .await
+            })
+            .await?;
+        Ok(())
+    }
+
     /// Reschedule with the given `plan`. Check the document of
     /// [`risingwave_ctl::cmd_impl::meta::reschedule`] for more details.
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {

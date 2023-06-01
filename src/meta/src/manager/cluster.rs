@@ -171,6 +171,12 @@ where
         Ok(())
     }
 
+    // mark a worker node as unschedulable
+    pub async fn cordon_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+        assert!(false); // TODO: implement this
+        Ok(WorkerType::Compactor)
+    }
+
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
         let worker = core.get_worker_by_host_checked(host_address.clone())?;

@@ -16,9 +16,8 @@ use risingwave_common::util::addr::HostAddr;
 
 use crate::CtlContext;
 
-// TODO: rename into cordon
 /// mark node as unschedulable
-pub async fn unregister_worker_node(context: &CtlContext, addr: HostAddr) -> anyhow::Result<()> {
+pub async fn cordon_worker(context: &CtlContext, addr: HostAddr) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     meta_client.unregister(addr).await?;
     // TODO: automatically call clear_worker_node here?

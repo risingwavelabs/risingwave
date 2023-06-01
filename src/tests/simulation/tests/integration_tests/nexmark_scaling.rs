@@ -86,7 +86,7 @@ async fn nexmark_scaling_down_common(
 
     let mut unregistered_nodes: Vec<WorkerNode> = vec![];
     let rand_nodes: Vec<WorkerNode> = cluster
-        .unregister_compute_nodes(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
+        .cordon_worker(number_of_nodes)
         .await
         .expect("unregistering node failed");
     for rand_node in rand_nodes {
@@ -173,7 +173,7 @@ async fn nexmark_scaling_up_down_common(
 
     let mut unregistered_nodes: Vec<WorkerNode> = vec![];
     let rand_nodes: Vec<WorkerNode> = cluster
-        .unregister_compute_nodes(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
+        .cordon_worker(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
         .await
         .expect("unregistering node failed");
     for rand_node in rand_nodes {

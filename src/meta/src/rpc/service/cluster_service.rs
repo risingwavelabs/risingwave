@@ -15,8 +15,8 @@
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
-    ListAllNodesResponse,
+    AddWorkerNodeResponse, CordonWorkerNodeRequest, CordonWorkerNodeResponse,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -71,6 +71,17 @@ where
         let host = req.get_host()?.clone();
         self.cluster_manager.activate_worker_node(host).await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
+    }
+
+    // mark a worker node as unschedulable
+    async fn cordon_worker_node(
+        &self,
+        request: Request<CordonWorkerNodeRequest>,
+    ) -> Result<Response<CordonWorkerNodeResponse>, Status> {
+        let req = request.into_inner();
+        let host = req.get_host()?.clone();
+        self.cluster_manager.cordon_worker_node(host).await?;
+        Ok(Response::new(CordonWorkerNodeResponse { status: None }))
     }
 
     async fn delete_worker_node(

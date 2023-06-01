@@ -64,7 +64,7 @@ impl CtlContext {
         tracing::info!("clean up context");
         if let Some(meta_client) = self.meta_client.take() {
             if let Err(e) = meta_client
-                .unregister(meta_client.host_addr().clone())
+                .cordon_worker(meta_client.host_addr().clone())
                 .await
             {
                 tracing::warn!(

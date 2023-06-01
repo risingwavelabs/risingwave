@@ -497,10 +497,8 @@ impl Cluster {
         .await;
     }
 
-    // TODO: rename into cordon
-    /// remove n random nodes from cluster gracefully by informing meta that node is no longer
-    /// available.
-    pub async fn unregister_compute_nodes(&self, n: usize) -> Result<Vec<WorkerNode>> {
+    /// mark a worker node as unschedulable
+    pub async fn cordon_worker(&self, n: usize) -> Result<Vec<WorkerNode>> {
         let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
         if worker_nodes.len() < n {
             return Err(anyhow!("cannot remove more nodes than present"));
@@ -516,7 +514,7 @@ impl Cluster {
                 host: addr.host,
                 port: addr.port as u16,
             };
-            self.unregister_worker_node(addr.clone()).await?;
+            self.cordon_worker(addr.clone()).await?;
         }
         Ok(rand_nodes)
     }

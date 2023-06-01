@@ -196,14 +196,6 @@ message ActivateWorkerNodeResponse {
   common.Status status = 1;
 }
 
-message DeleteWorkerNodeRequest {
-  common.HostAddress host = 1;
-}
-
-message DeleteWorkerNodeResponse {
-  common.Status status = 1;
-}
-
 message ListAllNodesRequest {
   common.WorkerType worker_type = 1;
   // Whether to include nodes still starting
@@ -215,10 +207,28 @@ message ListAllNodesResponse {
   repeated common.WorkerNode nodes = 2;
 }
 
+message DeleteWorkerNodeRequest {
+  common.HostAddress host = 1;
+}
+
+message DeleteWorkerNodeResponse {
+  common.Status status = 1;
+}
+
+// This request should NOT delete the node, but just cordon it aka. mark it as unschedulable
+message CordonWorkerNodeRequest {
+  common.HostAddress host = 1;
+}
+
+message CordonWorkerNodeResponse {
+  common.Status status = 1;
+}
+
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
-  rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse); 
+  rpc CordonWorkerNode(CordonWorkerNodeRequest) returns (CordonWorkerNodeResponse); 
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 

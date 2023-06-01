@@ -561,7 +561,7 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    pub async fn cordon_worker(&self, addr: HostAddr) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
