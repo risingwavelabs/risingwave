@@ -22,94 +22,13 @@ use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::{sleep, Instant};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{ParallelUnit, WorkerNode};
+use risingwave_pb::meta::table_fragments::fragment;
 use risingwave_simulation::cluster::{Configuration, KillOpts};
 use risingwave_simulation::ctl_ext::predicate;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 use risingwave_simulation::utils::AssertResult;
 use tracing_subscriber::fmt::format;
-
-/// gets the output without failures as the standard result
-// TODO: may be nice to have
-// async fn get_expected(mut cluster: NexmarkCluster, create: &str, select: &str, drop: &str)  ->
-// Result<String> {}
-
-/// Setup a nexmark stream, inject failures, and verify results.
-async fn nexmark_scaling_up_common(
-    create: &str,
-    select: &str,
-    drop: &str,
-    number_of_nodes: usize,
-) -> Result<()> {
-    // tracing_subscriber::fmt()
-    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-    //     .init();
-
-    let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
-    cluster.run(create).await?;
-    sleep(Duration::from_secs(30)).await;
-    let expected = cluster.run(select).await?;
-    cluster.run(drop).await?;
-    sleep(Duration::from_secs(5)).await;
-
-    cluster.run(create).await?;
-
-    cluster.add_compute_node(number_of_nodes);
-    sleep(Duration::from_secs(20)).await;
-
-    cluster.run(select).await?.assert_result_eq(&expected);
-
-    Ok(())
-}
-
-/// Setup a nexmark stream, inject failures, and verify results.
-async fn nexmark_scaling_down_common(
-    create: &str,
-    select: &str,
-    drop: &str,
-    number_of_nodes: usize,
-) -> Result<()> {
-    // tracing_subscriber::fmt()
-    //     .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-    //     .init();
-
-    let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
-    cluster.run(create).await?;
-    sleep(Duration::from_secs(30)).await;
-    let expected = cluster.run(select).await?;
-    cluster.run(drop).await?;
-    sleep(Duration::from_secs(5)).await;
-
-    cluster.run(create).await?;
-
-    let mut unregistered_nodes: Vec<WorkerNode> = vec![];
-    let rand_nodes: Vec<WorkerNode> = cluster
-        .cordon_worker(number_of_nodes)
-        .await
-        .expect("unregistering node failed");
-    for rand_node in rand_nodes {
-        println!("Unregister compute node {:?}", rand_node); // TODO: remove line
-        println!(
-            "Now compute nodes in cluster {}",
-            cluster.get_number_worker_nodes().await
-        ); // TODO: remove line
-
-        unregistered_nodes.push(rand_node);
-        sleep(Duration::from_secs(30)).await;
-    }
-    let unregistered_node_addrs = unregistered_nodes
-        .iter()
-        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
-        .collect_vec();
-
-    cluster.kill_nodes(&unregistered_node_addrs).await;
-
-    cluster.run(select).await?.assert_result_eq(&expected);
-
-    Ok(())
-}
 
 fn has_unique_elements<T>(iter: T) -> bool
 where
@@ -120,58 +39,23 @@ where
     iter.into_iter().all(move |x| uniq.insert(x))
 }
 
-/// Setup a nexmark stream, inject failures, and verify results.
-async fn nexmark_scaling_up_down_common(
-    create: &str,
-    select: &str,
-    drop: &str,
-    number_of_nodes: usize,
-) -> Result<()> {
-    //  tokio::task::spawn(async move {
-    //      tokio::time::sleep(Duration::from_secs(120)).await;
-    //      println!("max runtime is over");
-    //      assert!(false);
-    //  });
-
+/// create cluster, cordon node, run query. Cordoned node should NOT contain actors
+async fn test_cordon(number_of_nodes: usize) {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
-    println!("Beginning of test"); // TODO: remove line
 
+    // setup cluster and calc expected result
     let sleep_sec = 20;
-
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
-    println!(
-        "created OG cluster with {} worker nodes",
-        cluster.get_number_worker_nodes().await
-    ); // TODO: remove line
-
-    cluster.run(create).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
     let expected = cluster.run(select).await?;
-    println!("got expected result"); // TODO: remove line
-
-    println!("Cleaning cluster"); // TODO: remove line
     cluster.run(drop).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
 
-    cluster.run(create).await?;
-
-    // TODO: remove comment
-    // not adding compute nodes does not help
-    // However, when clearing nodes, if we add nodes we may also clear a node without fragments
-    // println!("adding compute node"); // TODO: remove line
-    // cluster.add_compute_node(number_of_nodes);
-    // sleep(Duration::from_secs(sleep_sec)).await;
-    // println!(
-    //     "Now {} compute nodes in cluster",
-    //     cluster.get_number_worker_nodes().await
-    // ); // TODO: remove line
-
-    // TODO: reschedule here as well?
-
-    let mut unregistered_nodes: Vec<WorkerNode> = vec![];
+    // cordon random nodes
+    let mut cordoned_nodes: Vec<WorkerNode> = vec![];
     let rand_nodes: Vec<WorkerNode> = cluster
         .cordon_worker(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
         .await
@@ -182,125 +66,51 @@ async fn nexmark_scaling_up_down_common(
             "Now compute nodes in cluster {}",
             cluster.get_number_worker_nodes().await
         ); // TODO: remove line
-
-        unregistered_nodes.push(rand_node);
-        sleep(Duration::from_secs(sleep_sec)).await;
+        cordoned_nodes.push(rand_node);
     }
-    let unregistered_node_task_names = unregistered_nodes
-        .clone()
-        .iter()
-        .map(|node| cluster.cn_host_addr_to_task(node.clone().host.unwrap()))
-        .collect_vec();
-    // make sure that we do not unregister the same node multiple times
-    assert!(has_unique_elements(unregistered_node_task_names.iter()));
-    println!("all unregistered nodes are uniq"); // TODO: remove line
+    let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
 
-    // question: If I mark CN as DELETING does meta remove fragments from DELETING CN?
-    // answer: NO. Marking as deleted should not trigger rescheduling. We call rescheduling in the
-    // end of the workflow
-
-    // TODO: should I make the interface use HostAddress? Then I do not need to convert here
-    let addrs = unregistered_nodes
-        .iter()
-        .map(|n| {
-            let a = n.get_host().expect("expected worker node to have host");
-            HostAddr {
-                host: a.host.clone(),
-                port: a.port as u16,
-            }
-        })
-        .collect_vec();
-    println!("clearing unregisterd nodes"); // TODO: remove line
-
-    // TODO:remove
-    // clearing one worker after another does not help
-    //  for addr in addrs {
-    //      let mut a: Vec<HostAddr> = vec![];
-    //      a.push(addr);
-    //      cluster
-    //          .clear_worker_nodes(a)
-    //          .await
-    //          .expect("failed to clear worker nodes");
-    //  }
-
-    cluster
-        .clear_worker_nodes(addrs.clone())
-        .await
-        .expect("failed to clear worker nodes");
-
-    // TODO: this should work without sleep
+    // compare results
     sleep(Duration::from_secs(sleep_sec)).await;
+    let got = cluster.run(select).await?;
+    assert_eq!(got, expected);
 
-    // // TODO: remove below
-    // cluster
-    //     .clear_worker_nodes(addrs.clone())
-    //     .await
-    //     .expect("failed to clear worker nodes");
-
-    println!("unregistered nodes cleared"); // TODO: remove line
-
-    // Notes: use RescheduleRequest. scale_service.rs reschedule
-    // I have to generate the new schedule plan myself. Hardcode it here
-
-    println!("Killing nodes"); // TODO: remove line
-    cluster.kill_nodes(&unregistered_node_task_names).await;
-    println!(
-        // TODO: remove line
-        "Nodes killed. Now compute nodes in cluster {}",
-        cluster.get_number_worker_nodes().await
-    );
-    // TODO: assert that cluster really has correct number of nodes
-
-    println!("run select"); // TODO: remove line
-    cluster.run(select).await?.assert_result_eq(&expected);
-
-    Ok(())
+    // no actors on cordoned nodes
+    let schedule = cluster.get_schedule().await?;
+    let cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
+    for worker in schedule.worker_list {
+        if cordoned_nodes_ids.contains(&worker.id) {
+            cordoned_pus.push(worker.parallel_units);
+        }
+    }
+    assert!(cordoned_nodes.len() == cordoned_pus.len());
+    let cordoned_pus_flat = cordoned_pus.iter().flatten().collect_vec();
+    for frag in schedule.fragment_list {
+        for actor in frag.actor_list {
+            let pu_id = actor.parallel_units_id;
+            assert!(!cordoned_pus_flat.contains(pu_id));
+        }
+    }
 }
-
-// TODO: We need to call ClearWorkers instead of manually trying to reschedule
 
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-            // TODO: Uncomment these again
-        //   #[madsim::test]
-        //   async fn [< nexmark_scaling_up_ $query >]() -> Result<()> {
-        //       use risingwave_simulation::nexmark::queries::$query::*;
-        //       nexmark_scaling_up_common(CREATE, SELECT, DROP, 1)
-        //       .await
-        //   }
-        //   #[madsim::test]
-        //   async fn [< nexmark_scaling_up_2_ $query >]() -> Result<()> {
-        //       use risingwave_simulation::nexmark::queries::$query::*;
-        //       nexmark_scaling_up_common(CREATE, SELECT, DROP, 2)
-        //       .await
-        //   }
-        //   #[madsim::test]
-        //   async fn [< nexmark_scaling_down_ $query >]() -> Result<()> {
-        //       use risingwave_simulation::nexmark::queries::$query::*;
-        //       nexmark_scaling_down_common(CREATE, SELECT, DROP, 1)
-        //       .await
-        //   }
-        //   #[madsim::test]
-        //   async fn [< nexmark_scaling_down_2_ $query >]() -> Result<()> {
-        //       use risingwave_simulation::nexmark::queries::$query::*;
-        //       nexmark_scaling_down_common(CREATE, SELECT, DROP, 2)
-        //       .await
-        //   }
-           #[madsim::test]
-           async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
-               use risingwave_simulation::nexmark::queries::$query::*;
-               nexmark_scaling_up_down_common(CREATE, SELECT, DROP, 2)
-               .await
-               }
-         }
+         //   #[madsim::test]
+         //   async fn [< nexmark_scaling_up_down_1_ $query >]() -> Result<()> {
+         //       use risingwave_simulation::nexmark::queries::$query::*;
+         //       test_cordon(CREATE, SELECT, DROP, 1)
+         //       .await
+         //   }
+            #[madsim::test]
+            async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                test_cordon(CREATE, SELECT, DROP, 2)
+                .await
+            }
+        }
     };
 }
-
-// TODO: Why do I sometimes get stuck? Do I maybe scale down the wrong nodes? Am I not allowed to
-// clear some nodes?
-
-// TODO: scale down only?
 
 // TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial

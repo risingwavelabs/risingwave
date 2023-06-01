@@ -27,6 +27,8 @@ use futures::{SinkExt, StreamExt};
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;

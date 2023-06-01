@@ -23,9 +23,10 @@ use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::{GetClusterInfoResponse, GetScheduleRequest, GetScheduleResponse};
 use risingwave_pb::stream_plan::StreamNode;
 
 use self::predicate::BoxedPredicate;
@@ -284,6 +285,32 @@ impl Cluster {
     /// Locate a fragment with the given id.
     pub async fn locate_fragment_by_id(&mut self, id: u32) -> Result<Fragment> {
         self.locate_one_fragment([predicate::id(id)]).await
+    }
+
+    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+        let response = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await
+            })
+            .await??;
+        Ok(response)
+    }
+
+    pub async fn get_schedule(&self) -> Result<GetScheduleResponse> {
+        let response = self
+            .ctl
+            .spawn(async move {
+                risingwave_ctl::cmd_impl::meta::get_schedule(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await
+            })
+            .await??;
+        Ok(response)
     }
 
     // mark a worker node as unschedulable

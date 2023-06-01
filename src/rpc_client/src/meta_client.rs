@@ -667,6 +667,12 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn get_schedule(&self) -> Result<GetScheduleResponse> {
+        let request = GetScheduleRequest {};
+        let resp = self.inner.get_schedule(request).await?;
+        Ok(resp)
+    }
+
     pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
         let request = RescheduleRequest { reschedules };
         let resp = self.inner.reschedule(request).await?;
@@ -1444,6 +1450,7 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, get_schedule, GetScheduleRequest, GetScheduleResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
