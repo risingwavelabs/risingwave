@@ -16,10 +16,9 @@ use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
 use itertools::Itertools;
-use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, F32, F64};
+use risingwave_common::types::{DataType, Date, Datum};
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::parser::unified::avro::AvroParseOptions;
@@ -256,7 +255,8 @@ pub(crate) fn from_avro_value(
         schema: Some(value_schema),
         relax_numeric: true,
     }
-    .parse(&value, shape)?)
+    .parse(&value, shape)
+    .map_err(|err| RwError::from(InternalError(format!("{:?}", err))))?)
 }
 
 #[cfg(test)]
