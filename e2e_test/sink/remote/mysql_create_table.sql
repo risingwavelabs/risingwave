@@ -28,7 +28,6 @@ CREATE TABLE t_remote_1 (
     v_bytea BLOB
 );
 
-
 CREATE TABLE t_types (
    id BIGINT PRIMARY KEY,
    varchar_column VARCHAR(100),
@@ -36,7 +35,7 @@ CREATE TABLE t_types (
    integer_column INTEGER,
    smallint_column SMALLINT,
    bigint_column BIGINT,
-   decimal_column DECIMAL,
+   decimal_column DECIMAL(10,2),
    real_column float,
    double_column DOUBLE,
    boolean_column TINYINT,

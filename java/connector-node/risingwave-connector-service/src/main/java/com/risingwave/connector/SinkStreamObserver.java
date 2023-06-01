@@ -67,7 +67,6 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 }
                 sinkId = sinkTask.getStart().getSinkId();
                 bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
-                LOG.info("Sink#{} is initialized", sinkId);
                 responseObserver.onNext(
                         ConnectorServiceProto.SinkResponse.newBuilder()
                                 .setStart(StartResponse.newBuilder().build())

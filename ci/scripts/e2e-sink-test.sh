@@ -29,10 +29,7 @@ download_java_binding "$profile"
 export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 # Change process number limit
-echo "process number limit"
-ulimit -a
-ulimit -u 1024
-echo "process number limit after changed"
+echo "--- os limits"
 ulimit -a
 
 echo "--- Download connector node package"
