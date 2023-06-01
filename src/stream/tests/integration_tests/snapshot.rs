@@ -19,8 +19,10 @@ use risingwave_common::types::DataType;
 use risingwave_stream::executor::test_utils::MessageSender;
 use risingwave_stream::executor::{BoxedMessageStream, Message};
 
+/// Options to control the building of snapshot ouput.
 #[derive(Debug, Clone, Default)]
 pub struct SnapshotOptions {
+    /// Whether to sort the output chunk, required if the output chunk has no specifed order.
     pub sort_chunk: bool,
 }
 
