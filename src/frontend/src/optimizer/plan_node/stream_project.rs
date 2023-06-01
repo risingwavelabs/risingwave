@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::stream::StreamPlanRef;
+use super::utils::formatter_debug_plan_node;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -39,7 +40,7 @@ pub struct StreamProject {
 
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamProject");
+        let mut builder = formatter_debug_plan_node!(f, "StreamProject");
         self.logical
             .fmt_fields_with_builder(&mut builder, self.schema());
         if !self.watermark_derivations.is_empty() {
