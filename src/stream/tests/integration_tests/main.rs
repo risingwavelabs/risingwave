@@ -14,6 +14,7 @@
 
 // tests
 mod eowc;
+mod hash_agg;
 mod project_set;
 
 // utils

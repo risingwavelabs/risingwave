@@ -114,7 +114,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::RegexpMatch);
+        ensure!(prost.get_function_type().unwrap() == Type::RegexpMatch);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
         };

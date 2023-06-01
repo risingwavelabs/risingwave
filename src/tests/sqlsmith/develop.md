@@ -1,5 +1,11 @@
 # Develop
 
+## Ignoring errors
+
+Sometimes you may encounter unrelated errors, since SqlSmith frontend tests run per PR.
+If these errors relate to Expression errors, they may be hard to avoid.
+In those cases, you may choose to ignore them, by adding these errors to `validation.rs`.
+
 ## Adding new query clauses
 
 For instance adding `ORDER BY`, or `Emit On Window Close`.
@@ -9,7 +15,7 @@ There isn't a clear-cut way for these.
 Typically, to add them you would do the following:
 1. Identify which part of the AST these are from.
 2. Look where this part of AST it is generated.
-   The section on [[Query Generation]] should help.
+   The section on [Query Generation](#query-generation) should help.
    The generation process roughly mirrors the structure of the AST.
 3. Add it to that part of the AST.
 

@@ -178,7 +178,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 13
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"

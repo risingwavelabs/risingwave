@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
-use super::utils::IndicesDisplay;
+use super::utils::{formatter_debug_plan_node, IndicesDisplay};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -258,7 +258,7 @@ impl_plan_tree_node_for_unary! { StreamSink }
 
 impl fmt::Display for StreamSink {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSink");
+        let mut builder = formatter_debug_plan_node!(f, "StreamSink");
 
         let sink_type = if self.sink_desc.sink_type.is_append_only() {
             "append-only"

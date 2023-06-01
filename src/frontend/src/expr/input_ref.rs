@@ -142,7 +142,7 @@ impl Expr for InputRef {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: ExprType::InputRef.into(),
+            function_type: ExprType::Unspecified.into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::InputRef(self.index() as _)),
         }
