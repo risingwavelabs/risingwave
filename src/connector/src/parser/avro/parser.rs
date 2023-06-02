@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Reader, Schema};
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -26,11 +25,13 @@ use risingwave_pb::plan_common::ColumnDesc;
 use url::Url;
 
 use super::schema_resolver::*;
-use super::util::{extract_inner_field_schema, from_avro_value};
 use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::upsert::UpsertAccess;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -177,15 +178,9 @@ impl AvroParser {
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        #[derive(Debug)]
-        enum Op {
-            Insert,
-            Delete,
-        }
-
-        let (raw_key, raw_value, op) = if self.is_enable_upsert() {
+        let (raw_key, raw_value) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
@@ -193,12 +188,12 @@ impl AvroParser {
                 )))
             })?;
             if !msg.record.is_empty() {
-                (Some(msg.primary_key), Some(msg.record), Op::Insert)
+                (Some(msg.primary_key), Some(msg.record))
             } else {
-                (Some(msg.primary_key), None, Op::Delete)
+                (Some(msg.primary_key), None)
             }
         } else {
-            (None, Some(Cow::from(&payload)), Op::Insert)
+            (None, Some(Cow::from(&payload)))
         };
 
         let avro_value = if let Some(payload) = raw_value {
@@ -261,79 +256,28 @@ impl AvroParser {
             None
         };
 
-        // the avro can be a key or a value
-        if let Some(Value::Record(fields)) = avro_value {
-            let fill = |column: &SourceColumnDesc| {
-                let tuple = match fields.iter().find(|val| column.name.eq(&val.0)) {
-                    None => {
-                        if self.upsert_primary_key_column_name.as_ref() == Some(&column.name) {
-                            if !(avro_key.is_some() && self.key_schema.is_some()) {
-                                tracing::error!(
-                                    upsert_primary_key_column_name =
-                                        self.upsert_primary_key_column_name,
-                                    "Upsert mode is enabled, but key or key schema is absent.",
-                                );
-                            }
-                            return from_avro_value(
-                                avro_key.as_ref().unwrap().clone(),
-                                self.key_schema.as_ref().unwrap(),
-                                &column.data_type,
-                            )
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "failed to process value ({}): {}",
-                                    String::from_utf8_lossy(&payload),
-                                    e
-                                );
-                                e
-                            });
-                        } else {
-                            return Ok(None);
-                        }
-                    }
-                    Some(tup) => tup,
-                };
+        let accessor = UpsertAccess {
+            key_accessor: avro_key.as_ref().map(|value| AvroAccess {
+                value: value,
+                options: Cow::Owned(AvroParseOptions {
+                    schema: self.key_schema.as_ref().map(|s| &**s),
+                    relax_numeric: true,
+                }),
+            }),
+            value_accessor: avro_value.as_ref().map(|value| AvroAccess {
+                value: value,
+                options: Cow::Owned(AvroParseOptions {
+                    schema: Some(&self.schema),
+                    relax_numeric: true,
+                }),
+            }),
+            primary_key_column_name: self
+                .upsert_primary_key_column_name
+                .clone()
+                .unwrap_or_default(),
+        };
 
-                let field_schema = extract_inner_field_schema(&self.schema, Some(&column.name))?;
-                from_avro_value(tuple.1.clone(), field_schema, &column.data_type).map_err(|e| {
-                    tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(&payload),
-                        e
-                    );
-                    e
-                })
-            };
-            match op {
-                Op::Insert => writer.insert(fill),
-                Op::Delete => writer.delete(fill),
-            }
-        } else if self.upsert_primary_key_column_name.is_some() && matches!(op, Op::Delete) {
-            writer.delete(|desc| {
-                if &desc.name != self.upsert_primary_key_column_name.as_ref().unwrap() {
-                    Ok(None)
-                } else {
-                    from_avro_value(
-                        avro_key.as_ref().unwrap().clone(),
-                        self.key_schema.as_deref().unwrap(),
-                        &desc.data_type
-                    )
-                    .map_err(|e| {
-                        tracing::error!(upsert_primary_key_column_name=self.upsert_primary_key_column_name,
-                            ?avro_value,op=?op,
-                            "failed to process value ({}): {}",
-                            String::from_utf8_lossy(&payload),
-                            e
-                        );
-                        e
-                    })
-                }
-            })
-        } else {
-            Err(RwError::from(ProtocolError(
-                "avro parse unexpected value".to_string(),
-            )))
-        }
+        apply_row_operation_on_stream_chunk_writer(accessor, writer)
     }
 }
 

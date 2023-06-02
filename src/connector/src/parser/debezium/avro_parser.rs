@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -198,10 +199,10 @@ impl DebeziumAvroParser {
 
         let accessor = AvroAccess {
             value: &avro_value,
-            options: &AvroParseOptions {
+            options: Cow::Owned(AvroParseOptions {
                 schema: Some(&self.inner_schema),
                 relax_numeric: true,
-            },
+            }),
         };
 
         let row_op = DebeziumAdapter { accessor };

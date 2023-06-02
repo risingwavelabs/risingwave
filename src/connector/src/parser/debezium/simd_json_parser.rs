@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt::Debug;
 
 use futures_async_stream::try_stream;
@@ -72,8 +73,8 @@ impl DebeziumJsonParser {
             })?;
 
         let accessor = JsonAccess {
-            value: payload,
-            options: &JsonParseOptions::DEBEZIUM,
+            value: Cow::Borrowed(payload),
+            options: Cow::Borrowed(&JsonParseOptions::DEBEZIUM),
         };
 
         let row_op = DebeziumAdapter { accessor };

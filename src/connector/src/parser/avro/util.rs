@@ -255,7 +255,7 @@ pub(crate) fn from_avro_value(
         schema: Some(value_schema),
         relax_numeric: true,
     }
-    .parse(&value, shape)
+    .parse(&value, Some(shape))
     .map_err(|err| RwError::from(InternalError(format!("{:?}", err))))
 }
 

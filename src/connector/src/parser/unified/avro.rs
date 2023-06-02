@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use apache_avro::types::Value;
@@ -5,7 +6,7 @@ use apache_avro::Schema;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
-use risingwave_common::types::{DataType, Date, Interval, JsonbVal, ScalarImpl};
+use risingwave_common::types::{DataType, Date, Datum, Interval, JsonbVal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{Access, AccessError, AccessResult};
@@ -30,12 +31,12 @@ impl<'a> AvroParseOptions<'a> {
             .flatten()
     }
 
-    pub fn parse<'b>(&self, value: &'b Value, shape: &'b DataType) -> AccessResult
+    pub fn parse<'b>(&self, value: &'b Value, shape: Option<&'b DataType>) -> AccessResult
     where
         'b: 'a,
     {
         let create_error = || AccessError::TypeError {
-            expected: shape.to_string(),
+            expected: format!("{:?}", shape),
             got: format!("{:?}", value),
             value: String::new(),
         };
@@ -50,25 +51,25 @@ impl<'a> AvroParseOptions<'a> {
                 .parse(v, shape);
             }
             // ---- Boolean -----
-            (DataType::Boolean, Value::Boolean(b)) => (*b).into(),
+            (Some(DataType::Boolean) | None, Value::Boolean(b)) => (*b).into(),
             // ---- Int16 -----
-            (DataType::Int16, Value::Int(i)) if self.relax_numeric => (*i as i16).into(),
-            (DataType::Int16, Value::Long(i)) if self.relax_numeric => (*i as i16).into(),
+            (Some(DataType::Int16), Value::Int(i)) if self.relax_numeric => (*i as i16).into(),
+            (Some(DataType::Int16), Value::Long(i)) if self.relax_numeric => (*i as i16).into(),
 
             // ---- Int32 -----
-            (DataType::Int32, Value::Int(i)) => (*i).into(),
-            (DataType::Int32, Value::Long(i)) if self.relax_numeric => (*i as i32).into(),
+            (Some(DataType::Int32) | None, Value::Int(i)) => (*i).into(),
+            (Some(DataType::Int32), Value::Long(i)) if self.relax_numeric => (*i as i32).into(),
             // ---- Int64 -----
-            (DataType::Int64, Value::Long(i)) => (*i).into(),
-            (DataType::Int64, Value::Int(i)) if self.relax_numeric => (*i as i64).into(),
+            (Some(DataType::Int64) | None, Value::Long(i)) => (*i).into(),
+            (Some(DataType::Int64), Value::Int(i)) if self.relax_numeric => (*i as i64).into(),
             // ---- Float32 -----
-            (DataType::Float32, Value::Float(i)) => (*i).into(),
-            (DataType::Float32, Value::Double(i)) => (*i as f32).into(),
+            (Some(DataType::Float32) | None, Value::Float(i)) => (*i).into(),
+            (Some(DataType::Float32), Value::Double(i)) => (*i as f32).into(),
             // ---- Float64 -----
-            (DataType::Float64, Value::Double(i)) => (*i).into(),
-            (DataType::Float64, Value::Float(i)) => (*i as f64).into(),
+            (Some(DataType::Float64) | None, Value::Double(i)) => (*i).into(),
+            (Some(DataType::Float64), Value::Float(i)) => (*i as f64).into(),
             // ---- Decimal -----
-            (DataType::Decimal, Value::Decimal(avro_decimal)) => {
+            (Some(DataType::Decimal) | None, Value::Decimal(avro_decimal)) => {
                 let (precision, scale) = match self.schema {
                     Some(Schema::Decimal {
                         precision, scale, ..
@@ -81,37 +82,41 @@ impl<'a> AvroParseOptions<'a> {
             }
 
             // ---- Date -----
-            (DataType::Date, Value::Date(days)) => Date::with_days(days + unix_epoch_days())
-                .map_err(|_| create_error())?
-                .into(),
+            (Some(DataType::Date) | None, Value::Date(days)) => {
+                Date::with_days(days + unix_epoch_days())
+                    .map_err(|_| create_error())?
+                    .into()
+            }
             // ---- Varchar -----
-            (DataType::Varchar, Value::Enum(_, symbol)) => symbol.clone().into_boxed_str().into(),
-            (DataType::Varchar, Value::String(s)) => s.clone().into_boxed_str().into(),
+            (Some(DataType::Varchar) | None, Value::Enum(_, symbol)) => {
+                symbol.clone().into_boxed_str().into()
+            }
+            (Some(DataType::Varchar) | None, Value::String(s)) => s.clone().into_boxed_str().into(),
             // ---- Timestamp -----
-            (DataType::Timestamp, Value::TimestampMillis(ms)) => {
+            (Some(DataType::Timestamp) | None, Value::TimestampMillis(ms)) => {
                 i64_to_timestamp(*ms).map_err(|_| create_error())?.into()
             }
-            (DataType::Timestamp, Value::TimestampMicros(us)) => {
+            (Some(DataType::Timestamp) | None, Value::TimestampMicros(us)) => {
                 i64_to_timestamp(*us).map_err(|_| create_error())?.into()
             }
 
             // ---- TimestampTz -----
-            (DataType::Timestamptz, Value::TimestampMillis(ms)) => {
+            (Some(DataType::Timestamptz), Value::TimestampMillis(ms)) => {
                 i64_to_timestamptz(*ms).map_err(|_| create_error())?.into()
             }
-            (DataType::Timestamptz, Value::TimestampMicros(us)) => {
+            (Some(DataType::Timestamptz), Value::TimestampMicros(us)) => {
                 i64_to_timestamptz(*us).map_err(|_| create_error())?.into()
             }
 
             // ---- Interval -----
-            (DataType::Interval, Value::Duration(duration)) => {
+            (Some(DataType::Interval) | None, Value::Duration(duration)) => {
                 let months = u32::from(duration.months()) as i32;
                 let days = u32::from(duration.days()) as i32;
                 let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
                 ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
             }
             // ---- Struct -----
-            (DataType::Struct(struct_type_info), Value::Record(descs)) => StructValue::new(
+            (Some(DataType::Struct(struct_type_info)), Value::Record(descs)) => StructValue::new(
                 struct_type_info
                     .field_names
                     .iter()
@@ -124,7 +129,7 @@ impl<'a> AvroParseOptions<'a> {
                                 schema,
                                 relax_numeric: self.relax_numeric,
                             }
-                            .parse(value, field_type)?)
+                            .parse(value, Some(field_type))?)
                         } else {
                             Ok(None)
                         }
@@ -132,8 +137,22 @@ impl<'a> AvroParseOptions<'a> {
                     .collect::<Result<_, AccessError>>()?,
             )
             .into(),
+            (None, Value::Record(descs)) => {
+                let rw_values = descs
+                    .into_iter()
+                    .map(|(field_name, field_value)| {
+                        let schema = self.extract_inner_schema(Some(field_name));
+                        Ok(Self {
+                            schema,
+                            relax_numeric: self.relax_numeric,
+                        }
+                        .parse(field_value, None)?)
+                    })
+                    .collect::<Result<Vec<Datum>, AccessError>>()?;
+                ScalarImpl::Struct(StructValue::new(rw_values))
+            }
             // ---- List -----
-            (DataType::List(item_type), Value::Array(arr)) => ListValue::new(
+            (Some(DataType::List(item_type)), Value::Array(arr)) => ListValue::new(
                 arr.iter()
                     .map(|v| {
                         let schema = self.extract_inner_schema(None);
@@ -141,15 +160,30 @@ impl<'a> AvroParseOptions<'a> {
                             schema,
                             relax_numeric: self.relax_numeric,
                         }
-                        .parse(v, item_type)
+                        .parse(v, Some(item_type))
+                    })
+                    .collect::<Result<Vec<_>, AccessError>>()?,
+            )
+            .into(),
+            (None, Value::Array(arr)) => ListValue::new(
+                arr.iter()
+                    .map(|v| {
+                        let schema = self.extract_inner_schema(None);
+                        Self {
+                            schema,
+                            relax_numeric: self.relax_numeric,
+                        }
+                        .parse(v, None)
                     })
                     .collect::<Result<Vec<_>, AccessError>>()?,
             )
             .into(),
             // ---- Bytea -----
-            (DataType::Bytea, Value::Bytes(value)) => value.clone().into_boxed_slice().into(),
+            (Some(DataType::Bytea) | None, Value::Bytes(value)) => {
+                value.clone().into_boxed_slice().into()
+            }
             // ---- Jsonb -----
-            (DataType::Jsonb, Value::String(s)) => {
+            (Some(DataType::Jsonb), Value::String(s)) => {
                 JsonbVal::from_str(s).map_err(|_| create_error())?.into()
             }
 
@@ -161,16 +195,16 @@ impl<'a> AvroParseOptions<'a> {
 
 pub struct AvroAccess<'a, 'b> {
     pub value: &'a Value,
-    pub options: &'a AvroParseOptions<'b>,
+    pub options: Cow<'a, AvroParseOptions<'b>>,
 }
 
 impl<'a, 'b> Access for AvroAccess<'a, 'b>
 where
     'a: 'b,
 {
-    fn access(&self, path: &[&str], shape: DataType) -> AccessResult {
+    fn access(&self, path: &[&str], shape: Option<&DataType>) -> AccessResult {
         let mut value = self.value;
-        let mut options = self.options.clone();
+        let mut options: AvroParseOptions<'_> = self.options.as_ref().clone();
 
         let mut i = 0;
         while i < path.len() {
@@ -204,6 +238,6 @@ where
             Err(create_error())?;
         }
 
-        self.options.parse(value, &shape)
+        self.options.parse(value, shape)
     }
 }

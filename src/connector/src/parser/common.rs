@@ -47,7 +47,7 @@ fn do_parse_simd_json_value(
         SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
         _ => Default::default(),
     };
-    Ok(options.parse(v, dtype)?.unwrap())
+    Ok(options.parse(v, Some(dtype))?.unwrap())
 }
 
 #[inline]

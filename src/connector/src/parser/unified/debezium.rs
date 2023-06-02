@@ -23,8 +23,8 @@ where
         shape: &risingwave_common::types::DataType,
     ) -> super::AccessResult {
         match self.op()? {
-            RowOperation::Delete => self.accessor.access(&[BEFORE, name], shape.clone()),
-            _ => self.accessor.access(&[AFTER, name], shape.clone()),
+            RowOperation::Delete => self.accessor.access(&[BEFORE, name], Some(shape)),
+            _ => self.accessor.access(&[AFTER, name], Some(shape)),
         }
     }
 
@@ -33,11 +33,11 @@ where
         name: &str,
         shape: &risingwave_common::types::DataType,
     ) -> super::AccessResult {
-        self.accessor.access(&[BEFORE, name], shape.clone())
+        self.accessor.access(&[BEFORE, name], Some(shape))
     }
 
     fn op(&self) -> std::result::Result<RowOperation, super::AccessError> {
-        if let Some(ScalarImpl::Utf8(op)) = self.accessor.access(&[OP], DataType::Varchar)? {
+        if let Some(ScalarImpl::Utf8(op)) = self.accessor.access(&[OP], Some(&DataType::Varchar))? {
             match op.as_ref() {
                 DEBEZIUM_READ_OP | DEBEZIUM_CREATE_OP => return Ok(RowOperation::Insert),
                 DEBEZIUM_UPDATE_OP => return Ok(RowOperation::Update),
