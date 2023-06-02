@@ -141,7 +141,7 @@ pub async fn handle_create_function(
         Kind::Table(_) => {
             let mut fields = vec![arrow_schema::Field::new(
                 "row_index",
-                arrow_schema::DataType::Int64,
+                arrow_schema::DataType::Int32,
                 true,
             )];
             match &return_type {

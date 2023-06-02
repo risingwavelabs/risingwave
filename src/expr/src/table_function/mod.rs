@@ -52,7 +52,8 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains at least two columns:
-    /// - The first column is the row indexes of input chunk. It should be monotonically increasing.
+    /// - The first column is an I32Array containing row indexes of input chunk. It should be
+    ///   monotonically increasing.
     /// - The remaining columns are the output values. More than one columns are allowed, which will
     ///   be transformed into a single `STRUCT` column later.
     ///
@@ -265,7 +266,7 @@ impl<'a> TableFunctionOutputIter<'a> {
     /// Gets the current row.
     pub fn peek(&'a self) -> Option<(usize, DatumRef<'a>)> {
         let (indexes, values) = self.chunk.as_ref()?;
-        let index = indexes.as_int64().value_at(self.index).unwrap() as usize;
+        let index = indexes.as_int32().value_at(self.index).unwrap() as usize;
         let value = values.value_at(self.index);
         Some((index, value))
     }

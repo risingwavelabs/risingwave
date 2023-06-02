@@ -594,14 +594,14 @@ impl FunctionAttr {
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
-                        let mut index_builder = I64ArrayBuilder::new(self.chunk_size);
+                        let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
                         for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
                                 let iter = #fn_name(#(#inputs,)* #const_arg);
                                 for output in #iter {
-                                    index_builder.append(Some(i as i64));
+                                    index_builder.append(Some(i as i32));
                                     match #output {
                                         Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
                                         None => { #(#builders.append_null();)* }
@@ -609,7 +609,7 @@ impl FunctionAttr {
 
                                     if index_builder.len() == self.chunk_size {
                                         let columns = vec![
-                                            std::mem::replace(&mut index_builder, I64ArrayBuilder::new(self.chunk_size)).finish().into_ref(),
+                                            std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref(),
                                             #(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref(),)*
                                         ];
                                         yield DataChunk::new(columns, self.chunk_size);

@@ -80,7 +80,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         // function call.
         var outputs = new ArrayList<VectorSchemaRoot>();
         var row = new Object[batch.getSchema().getFields().size()];
-        var indexes = new ArrayList<Long>();
+        var indexes = new ArrayList<Integer>();
         Runnable buildChunk = () -> {
             var indexVector = TypeUtils.createVector(this.outputSchema.getFields().get(0), this.allocator,
                     indexes.toArray());
@@ -105,7 +105,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
             var size_after = this.function.size();
             // add indexes
             for (int j = size_before; j < size_after; j++) {
-                indexes.add((long) i);
+                indexes.add(i);
             }
             // check if we need to flush
             if (size_after >= this.chunk_size) {

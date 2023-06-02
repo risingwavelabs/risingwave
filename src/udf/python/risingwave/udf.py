@@ -207,7 +207,7 @@ class UserDefinedTableFunctionWrapper(TableFunction):
             )
         )
         self._result_schema = pa.schema(
-            [("row_index", pa.int64())]
+            [("row_index", pa.int32())]
             + [("", _to_data_type(t)) for t in _to_list(result_types)]
         )
         self._name = name or (

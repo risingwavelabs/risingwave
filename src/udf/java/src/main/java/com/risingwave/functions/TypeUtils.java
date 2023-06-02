@@ -108,7 +108,7 @@ class TypeUtils {
         var typeArguments = parameterizedType.getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
 
-        var row_index = Field.nullable("row_index", new ArrowType.Int(64, true));
+        var row_index = Field.nullable("row_index", new ArrowType.Int(32, true));
         return new Schema(Arrays.asList(row_index, classToField(type, "")));
     }
 
