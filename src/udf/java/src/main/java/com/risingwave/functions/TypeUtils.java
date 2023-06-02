@@ -7,6 +7,7 @@ import org.apache.arrow.vector.types.*;
 import org.apache.arrow.vector.types.pojo.*;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.ParameterizedType;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -99,8 +100,16 @@ class TypeUtils {
 
     public static Schema methodToOutputSchema(Method method) {
         var type = method.getReturnType();
-        var fields = Arrays.asList(classToField(type, ""));
-        return new Schema(fields);
+        return new Schema(Arrays.asList(classToField(type, "")));
+    }
+
+    public static Schema tableFunctionToOutputSchema(Class<?> type) {
+        var parameterizedType = (ParameterizedType) type.getGenericSuperclass();
+        var typeArguments = parameterizedType.getActualTypeArguments();
+        type = (Class<?>) typeArguments[0];
+
+        var row_index = Field.nullable("row_index", new ArrowType.Int(64, true));
+        return new Schema(Arrays.asList(row_index, classToField(type, "")));
     }
 
     public static FieldVector createVector(Field field, BufferAllocator allocator, Object[] values) {

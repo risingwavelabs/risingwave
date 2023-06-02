@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 import com.risingwave.functions.ScalarFunction;
+import com.risingwave.functions.TableFunction;
 import com.risingwave.functions.UdfServer;
 
 public class UdfExample {
@@ -13,6 +14,7 @@ public class UdfExample {
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
+            server.addFunction("series", new Series());
 
             server.start();
             server.awaitTermination();
@@ -64,6 +66,14 @@ public class UdfExample {
         static String intToIpAddr(int addr) {
             return String.format("%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff,
                     addr & 0xff);
+        }
+    }
+
+    public static class Series extends TableFunction<Integer> {
+        public void eval(int n) {
+            for (int i = 0; i < n; i++) {
+                collect(i);
+            }
         }
     }
 }

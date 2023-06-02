@@ -61,16 +61,61 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
 }
 
 class TableFunctionBatch extends UserDefinedFunctionBatch {
-    TableFunction function;
+    TableFunction<?> function;
+    Method method;
+    int chunk_size = 1024;
 
-    TableFunctionBatch(TableFunction function, BufferAllocator allocator) {
+    TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
+        this.method = Reflection.getEvalMethod(function);
+        this.inputSchema = TypeUtils.methodToInputSchema(this.method);
+        this.outputSchema = TypeUtils.tableFunctionToOutputSchema(function.getClass());
     }
 
     @Override
     Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
-        return null;
+        // TODO: incremental compute and output
+        // due to the lack of generator support in Java, we can not yield from a
+        // function call.
+        var outputs = new ArrayList<VectorSchemaRoot>();
+        var row = new Object[batch.getSchema().getFields().size()];
+        var indexes = new ArrayList<Long>();
+        Runnable buildChunk = () -> {
+            var indexVector = TypeUtils.createVector(this.outputSchema.getFields().get(0), this.allocator,
+                    indexes.toArray());
+            indexes.clear();
+            var valueVector = TypeUtils.createVector(this.outputSchema.getFields().get(1), this.allocator,
+                    this.function.take());
+            var outputBatch = VectorSchemaRoot.of(indexVector, valueVector);
+            outputs.add(outputBatch);
+        };
+        for (int i = 0; i < batch.getRowCount(); i++) {
+            // prepare input row
+            for (int j = 0; j < row.length; j++) {
+                row[j] = batch.getVector(j).getObject(i);
+            }
+            // call function
+            var size_before = this.function.size();
+            try {
+                this.method.invoke(this.function, row);
+            } catch (IllegalAccessException | InvocationTargetException e) {
+                throw new RuntimeException(e);
+            }
+            var size_after = this.function.size();
+            // add indexes
+            for (int j = size_before; j < size_after; j++) {
+                indexes.add((long) i);
+            }
+            // check if we need to flush
+            if (size_after >= this.chunk_size) {
+                buildChunk.run();
+            }
+        }
+        if (this.function.size() > 0) {
+            buildChunk.run();
+        }
+        return outputs.iterator();
     }
 }
 
