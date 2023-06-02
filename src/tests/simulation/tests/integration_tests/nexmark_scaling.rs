@@ -58,6 +58,7 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
     // compare results
     sleep(Duration::from_secs(sleep_sec)).await;
     cluster.run(create).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
     let got = cluster.run(select).await?;
     assert_eq!(got, expected);
 
