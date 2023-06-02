@@ -30,9 +30,6 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // TODO: Is the create statement also dropped? After drop will there be zero actors in cluster?
-    // I think drop also undoes the create part
-    // TODO: maybe get the expected result in a different cluster
     // setup cluster and calc expected result
     let sleep_sec = 30;
     let mut cluster =
@@ -49,10 +46,17 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
     let rand_nodes: Vec<WorkerNode> = cluster
         .cordon_random_workers(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
         .await?;
-    for rand_node in rand_nodes {
-        println!("Unregister compute node {:?}", rand_node); // TODO: remove line
+    for rand_node in rand_nodes.clone() {
         cordoned_nodes.push(rand_node);
     }
+
+    let mut log_msg = "Cordoned the following nodes:\n".to_string();
+    for rand_node in rand_nodes {
+        log_msg = format!("{}{:?}\n", log_msg, rand_node);
+    }
+    println!("{}", log_msg);
+    // tracing::info!(log_msg); // TODO: use trace
+
     let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
 
     // compare results
@@ -85,7 +89,6 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
 }
 
 // TODO: remove the meta.get_schedule rpc call and what belongs to it
-// TODO: Do not use GetScheduleResponse here
 async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
     // Compile fragments
     let mut fragment_list: Vec<Fragment> = vec![];
@@ -120,17 +123,15 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-         //   #[madsim::test]
-         //   async fn [< nexmark_scaling_up_down_1_ $query >]() -> Result<()> {
-         //       use risingwave_simulation::nexmark::queries::$query::*;
-          //      test_cordon(CREATE, SELECT, DROP, 2)
-                //       .await
-         //    }
+            #[madsim::test]
+            async fn [< nexmark_scaling_up_down_1_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                test_cordon(CREATE, SELECT, DROP, 1).await
+            }
             #[madsim::test]
             async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                test_cordon(CREATE, SELECT, DROP, 2)
-                .await
+                test_cordon(CREATE, SELECT, DROP, 2).await
             }
         }
     };
