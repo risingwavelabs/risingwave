@@ -61,7 +61,7 @@ message WorkerNode {
     UNSPECIFIED = 0;
     STARTING = 1;
     RUNNING = 2;
-    // TODO: add CORDON here
+    CORDONED = 3;
   }
   // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
   message Property {

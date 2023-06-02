@@ -14,41 +14,33 @@
 
 #![cfg(madsim)]
 
-use std::collections::HashSet;
-use std::hash::Hash;
 use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::{sleep, Instant};
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::{Actor, Fragment, ParallelUnit, Status, WorkerNode};
-use risingwave_pb::meta::table_fragments::fragment;
+use madsim::time::sleep;
+use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
-use risingwave_simulation::cluster::{Configuration, KillOpts};
-use risingwave_simulation::ctl_ext::predicate;
+use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
-use risingwave_simulation::utils::AssertResult;
-use tracing_subscriber::fmt::format;
 
 /// create cluster, cordon node, run query. Cordoned node should NOT contain actors
-async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: usize) {
+async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: usize) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
     // TODO: Is the create statement also dropped? After drop will there be zero actors in cluster?
+    // I think drop also undoes the create part
     // TODO: maybe get the expected result in a different cluster
     // setup cluster and calc expected result
-    let sleep_sec = 20;
+    let sleep_sec = 30;
     let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false)
-            .await
-            .expect("creating cluster failed");
-    cluster.run(create).await.expect("failed to run create");
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+    cluster.run(create).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
-    let expected = cluster.run(select).await.expect("failed to run select");
-    cluster.run(drop).await.expect("failed to run drop");
+    let expected = cluster.run(select).await?;
+    cluster.run(drop).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
 
     // cordon random nodes
@@ -56,8 +48,7 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
     // TODO: I can directly write this in the cordoned_nodes ved
     let rand_nodes: Vec<WorkerNode> = cluster
         .cordon_random_workers(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
-        .await
-        .expect("cordoning node failed");
+        .await?;
     for rand_node in rand_nodes {
         println!("Unregister compute node {:?}", rand_node); // TODO: remove line
         cordoned_nodes.push(rand_node);
@@ -66,14 +57,12 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
 
     // compare results
     sleep(Duration::from_secs(sleep_sec)).await;
-    let got = cluster.run(select).await.expect("failed to run select");
+    cluster.run(create).await?;
+    let got = cluster.run(select).await?;
     assert_eq!(got, expected);
 
     // no actors on cordoned nodes
-    let info = cluster
-        .get_cluster_info()
-        .await
-        .expect("failed to get info");
+    let info = cluster.get_cluster_info().await?;
     let (fragments, workers) = get_schedule(info).await;
 
     // TODO: do this fancy with map
@@ -91,6 +80,7 @@ async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: us
             assert!(!cordoned_pus_flat.contains(&pu_id));
         }
     }
+    Ok(())
 }
 
 // TODO: remove the meta.get_schedule rpc call and what belongs to it
@@ -130,13 +120,13 @@ macro_rules! test {
     ($query:ident) => {
         paste::paste! {
          //   #[madsim::test]
-         //   async fn [< nexmark_scaling_up_down_1_ $query >]() {
+         //   async fn [< nexmark_scaling_up_down_1_ $query >]() -> Result<()> {
          //       use risingwave_simulation::nexmark::queries::$query::*;
-         //       test_cordon(CREATE, SELECT, DROP, 1)
-         //       .await
+          //      test_cordon(CREATE, SELECT, DROP, 2)
+                //       .await
          //    }
             #[madsim::test]
-            async fn [< nexmark_scaling_up_down_2_ $query >]() {
+            async fn [< nexmark_scaling_up_down_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 test_cordon(CREATE, SELECT, DROP, 2)
                 .await
