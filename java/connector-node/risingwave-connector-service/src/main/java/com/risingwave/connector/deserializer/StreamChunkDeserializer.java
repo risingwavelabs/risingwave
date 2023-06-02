@@ -108,6 +108,7 @@ public class StreamChunkDeserializer implements Deserializer {
                             };
                     break;
                 case TIMESTAMP:
+                case TIMESTAMPTZ:
                     ret[i] =
                             row -> {
                                 if (row.isNull(index)) {

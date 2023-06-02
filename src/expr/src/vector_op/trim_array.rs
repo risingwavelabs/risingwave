@@ -26,27 +26,27 @@ use crate::Result;
 ///
 /// ```slt
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], 4);
+/// select trim_array(array[1,2,3,4,5,null], 4);
 /// ----
 /// {1,2}
 ///
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], 0);
+/// select trim_array(array[1,2,3,4,5,null], 0);
 /// ----
 /// {1,2,3,4,5,NULL}
 ///
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], null);
+/// select trim_array(array[1,2,3,4,5,null], null);
 /// ----
 /// NULL
 ///
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], null::smallint);
+/// select trim_array(array[1,2,3,4,5,null], null::smallint);
 /// ----
 /// NULL
 ///
 /// query T
-/// select trim_array(array[1,2,3,4,5,null::int], 6);
+/// select trim_array(array[1,2,3,4,5,null], 6);
 /// ----
 /// {}
 ///
@@ -56,22 +56,22 @@ use crate::Result;
 /// NULL
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], 7);
+/// select trim_array(array[1,2,3,4,5,null], 7);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], -1);
+/// select trim_array(array[1,2,3,4,5,null], -1);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], null::bigint);
+/// select trim_array(array[1,2,3,4,5,null], null::bigint);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], 3.14);
+/// select trim_array(array[1,2,3,4,5,null], 3.14);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], array[1]);
+/// select trim_array(array[1,2,3,4,5,null], array[1]);
 ///
 /// statement error
-/// select trim_array(array[1,2,3,4,5,null::int], true);
+/// select trim_array(array[1,2,3,4,5,null], true);
 /// ```
 #[function("trim_array(list, int32) -> list")]
 fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
