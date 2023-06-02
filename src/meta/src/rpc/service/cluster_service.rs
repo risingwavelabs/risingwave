@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -21,6 +25,7 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::ClusterManagerRef;
+use crate::model::Worker;
 use crate::storage::MetaStore;
 use crate::MetaError;
 
@@ -63,6 +68,22 @@ where
         }))
     }
 
+    /// TODO: Use HostAddr or host Address?
+    /// mark node as unschedulable. Will not affect actors which are already running on that node
+    async fn cordon_worker_node(
+        &self,
+        req: Request<CordonWorkerNodeRequest>,
+    ) -> Result<Response<CordonWorkerNodeResponse>, Status> {
+        let host_address = match req.into_inner().host {
+            None => return Err(Status::invalid_argument("request did not have host")),
+            Some(ha) => ha,
+        };
+        self.cluster_manager
+            .cordon_worker_node(host_address)
+            .await?;
+        Ok(Response::new(CordonWorkerNodeResponse { status: None }))
+    }
+
     async fn activate_worker_node(
         &self,
         request: Request<ActivateWorkerNodeRequest>,
@@ -71,17 +92,6 @@ where
         let host = req.get_host()?.clone();
         self.cluster_manager.activate_worker_node(host).await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
-    }
-
-    // mark a worker node as unschedulable
-    async fn cordon_worker_node(
-        &self,
-        request: Request<CordonWorkerNodeRequest>,
-    ) -> Result<Response<CordonWorkerNodeResponse>, Status> {
-        let req = request.into_inner();
-        let host = req.get_host()?.clone();
-        self.cluster_manager.cordon_worker_node(host).await?;
-        Ok(Response::new(CordonWorkerNodeResponse { status: None }))
     }
 
     async fn delete_worker_node(

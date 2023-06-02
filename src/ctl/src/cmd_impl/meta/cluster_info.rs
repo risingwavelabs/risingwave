@@ -18,11 +18,9 @@ use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::{
-    CordonWorkerNodeRequest, CordonWorkerNodeResponse, GetClusterInfoRequest,
-    GetClusterInfoResponse,
-};
+use risingwave_pb::meta::{CordonWorkerNodeResponse, GetClusterInfoResponse};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -37,11 +35,14 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
 // TODO: remove this
 pub async fn cordon_worker(
     context: &CtlContext,
-    // What should I use? HostAddr or HostAddress?
+    // TODO: We should use HostAddress for all of these functions
     addr: HostAddr,
 ) -> anyhow::Result<CordonWorkerNodeResponse> {
     let meta_client = context.meta_client().await?;
-
+    let addr = HostAddress {
+        host: addr.host,
+        port: addr.port as i32,
+    };
     let response = meta_client.cordon_worker(addr).await?;
     Ok(response)
 }

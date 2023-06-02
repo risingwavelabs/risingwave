@@ -33,17 +33,19 @@ use tracing_subscriber::fmt::format;
 
 /// create cluster, cordon node, run query. Cordoned node should NOT contain actors
 async fn test_cordon(create: &str, select: &str, drop: &str, number_of_nodes: usize) {
-    let x = risingwave_simulation::nexmark::queries::q101::CREATE;
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    // TODO: Is the create statement also dropped? After drop will there be zero actors in cluster?
+    // TODO: maybe get the expected result in a different cluster
     // setup cluster and calc expected result
     let sleep_sec = 20;
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false)
             .await
             .expect("creating cluster failed");
+    cluster.run(create).await.expect("failed to run create");
     sleep(Duration::from_secs(sleep_sec)).await;
     let expected = cluster.run(select).await.expect("failed to run select");
     cluster.run(drop).await.expect("failed to run drop");
