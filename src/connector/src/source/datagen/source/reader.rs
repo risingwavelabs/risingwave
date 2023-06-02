@@ -249,7 +249,7 @@ fn generator_from_data_type(
         }
         DataType::Struct(struct_type) => {
             let struct_fields = struct_type
-                .name_types()
+                .iter()
                 .map(|(field_name, data_type)| {
                     let gen = generator_from_data_type(
                         data_type.clone(),

@@ -183,7 +183,6 @@ pub enum NestedType {
 fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
     let fields = ty
         .types()
-        .iter()
         .map(|f| match f {
             DataType::Struct(s) => extract_struct_nested_type(s),
             _ => Ok(NestedType::Type(f.clone())),

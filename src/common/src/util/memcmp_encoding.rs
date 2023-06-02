@@ -152,7 +152,6 @@ fn calculate_encoded_size_inner(
             DataType::List { .. } => deserializer.skip_bytes()?,
             DataType::Struct(t) => t
                 .types()
-                .iter()
                 .map(|field| {
                     // use default null tags inside composite type
                     calculate_encoded_size_inner(

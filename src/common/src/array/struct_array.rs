@@ -81,7 +81,6 @@ impl ArrayBuilder for StructArrayBuilder {
         };
         let children_array = ty
             .types()
-            .iter()
             .map(|a| a.create_array_builder(capacity))
             .collect();
         Self {
@@ -179,7 +178,7 @@ impl Array for StructArray {
 
     fn to_protobuf(&self) -> PbArray {
         let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
-        let children_type = self.type_.types().iter().map(|t| t.to_protobuf()).collect();
+        let children_type = self.type_.types().map(|t| t.to_protobuf()).collect();
         PbArray {
             array_type: PbArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
@@ -321,12 +320,12 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn memcmp_deserialize(
-        fields: &[DataType],
+    pub fn memcmp_deserialize<'a>(
+        fields: impl IntoIterator<Item = &'a DataType>,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
-            .iter()
+            .into_iter()
             .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)

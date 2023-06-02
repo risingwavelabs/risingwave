@@ -359,8 +359,8 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
-                pb.field_type = t.types().iter().map(|f| f.to_protobuf()).collect_vec();
-                pb.field_names = t.names().to_vec();
+                pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
+                pb.field_names = t.names().map(|s| s.into()).collect();
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
@@ -402,7 +402,7 @@ impl DataType {
 
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
         Self::Struct(StructType {
-            fields: fields.into(),
+            field_types: fields.into(),
             field_names: field_names.into(),
         })
     }
@@ -439,7 +439,6 @@ impl DataType {
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .types()
-                    .iter()
                     .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
@@ -953,11 +952,8 @@ impl ScalarImpl {
                     ))
                     .into());
                 }
-                let mut fields = Vec::with_capacity(s.types().len());
-                for (s, ty) in str[1..str.len() - 1]
-                    .split(',')
-                    .zip_eq_debug(s.types().iter())
-                {
+                let mut fields = Vec::with_capacity(s.len());
+                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(s.types()) {
                     fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
                 }
                 ScalarImpl::Struct(StructValue::new(fields))

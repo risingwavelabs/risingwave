@@ -180,16 +180,16 @@ impl FunctionCall {
             )));
         };
         let (func_type, inputs, _) = func.decompose();
-        match t.types().len().cmp(&inputs.len()) {
+        match t.len().cmp(&inputs.len()) {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq_fast(t.types().to_vec())
-                    .map(|(e, t)| Self::new_cast(e, t, allows))
+                    .zip_eq_fast(t.types())
+                    .map(|(e, t)| Self::new_cast(e, t.clone(), allows))
                     .collect::<Result<Vec<_>, CastError>>()?;
                 let return_type = DataType::new_struct(
-                    inputs.iter().map(|i| i.return_type()).collect_vec(),
-                    t.names().to_vec(),
+                    inputs.iter().map(|i| i.return_type()).collect(),
+                    t.names().map(|s| s.to_string()).collect(),
                 );
                 Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
             }

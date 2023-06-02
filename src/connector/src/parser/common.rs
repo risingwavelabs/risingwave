@@ -162,7 +162,7 @@ pub(crate) fn do_parse_simd_json_value(
         }
         (DataType::Struct(struct_type_info), _) => {
             let fields: Vec<Option<ScalarImpl>> = struct_type_info
-                .name_types()
+                .iter()
                 .map(|(name, ty)| {
                     simd_json_parse_value(format, ty, json_object_smart_get_value(v, name.into()))
                 })

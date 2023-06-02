@@ -47,7 +47,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
         DataType::Struct(inner) => AstDataType::Struct(
             inner
-                .name_types()
+                .iter()
                 .map(|(name, typ)| StructField {
                     name: name.into(),
                     data_type: data_type_to_ast_data_type(typ),

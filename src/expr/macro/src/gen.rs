@@ -520,7 +520,7 @@ impl FunctionAttr {
             vec![quote! { self.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().types()[#i].clone() })
+                .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
         let const_arg = match &self.prebuild {

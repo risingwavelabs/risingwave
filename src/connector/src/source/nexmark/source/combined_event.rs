@@ -86,21 +86,21 @@ pub fn get_event_data_types_with_names(
         Some(EventType::Person) => {
             let struct_type = get_person_struct_type();
             struct_type
-                .name_types()
+                .iter()
                 .map(|(n, t)| (n.into(), t.clone()))
                 .collect()
         }
         Some(EventType::Auction) => {
             let struct_type = get_auction_struct_type();
             struct_type
-                .name_types()
+                .iter()
                 .map(|(n, t)| (n.into(), t.clone()))
                 .collect()
         }
         Some(EventType::Bid) => {
             let struct_type = get_bid_struct_type();
             struct_type
-                .name_types()
+                .iter()
                 .map(|(n, t)| (n.into(), t.clone()))
                 .collect()
         }
@@ -127,9 +127,9 @@ pub(crate) fn get_event_data_types(
                 DataType::Struct(get_bid_struct_type()),
             ]
         }
-        Some(EventType::Person) => get_person_struct_type().types().into(),
-        Some(EventType::Auction) => get_auction_struct_type().types().into(),
-        Some(EventType::Bid) => get_bid_struct_type().types().into(),
+        Some(EventType::Person) => get_person_struct_type().types().cloned().collect(),
+        Some(EventType::Auction) => get_auction_struct_type().types().cloned().collect(),
+        Some(EventType::Bid) => get_bid_struct_type().types().cloned().collect(),
     };
 
     if let Some(row_id_index) = row_id_index {

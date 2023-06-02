@@ -168,7 +168,7 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
             DataType::Struct(struct_type) => Self::Struct(
                 struct_type
-                    .name_types()
+                    .iter()
                     .map(|(name, ty)| Field::new(name, ty.into(), true))
                     .collect(),
             ),
@@ -593,7 +593,7 @@ impl From<&StructArray> for arrow_array::StructArray {
     fn from(array: &StructArray) -> Self {
         let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> = array
             .fields()
-            .zip_eq_debug(array.data_type().as_struct().name_types())
+            .zip_eq_debug(array.data_type().as_struct().iter())
             .map(|(arr, (name, ty))| (Field::new(name, ty.into(), true), arr.as_ref().into()))
             .collect();
         arrow_array::StructArray::from(struct_data_vector)
