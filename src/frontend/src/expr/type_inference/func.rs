@@ -477,37 +477,42 @@ fn infer_type_for_special(
         }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
-            let left_type = inputs[0].return_type();
-            let right_type = inputs[1].return_type();
-            let return_type = match (&left_type, &right_type) {
-                (DataType::List(left_elem_type), DataType::List(right_elem_type)) => {
-                    if let Ok(res) = align_types(inputs.iter_mut()) {
-                        Some(res)
-                    } else if **left_elem_type == right_type {
-                        Some(left_type.clone())
-                    } else if left_type == **right_elem_type {
-                        Some(right_type.clone())
-                    } else {
-                        let common_type = align_array_and_element(0, 1, inputs)
-                            .or_else(|_| align_array_and_element(1, 0, inputs));
-                        match common_type {
-                            Ok(casted) => Some(casted),
-                            Err(err) => return Err(err.into()),
-                        }
-                    }
+            let left_type = (!inputs[0].is_unknown()).then(|| inputs[0].return_type());
+            let right_type = (!inputs[1].is_unknown()).then(|| inputs[1].return_type());
+            let return_type = match (left_type, right_type) {
+                (None, t @ None)
+                | (None, t @ Some(DataType::List(_)))
+                | (t @ Some(DataType::List(_)), None) => {
+                    // when neither type is available, default to `varchar[]`
+                    // when one side is unknown and other side is list, use that list type
+                    let t = t.unwrap_or_else(|| DataType::List(DataType::Varchar.into()));
+                    let inputs_owned = std::mem::take(inputs);
+                    *inputs = inputs_owned
+                        .into_iter()
+                        .map(|e| e.cast_implicit(t.clone()))
+                        .try_collect()?;
+                    Some(t)
                 }
+                (Some(DataType::List(_)), Some(DataType::List(_))) => {
+                    align_types(inputs.iter_mut())
+                        .or_else(|_| align_array_and_element(0, &[1], inputs))
+                        .or_else(|_| align_array_and_element(1, &[0], inputs))
+                        .ok()
+                }
+                // else either side is a known non-list type
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
                 ErrorCode::BindError(format!(
                     "Cannot concatenate {} and {}",
-                    left_type, right_type
+                    inputs[0].return_type(),
+                    inputs[1].return_type()
                 ))
             })?))
         }
         ExprType::ArrayAppend => {
             ensure_arity!("array_append", | inputs | == 2);
-            let common_type = align_array_and_element(0, 1, inputs);
+            let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
                 Ok(casted) => Ok(Some(casted)),
                 Err(_) => Err(ErrorCode::BindError(format!(
@@ -520,7 +525,7 @@ fn infer_type_for_special(
         }
         ExprType::ArrayPrepend => {
             ensure_arity!("array_prepend", | inputs | == 2);
-            let common_type = align_array_and_element(1, 0, inputs);
+            let common_type = align_array_and_element(1, &[0], inputs);
             match common_type {
                 Ok(casted) => Ok(Some(casted)),
                 Err(_) => Err(ErrorCode::BindError(format!(
@@ -533,7 +538,7 @@ fn infer_type_for_special(
         }
         ExprType::ArrayRemove => {
             ensure_arity!("array_remove", | inputs | == 2);
-            let common_type = align_array_and_element(0, 1, inputs);
+            let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
                 Ok(casted) => Ok(Some(casted)),
                 Err(_) => Err(ErrorCode::BindError(format!(
@@ -546,7 +551,7 @@ fn infer_type_for_special(
         }
         ExprType::ArrayPositions => {
             ensure_arity!("array_positions", | inputs | == 2);
-            let common_type = align_array_and_element(0, 1, inputs);
+            let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
                 Ok(_) => Ok(Some(DataType::List(Box::new(DataType::Int32)))),
                 Err(_) => Err(ErrorCode::BindError(format!(
