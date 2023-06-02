@@ -33,6 +33,13 @@ async fn nexmark_recovery_common(create: &str, select: &str, drop: &str) -> Resu
     cluster.run(create).await?;
     sleep(Duration::from_secs(30)).await;
     let expected = cluster.run(select).await?;
+
+    println!("before new create");
+    cluster
+        .run(risingwave_simulation::nexmark::queries::q4::CREATE)
+        .await?;
+    println!("after new create");
+
     cluster.run(drop).await?;
     sleep(Duration::from_secs(5)).await;
 
