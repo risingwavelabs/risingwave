@@ -211,7 +211,7 @@ impl ExprImpl {
 
     /// Check whether self is a literal NULL or literal string.
     pub fn is_unknown(&self) -> bool {
-        matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+        matches!(self, ExprImpl::Literal(literal) if literal.is_unknown())
             || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 

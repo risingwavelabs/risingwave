@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::cast::*;
 
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
@@ -84,7 +84,7 @@ pub fn align_array_and_element(
 ) -> std::result::Result<DataType, ErrorCode> {
     let mut dummy_element = match inputs[array_idx].is_unknown() {
         // when array is unknown type, make an unknown typed value (e.g. null)
-        true => ExprImpl::literal_null(DataType::Varchar),
+        true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
             let array_element_type = match inputs[array_idx].return_type() {
                 DataType::List(t) => *t,

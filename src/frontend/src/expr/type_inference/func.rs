@@ -45,7 +45,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
         .into_iter()
         .zip_eq_fast(sig.inputs_type)
         .map(|(expr, t)| {
-            if DataTypeName::from(expr.return_type()) != *t {
+            if expr.is_unknown() || DataTypeName::from(expr.return_type()) != *t {
                 if t.is_scalar() {
                     return expr.cast_implicit((*t).into()).map_err(Into::into);
                 } else {
