@@ -89,7 +89,7 @@ impl Literal {
         &self.data
     }
 
-    pub fn is_unknown(&self) -> bool {
+    pub fn is_untyped(&self) -> bool {
         self.data_type.is_none()
     }
 

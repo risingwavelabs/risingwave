@@ -52,7 +52,7 @@ pub fn align_types<'a>(
     // Essentially a filter_map followed by a try_reduce, which is unstable.
     let mut ret_type = None;
     for e in &exprs {
-        if e.is_unknown() {
+        if e.is_untyped() {
             continue;
         }
         ret_type = match ret_type {
@@ -82,7 +82,7 @@ pub fn align_array_and_element(
     element_indices: &[usize],
     inputs: &mut [ExprImpl],
 ) -> std::result::Result<DataType, ErrorCode> {
-    let mut dummy_element = match inputs[array_idx].is_unknown() {
+    let mut dummy_element = match inputs[array_idx].is_untyped() {
         // when array is unknown type, make an unknown typed value (e.g. null)
         true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
@@ -94,7 +94,7 @@ pub fn align_array_and_element(
             InputRef::new(0, array_element_type).into()
         }
     };
-    assert_eq!(dummy_element.is_unknown(), inputs[array_idx].is_unknown());
+    assert_eq!(dummy_element.is_untyped(), inputs[array_idx].is_untyped());
 
     let common_element_type = align_types(
         inputs

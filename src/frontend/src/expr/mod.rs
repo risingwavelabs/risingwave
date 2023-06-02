@@ -210,8 +210,8 @@ impl ExprImpl {
     }
 
     /// Check whether self is a literal NULL or literal string.
-    pub fn is_unknown(&self) -> bool {
-        matches!(self, ExprImpl::Literal(literal) if literal.is_unknown())
+    pub fn is_untyped(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.is_untyped())
             || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 
@@ -232,7 +232,7 @@ impl ExprImpl {
 
     /// Shorthand to enforce implicit cast to boolean
     pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
-        if self.is_unknown() {
+        if self.is_untyped() {
             let inner = self.cast_implicit(DataType::Boolean)?;
             return Ok(inner);
         }
