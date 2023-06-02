@@ -31,6 +31,7 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::select;
+use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::SenderError;
@@ -302,6 +303,7 @@ pub struct BatchTaskExecution<C> {
 
     shutdown_tx: tokio::sync::watch::Sender<ShutdownMsg>,
     shutdown_rx: tokio::sync::watch::Receiver<ShutdownMsg>,
+    heartbeat_join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -335,6 +337,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             sender,
             shutdown_tx,
             shutdown_rx,
+            heartbeat_join_handle: Mutex::new(None),
         })
     }
 
@@ -668,6 +671,20 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         let guard = self.state.lock();
         !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
+}
+
+impl<C> BatchTaskExecution<C> {
+    pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
+        *self.heartbeat_join_handle.lock() = Some(join_handle);
+    }
+}
+
+impl<C> Drop for BatchTaskExecution<C> {
+    fn drop(&mut self) {
+        if let Some(join_handle) = self.heartbeat_join_handle.lock().take() {
+            join_handle.abort();
+        }
     }
 }
 

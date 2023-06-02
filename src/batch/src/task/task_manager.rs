@@ -107,6 +107,15 @@ impl BatchManager {
         let ret = if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(task.clone());
             self.metrics.task_num.inc();
+
+            let this = self.clone();
+            let task_id = task_id.clone();
+            let state_reporter = state_reporter.clone();
+            let heartbeat_join_handle = self.runtime.spawn(async move {
+                this.start_task_heartbeat(state_reporter, task_id).await;
+            });
+            task.set_heartbeat_join_handle(heartbeat_join_handle);
+
             Ok(())
         } else {
             Err(ErrorCode::InternalError(format!(
@@ -115,15 +124,11 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter.clone()))
+        task.async_execute(Some(state_reporter))
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());
             })?;
-        let this = self.clone();
-        self.runtime.spawn(async move {
-            this.start_task_heartbeat(state_reporter, task_id).await;
-        });
         ret
     }
 
