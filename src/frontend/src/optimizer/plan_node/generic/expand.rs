@@ -108,7 +108,7 @@ impl<PlanRef: GenericPlanRef> DistillUnit for Expand<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
-    pub fn column_subsets_pretty<'a>(&self) -> Pretty<'a> {
+    fn column_subsets_pretty<'a>(&self) -> Pretty<'a> {
         Pretty::Array(
             self.column_subsets
                 .iter()
@@ -124,7 +124,7 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
         )
     }
 
-    pub fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
+    fn column_subsets_display(&self) -> Vec<Vec<FieldDisplay<'_>>> {
         self.column_subsets
             .iter()
             .map(|subset| {
