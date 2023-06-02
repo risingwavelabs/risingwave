@@ -133,6 +133,8 @@ impl BatchManager {
         let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(60));
         heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         heartbeat_interval.reset();
+        tracing::debug!("heartbeat loop for task {:?} starts", task_id);
+        self.metrics.batch_heartbeat_worker_num.inc();
         loop {
             heartbeat_interval.tick().await;
             if !self.tasks.lock().contains_key(&task_id) {
@@ -152,6 +154,8 @@ impl BatchManager {
                 self.cancel_task(&task_id.to_prost());
             }
         }
+        tracing::debug!("heartbeat loop for task {:?} stops", task_id);
+        self.metrics.batch_heartbeat_worker_num.dec();
     }
 
     pub fn get_data(
