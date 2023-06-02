@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -25,14 +24,13 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::avro::util::{
-    avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
-    get_field_from_avro_value,
-};
+use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::debezium::DebeziumAdapter;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
@@ -190,7 +188,7 @@ impl DebeziumAvroParser {
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let writer_schema = self.schema_resolver.get(schema_id).await?;
@@ -198,76 +196,17 @@ impl DebeziumAvroParser {
         let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let op = get_field_from_avro_value(&avro_value, OP)?;
-        if let Value::String(op_str) = op {
-            match op_str.as_str() {
-                DEBEZIUM_UPDATE_OP => {
-                    let before = get_field_from_avro_value(&avro_value, BEFORE)
-                        .map_err(|_| {
-                            RwError::from(ProtocolError(
-                                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                            ))
-                        })?;
-                    let after = get_field_from_avro_value(&avro_value, AFTER)?;
+        let accessor = AvroAccess {
+            value: &avro_value,
+            options: &AvroParseOptions {
+                schema: Some(&self.inner_schema),
+                relax_numeric: true,
+            },
+        };
 
-                    writer.update(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        let before = from_avro_value(
-                            get_field_from_avro_value(before, column.name.as_str())?.clone(),
-                            field_schema,
-                            &column.data_type,
-                        )?;
-                        let after = from_avro_value(
-                            get_field_from_avro_value(after, column.name.as_str())?.clone(),
-                            field_schema,
-                            &column.data_type,
-                        )?;
+        let row_op = DebeziumAdapter { accessor };
 
-                        Ok((before, after))
-                    })
-                }
-                DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                    let after = get_field_from_avro_value(&avro_value, AFTER)?;
-
-                    writer.insert(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        from_avro_value(
-                            get_field_from_avro_value(after, column.name.as_str())?.clone(),
-                            field_schema,
-                            &column.data_type,
-                        )
-                    })
-                }
-                DEBEZIUM_DELETE_OP => {
-                    let before = get_field_from_avro_value(&avro_value, BEFORE)
-                        .map_err(|_| {
-                            RwError::from(ProtocolError(
-                                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                            ))
-                        })?;
-
-                    writer.delete(|column| {
-                        let field_schema =
-                            extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                        from_avro_value(
-                            get_field_from_avro_value(before, column.name.as_str())?.clone(),
-                            field_schema,
-                            &column.data_type,
-                        )
-                    })
-                }
-                _ => Err(RwError::from(ProtocolError(format!(
-                    "unknown debezium op: {}",
-                    op_str
-                )))),
-            }
-        } else {
-            Err(RwError::from(ProtocolError(
-                "payload op is not a string ".to_owned(),
-            )))
-        }
+        apply_row_operation_on_stream_chunk_writer(row_op, writer)
     }
 }
 

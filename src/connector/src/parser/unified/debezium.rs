@@ -22,7 +22,10 @@ where
         name: &str,
         shape: &risingwave_common::types::DataType,
     ) -> super::AccessResult {
-        self.accessor.access(&[AFTER, name], shape.clone())
+        match self.op()? {
+            RowOperation::Delete => self.accessor.access(&[BEFORE, name], shape.clone()),
+            _ => self.accessor.access(&[AFTER, name], shape.clone()),
+        }
     }
 
     fn access_before(

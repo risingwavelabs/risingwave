@@ -4,7 +4,7 @@ use apache_avro::types::Value;
 use apache_avro::Schema;
 use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
-use risingwave_common::cast::i64_to_timestamp;
+use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz};
 use risingwave_common::types::{DataType, Date, Interval, JsonbVal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -95,6 +95,14 @@ impl<'a> AvroParseOptions<'a> {
                 i64_to_timestamp(*us).map_err(|_| create_error())?.into()
             }
 
+            // ---- TimestampTz -----
+            (DataType::Timestamptz, Value::TimestampMillis(ms)) => {
+                i64_to_timestamptz(*ms).map_err(|_| create_error())?.into()
+            }
+            (DataType::Timestamptz, Value::TimestampMicros(us)) => {
+                i64_to_timestamptz(*us).map_err(|_| create_error())?.into()
+            }
+
             // ---- Interval -----
             (DataType::Interval, Value::Duration(duration)) => {
                 let months = u32::from(duration.months()) as i32;
@@ -152,8 +160,8 @@ impl<'a> AvroParseOptions<'a> {
 }
 
 pub struct AvroAccess<'a, 'b> {
-    value: &'a Value,
-    options: &'a AvroParseOptions<'b>,
+    pub value: &'a Value,
+    pub options: &'a AvroParseOptions<'b>,
 }
 
 impl<'a, 'b> Access for AvroAccess<'a, 'b>

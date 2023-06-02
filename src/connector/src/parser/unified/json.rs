@@ -247,7 +247,7 @@ impl JsonParseOptions {
             (
                 DataType::Decimal,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => value.try_as_i64()?.into(),
+            ) => Decimal::from(value.try_as_i64()?).into(),
 
             (DataType::Decimal, ValueType::F64) => Decimal::try_from(value.try_as_f64()?)
                 .map_err(|_| create_error())?
