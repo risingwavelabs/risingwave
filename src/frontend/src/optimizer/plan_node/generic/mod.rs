@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 
 use super::{stream, EqJoinPredicate};
@@ -56,6 +57,10 @@ mod update;
 pub use update::*;
 mod delete;
 pub use delete::*;
+
+pub trait Distill {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;
+}
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
