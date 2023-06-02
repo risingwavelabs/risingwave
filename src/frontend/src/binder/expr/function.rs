@@ -107,8 +107,7 @@ impl Binder {
         }
 
         // table function
-        let table_function_type = TableFunctionType::from_str(function_name.as_str());
-        if let Ok(function_type) = table_function_type {
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }

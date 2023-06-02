@@ -656,9 +656,8 @@ impl fmt::Debug for DataChunk {
 
 impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
-        let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
-            columns,
+            columns: array.fields().cloned().collect(),
             vis2: Vis::Compact(array.len()),
         }
     }

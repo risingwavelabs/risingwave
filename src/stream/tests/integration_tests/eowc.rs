@@ -166,6 +166,7 @@ async fn test_over_window() {
               output:
               - !barrier 4
         "#]],
+        SnapshotOptions::default(),
     )
     .await;
 }
@@ -207,6 +208,7 @@ async fn test_over_window_aggregate() {
                 | + | 1 | p1 | 101 | 16 | 46 |
                 +---+---+----+-----+----+----+
         "#]],
+        SnapshotOptions::default(),
     )
     .await;
 }

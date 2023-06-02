@@ -299,10 +299,10 @@ impl fmt::Display for StreamHashJoin {
             .expect("first join key");
 
         let mut builder = formatter_debug_plan_node!(
-            f, "StreamHashJoin"
-            , { "window", self.left().watermark_columns().contains(ljk) && self.right().watermark_columns().contains(rjk) }
-            , { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() }
-            , { "append_only", self.is_append_only }
+            f, "StreamHashJoin",
+            { "window", self.left().watermark_columns().contains(ljk) && self.right().watermark_columns().contains(rjk) },
+            { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() },
+            { "append_only", self.is_append_only },
         );
 
         let verbose = self.base.ctx.is_explain_verbose();

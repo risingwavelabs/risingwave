@@ -258,8 +258,8 @@ impl StructArray {
     }
 
     /// Returns an iterator over the field array.
-    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayImpl> {
-        self.children.iter().map(|f| &(**f))
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayRef> {
+        self.children.iter()
     }
 
     pub fn field_at(&self, index: usize) -> ArrayRef {
