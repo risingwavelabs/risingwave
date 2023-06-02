@@ -19,11 +19,12 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
-use super::operators::*;
 use crate::impl_common_parser_logic;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
+use crate::parser::unified::debezium::DebeziumAdapter;
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
+use crate::source::{SourceColumnDesc, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -58,7 +59,7 @@ impl DebeziumJsonParser {
     pub async fn parse_inner(
         &self,
         mut payload: Vec<u8>,
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -70,88 +71,14 @@ impl DebeziumJsonParser {
                 RwError::from(ProtocolError("no payload in debezium event".to_owned()))
             })?;
 
-        let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "op field not found in debezium json".to_owned(),
-            ))
-        })?;
+        let accessor = JsonAccess {
+            value: payload,
+            options: &JsonParseOptions::DEBEZIUM,
+        };
 
-        let format = SourceFormat::DebeziumJson;
-        match op {
-            DEBEZIUM_UPDATE_OP => {
-                let before = payload.get(BEFORE).and_then(ensure_not_null).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
-                    ))
-                })?;
+        let row_op = DebeziumAdapter { accessor };
 
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for updating event".to_string(),
-                        ))
-                    })?;
-
-                writer.update(|column| {
-                    let before = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, (&column.name).into()),
-                    )?;
-                    let after = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, (&column.name).into()),
-                    )?;
-
-                    Ok((before, after))
-                })
-            }
-            DEBEZIUM_CREATE_OP | DEBEZIUM_READ_OP => {
-                let after = payload
-                    .get(AFTER)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "after is missing for creating event".to_string(),
-                        ))
-                    })?;
-
-                writer.insert(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, (&column.name).into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            DEBEZIUM_DELETE_OP => {
-                let before = payload
-                    .get(BEFORE)
-                    .and_then(ensure_not_null)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(
-                            "before is missing for delete event".to_string(),
-                        ))
-                    })?;
-
-                writer.delete(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, (&column.name).into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            _ => Err(RwError::from(ProtocolError(format!(
-                "unknown debezium op: {}",
-                op
-            )))),
-        }
+        apply_row_operation_on_stream_chunk_writer(row_op, writer)
     }
 }
 

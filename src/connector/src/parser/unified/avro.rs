@@ -2,12 +2,13 @@ use std::str::FromStr;
 
 use apache_avro::types::Value;
 use apache_avro::Schema;
+use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::cast::i64_to_timestamp;
 use risingwave_common::types::{DataType, Date, Interval, JsonbVal, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::{AccessError, AccessResult};
+use super::{Access, AccessError, AccessResult};
 use crate::parser::avro::util::{
     avro_decimal_to_rust_decimal, extract_inner_field_schema, unix_epoch_days,
 };
@@ -147,5 +148,54 @@ impl<'a> AvroParseOptions<'a> {
             (_expected, _got) => Err(create_error())?,
         };
         Ok(Some(v))
+    }
+}
+
+pub struct AvroAccess<'a, 'b> {
+    value: &'a Value,
+    options: &'a AvroParseOptions<'b>,
+}
+
+impl<'a, 'b> Access for AvroAccess<'a, 'b>
+where
+    'a: 'b,
+{
+    fn access(&self, path: &[&str], shape: DataType) -> AccessResult {
+        let mut value = self.value;
+        let mut options = self.options.clone();
+
+        let mut i = 0;
+        while i < path.len() {
+            let key = path[i];
+            let create_error = || AccessError::Undefined {
+                name: key.to_string(),
+                path: path.iter().take(i).join("."),
+            };
+            match value {
+                Value::Union(_, v) => {
+                    value = v;
+                    options.schema = options.extract_inner_schema(None);
+                    continue;
+                }
+                Value::Map(fields) if fields.contains_key(key) => {
+                    value = fields.get(key).unwrap();
+                    options.schema = None;
+                    i += 1;
+                    continue;
+                }
+                Value::Record(fields) => {
+                    if let Some((_, v)) = fields.iter().find(|(k, _)| k == key) {
+                        value = v;
+                        options.schema = options.extract_inner_schema(Some(key));
+                        i += 1;
+                        continue;
+                    }
+                }
+                _ => (),
+            }
+            Err(create_error())?;
+        }
+
+        self.options.parse(value, &shape)
     }
 }

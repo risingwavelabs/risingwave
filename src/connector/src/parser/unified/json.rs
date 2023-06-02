@@ -66,7 +66,9 @@ impl Default for JsonParseOptions {
             bytea_handling: ByteaHandling::Standard,
             time_handling: TimeHandling::Micro,
             json_value_handling: JsonValueHandling::AsValue,
-            numeric_handling: NumericHandling::Strict,
+            numeric_handling: NumericHandling::Relax {
+                string_parsing: false,
+            },
             boolean_handing: BooleanHandling::Strict,
         }
     }
@@ -379,8 +381,8 @@ impl JsonParseOptions {
 }
 
 pub struct JsonAccess<'a, 'b> {
-    value: &'a BorrowedValue<'b>,
-    options: &'a JsonParseOptions,
+    pub value: &'a BorrowedValue<'b>,
+    pub options: &'a JsonParseOptions,
 }
 
 impl<'a, 'b> Access for JsonAccess<'a, 'b>
