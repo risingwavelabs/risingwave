@@ -1293,8 +1293,8 @@ mod tests {
                         ScalarImpl::Float64(23.33.into()).into(),
                     ])),
                     DataType::Struct(StructType::new(vec![
-                        ("a".to_string(), DataType::Int64),
-                        ("b".to_string(), DataType::Float64),
+                        ("a", DataType::Int64),
+                        ("b", DataType::Float64),
                     ])),
                 ),
                 DataTypeName::List => (

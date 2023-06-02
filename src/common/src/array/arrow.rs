@@ -754,7 +754,7 @@ mod tests {
         use arrow_array::Array as _;
 
         // Empty array - risingwave to arrow conversion.
-        let test_arr = StructArray::new(StructType::new(vec![]), vec![], Bitmap::ones(0));
+        let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         assert_eq!(arrow_array::StructArray::from(&test_arr).len(), 0);
 
         // Empty array - arrow to risingwave conversion.
@@ -786,10 +786,7 @@ mod tests {
         let actual_risingwave_struct_array =
             StructArray::try_from(&test_arrow_struct_array).unwrap();
         let expected_risingwave_struct_array = StructArray::new(
-            StructType::new(vec![
-                ("a".into(), DataType::Boolean),
-                ("b".into(), DataType::Int32),
-            ]),
+            StructType::new(vec![("a", DataType::Boolean), ("b", DataType::Int32)]),
             vec![
                 BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into_ref(),
                 I32Array::from_iter([Some(42), Some(28), Some(19), None]).into_ref(),

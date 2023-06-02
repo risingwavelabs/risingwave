@@ -35,16 +35,25 @@ pub struct StructType {
 
 impl StructType {
     /// Creates a struct type with named fields.
-    pub fn new(named_fields: Vec<(String, DataType)>) -> Self {
+    pub fn new(named_fields: Vec<(impl Into<String>, DataType)>) -> Self {
         let mut field_types = Vec::with_capacity(named_fields.len());
         let mut field_names = Vec::with_capacity(named_fields.len());
         for (name, ty) in named_fields {
-            field_names.push(name);
+            field_names.push(name.into());
             field_types.push(ty);
         }
         Self {
             field_types: field_types.into(),
             field_names: field_names.into(),
+        }
+    }
+
+    /// Creates a struct type with no fields.
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self {
+            field_types: Arc::new([]),
+            field_names: Arc::new([]),
         }
     }
 

@@ -646,14 +646,8 @@ mod tests {
                     Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
-                &StructType::new(vec![
-                    ("a".to_string(), DataType::Varchar),
-                    ("b".to_string(), DataType::Float32),
-                ]),
-                &StructType::new(vec![
-                    ("a".to_string(), DataType::Int32),
-                    ("b".to_string(), DataType::Int32),
-                ])
+                &StructType::new(vec![("a", DataType::Varchar), ("b", DataType::Float32),]),
+                &StructType::new(vec![("a", DataType::Int32), ("b", DataType::Int32),])
             )
             .unwrap(),
             StructValue::new(vec![

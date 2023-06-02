@@ -72,7 +72,7 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_type(capacity, DataType::Struct(StructType::new(vec![])))
+        Self::with_type(capacity, DataType::Struct(StructType::empty()))
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
@@ -459,7 +459,7 @@ mod tests {
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_struct_new_empty() {
-        let arr = StructArray::new(StructType::new(vec![]), vec![], Bitmap::ones(0));
+        let arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }

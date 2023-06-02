@@ -704,8 +704,8 @@ mod tests {
                 SourceColumnDesc {
                     name: "o_point".to_string(),
                     data_type: DataType::Struct(StructType::new(vec![
-                        ("x".into(), DataType::Float32),
-                        ("y".into(), DataType::Float32),
+                        ("x", DataType::Float32),
+                        ("y", DataType::Float32),
                     ])),
                     column_id: 7.into(),
                     fields: vec![],

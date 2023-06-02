@@ -142,41 +142,41 @@ pub(crate) fn get_event_data_types(
 
 pub(crate) fn get_person_struct_type() -> StructType {
     StructType::new(vec![
-        ("id".into(), DataType::Int64),
-        ("name".into(), DataType::Varchar),
-        ("email_address".into(), DataType::Varchar),
-        ("credit_card".into(), DataType::Varchar),
-        ("city".into(), DataType::Varchar),
-        ("state".into(), DataType::Varchar),
-        ("date_time".into(), DataType::Timestamp),
-        ("extra".into(), DataType::Varchar),
+        ("id", DataType::Int64),
+        ("name", DataType::Varchar),
+        ("email_address", DataType::Varchar),
+        ("credit_card", DataType::Varchar),
+        ("city", DataType::Varchar),
+        ("state", DataType::Varchar),
+        ("date_time", DataType::Timestamp),
+        ("extra", DataType::Varchar),
     ])
 }
 
 pub(crate) fn get_auction_struct_type() -> StructType {
     StructType::new(vec![
-        ("id".into(), DataType::Int64),
-        ("item_name".into(), DataType::Varchar),
-        ("description".into(), DataType::Varchar),
-        ("initial_bid".into(), DataType::Int64),
-        ("reserve".into(), DataType::Int64),
-        ("date_time".into(), DataType::Timestamp),
-        ("expires".into(), DataType::Timestamp),
-        ("seller".into(), DataType::Int64),
-        ("category".into(), DataType::Int64),
-        ("extra".into(), DataType::Varchar),
+        ("id", DataType::Int64),
+        ("item_name", DataType::Varchar),
+        ("description", DataType::Varchar),
+        ("initial_bid", DataType::Int64),
+        ("reserve", DataType::Int64),
+        ("date_time", DataType::Timestamp),
+        ("expires", DataType::Timestamp),
+        ("seller", DataType::Int64),
+        ("category", DataType::Int64),
+        ("extra", DataType::Varchar),
     ])
 }
 
 pub(crate) fn get_bid_struct_type() -> StructType {
     StructType::new(vec![
-        ("auction".into(), DataType::Int64),
-        ("bidder".into(), DataType::Int64),
-        ("price".into(), DataType::Int64),
-        ("channel".into(), DataType::Varchar),
-        ("url".into(), DataType::Varchar),
-        ("date_time".into(), DataType::Timestamp),
-        ("extra".into(), DataType::Varchar),
+        ("auction", DataType::Int64),
+        ("bidder", DataType::Int64),
+        ("price", DataType::Int64),
+        ("channel", DataType::Varchar),
+        ("url", DataType::Varchar),
+        ("date_time", DataType::Timestamp),
+        ("extra", DataType::Varchar),
     ])
 }
 

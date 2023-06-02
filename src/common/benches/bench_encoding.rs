@@ -117,10 +117,7 @@ fn bench_encoding(c: &mut Criterion) {
         // encoding.
         Case::new(
             "Struct of Bool (len = 100)",
-            DataType::Struct(StructType::new(vec![
-                ("".to_string(), DataType::Boolean);
-                100
-            ])),
+            DataType::Struct(StructType::new(vec![("", DataType::Boolean); 100])),
             ScalarImpl::Struct(StructValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
         ),
         Case::new(
