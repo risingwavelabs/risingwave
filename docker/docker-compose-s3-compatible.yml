@@ -29,10 +29,8 @@ services:
     container_name: compactor-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/6660
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/6660; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -66,10 +64,8 @@ services:
     container_name: compute-node-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/5688
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5688; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -112,9 +108,10 @@ services:
     healthcheck:
       test:
         - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/2388
+        - etcdctl
+        - --endpoints=http://localhost:2388
+        - endpoint
+        - health
       interval: 1s
       timeout: 5s
       retries: 5
@@ -147,10 +144,8 @@ services:
     container_name: frontend-node-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/4566
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -172,10 +167,8 @@ services:
     container_name: grafana-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/3001
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/3001; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -218,10 +211,8 @@ services:
     container_name: meta-node-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/5690
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -246,10 +237,8 @@ services:
     container_name: prometheus-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9500
+        - CMD-SHELL
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -295,10 +284,8 @@ services:
     container_name: message_queue
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9092
+        - CMD-SHELL
+        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9092; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5
