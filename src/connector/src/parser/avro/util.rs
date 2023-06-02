@@ -251,16 +251,18 @@ pub(crate) fn from_avro_value(
     value_schema: &Schema,
     shape: &DataType,
 ) -> Result<Datum> {
-    Ok(AvroParseOptions {
+    AvroParseOptions {
         schema: Some(value_schema),
         relax_numeric: true,
     }
     .parse(&value, shape)
-    .map_err(|err| RwError::from(InternalError(format!("{:?}", err))))?)
+    .map_err(|err| RwError::from(InternalError(format!("{:?}", err))))
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::ScalarImpl;
+
     use super::*;
     #[test]
     fn test_convert_decimal() {

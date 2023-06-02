@@ -40,7 +40,14 @@ impl<'a> AvroParseOptions<'a> {
         };
         let v: ScalarImpl = match (shape, value) {
             (_, Value::Null) => return Ok(None),
-
+            (_, Value::Union(_, v)) => {
+                let schema = self.extract_inner_schema(None);
+                return Self {
+                    schema,
+                    relax_numeric: self.relax_numeric,
+                }
+                .parse(v, shape);
+            }
             // ---- Boolean -----
             (DataType::Boolean, Value::Boolean(b)) => (*b).into(),
             // ---- Int16 -----
@@ -119,13 +126,13 @@ impl<'a> AvroParseOptions<'a> {
             // ---- List -----
             (DataType::List(item_type), Value::Array(arr)) => ListValue::new(
                 arr.iter()
-                    .map(|_v| {
+                    .map(|v| {
                         let schema = self.extract_inner_schema(None);
-                        Ok(Self {
+                        Self {
                             schema,
                             relax_numeric: self.relax_numeric,
                         }
-                        .parse(value, item_type)?)
+                        .parse(v, item_type)
                     })
                     .collect::<Result<Vec<_>, AccessError>>()?,
             )

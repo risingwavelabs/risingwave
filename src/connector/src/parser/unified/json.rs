@@ -358,7 +358,9 @@ impl JsonParseOptions {
             (DataType::Jsonb, _)
                 if matches!(self.json_value_handling, JsonValueHandling::AsValue) =>
             {
-                JsonbVal::from_serde(value.clone().try_into().map_err(|_| create_error())?).into()
+                let value: serde_json::Value =
+                    value.clone().try_into().map_err(|_| create_error())?;
+                JsonbVal::from(value).into()
             }
             // ---- Int256 -----
             (
