@@ -25,7 +25,8 @@ use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::GetDataResponse;
+use risingwave_pb::task_service::task_info_response::TaskStatus;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
@@ -89,7 +90,7 @@ impl BatchManager {
     }
 
     pub async fn fire_task(
-        &self,
+        self: &Arc<Self>,
         tid: &PbTaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
@@ -114,8 +115,43 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(Some(state_reporter)).await?;
+        task.async_execute(Some(state_reporter.clone()))
+            .await
+            .inspect_err(|_| {
+                self.cancel_task(&task_id.to_prost());
+            })?;
+        let this = self.clone();
+        self.runtime.spawn(async move {
+            this.start_task_heartbeat(state_reporter, task_id).await;
+        });
         ret
+    }
+
+    async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
+        // The heartbeat is to ensure task cancellation when frontend's cancellation request fails
+        // to reach compute node (for any reason like RPC fails, frontend crashes).
+        let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(60));
+        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        heartbeat_interval.reset();
+        loop {
+            heartbeat_interval.tick().await;
+            if !self.tasks.lock().contains_key(&task_id) {
+                break;
+            }
+            if state_reporter
+                .send(TaskInfoResponse {
+                    task_id: Some(task_id.to_prost()),
+                    task_status: TaskStatus::Ping.into(),
+                    error_message: "".to_string(),
+                })
+                .await
+                .is_err()
+            {
+                tracing::warn!("try to cancel task {:?} due to heartbeat", task_id);
+                // Task may have been cancelled, but it's fine to `cancel_task` again.
+                self.cancel_task(&task_id.to_prost());
+            }
+        }
     }
 
     pub fn get_data(
@@ -164,7 +200,7 @@ impl BatchManager {
                 self.metrics.task_num.dec();
             }
             None => {
-                warn!("Task id not found for abort task")
+                warn!("Task {:?} not found for cancel", sid)
             }
         };
     }
@@ -253,6 +289,8 @@ impl BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use risingwave_common::config::BatchConfig;
     use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
@@ -268,7 +306,10 @@ mod tests {
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -296,7 +337,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -344,7 +388,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_cancel_for_busy_loop() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -379,7 +426,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_cancel_for_block() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -414,7 +464,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_abort_for_busy_loop() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -454,7 +507,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_abort_for_block() {
-        let manager = BatchManager::new(BatchConfig::default(), BatchManagerMetrics::for_test());
+        let manager = Arc::new(BatchManager::new(
+            BatchConfig::default(),
+            BatchManagerMetrics::for_test(),
+        ));
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
