@@ -5638,6 +5638,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "scopeguard",
  "serde_json",
  "task_stats_alloc",
  "tempfile",

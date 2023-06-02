@@ -133,13 +133,17 @@ impl BatchManager {
     }
 
     async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
+        scopeguard::guard((), |_| {
+            tracing::debug!("heartbeat worker for task {:?} stopped", task_id);
+            self.metrics.batch_heartbeat_worker_num.dec();
+        });
+        tracing::debug!("heartbeat worker for task {:?} started", task_id);
+        self.metrics.batch_heartbeat_worker_num.inc();
         // The heartbeat is to ensure task cancellation when frontend's cancellation request fails
         // to reach compute node (for any reason like RPC fails, frontend crashes).
         let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(60));
         heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         heartbeat_interval.reset();
-        tracing::debug!("heartbeat loop for task {:?} starts", task_id);
-        self.metrics.batch_heartbeat_worker_num.inc();
         loop {
             heartbeat_interval.tick().await;
             if !self.tasks.lock().contains_key(&task_id) {
@@ -157,10 +161,9 @@ impl BatchManager {
                 tracing::warn!("try to cancel task {:?} due to heartbeat", task_id);
                 // Task may have been cancelled, but it's fine to `cancel_task` again.
                 self.cancel_task(&task_id.to_prost());
+                break;
             }
         }
-        tracing::debug!("heartbeat loop for task {:?} stops", task_id);
-        self.metrics.batch_heartbeat_worker_num.dec();
     }
 
     pub fn get_data(
@@ -207,6 +210,9 @@ impl BatchManager {
                 // propagated to upstream.
                 task.cancel();
                 self.metrics.task_num.dec();
+                if let Some(heartbeat_join_handle) = task.heartbeat_join_handle() {
+                    heartbeat_join_handle.abort();
+                }
             }
             None => {
                 warn!("Task {:?} not found for cancel", sid)

@@ -678,13 +678,9 @@ impl<C> BatchTaskExecution<C> {
     pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
         *self.heartbeat_join_handle.lock() = Some(join_handle);
     }
-}
 
-impl<C> Drop for BatchTaskExecution<C> {
-    fn drop(&mut self) {
-        if let Some(join_handle) = self.heartbeat_join_handle.lock().take() {
-            join_handle.abort();
-        }
+    pub(crate) fn heartbeat_join_handle(&self) -> Option<JoinHandle<()>> {
+        self.heartbeat_join_handle.lock().take()
     }
 }
 
