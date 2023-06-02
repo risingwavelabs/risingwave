@@ -23,14 +23,17 @@ use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 /// A cheaply cloneable struct type.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StructType {
+pub struct StructType(Arc<StructTypeInner>);
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct StructTypeInner {
     // Details about a struct type. There are 2 cases for a struct:
     // 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
     //     e.g. `STRUCT<i INT, j VARCHAR>`.
     // 2. `field_names.len() == 0`: it represents a struct with unnamed fields,
     //     e.g. `ROW(1, 2)`.
-    pub(super) field_names: Arc<[String]>,
-    pub(super) field_types: Arc<[DataType]>,
+    field_names: Box<[String]>,
+    field_types: Box<[DataType]>,
 }
 
 impl StructType {
@@ -42,73 +45,81 @@ impl StructType {
             field_names.push(name.into());
             field_types.push(ty);
         }
-        Self {
+        Self(Arc::new(StructTypeInner {
             field_types: field_types.into(),
             field_names: field_names.into(),
-        }
+        }))
     }
 
     /// Creates a struct type with no fields.
     #[cfg(test)]
     pub fn empty() -> Self {
-        Self {
-            field_types: Arc::new([]),
-            field_names: Arc::new([]),
-        }
+        Self(Arc::new(StructTypeInner {
+            field_types: Box::new([]),
+            field_names: Box::new([]),
+        }))
+    }
+
+    pub(super) fn from_parts(field_names: Vec<String>, field_types: Vec<DataType>) -> Self {
+        Self(Arc::new(StructTypeInner {
+            field_types: field_types.into(),
+            field_names: field_names.into(),
+        }))
     }
 
     /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
-        Self {
+        Self(Arc::new(StructTypeInner {
             field_types: fields.into(),
-            field_names: Arc::new([]),
-        }
+            field_names: Box::new([]),
+        }))
     }
 
     /// Returns the number of fields.
     pub fn len(&self) -> usize {
-        self.field_types.len()
+        self.0.field_types.len()
     }
 
     /// Returns `true` if there are no fields.
     pub fn is_empty(&self) -> bool {
-        self.field_types.is_empty()
+        self.0.field_types.is_empty()
     }
 
     /// Gets an iterator over the names of the fields.
     ///
     /// If the struct field is unnamed, the iterator returns **no names**.
     pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.field_names.iter().map(|s| s.as_str())
+        self.0.field_names.iter().map(|s| s.as_str())
     }
 
     /// Gets an iterator over the types of the fields.
     pub fn types(&self) -> impl ExactSizeIterator<Item = &DataType> {
-        self.field_types.iter()
+        self.0.field_types.iter()
     }
 
     /// Gets an iterator over the fields.
     ///
     /// If the struct field is unnamed, the iterator returns **empty strings**.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &DataType)> {
-        self.field_names
+        self.0
+            .field_names
             .iter()
             .map(|s| s.as_str())
-            .chain(std::iter::repeat("").take(self.field_types.len() - self.field_names.len()))
-            .zip_eq_debug(self.field_types.iter())
+            .chain(std::iter::repeat("").take(self.0.field_types.len() - self.0.field_names.len()))
+            .zip_eq_debug(self.0.field_types.iter())
     }
 }
 
 impl Display for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.field_names.is_empty() {
+        if self.0.field_names.is_empty() {
             write!(f, "record")
         } else {
             write!(
                 f,
                 "struct<{}>",
-                (self.field_types.iter())
-                    .zip_eq_fast(self.field_names.iter())
+                (self.0.field_types.iter())
+                    .zip_eq_fast(self.0.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
                     .join(",")
             )
@@ -134,9 +145,9 @@ impl FromStr for StructType {
             field_names.push(field_name.to_string());
             field_types.push(DataType::from_str(field_type)?);
         }
-        Ok(StructType {
+        Ok(Self(Arc::new(StructTypeInner {
             field_types: field_types.into(),
             field_names: field_names.into(),
-        })
+        })))
     }
 }
