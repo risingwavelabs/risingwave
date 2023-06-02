@@ -533,7 +533,7 @@ impl S3ObjectStore {
         // Retry 3 times if we get server-side errors or throttling errors
         let sdk_config_loader =
             aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
-        let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or("".to_string());
+        let endpoint = std::env::var("OBJECT_STORAGE_ENDPOINT").unwrap_or("".to_string());
         let sdk_config = match endpoint.is_empty() {
             false => {
                 sdk_config_loader
