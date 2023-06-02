@@ -81,8 +81,8 @@ impl StreamExchange {
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = formatter_debug_plan_node!(
-            f, "StreamExchange"
-            , { "no_shuffle", self.no_shuffle }
+            f, "StreamExchange",
+            { "no_shuffle", self.no_shuffle },
         );
 
         builder

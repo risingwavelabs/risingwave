@@ -212,7 +212,7 @@ impl From<Value> for JsonbVal {
     }
 }
 
-impl JsonbRef<'_> {
+impl<'a> JsonbRef<'a> {
     pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl bytes::BufMut>,
@@ -301,12 +301,50 @@ impl JsonbRef<'_> {
         }
     }
 
+    pub fn force_string(&self) -> String {
+        let mut s = String::new();
+        self.force_str(&mut s).unwrap();
+        s
+    }
+
     pub fn access_object_field(&self, field: &str) -> Option<Self> {
         self.0.get(field).map(Self)
     }
 
     pub fn access_array_element(&self, idx: usize) -> Option<Self> {
         self.0.get(idx).map(Self)
+    }
+
+    /// Returns an iterator over the elements if this is an array.
+    pub fn array_elements(self) -> Result<impl Iterator<Item = JsonbRef<'a>>, String> {
+        match &self.0 {
+            Value::Array(array) => Ok(array.iter().map(Self)),
+            _ => Err(format!(
+                "cannot extract elements from a jsonb {}",
+                self.type_name()
+            )),
+        }
+    }
+
+    /// Returns an iterator over the keys if this is an object.
+    pub fn object_keys(self) -> Result<impl Iterator<Item = &'a str>, String> {
+        match &self.0 {
+            Value::Object(object) => Ok(object.keys().map(|s| s.as_str())),
+            _ => Err(format!(
+                "cannot call jsonb_object_keys on a jsonb {}",
+                self.type_name()
+            )),
+        }
+    }
+
+    /// Returns an iterator over the key-value pairs if this is an object.
+    pub fn object_key_values(
+        self,
+    ) -> Result<impl Iterator<Item = (&'a str, JsonbRef<'a>)>, String> {
+        match &self.0 {
+            Value::Object(object) => Ok(object.iter().map(|(k, v)| (k.as_str(), Self(v)))),
+            _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
+        }
     }
 }
 

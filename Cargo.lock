@@ -6245,6 +6245,7 @@ dependencies = [
  "once_cell",
  "prost",
  "risingwave_common",
+ "risingwave_expr",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
  "risingwave_pb",
