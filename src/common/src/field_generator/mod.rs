@@ -145,7 +145,7 @@ impl FieldGeneratorImpl {
                 split_num,
                 offset,
             )?)),
-            _ => unimplemented!(),
+            _ => anyhow!("unimplemented field generator {}", data_type),
         }
     }
 
@@ -171,7 +171,7 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            _ => unimplemented!("DataType: {}", data_type),
+            _ => anyhow!("unimplemented field generator {}", data_type),
         }
     }
 
