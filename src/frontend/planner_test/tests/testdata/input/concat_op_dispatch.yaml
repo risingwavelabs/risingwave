@@ -1,0 +1,65 @@
+- sql: |
+    select array[1] || array[2];
+  name: int[] || int[] -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array[1] || 2;
+  name: int[] || int -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array[1] || null;
+  name: int[] || unknown (as int[]) -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array[1] || '{2}';
+  name: int[] || unknown (as int[]) -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array['a'] || '{b}';
+  name: text[] || unknown (as text[]) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    with t(s) as (select 'b') select array['a'] || s from t;
+  name: text[] || text -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    with t(s) as (select '2') select array[1] || s from t;
+  name: int[] || text -> err
+  expected_outputs:
+  - binder_error
+- sql: |
+    select '1'::jsonb || '2'::jsonb;
+  name: jsonb || jsonb -> jsonb
+  expected_outputs:
+  - binder_error
+- sql: |
+    select '1'::jsonb || '2';
+  name: jsonb || unknown (as jsonb) -> jsonb
+  expected_outputs:
+  - binder_error
+- sql: |
+    with t(s) as (select '2') select '1'::jsonb || s from t;
+  name: jsonb || text -> text
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select 1 || 2;
+  name: int || int -> err
+  expected_outputs:
+  - binder_error
+- sql: |
+    select 1 || '2';
+  name: int || unknown (as text) -> text
+  expected_outputs:
+  - batch_plan
+- sql: |
+    with t(s) as (select '2') select 1 || s from t;
+  name: int || text -> text
+  expected_outputs:
+  - batch_plan
