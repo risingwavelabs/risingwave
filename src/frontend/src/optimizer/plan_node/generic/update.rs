@@ -19,7 +19,7 @@ use educe::Educe;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::TableVersionId;
 
-use super::Distill;
+use super::DistillUnit;
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, ExprRewriter};
 
@@ -79,13 +79,13 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
     }
 }
 
-impl<PlanRef: Eq + Hash> Distill for Update<PlanRef> {
+impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 3 } else { 2 });
         vec.push(("table", Pretty::Text(self.table_name.clone().into())));
         vec.push(("exprs", Pretty::debug(&self.exprs)));
         if self.returning {
-            vec.push(("returning", Pretty::display(&"true")));
+            vec.push(("returning", Pretty::display(&true)));
         }
         Pretty::childless_record(name, vec)
     }
