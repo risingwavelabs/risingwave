@@ -62,7 +62,6 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_tracing", Level::INFO)
         .with_target("risingwave_compute", Level::INFO)
         .with_target("risingwave_compactor", Level::INFO)
-        .with_target("risingwave_object_store", Level::INFO)
         .with_target("risingwave_hummock_sdk", Level::INFO)
         .with_target("pgwire", Level::ERROR)
         // disable events that are too verbose
@@ -154,8 +153,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
-            .with_target("aws-smithy-types", Level::INFO)
-            .with_target("aws-credential-types", LevelFilter::OFF)
+            .with_target("aws_smithy_types", Level::INFO)
+            .with_target("aws_credential_types", LevelFilter::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
