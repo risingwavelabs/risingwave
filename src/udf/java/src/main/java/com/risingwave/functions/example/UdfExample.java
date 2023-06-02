@@ -15,6 +15,7 @@ public class UdfExample {
             server.addFunction("gcd3", new Gcd());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("series", new Series());
+            server.addFunction("split", new Split());
 
             server.start();
             server.awaitTermination();
@@ -73,6 +74,22 @@ public class UdfExample {
         public void eval(int n) {
             for (int i = 0; i < n; i++) {
                 collect(i);
+            }
+        }
+    }
+
+    public static class Split extends TableFunction<Split.Row> {
+        public static class Row {
+            public String word;
+            public int length;
+        }
+
+        public void eval(String str) {
+            for (var s : str.split(" ")) {
+                var row = new Row();
+                row.word = s;
+                row.length = s.length();
+                collect(row);
             }
         }
     }
