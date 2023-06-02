@@ -18,7 +18,7 @@ mod varchar;
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
