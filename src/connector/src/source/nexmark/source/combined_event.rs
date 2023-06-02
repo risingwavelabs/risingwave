@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 pub use nexmark::event::EventType;
 use nexmark::event::{Auction, Bid, Event, Person};
 use risingwave_common::array::StructValue;
 use risingwave_common::catalog::row_id_column_name;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType, Timestamp};
-use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -76,44 +74,35 @@ pub fn get_event_data_types_with_names(
     let mut fields = match event_type {
         None => {
             vec![
-                ("event_type".to_owned(), DataType::Int64),
+                ("event_type".into(), DataType::Int64),
+                ("person".into(), DataType::Struct(get_person_struct_type())),
                 (
-                    "person".to_owned(),
-                    DataType::Struct(get_person_struct_type().into()),
+                    "auction".into(),
+                    DataType::Struct(get_auction_struct_type()),
                 ),
-                (
-                    "auction".to_owned(),
-                    DataType::Struct(get_auction_struct_type().into()),
-                ),
-                (
-                    "bid".to_owned(),
-                    DataType::Struct(get_bid_struct_type().into()),
-                ),
+                ("bid".into(), DataType::Struct(get_bid_struct_type())),
             ]
         }
         Some(EventType::Person) => {
             let struct_type = get_person_struct_type();
             struct_type
-                .field_names
-                .into_iter()
-                .zip_eq_fast(struct_type.fields)
-                .collect_vec()
+                .name_types()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
         }
         Some(EventType::Auction) => {
             let struct_type = get_auction_struct_type();
             struct_type
-                .field_names
-                .into_iter()
-                .zip_eq_fast(struct_type.fields)
-                .collect_vec()
+                .name_types()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
         }
         Some(EventType::Bid) => {
             let struct_type = get_bid_struct_type();
             struct_type
-                .field_names
-                .into_iter()
-                .zip_eq_fast(struct_type.fields)
-                .collect_vec()
+                .name_types()
+                .map(|(n, t)| (n.into(), t.clone()))
+                .collect()
         }
     };
 
@@ -133,14 +122,14 @@ pub(crate) fn get_event_data_types(
         None => {
             vec![
                 DataType::Int64,
-                DataType::Struct(get_person_struct_type().into()),
-                DataType::Struct(get_auction_struct_type().into()),
-                DataType::Struct(get_bid_struct_type().into()),
+                DataType::Struct(get_person_struct_type()),
+                DataType::Struct(get_auction_struct_type()),
+                DataType::Struct(get_bid_struct_type()),
             ]
         }
-        Some(EventType::Person) => get_person_struct_type().fields,
-        Some(EventType::Auction) => get_auction_struct_type().fields,
-        Some(EventType::Bid) => get_bid_struct_type().fields,
+        Some(EventType::Person) => get_person_struct_type().types().into(),
+        Some(EventType::Auction) => get_auction_struct_type().types().into(),
+        Some(EventType::Bid) => get_bid_struct_type().types().into(),
     };
 
     if let Some(row_id_index) = row_id_index {
@@ -152,97 +141,43 @@ pub(crate) fn get_event_data_types(
 }
 
 pub(crate) fn get_person_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Timestamp,
-        DataType::Varchar,
-    ];
-    let field_names = vec![
-        "id",
-        "name",
-        "email_address",
-        "credit_card",
-        "city",
-        "state",
-        "date_time",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("id".into(), DataType::Int64),
+        ("name".into(), DataType::Varchar),
+        ("email_address".into(), DataType::Varchar),
+        ("credit_card".into(), DataType::Varchar),
+        ("city".into(), DataType::Varchar),
+        ("state".into(), DataType::Varchar),
+        ("date_time".into(), DataType::Timestamp),
+        ("extra".into(), DataType::Varchar),
+    ])
 }
 
 pub(crate) fn get_auction_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Timestamp,
-        DataType::Timestamp,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Varchar,
-    ];
-    let field_names = vec![
-        "id",
-        "item_name",
-        "description",
-        "initial_bid",
-        "reserve",
-        "date_time",
-        "expires",
-        "seller",
-        "category",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("id".into(), DataType::Int64),
+        ("item_name".into(), DataType::Varchar),
+        ("description".into(), DataType::Varchar),
+        ("initial_bid".into(), DataType::Int64),
+        ("reserve".into(), DataType::Int64),
+        ("date_time".into(), DataType::Timestamp),
+        ("expires".into(), DataType::Timestamp),
+        ("seller".into(), DataType::Int64),
+        ("category".into(), DataType::Int64),
+        ("extra".into(), DataType::Varchar),
+    ])
 }
 
 pub(crate) fn get_bid_struct_type() -> StructType {
-    let fields = vec![
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Int64,
-        DataType::Varchar,
-        DataType::Varchar,
-        DataType::Timestamp,
-        DataType::Varchar,
-    ];
-    let field_names = vec![
-        "auction",
-        "bidder",
-        "price",
-        "channel",
-        "url",
-        "date_time",
-        "extra",
-    ]
-    .into_iter()
-    .map(ToOwned::to_owned)
-    .collect();
-
-    StructType {
-        fields,
-        field_names,
-    }
+    StructType::new(vec![
+        ("auction".into(), DataType::Int64),
+        ("bidder".into(), DataType::Int64),
+        ("price".into(), DataType::Int64),
+        ("channel".into(), DataType::Varchar),
+        ("url".into(), DataType::Varchar),
+        ("date_time".into(), DataType::Timestamp),
+        ("extra".into(), DataType::Varchar),
+    ])
 }
 
 pub(crate) fn combined_event_to_row(e: CombinedEvent, row_id_index: Option<usize>) -> OwnedRow {

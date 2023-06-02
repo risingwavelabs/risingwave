@@ -19,7 +19,6 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
@@ -48,11 +47,9 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
         DataType::Struct(inner) => AstDataType::Struct(
             inner
-                .field_names
-                .iter()
-                .zip_eq_fast(inner.fields.iter())
+                .name_types()
                 .map(|(name, typ)| StructField {
-                    name: name.as_str().into(),
+                    name: name.into(),
                     data_type: data_type_to_ast_data_type(typ),
                 })
                 .collect(),

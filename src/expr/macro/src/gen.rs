@@ -520,7 +520,7 @@ impl FunctionAttr {
             vec![quote! { self.return_type.clone() }]
         } else {
             (0..return_types.len())
-                .map(|i| quote! { self.return_type.as_struct().fields[#i].clone() })
+                .map(|i| quote! { self.return_type.as_struct().types()[#i].clone() })
                 .collect()
         };
         let const_arg = match &self.prebuild {
@@ -651,9 +651,7 @@ fn data_type(ty: &str) -> TokenStream2 {
         return quote! { DataType::List(Box::new(#inner_type)) };
     }
     if ty.starts_with("struct<") {
-        return quote! { DataType::Struct(Arc::new(
-            #ty.parse().expect("invalid struct type")
-        )) };
+        return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };
     }
     let variant = format_ident!("{}", types::data_type(ty));
     quote! { DataType::#variant }

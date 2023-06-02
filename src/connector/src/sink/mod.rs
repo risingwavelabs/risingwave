@@ -30,7 +30,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
-use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -363,12 +363,10 @@ fn datum_to_json_object(
             json!(vec)
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_fast(
-                st.fields
-                    .iter()
-                    .zip_eq_fast(st.field_names.iter())
-                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            let mut map = Map::with_capacity(st.types().len());
+            for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
+                st.name_types()
+                    .map(|(name, dt)| Field::with_name(dt.clone(), name)),
             ) {
                 let value =
                     datum_to_json_object(&sub_field, sub_datum_ref, timestamp_handling_mode)?;

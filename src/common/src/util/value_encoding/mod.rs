@@ -378,9 +378,9 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
-    let num_fields = struct_def.fields.len();
+    let num_fields = struct_def.types().len();
     let mut field_values = Vec::with_capacity(num_fields);
-    for field_type in &struct_def.fields {
+    for field_type in struct_def.types().iter() {
         field_values.push(inner_deserialize_datum(data, field_type)?);
     }
 

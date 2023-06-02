@@ -101,10 +101,9 @@ impl Binder {
     fn bind_wildcard_field(expr: ExprImpl) -> Result<Vec<(ExprImpl, String)>> {
         let input = expr.return_type();
         if let DataType::Struct(t) = input {
-            Ok(t.fields
-                .iter()
+            Ok(t.name_types()
                 .enumerate()
-                .map(|(i, f)| {
+                .map(|(i, (name, ty))| {
                     (
                         FunctionCall::new_unchecked(
                             ExprType::Field,
@@ -113,10 +112,10 @@ impl Binder {
                                 Literal::new(Some((i as i32).to_scalar_value()), DataType::Int32)
                                     .into(),
                             ],
-                            f.clone(),
+                            ty.clone(),
                         )
                         .into(),
-                        t.field_names[i].clone(),
+                        name.to_string(),
                     )
                 })
                 .collect_vec())
@@ -128,8 +127,8 @@ impl Binder {
 
 fn find_field(input: DataType, field_name: String) -> Result<(DataType, usize)> {
     if let DataType::Struct(t) = input {
-        if let Some((pos, _)) = t.field_names.iter().find_position(|s| **s == field_name) {
-            Ok((t.fields[pos].clone(), pos))
+        if let Some((pos, _)) = t.names().iter().find_position(|s| **s == field_name) {
+            Ok((t.types()[pos].clone(), pos))
         } else {
             Err(ErrorCode::BindError(format!(
                 "column \"{}\" not found in struct type",

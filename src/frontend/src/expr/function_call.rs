@@ -171,9 +171,7 @@ impl FunctionCall {
         allows: CastContext,
     ) -> Result<ExprImpl, CastError> {
         let func = *expr.into_function_call().unwrap();
-        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
-            (t.fields.clone(), t.field_names.clone())
-        } else {
+        let DataType::Struct(t) = &target_type else {
             return Err(CastError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 func.return_type(),
@@ -182,16 +180,16 @@ impl FunctionCall {
             )));
         };
         let (func_type, inputs, _) = func.decompose();
-        match fields.len().cmp(&inputs.len()) {
+        match t.types().len().cmp(&inputs.len()) {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq_fast(fields.to_vec())
+                    .zip_eq_fast(t.types().to_vec())
                     .map(|(e, t)| Self::new_cast(e, t, allows))
                     .collect::<Result<Vec<_>, CastError>>()?;
                 let return_type = DataType::new_struct(
                     inputs.iter().map(|i| i.return_type()).collect_vec(),
-                    field_names,
+                    t.names().to_vec(),
                 );
                 Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
             }

@@ -14,11 +14,12 @@
 
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
 use super::DataType;
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 /// Details about a struct type. There are 2 cases for a struct:
 /// 1. `field_names.len() == fields.len()`: it represents a struct with named fields, e.g.
@@ -27,31 +28,47 @@ use crate::util::iter_util::ZipEqFast;
 ///    `ROW(1, 2)`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StructType {
-    pub fields: Vec<DataType>,
-    pub field_names: Vec<String>,
+    pub(super) field_names: Arc<[String]>,
+    pub(super) fields: Arc<[DataType]>,
 }
 
 impl StructType {
     /// Creates a struct type with named fields.
-    pub fn new(named_fields: Vec<(DataType, String)>) -> Self {
+    pub fn new(named_fields: Vec<(String, DataType)>) -> Self {
         let mut fields = Vec::with_capacity(named_fields.len());
         let mut field_names = Vec::with_capacity(named_fields.len());
-        for (d, s) in named_fields {
-            fields.push(d);
-            field_names.push(s);
+        for (name, ty) in named_fields {
+            field_names.push(name);
+            fields.push(ty);
         }
         Self {
-            fields,
-            field_names,
+            fields: fields.into(),
+            field_names: field_names.into(),
         }
     }
 
     /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
         Self {
-            fields,
-            field_names: Vec::new(),
+            fields: fields.into(),
+            field_names: Arc::new([]),
         }
+    }
+
+    pub fn types(&self) -> &[DataType] {
+        &self.fields
+    }
+
+    pub fn names(&self) -> &[String] {
+        &self.field_names
+    }
+
+    pub fn name_types(&self) -> impl Iterator<Item = (&str, &DataType)> {
+        self.field_names
+            .iter()
+            .map(|s| s.as_str())
+            .chain(std::iter::repeat("").take(self.fields.len() - self.field_names.len()))
+            .zip_eq_debug(self.fields.iter())
     }
 }
 
@@ -91,8 +108,8 @@ impl FromStr for StructType {
             fields.push(DataType::from_str(field_type)?);
         }
         Ok(StructType {
-            fields,
-            field_names,
+            fields: fields.into(),
+            field_names: field_names.into(),
         })
     }
 }

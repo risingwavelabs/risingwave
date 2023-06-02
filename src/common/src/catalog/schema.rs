@@ -278,10 +278,8 @@ impl FromIterator<Field> for Schema {
 impl From<&StructType> for Schema {
     fn from(t: &StructType) -> Self {
         Schema::new(
-            t.fields
-                .iter()
-                .zip_eq_fast(t.field_names.iter())
-                .map(|(d, s)| Field::with_name(d.clone(), s))
+            t.name_types()
+                .map(|(s, d)| Field::with_name(d.clone(), s))
                 .collect(),
         )
     }

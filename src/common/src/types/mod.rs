@@ -21,7 +21,6 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::{FromStr, Utf8Error};
-use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
 use chrono::{Datelike, Timelike};
@@ -165,7 +164,7 @@ pub enum DataType {
     Interval,
     #[display("{0}")]
     #[from_str(ignore)]
-    Struct(Arc<StructType>),
+    Struct(StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
     List(Box<DataType>),
@@ -360,8 +359,8 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
-                pb.field_type = t.fields.iter().map(|f| f.to_protobuf()).collect_vec();
-                pb.field_names = t.field_names.clone();
+                pb.field_type = t.types().iter().map(|f| f.to_protobuf()).collect_vec();
+                pb.field_names = t.names().to_vec();
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
@@ -402,13 +401,10 @@ impl DataType {
     }
 
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
-        Self::Struct(
-            StructType {
-                fields,
-                field_names,
-            }
-            .into(),
-        )
+        Self::Struct(StructType {
+            fields: fields.into(),
+            field_names: field_names.into(),
+        })
     }
 
     pub fn as_struct(&self) -> &StructType {
@@ -442,7 +438,7 @@ impl DataType {
             DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
-                    .fields
+                    .types()
                     .iter()
                     .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
@@ -957,8 +953,11 @@ impl ScalarImpl {
                     ))
                     .into());
                 }
-                let mut fields = Vec::with_capacity(s.fields.len());
-                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(&s.fields) {
+                let mut fields = Vec::with_capacity(s.types().len());
+                for (s, ty) in str[1..str.len() - 1]
+                    .split(',')
+                    .zip_eq_debug(s.types().iter())
+                {
                     fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
                 }
                 ScalarImpl::Struct(StructValue::new(fields))
@@ -1134,7 +1133,7 @@ impl ScalarImpl {
                 Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
-            Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
+            Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
         })
     }
@@ -1297,13 +1296,10 @@ mod tests {
                         ScalarImpl::Int64(233).into(),
                         ScalarImpl::Float64(23.33.into()).into(),
                     ])),
-                    DataType::Struct(
-                        StructType::new(vec![
-                            (DataType::Int64, "a".to_string()),
-                            (DataType::Float64, "b".to_string()),
-                        ])
-                        .into(),
-                    ),
+                    DataType::Struct(StructType::new(vec![
+                        ("a".to_string(), DataType::Int64),
+                        ("b".to_string(), DataType::Float64),
+                    ])),
                 ),
                 DataTypeName::List => (
                     ScalarImpl::List(ListValue::new(vec![

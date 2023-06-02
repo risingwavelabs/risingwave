@@ -146,7 +146,7 @@ pub async fn handle_create_function(
             )];
             match &return_type {
                 DataType::Struct(s) => {
-                    fields.extend(s.fields.iter().map(|t| to_field(t.clone().into())))
+                    fields.extend(s.types().iter().map(|t| to_field(t.clone().into())))
                 }
                 _ => fields.push(to_field(return_type.clone().into())),
             }

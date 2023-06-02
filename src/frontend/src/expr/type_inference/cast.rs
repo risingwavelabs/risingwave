@@ -126,17 +126,17 @@ pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastCont
 fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     match (source, target) {
         (DataType::Struct(lty), DataType::Struct(rty)) => {
-            if lty.fields.is_empty() || rty.fields.is_empty() {
+            if lty.types().is_empty() || rty.types().is_empty() {
                 unreachable!("record type should be already processed at this point");
             }
-            if lty.fields.len() != rty.fields.len() {
+            if lty.types().len() != rty.types().len() {
                 // only cast structs of the same length
                 return false;
             }
             // ... and all fields are castable
-            lty.fields
+            lty.types()
                 .iter()
-                .zip_eq_fast(rty.fields.iter())
+                .zip_eq_fast(rty.types().iter())
                 .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
