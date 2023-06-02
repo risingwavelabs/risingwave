@@ -133,7 +133,7 @@ impl BatchManager {
     }
 
     async fn start_task_heartbeat(&self, mut state_reporter: StateReporter, task_id: TaskId) {
-        scopeguard::guard((), |_| {
+        let _metric_guard = scopeguard::guard((), |_| {
             tracing::debug!("heartbeat worker for task {:?} stopped", task_id);
             self.metrics.batch_heartbeat_worker_num.dec();
         });
