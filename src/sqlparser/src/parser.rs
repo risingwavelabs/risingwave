@@ -714,9 +714,7 @@ impl Parser {
             self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
             let order_by_parsed = self.parse_comma_separated(Parser::parse_order_by_expr)?;
             let order_by = order_by_parsed.iter().exactly_one().map_err(|_| {
-                ParserError::ParserError(
-                    "only one arg in order by is expected here".to_string(),
-                )
+                ParserError::ParserError("only one arg in order by is expected here".to_string())
             })?;
             self.expect_token(&Token::RParen)?;
             Some(Box::new(order_by.clone()))
