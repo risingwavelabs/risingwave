@@ -92,7 +92,7 @@ pub fn add_hummock_backend(
         }
         ([], [aws_s3], []) => {
             cmd.arg("--state-store")
-                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket));
+                .arg(format!("hummock+s3://{}", aws_s3.bucket));
             (true, true)
         }
         ([], [], [opendal]) => {

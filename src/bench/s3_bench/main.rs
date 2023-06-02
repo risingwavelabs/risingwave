@@ -18,6 +18,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use aws_config::retry::RetryConfig;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
 use aws_sdk_s3::{Client, Credentials, Endpoint};
 use aws_smithy_http::body::SdkBody;
@@ -158,10 +159,6 @@ pub struct Config {
     /// Concurrent get and put
     #[clap(short, long)]
     multithread: bool,
-
-    /// If 'virtual_hosted' is true, that means using other s3 compatible object store.
-    #[clap(short, long)]
-    virtual_hosted: bool,
 }
 
 fn read_cases(cfg: Arc<Config>) -> Vec<Case> {
@@ -630,37 +627,21 @@ async fn main() {
 
     let cfg = Arc::new(Config::parse());
 
-    let shared_config = match cfg.virtual_hosted {
-        true => {
-            // using s3 compatible object store, need to get region and some other information.
-            // load from env
-            let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
-                panic!("S3_COMPATIBLE_REGION not found from environment variables")
-            });
-            let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
-                panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
-            });
-            let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
-                panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
-            });
-            let access_key_secret = std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY")
-                .unwrap_or_else(|_| {
-                    panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
-                });
-
-            aws_config::from_env()
-                .credentials_provider(Credentials::from_keys(
-                    access_key_id,
-                    access_key_secret,
-                    None,
-                ))
+    // Retry 3 times if we get server-side errors or throttling errors
+    let sdk_config_loader =
+        aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
+    let endpoint = std::env::var("OBJECT_STORAGE_ENDPOINT").unwrap_or("".to_string());
+    let sdk_config = match endpoint.is_empty() {
+        false => {
+            sdk_config_loader
                 .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
                 .load()
                 .await
         }
-        false => aws_config::load_from_env().await,
+        true => sdk_config_loader.load().await,
     };
-    let client = Arc::new(Client::new(&shared_config));
+
+    let client = Arc::new(Client::new(&sdk_config));
     let objs = Arc::new(RwLock::new(ObjPool::default()));
 
     let mut cases = read_cases(cfg.clone());
