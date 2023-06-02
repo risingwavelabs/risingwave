@@ -729,7 +729,7 @@ mod tests {
     /// [`Java_com_risingwave_java_binding_Binding_rowGetTimestampValue`]
     /// is of type [`DataType::Timestamptz`] stored in microseconds
     #[test]
-    fn test_timestampz_to_interval() {
+    fn test_timestamptz_to_i64() {
         let timestamptz_val =
             literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap();
         assert_eq!(timestamptz_val.as_int64(), &1_685_583_900_000_000);
