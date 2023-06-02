@@ -29,7 +29,10 @@ All of these object stores are supported in risedev, you can use the risedev com
 ### COS & Lyvecloud Storage
 To use COS or Lyvecloud Storage, you need to overwrite the aws default `access_key`, `secret_key`, `region`, and config endpoint in the environment variable:
 ```shell
-export OBJECT_STORAGE_ENDPOINT = "endpoint"
+export AWS_REGION=your_region
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export OBJECT_STORAGE_ENDPOINT=your_endpoint 
 ```
 
 then in `risedev.yml`, set the bucket name, starting RisingWave with ridedev. Then you can successfully run RisingWave on these two storage backends.

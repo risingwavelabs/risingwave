@@ -24,7 +24,7 @@ profile:
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
-        # bucket: bucket-name
+        # bucket: test-bucket
 
       # If you want to create CDC source table, uncomment the following line
       # - use: connector-node
