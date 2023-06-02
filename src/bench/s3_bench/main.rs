@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use aws_config::retry::RetryConfig;
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::{Client, Credentials, Endpoint};
+use aws_sdk_s3::{Client, Endpoint};
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;

@@ -142,7 +142,6 @@ pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
-    // S3Compatible(MonitoredObjectStore<S3ObjectStore>),
 }
 
 macro_rules! dispatch_async {
@@ -169,9 +168,6 @@ macro_rules! object_store_impl_method_body {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
-                // ObjectStoreImpl::S3Compatible(s3) => {
-                //     $dispatch_macro!(s3, $method_name, path $(, $args)*)
-                // },
             }
         }
     };
@@ -196,9 +192,6 @@ macro_rules! object_store_impl_method_body_slice {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
-                // ObjectStoreImpl::S3Compatible(s3) => {
-                //     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                // }
             }
         }
     };
@@ -265,7 +258,6 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
-            // ObjectStoreImpl::S3Compatible(store) => store.inner.get_object_prefix(obj_id),
         }
     }
 }
