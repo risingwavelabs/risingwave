@@ -19,7 +19,7 @@ use crate::CtlContext;
 /// mark node as unschedulable
 pub async fn cordon_worker(context: &CtlContext, addr: HostAddr) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    meta_client.unregister(addr).await?;
-    // TODO: automatically call clear_worker_node here?
+    meta_client.unregister(addr).await?; // TODO: rename into unregister
+                                         // TODO: automatically call clear_worker_node here?
     Ok(())
 }

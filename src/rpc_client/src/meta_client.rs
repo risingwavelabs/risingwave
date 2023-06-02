@@ -561,12 +561,9 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
-    pub async fn cordon_worker(&self, addr: HostAddr) -> Result<()> {
-        let request = DeleteWorkerNodeRequest {
-            host: Some(addr.to_protobuf()),
-        };
-        self.inner.delete_worker_node(request).await?;
-        Ok(())
+    pub async fn cordon_worker(&self, addr: HostAddr) -> Result<CordonWorkerNodeResponse> {
+        assert!(false); // There should be a inner.cordon_worker
+        Ok(CordonWorkerNodeResponse { status: None })
     }
 
     /// Starts a heartbeat worker.
@@ -664,12 +661,6 @@ impl MetaClient {
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
-        Ok(resp)
-    }
-
-    pub async fn get_schedule(&self) -> Result<GetScheduleResponse> {
-        let request = GetScheduleRequest {};
-        let resp = self.inner.get_schedule(request).await?;
         Ok(resp)
     }
 
@@ -1450,7 +1441,6 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, get_schedule, GetScheduleRequest, GetScheduleResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }

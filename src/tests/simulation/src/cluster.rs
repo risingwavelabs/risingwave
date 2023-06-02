@@ -19,13 +19,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
+use itertools::Itertools;
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
+use rand::seq::IteratorRandom;
 use rand::Rng;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
@@ -387,6 +389,29 @@ impl Cluster {
         self.client.spawn(future).await.unwrap()
     }
 
+    /// cordon n random nodes in this cluster.
+    pub async fn cordon_random_workers(&self, n: usize) -> Result<Vec<WorkerNode>> {
+        let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
+        if worker_nodes.len() < n {
+            return Err(anyhow!("cannot remove more nodes than present"));
+        }
+        // TODO: is this affected by madsim?
+        let rand_nodes = worker_nodes
+            .iter()
+            .choose_multiple(&mut rand::thread_rng(), n)
+            .to_vec();
+        let rand_nodes = rand_nodes.iter().map(|n| n.clone().clone()).collect_vec();
+        for rand_node in rand_nodes.clone() {
+            let addr = rand_node.clone().host.expect("node does not have host");
+            let addr = HostAddr {
+                host: addr.host,
+                port: addr.port as u16,
+            };
+            self.cordon_worker(addr).await?;
+        }
+        Ok(rand_nodes)
+    }
+
     /// Run a SQL query from the client and wait until the condition is met.
     pub async fn wait_until(
         &mut self,
@@ -497,28 +522,6 @@ impl Cluster {
             madsim::runtime::Handle::current().restart(name);
         }))
         .await;
-    }
-
-    /// mark a worker node as unschedulable
-    pub async fn cordon_worker(&self, n: usize) -> Result<Vec<WorkerNode>> {
-        let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
-        if worker_nodes.len() < n {
-            return Err(anyhow!("cannot remove more nodes than present"));
-        }
-        // TODO: is this affected by madsim?
-        let rand_nodes: Vec<&WorkerNode> = worker_nodes
-            .choose_multiple(&mut rand::thread_rng(), n)
-            .collect();
-        let rand_nodes = rand_nodes.iter().map(|n| n.clone().clone()).collect_vec();
-        for rand_node in rand_nodes.clone() {
-            let addr = rand_node.clone().host.expect("node does not have host");
-            let addr = HostAddr {
-                host: addr.host,
-                port: addr.port as u16,
-            };
-            self.cordon_worker(addr.clone()).await?;
-        }
-        Ok(rand_nodes)
     }
 
     /// Create a node for kafka producer and prepare data.

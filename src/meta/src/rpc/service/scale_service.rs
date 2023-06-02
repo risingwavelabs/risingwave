@@ -17,9 +17,8 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, GetScheduleRequest, GetScheduleResponse,
-    PauseRequest, PauseResponse, RescheduleRequest, RescheduleResponse, ResumeRequest,
-    ResumeResponse,
+    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
+    RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -123,47 +122,6 @@ where
             table_fragments,
             actor_splits,
             source_infos,
-        }))
-    }
-
-    async fn get_schedule(
-        &self,
-        _request: Request<GetScheduleRequest>,
-    ) -> Result<Response<GetScheduleResponse>, Status> {
-        let cluster_info = self
-            .get_cluster_info(Request::new(GetClusterInfoRequest {}))
-            .await?
-            .into_inner();
-
-        // Compile fragments
-        let mut fragment_list: Vec<risingwave_pb::common::Fragment> = vec![];
-        for table_fragment in cluster_info.get_table_fragments() {
-            for (_, fragment) in table_fragment.get_fragments() {
-                let mut actor_list: Vec<risingwave_pb::common::Actor> = vec![];
-                for actor in fragment.get_actors() {
-                    let id = actor.actor_id;
-                    let pu_id = table_fragment
-                        .get_actor_status()
-                        .get(&id)
-                        .expect("expected actor status") // TODO: handle gracefully
-                        .get_parallel_unit()?
-                        .get_id();
-                    actor_list.push(risingwave_pb::common::Actor {
-                        actor_id: actor.actor_id,
-                        parallel_units_id: pu_id,
-                    });
-                }
-                fragment_list.push(risingwave_pb::common::Fragment {
-                    id: fragment.get_fragment_id(),
-                    actor_list,
-                    type_flag: fragment.fragment_type_mask,
-                });
-            }
-        }
-
-        Ok(Response::new(GetScheduleResponse {
-            fragment_list: fragment_list,
-            worker_list: cluster_info.worker_nodes,
         }))
     }
 

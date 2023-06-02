@@ -5,6 +5,22 @@ package common;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
+message Actor {
+  uint32 actor_id = 1; 
+  uint32 parallel_units_id = 2;
+}
+
+message Fragment {
+  uint32 id = 1; 
+  repeated Actor actor_list = 2; 
+  uint32 type_flag = 3; 
+}
+
+message Schedule {
+  repeated Fragment fragments = 1; 
+  repeated WorkerNode workers = 2; 
+}
+
 message Status {
   enum Code {
     UNSPECIFIED = 0;
@@ -45,6 +61,7 @@ message WorkerNode {
     UNSPECIFIED = 0;
     STARTING = 1;
     RUNNING = 2;
+    // TODO: add CORDON here
   }
   // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
   message Property {
