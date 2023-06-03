@@ -32,7 +32,7 @@ impl Binder {
             Value::Boolean(b) => self.bind_bool(b),
             // Both null and string literal will be treated as `unknown` during type inference.
             // See [`ExprImpl::is_unknown`].
-            Value::Null => Ok(Literal::new(None, DataType::Varchar)),
+            Value::Null => Ok(Literal::new_untyped(None)),
             Value::Interval {
                 value,
                 leading_field,
@@ -46,10 +46,7 @@ impl Binder {
     }
 
     pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new(
-            Some(ScalarImpl::Utf8(s.into())),
-            DataType::Varchar,
-        ))
+        Ok(Literal::new_untyped(Some(s)))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {

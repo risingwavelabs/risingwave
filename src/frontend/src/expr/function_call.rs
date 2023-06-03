@@ -125,7 +125,7 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_row_expr(child, target, allows);
         }
-        if child.is_unknown() {
+        if child.is_untyped() {
             // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
             let literal = child.as_literal().unwrap();
             let datum = literal
@@ -147,7 +147,7 @@ impl FunctionCall {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
-        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
+        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,
