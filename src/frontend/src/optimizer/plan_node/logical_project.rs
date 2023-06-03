@@ -88,11 +88,6 @@ impl LogicalProject {
         self.core.fmt_with_name(f, name, self.base.schema())
     }
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core
-            .fmt_fields_with_builder(builder, self.base.schema())
-    }
-
     pub fn is_identity(&self) -> bool {
         self.core.is_identity()
     }
