@@ -119,7 +119,7 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
                         .map(|d| Pretty::display(&d))
                         .collect()
                 })
-                .map(|subset| Pretty::Array(subset))
+                .map(Pretty::Array)
                 .collect(),
         )
     }
