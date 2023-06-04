@@ -597,15 +597,25 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         builder.field("aggs", &self.agg_calls_display());
     }
 
+    pub fn fields_pretty<'a>(&self) -> Vec<(&'a str, Pretty<'a>)> {
+        let last = ("aggs", self.agg_calls_pretty());
+        if self.group_key.count_ones(..) != 0 {
+            let first = ("group_key", self.group_key_pretty());
+            vec![first, last]
+        } else {
+            vec![last]
+        }
+    }
+
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
         let f = |plan_agg_call| PlanAggCallDisplay {
             plan_agg_call,
             input_schema: self.input.schema(),
         };
-        self.agg_calls.iter().map(f).collect_vec()
+        self.agg_calls.iter().map(f).collect()
     }
 
-    fn agg_calls_pretty(&self) -> Pretty<'_> {
+    fn agg_calls_pretty<'a>(&self) -> Pretty<'a> {
         let f = |plan_agg_call| {
             Pretty::debug(&PlanAggCallDisplay {
                 plan_agg_call,
@@ -620,7 +630,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         self.group_key.ones().map(f).collect_vec()
     }
 
-    fn group_key_pretty(&self) -> Pretty<'_> {
+    fn group_key_pretty<'a>(&self) -> Pretty<'a> {
         let f = |i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap()));
         Pretty::Array(self.group_key.ones().map(f).collect())
     }
