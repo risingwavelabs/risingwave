@@ -18,4 +18,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Check License Header
-      uses: xxchan/skywalking-eyes/header@fda7518da2eec744b79322dceb539b70a80293aa
+      uses: xxchan/skywalking-eyes/header@a77d9ee9ec95a8afc78d5262b3518a9f4d6beee3
