@@ -17,6 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
@@ -597,20 +598,31 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     }
 
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.agg_calls
-            .iter()
-            .map(|plan_agg_call| PlanAggCallDisplay {
+        let f = |plan_agg_call| PlanAggCallDisplay {
+            plan_agg_call,
+            input_schema: self.input.schema(),
+        };
+        self.agg_calls.iter().map(f).collect_vec()
+    }
+
+    fn agg_calls_pretty(&self) -> Pretty<'_> {
+        let f = |plan_agg_call| {
+            Pretty::debug(&PlanAggCallDisplay {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+        };
+        Pretty::Array(self.agg_calls.iter().map(f).collect())
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.group_key
-            .ones()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+        let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
+        self.group_key.ones().map(f).collect_vec()
+    }
+
+    fn group_key_pretty(&self) -> Pretty<'_> {
+        let f = |i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap()));
+        Pretty::Array(self.group_key.ones().map(f).collect())
     }
 }
 
