@@ -149,6 +149,18 @@ def section_overview(panels):
                     f"{metric('storage_stale_object_count')} >= bool 200",
                     "Lagging Vacuum",
                 ),
+                panels.target(
+                    f"{metric('meta_cache_size')} >= bool 1024*1024*1024*0.9",
+                    "The meta cache is too large",
+                ),
+                panels.target(
+                    f"{metric('block_cache_size')} >= bool 2*1024*1024*1024*0.9",
+                    "The block cache is too large",
+                ),
+                panels.target(
+                    f"{metric('block_cache_size')} >= bool 1024*1024*1024*0.9",
+                    "The uploading memory usage is too large",
+                ),
             ],
             ["last"],
         ),
