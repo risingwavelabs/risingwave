@@ -18,4 +18,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Check License Header
-      uses: apache/skywalking-eyes/header@5dfa68f93380a5e57259faaf95088b7f133b5778
+      uses: xxchan/skywalking-eyes/header@fda7518
