@@ -150,11 +150,11 @@ def section_overview(panels):
                     "Lagging Vacuum",
                 ),
                 panels.target(
-                    f"{metric('state_store_meta_cache_size')} >= bool 1024*1024*1024*0.9",
+                    f"{metric('state_store_meta_cache_size')} >= bool 2*1024*1024*1024*0.9",
                     "The meta cache is too large",
                 ),
                 panels.target(
-                    f"{metric('state_store_block_cache_size')} >= bool 2*1024*1024*1024*0.9",
+                    f"{metric('state_store_block_cache_size')} >= bool 512*1024*1024*0.9",
                     "The block cache is too large",
                 ),
                 panels.target(
