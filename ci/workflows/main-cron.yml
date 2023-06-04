@@ -207,7 +207,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 25
+    timeout_in_minutes: 32
 
   - label: "S3 source check on AWS (csv parser)"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv"
