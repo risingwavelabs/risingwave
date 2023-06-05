@@ -148,7 +148,7 @@ impl Binder {
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(
-                "within group is disallowed here".to_string(),
+                format!("within group is disallowed for the {}", kind);
             )
             .into());
         }
