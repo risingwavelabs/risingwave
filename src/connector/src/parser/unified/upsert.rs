@@ -3,6 +3,8 @@ use risingwave_common::types::DataType;
 use super::{Access, OperateRow, RowOperation};
 use crate::parser::unified::AccessError;
 
+/// UpsertAccess wraps a key-value message format into an upsert source.
+/// A key accessor and a value accessor are required.
 pub struct UpsertAccess<K, V> {
     pub key_accessor: Option<K>,
     pub value_accessor: Option<V>,

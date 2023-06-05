@@ -5,9 +5,11 @@ use super::{Access, OperateRow, RowOperation};
 pub struct DebeziumAdapter<A> {
     pub accessor: A,
 }
+
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
+
 pub const DEBEZIUM_READ_OP: &str = "r";
 pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
