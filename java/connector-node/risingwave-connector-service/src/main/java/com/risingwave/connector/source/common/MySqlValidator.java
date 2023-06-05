@@ -152,7 +152,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
                 if (!isDataTypeCompatible(pgDataType, e.getValue())) {
-                    throw ValidatorUtils.invalidArgument("Incompatible data type of column " + e.getKey());
+                    throw ValidatorUtils.invalidArgument(
+                            "Incompatible data type of column " + e.getKey());
                 }
             }
 
