@@ -119,8 +119,6 @@ async fn cordoned_nodes_do_not_get_new_actors(
         }
     }
 
-    println!("here is where the fun begins... Creating additional query"); // TODO: del line
-
     let dummy_create = "create table t (dummy date, v varchar);";
     let dummy_mv = "create materialized view mv as select v from t;";
     let dummy_in = "insert into t values ('2023-01-01', '1z');";
@@ -336,10 +334,8 @@ async fn invalid_reschedule(
         .expect("expect fragment to have at least 1 actor")
         .parallel_units_id;
     let to = cordoned_pus.choose(&mut rand::thread_rng()).unwrap().id;
-    cluster
-        .reschedule(format!("{f_id}-[{from}]+[{to}]"))
-        .await
-        .unwrap();
+    let result = cluster.reschedule(format!("{f_id}-[{from}]+[{to}]")).await;
+    assert!(result.is_err());
     // TODO: in the future this should not panic, but return an error
 
     cluster.run(drop).await?;
@@ -380,7 +376,7 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-        /*    // cordon on empty cluster
+            // cordon on empty cluster
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
@@ -432,18 +428,14 @@ macro_rules! test {
                     .await.unwrap()
             }
 
-             */
-
             // invalid scheduling request
             #[madsim::test]
-            #[should_panic]
             async fn [< invalid_reschedule_ $query >]() {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 invalid_reschedule(CREATE, SELECT, DROP, 3)
                     .await.unwrap()
             }
             #[madsim::test]
-            #[should_panic]
             async fn [< invalid_reschedule_2_ $query >]() {
                 use risingwave_simulation::nexmark::queries::q3::*;
                 invalid_reschedule(CREATE, SELECT, DROP, 3)
