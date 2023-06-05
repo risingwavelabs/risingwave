@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
+
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
