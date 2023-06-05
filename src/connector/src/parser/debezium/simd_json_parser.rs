@@ -60,7 +60,7 @@ impl DebeziumJsonParser {
     pub async fn parse_inner(
         &self,
         mut payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -79,7 +79,7 @@ impl DebeziumJsonParser {
 
         let row_op = DebeziumAdapter { accessor };
 
-        apply_row_operation_on_stream_chunk_writer(row_op, writer)
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
 }
 

@@ -25,7 +25,7 @@ row schema location confluent schema registry 'http://message_queue:8081'
 # but if we let the key as a column, there's no such requirement
 statement ok
 CREATE TABLE upsert_student_key_not_subset_of_value_avro_json (
-	key_struct struct<NOTEXIST INT> PRIMARY KEY
+	key_struct struct<"NOTEXIST" INT> PRIMARY KEY
 )
 WITH (
 	connector = 'kafka',

@@ -189,7 +189,7 @@ impl DebeziumAvroParser {
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let writer_schema = self.schema_resolver.get(schema_id).await?;
@@ -200,14 +200,14 @@ impl DebeziumAvroParser {
         let accessor = AvroAccess {
             value: &avro_value,
             options: Cow::Owned(AvroParseOptions {
-                schema: Some(&self.inner_schema),
+                schema: Some(&self.outer_schema),
                 relax_numeric: true,
             }),
         };
 
         let row_op = DebeziumAdapter { accessor };
 
-        apply_row_operation_on_stream_chunk_writer(row_op, writer)
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
 }
 

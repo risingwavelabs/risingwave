@@ -10,7 +10,7 @@ pub type AccessResult = std::result::Result<Datum, AccessError>;
 pub trait Access {
     fn access(&self, path: &[&str], shape: Option<&DataType>) -> AccessResult;
 }
-
+#[derive(Debug)]
 pub enum RowOperation {
     Insert,
     Update,

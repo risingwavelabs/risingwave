@@ -178,7 +178,7 @@ impl AvroParser {
     pub(crate) async fn parse_inner(
         &self,
         payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         let (raw_key, raw_value) = if self.is_enable_upsert() {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
@@ -277,7 +277,7 @@ impl AvroParser {
                 .unwrap_or_default(),
         };
 
-        apply_row_operation_on_stream_chunk_writer(accessor, writer)
+        apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
     }
 }
 

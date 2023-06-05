@@ -40,6 +40,7 @@ impl<'a> AvroParseOptions<'a> {
             got: format!("{:?}", value),
             value: String::new(),
         };
+
         let v: ScalarImpl = match (shape, value) {
             (_, Value::Null) => return Ok(None),
             (_, Value::Union(_, v)) => {
@@ -238,6 +239,6 @@ where
             Err(create_error())?;
         }
 
-        self.options.parse(value, shape)
+        options.parse(value, shape)
     }
 }

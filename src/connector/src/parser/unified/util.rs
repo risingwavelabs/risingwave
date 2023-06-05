@@ -5,7 +5,7 @@ use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 
 pub fn apply_row_operation_on_stream_chunk_writer(
     row_op: impl OperateRow,
-    mut writer: SourceStreamChunkRowWriter<'_>,
+    writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> std::result::Result<WriteGuard, RwError> {
     match row_op.op()? {
         super::RowOperation::Update => writer.update(|column| {

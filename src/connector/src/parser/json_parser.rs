@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 
 use futures_async_stream::try_stream;
-use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use simd_json::BorrowedValue;
 
@@ -88,7 +88,7 @@ impl JsonParser {
     pub async fn parse_inner(
         &self,
         mut payload: Vec<u8>,
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         if self.enable_upsert {
             let msg: UpsertMessage<'_> = bincode::deserialize(&payload)
@@ -123,21 +123,44 @@ impl JsonParser {
                 primary_key_column_name: String::new(),
             };
 
-            apply_row_operation_on_stream_chunk_writer(accessor, writer)
+            apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
         } else {
-            let accessor = UpsertAccess {
-                key_accessor: None as Option<JsonAccess<'_, '_>>,
-                value_accessor: Some(JsonAccess {
-                    value: Cow::Owned(
-                        simd_json::to_borrowed_value(&mut payload)
-                            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
-                    ),
-                    options: Default::default(),
-                }),
-                primary_key_column_name: String::new(),
+            let value = simd_json::to_borrowed_value(&mut payload)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            let values = if let simd_json::BorrowedValue::Array(arr) = value {
+                arr
+            } else {
+                vec![value]
             };
+            let mut errors = Vec::new();
+            let mut guard = None;
+            for value in values {
+                let accessor = UpsertAccess {
+                    key_accessor: None as Option<JsonAccess<'_, '_>>,
+                    value_accessor: Some(JsonAccess {
+                        value: Cow::Owned(value),
+                        options: Default::default(),
+                    }),
+                    primary_key_column_name: String::new(),
+                };
 
-            apply_row_operation_on_stream_chunk_writer(accessor, writer)
+                match apply_row_operation_on_stream_chunk_writer(accessor, &mut writer) {
+                    Ok(this_guard) => guard = Some(this_guard),
+                    Err(err) => errors.push(err),
+                }
+            }
+
+            if let Some(guard) = guard {
+                if !errors.is_empty() {
+                    tracing::error!(?errors, "failed to parse some columns");
+                }
+                Ok(guard)
+            } else {
+                Err(RwError::from(ErrorCode::InternalError(format!(
+                    "failed to parse all columns: {:?}",
+                    errors
+                ))))
+            }
         }
     }
 }
