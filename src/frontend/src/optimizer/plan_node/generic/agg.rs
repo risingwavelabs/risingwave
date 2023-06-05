@@ -26,7 +26,7 @@ use risingwave_pb::expr::PbAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{stream, GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -35,7 +35,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
 };
-use crate::{impl_distill_unit_from_fields, TableCatalog};
+use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///

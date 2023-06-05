@@ -62,7 +62,6 @@ pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;
 }
 
-#[macro_export]
 macro_rules! impl_distill_unit_from_fields {
     ($name:ident, $bound:path) => {
         use $crate::optimizer::plan_node::generic::DistillUnit;
@@ -73,6 +72,7 @@ macro_rules! impl_distill_unit_from_fields {
         }
     };
 }
+pub(super) use impl_distill_unit_from_fields;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
