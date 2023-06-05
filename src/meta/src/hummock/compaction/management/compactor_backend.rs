@@ -14,12 +14,15 @@
 
 use async_trait::async_trait;
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::CompactionTaskEvent;
+use crate::hummock::error::Error;
 use crate::hummock::HummockManagerRef;
+use crate::manager::LocalNotification;
 use crate::storage::MetaStore;
 
 #[async_trait]
@@ -31,7 +34,7 @@ pub trait CompactorBackend {
         timeout: u64,
     ) -> bool;
 
-    async fn cancel(&self, compact_task: &CompactTask) -> bool;
+    async fn cancel(&self, compact_task: &mut CompactTask) -> bool;
 
     fn event_channel(
         &mut self,
@@ -87,9 +90,26 @@ where
             {
                 Ok(_) => {}
                 Err(err) => {
-                    // handle error
-                    // log
-                    return false;
+                    tracing::warn!(
+                        "Failed to assign {:?} compaction task to compactor {} : {:#?}",
+                        compact_task.task_type().as_str_name(),
+                        compactor.context_id(),
+                        err
+                    );
+                    match err {
+                        Error::CompactionTaskAlreadyAssigned(_, _) => {
+                            panic!("Compaction task manager is the only tokio task that can assign task.");
+                        }
+                        Error::InvalidContext(context_id) => {
+                            self.hummock_manager
+                                .compactor_manager
+                                .remove_compactor(context_id);
+                            return false;
+                        }
+                        _ => {
+                            return false;
+                        }
+                    }
                 }
             };
 
@@ -98,8 +118,17 @@ where
                 .send_task(Task::CompactTask(compact_task.clone()))
                 .await
             {
-                // handle error
-                // log
+                tracing::warn!(
+                    "Failed to send task {} to {}. {:#?}",
+                    compact_task.task_id,
+                    compactor.context_id(),
+                    e
+                );
+
+                // todo: add timeout to remove compactor
+                self.hummock_manager
+                    .compactor_manager
+                    .pause_compactor(compactor.context_id());
 
                 return false;
             }
@@ -117,8 +146,28 @@ where
         }
     }
 
-    async fn cancel(&self, compact_task: &CompactTask) -> bool {
-        todo!()
+    async fn cancel(&self, compact_task: &mut CompactTask) -> bool {
+        if let Err(err) = self
+            .hummock_manager
+            .cancel_compact_task(compact_task, TaskStatus::HeartbeatCanceled)
+            .await
+        {
+            // Cancel task asynchronously.
+            tracing::warn!(
+                "Failed to cancel task {}. {}. {:?} It will be cancelled asynchronously.",
+                compact_task.task_id,
+                err,
+                TaskStatus::HeartbeatCanceled
+            );
+            self.hummock_manager
+                .env
+                .notification_manager()
+                .notify_local_subscribers(LocalNotification::CompactionTaskNeedCancel(
+                    compact_task.clone(),
+                ))
+                .await;
+        }
+        true
     }
 
     fn event_channel(
