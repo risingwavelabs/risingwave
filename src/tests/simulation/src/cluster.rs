@@ -389,8 +389,18 @@ impl Cluster {
         self.client.spawn(future).await.unwrap()
     }
 
-    /// cordon n random nodes in this cluster.
-    pub async fn cordon_random_workers(&self, n: usize) -> Result<Vec<WorkerNode>> {
+    // convenience function, wrapper for cordon_worker
+    pub async fn cordon_node(&self, worker_node: &WorkerNode) -> Result<()> {
+        let addr = worker_node.clone().host.expect("node does not have host");
+        let addr = HostAddr {
+            host: addr.host,
+            port: addr.port as u16,
+        };
+        self.cordon_worker(addr).await?;
+        Ok(())
+    }
+
+    pub async fn get_random_worker_nodes(&self, n: usize) -> Result<Vec<WorkerNode>> {
         let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
         if worker_nodes.len() < n {
             return Err(anyhow!("cannot remove more nodes than present"));
@@ -400,14 +410,14 @@ impl Cluster {
             .iter()
             .choose_multiple(&mut rand::thread_rng(), n)
             .to_vec();
-        let rand_nodes = rand_nodes.iter().map(|n| n.clone().clone()).collect_vec();
+        Ok(rand_nodes.iter().map(|n| n.clone().clone()).collect_vec())
+    }
+
+    /// cordon n random nodes in this cluster.
+    pub async fn cordon_random_workers(&self, n: usize) -> Result<Vec<WorkerNode>> {
+        let rand_nodes = self.get_random_worker_nodes(n).await?;
         for rand_node in rand_nodes.clone() {
-            let addr = rand_node.clone().host.expect("node does not have host");
-            let addr = HostAddr {
-                host: addr.host,
-                port: addr.port as u16,
-            };
-            self.cordon_worker(addr).await?;
+            self.cordon_node(&rand_node).await?;
         }
         Ok(rand_nodes)
     }

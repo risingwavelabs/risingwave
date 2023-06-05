@@ -19,6 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_simulation::cluster::Configuration;
@@ -244,22 +245,56 @@ async fn cordoned_nodes_do_not_get_actors(
     Ok(())
 }
 
-#[madsim::test]
-#[should_panic]
-async fn cordon_all_nodes_error() {
-    use risingwave_simulation::nexmark::queries::q3::*;
-    cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
-        .await
-        .unwrap()
-}
+async fn cordon_is_idempotent(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    let sleep_sec = 5;
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+    let rand_workers = cluster.get_random_worker_nodes(number_of_nodes).await?;
+    let mut old_ids = rand_workers.iter().map(|w| w.id).collect_vec();
+    old_ids.sort();
 
-#[madsim::test]
-#[should_panic]
-async fn cordon_all_nodes_error_2() {
-    use risingwave_simulation::nexmark::queries::q3::*;
-    cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
-        .await
-        .unwrap()
+    cluster.run(create).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
+    let expected = cluster.run(select).await?;
+    cluster.run(drop).await?;
+
+    // cordon the same nodes multiple times times
+    for _ in 0..3 {
+        for worker in &rand_workers {
+            cluster
+                .cordon_node(&worker)
+                .await
+                .expect("expect cordon to work");
+        }
+
+        // expect the same result, independent of how many times we cordoned
+        cluster.run(create).await?;
+        sleep(Duration::from_secs(sleep_sec)).await;
+        let got = cluster.run(select).await?;
+        assert_eq!(expected, got);
+        cluster.run(drop).await?;
+
+        // TODO: do this with set operations
+        // we only ever expect the same workers to be cordoned
+        let (_, workers) = get_schedule(cluster.get_cluster_info().await?).await;
+        let mut new_ids = workers
+            .iter()
+            .filter(|w| w.state() == State::Cordoned)
+            .map(|w| w.id)
+            .collect_vec();
+        new_ids.sort();
+        assert_eq!(new_ids, old_ids);
+    }
+
+    Ok(())
 }
 
 // TODO: remove the meta.get_schedule rpc call and what belongs to it
@@ -297,6 +332,7 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
+            // cordon on empty cluster
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
@@ -308,6 +344,7 @@ macro_rules! test {
                 cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
             }
 
+            // cordon on running cluster
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
@@ -318,11 +355,38 @@ macro_rules! test {
                 use risingwave_simulation::nexmark::queries::$query::*;
                 cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 2).await
             }
+
+            // Idempotent
+            #[madsim::test]
+            async fn [< cordon_is_idempotent_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordon_is_idempotent(CREATE, SELECT, DROP, 1).await
+            }
+            #[madsim::test]
+            async fn [< cordon_is_idempotent_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordon_is_idempotent(CREATE, SELECT, DROP, 2).await
+            }
+
+            // cordon all nodes
+            #[madsim::test]
+            #[should_panic]
+            async fn [< cordon_all_nodes_error_ $query >]() {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
+                    .await.unwrap()
+            }
+            #[madsim::test]
+            #[should_panic]
+            async fn [< cordon_all_nodes_error_2_ $query >]() {
+                use risingwave_simulation::nexmark::queries::q3::*;
+                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
+                    .await.unwrap()
+            }
         }
     };
 }
 
-// TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial
 test!(q3);
 test!(q4);
@@ -344,26 +408,8 @@ test!(q105);
 // Tool for open source users to scale clusters
 // add to risectl cmd line tool
 // cordan node -> K8s naming. No new scheduling done on this node
-// Do we have an issue for it?
-// also provide uncordon command: Mark a DELETING node as non-deleting
-// Discuss
-
-// SQL interface for actors and nodes and so on
-
-// Maybe split up my PR in small PRs?
-// E.g. one PR with cordon only
-
-// debug approaches
-// maybe provide commands above and run against real cluster
-// madsim only uses one thread. May get stuck
-// runji madsim turn on debugging traces
-
-// Think: Workflow maybe Arne?
-// Maybe he has no time
-
-// Mit Peng Chen sprechen
-
-// wg-scaling-compute-node update geben
+// Do we have an issue for it? -> No
+// also provide uncordon command: Mark a Cordoned node as non-deleting
 
 // TODO: Another test:
 // corden nodes, manually schedule actors on cordnened node. Should throw error
