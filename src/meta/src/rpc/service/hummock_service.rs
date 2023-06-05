@@ -252,8 +252,6 @@ where
             self.hummock_manager
                 .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
         }
-        self.hummock_manager
-            .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

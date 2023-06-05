@@ -113,7 +113,6 @@ pub struct HummockManager<S: MetaStore> {
     // `compaction_request_channel` is used to schedule a compaction for specified
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
@@ -335,7 +334,6 @@ where
             catalog_manager,
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
-            compaction_resume_notifier: parking_lot::RwLock::new(None),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
@@ -1355,14 +1353,6 @@ where
             // policy.
             self.compactor_manager
                 .report_compact_task(context_id, compact_task);
-            // Tell compaction scheduler to resume compaction if there's any compactor becoming
-            // available.
-            if assigned_task_num == self.compactor_manager.max_concurrent_task_number() {
-                self.try_resume_compaction(CompactionResumeTrigger::TaskReport {
-                    original_task_num: assigned_task_num,
-                });
-            }
-
             // Update compaction task count.
             //
             // A corner case is that the compactor is deleted
@@ -1889,15 +1879,6 @@ where
         Ok(())
     }
 
-    pub fn init_compaction_scheduler(
-        &self,
-        sched_channel: CompactionRequestChannelRef,
-        notifier: Option<Arc<Notify>>,
-    ) {
-        *self.compaction_request_channel.write() = Some(sched_channel);
-        *self.compaction_resume_notifier.write() = notifier;
-    }
-
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
     #[named]
     async fn cancel_unassigned_compaction_task(&self) -> Result<()> {
@@ -1953,14 +1934,6 @@ where
         } else {
             tracing::warn!("compaction_request_channel is not initialized");
             false
-        }
-    }
-
-    /// Tell compaction scheduler to resume compaction.
-    pub fn try_resume_compaction(&self, trigger: CompactionResumeTrigger) {
-        tracing::debug!("resume compaction, trigger: {:?}", trigger);
-        if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
-            notifier.notify_one();
         }
     }
 

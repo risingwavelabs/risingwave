@@ -137,11 +137,6 @@ where
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
-        self.hummock_manager.init_compaction_scheduler(
-            sched_channel.clone(),
-            Some(self.compaction_resume_notifier.clone()),
-        );
-
         tracing::info!("Start compaction scheduler.");
 
         let compaction_selectors = Self::init_selectors();
@@ -350,7 +345,6 @@ where
                                         &mut compaction_selectors,
                                         task_type,
                                         sched_channel.clone(),
-                                        shutdown_rx.clone(),
                                     )
                                     .await
                                 {
@@ -421,7 +415,6 @@ where
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         task_type: compact_task::TaskType,
         sched_channel: Arc<CompactionRequestChannel>,
-        shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
         sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
         sched_channel.unschedule(compaction_group, task_type);
@@ -431,7 +424,6 @@ where
             task_type,
             compaction_selectors,
             sched_channel,
-            shutdown_rx,
         )
         .await
     }
@@ -459,21 +451,11 @@ where
         task_type: compact_task::TaskType,
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         sched_channel: Arc<CompactionRequestChannel>,
-        mut shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
         // Wait for a compactor to become available.
-        let compactor = loop {
-            if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
-                break compactor;
-            } else {
-                tracing::debug!("No available compactor, pausing compaction.");
-                tokio::select! {
-                    _ = self.compaction_resume_notifier.notified() => {},
-                    _ = &mut shutdown_rx => {
-                        return false;
-                    }
-                }
-            }
+        let compactor = match self.hummock_manager.get_idle_compactor().await {
+            Some(compactor) => compactor,
+            None => return false,
         };
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
         self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
