@@ -25,7 +25,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{DistillUnit, GenericPlanRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -138,12 +138,14 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalProject", self.base.schema())
+        self.core
+            .fmt_with_name(f, "LogicalProject", self.base.schema())
     }
 }
 impl Distill for LogicalProject {
     fn distill<'a>(&self) -> Pretty<'a> {
-        self.core.distill_with_name("LogicalProject", self.base.schema())
+        self.core
+            .distill_with_name("LogicalProject", self.base.schema())
     }
 }
 
