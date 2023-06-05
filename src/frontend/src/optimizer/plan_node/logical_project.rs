@@ -25,7 +25,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::generic::{DistillUnit, GenericPlanRef};
+use crate::optimizer::plan_node::generic::{GenericPlanRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };

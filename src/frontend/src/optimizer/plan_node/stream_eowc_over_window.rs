@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::fmt;
+
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;

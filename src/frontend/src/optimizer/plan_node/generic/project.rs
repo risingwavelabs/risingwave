@@ -21,7 +21,7 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
