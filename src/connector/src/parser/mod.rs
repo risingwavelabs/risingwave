@@ -426,7 +426,10 @@ impl SpecificParserConfig {
     pub fn is_upsert(&self) -> bool {
         matches!(
             self,
-            SpecificParserConfig::UpsertJson | SpecificParserConfig::UpsertAvro(_)
+            SpecificParserConfig::UpsertJson
+                | SpecificParserConfig::UpsertAvro(_)
+                | SpecificParserConfig::DebeziumAvro(_)
+                | SpecificParserConfig::DebeziumJson
         )
     }
 

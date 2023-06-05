@@ -46,14 +46,9 @@ impl SourceMessage {
 
 impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
-        let encoded = bincode::serialize(&UpsertMessage {
-            primary_key: message.key().unwrap_or_default().into(),
-            record: message.payload().unwrap_or_default().into(),
-        })
-        .unwrap();
         SourceMessage {
             // TODO(TaoWu): Possible performance improvement: avoid memory copying here.
-            payload: Some(encoded),
+            payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
