@@ -35,7 +35,7 @@ impl Expr for Now {
 
     fn to_expr_proto(&self) -> ExprNode {
         ExprNode {
-            expr_type: expr_node::Type::Now.into(),
+            expr_type: expr_node::Type::Unspecified.into(),
             return_type: Some(self.return_type().into()),
             rex_node: Some(expr_node::RexNode::Now(true)),
         }
