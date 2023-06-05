@@ -144,8 +144,10 @@ impl fmt::Display for LogicalProject {
 }
 impl Distill for LogicalProject {
     fn distill<'a>(&self) -> Pretty<'a> {
-        self.core
-            .distill_with_name("LogicalProject", self.base.schema())
+        Pretty::childless_record(
+            "LogicalProject",
+            self.core.fields_pretty(self.base.schema()),
+        )
     }
 }
 
