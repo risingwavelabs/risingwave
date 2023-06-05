@@ -169,7 +169,7 @@ impl DmlExecutor {
                                     }
                                 }
                                 None => {
-                                    tracing::warn!("txn_id={} Maybe this transaction is too large to provide atomicity.", txn_id);
+                                    tracing::warn!("txn_id={} TxnMsg::End receives but not in the active_txn_map. Maybe this transaction is too large to provide atomicity.", txn_id);
                                 }
                             };
                         }
@@ -178,7 +178,8 @@ impl DmlExecutor {
                                 Some((_, vec)) => {
                                     vec.push(chunk);
                                     if vec.len() > MAX_CHUNK_FOR_ATOMICITY {
-                                        // Too many chunks for atomicity. Drain can yield them.
+                                        // Too many chunks for atomicity. Drain and yield them.
+                                        tracing::warn!("txn_id={} Too many chunks for atomicity. Sent them to the downstream anyway.", txn_id);
                                         for chunk in vec.drain(..) {
                                             yield Message::Chunk(chunk);
                                         }
