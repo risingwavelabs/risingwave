@@ -147,9 +147,10 @@ impl Binder {
                 AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
             )
         {
-            return Err(ErrorCode::InvalidInputSyntax(
-                format!("within group is disallowed for the {}", kind);
-            )
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "within group is disallowed for the {}",
+                kind
+            ))
             .into());
         }
         self.ensure_aggregate_allowed()?;
