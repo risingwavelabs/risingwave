@@ -201,12 +201,13 @@ message ExprNode {
   }
   Type function_type = 1;
   data.DataType return_type = 3;
+  message NowRexNode {}
   oneof rex_node {
     uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
-    bool now = 8;
+    NowRexNode now = 8;
   }
 }
 

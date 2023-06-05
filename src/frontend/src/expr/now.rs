@@ -14,7 +14,7 @@
 
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::expr::{expr_node, ExprNode};
+use risingwave_pb::expr::{expr_node::{self, NowRexNode}, ExprNode};
 
 use super::{Expr, ExprImpl, ExprRewriter, FunctionCall, Literal};
 
@@ -35,9 +35,9 @@ impl Expr for Now {
 
     fn to_expr_proto(&self) -> ExprNode {
         ExprNode {
-            expr_type: expr_node::Type::Unspecified.into(),
+            function_type: expr_node::Type::Unspecified.into(),
             return_type: Some(self.return_type().into()),
-            rex_node: Some(expr_node::RexNode::Now(true)),
+            rex_node: Some(expr_node::RexNode::Now(NowRexNode{})),
         }
     }
 }
