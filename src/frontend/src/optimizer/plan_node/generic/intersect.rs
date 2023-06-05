@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use pretty_xmlish::{StrAssocArr, Pretty};
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};

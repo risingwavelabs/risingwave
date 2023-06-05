@@ -35,7 +35,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
 };
-use crate::{TableCatalog, impl_distill_unit_from_fields};
+use crate::{impl_distill_unit_from_fields, TableCatalog};
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
