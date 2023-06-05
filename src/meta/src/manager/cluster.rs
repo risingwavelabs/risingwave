@@ -155,6 +155,12 @@ where
         if worker.worker_node.state == State::Running as i32 {
             return Ok(());
         }
+
+        if worker.worker_node.state == State::Cordoned as i32 {
+            tracing::warn!("activating cordoned worker. Ignoring request");
+            return Ok(());
+        }
+
         worker.worker_node.state = State::Running as i32;
         worker.insert(self.env.meta_store()).await?;
 
@@ -196,7 +202,7 @@ where
         worker.worker_node.state = State::Cordoned as i32;
         Worker::insert(&worker, self.env.meta_store()).await?;
 
-        Ok(WorkerType::Compactor)
+        Ok(worker_type)
     }
 
     pub async fn delete_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
