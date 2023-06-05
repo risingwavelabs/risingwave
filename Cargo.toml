@@ -58,6 +58,7 @@ license = "Apache-2.0"
 repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
+await-tree = "0.1.1"
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }

@@ -49,6 +49,11 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    select '1'::jsonb || '2'::text;
+  name: jsonb || text -> text
+  expected_outputs:
+  - batch_plan
+- sql: |
     select 1 || 2;
   name: int || int -> err
   expected_outputs:

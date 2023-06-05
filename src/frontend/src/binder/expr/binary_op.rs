@@ -88,8 +88,8 @@ impl Binder {
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
             BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
-                let left_type = (!bound_left.is_unknown()).then(|| bound_left.return_type());
-                let right_type = (!bound_right.is_unknown()).then(|| bound_right.return_type());
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
                 match (left_type, right_type) {
                     // array concatenation
                     (Some(DataType::List { .. }), Some(DataType::List { .. }))

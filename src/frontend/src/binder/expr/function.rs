@@ -541,7 +541,7 @@ impl Binder {
                     "pg_typeof",
                     guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
-                        let v = match input.is_unknown() {
+                        let v = match input.is_untyped() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };

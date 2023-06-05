@@ -58,6 +58,11 @@
     with t(s) as (select '2') select '1'::jsonb || s from t;
   batch_plan: |
     BatchValues { rows: [['12':Varchar]] }
+- name: jsonb || text -> text
+  sql: |
+    select '1'::jsonb || '2'::text;
+  batch_plan: |
+    BatchValues { rows: [['12':Varchar]] }
 - name: int || int -> err
   sql: |
     select 1 || 2;

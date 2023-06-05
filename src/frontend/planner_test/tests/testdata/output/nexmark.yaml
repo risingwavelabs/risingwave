@@ -1343,17 +1343,34 @@
             WHEN lower(channel) = 'google' THEN '1'
             WHEN lower(channel) = 'facebook' THEN '2'
             WHEN lower(channel) = 'baidu' THEN '3'
-            ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
+            ELSE REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2]
             END
         AS channel_id FROM bid
-        where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
+        where REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2] is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
-  binder_error: |-
-    Bind error: failed to bind expression: CASE WHEN lower(channel) = 'apple' THEN '0' WHEN lower(channel) = 'google' THEN '1' WHEN lower(channel) = 'facebook' THEN '2' WHEN lower(channel) = 'baidu' THEN '3' ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) END
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, Case((Lower(bid.channel) = 'apple':Varchar), '0':Varchar, (Lower(bid.channel) = 'google':Varchar), '1':Varchar, (Lower(bid.channel) = 'facebook':Varchar), '2':Varchar, (Lower(bid.channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1] }
+      └─BatchFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(bid.channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+        └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, Case((Lower(bid.channel) = 'apple':Varchar), '0':Varchar, (Lower(bid.channel) = 'google':Varchar), '1':Varchar, (Lower(bid.channel) = 'facebook':Varchar), '2':Varchar, (Lower(bid.channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1, bid._row_id] }
+      └─StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(bid.channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+        └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
+    └── StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, Case((Lower(bid.channel) = 'apple':Varchar), '0':Varchar, (Lower(bid.channel) = 'google':Varchar), '1':Varchar, (Lower(bid.channel) = 'facebook':Varchar), '2':Varchar, (Lower(bid.channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1, bid._row_id] }
+        └── StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(bid.channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+            └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+                ├──  Upstream
+                └──  BatchPlanNode
 
-    Caused by:
-      Feature is not yet implemented: unsupported function: "regexp_extract"
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Table 0 { columns: [ vnode, _row_id, bid_backfill_finished ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
+
+    Table 4294967294 { columns: [ auction, bidder, price, channel, channel_id, bid._row_id ], primary key: [ $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+
 - id: nexmark_q22
   before:
   - create_tables

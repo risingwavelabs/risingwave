@@ -1313,17 +1313,34 @@
             WHEN lower(channel) = 'google' THEN '1'
             WHEN lower(channel) = 'facebook' THEN '2'
             WHEN lower(channel) = 'baidu' THEN '3'
-            ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
+            ELSE REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2]
             END
         AS channel_id FROM bid
-        where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
+        where REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2] is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
-  binder_error: |-
-    Bind error: failed to bind expression: CASE WHEN lower(channel) = 'apple' THEN '0' WHEN lower(channel) = 'google' THEN '1' WHEN lower(channel) = 'facebook' THEN '2' WHEN lower(channel) = 'baidu' THEN '3' ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) END
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [auction, bidder, price, channel, Case((Lower(channel) = 'apple':Varchar), '0':Varchar, (Lower(channel) = 'google':Varchar), '1':Varchar, (Lower(channel) = 'facebook':Varchar), '2':Varchar, (Lower(channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1] }
+      └─BatchFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+        └─BatchSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"], filter: (None, None) }
+  stream_plan: |
+    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck" }
+    └─StreamProject { exprs: [auction, bidder, price, channel, Case((Lower(channel) = 'apple':Varchar), '0':Varchar, (Lower(channel) = 'google':Varchar), '1':Varchar, (Lower(channel) = 'facebook':Varchar), '2':Varchar, (Lower(channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1, _row_id] }
+      └─StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+        └─StreamRowIdGen { row_id_index: 7 }
+          └─StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck" } { materialized table: 4294967294 }
+    └── StreamProject { exprs: [auction, bidder, price, channel, Case((Lower(channel) = 'apple':Varchar), '0':Varchar, (Lower(channel) = 'google':Varchar), '1':Varchar, (Lower(channel) = 'facebook':Varchar), '2':Varchar, (Lower(channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1, _row_id] }
+        └── StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
+            └── StreamRowIdGen { row_id_index: 7 }
+                └──  StreamSource { source: "bid", columns: ["auction", "bidder", "price", "channel", "url", "date_time", "extra", "_row_id"] } { source state table: 0 }
 
-    Caused by:
-      Feature is not yet implemented: unsupported function: "regexp_extract"
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Table 0 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+
+    Table 4294967294 { columns: [ auction, bidder, price, channel, channel_id, _row_id ], primary key: [ $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+
 - id: nexmark_q22
   before:
   - create_sources

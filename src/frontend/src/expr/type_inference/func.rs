@@ -34,7 +34,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
 
     let actuals = inputs
         .iter()
-        .map(|e| match e.is_unknown() {
+        .map(|e| match e.is_untyped() {
             true => None,
             false => Some(e.return_type().into()),
         })
@@ -45,7 +45,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
         .into_iter()
         .zip_eq_fast(sig.inputs_type)
         .map(|(expr, t)| {
-            if DataTypeName::from(expr.return_type()) != *t {
+            if expr.is_untyped() || DataTypeName::from(expr.return_type()) != *t {
                 if t.is_scalar() {
                     return expr.cast_implicit((*t).into()).map_err(Into::into);
                 } else {
@@ -66,7 +66,7 @@ pub fn infer_some_all(
     mut func_types: Vec<ExprType>,
     inputs: &mut Vec<ExprImpl>,
 ) -> Result<DataType> {
-    let element_type = if inputs[1].is_unknown() {
+    let element_type = if inputs[1].is_untyped() {
         None
     } else if let DataType::List(datatype) = inputs[1].return_type() {
         Some(DataTypeName::from(*datatype))
@@ -79,7 +79,7 @@ pub fn infer_some_all(
 
     let final_type = func_types.pop().unwrap();
     let actuals = vec![
-        (!inputs[0].is_unknown()).then_some(inputs[0].return_type().into()),
+        (!inputs[0].is_untyped()).then_some(inputs[0].return_type().into()),
         element_type,
     ];
     let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
@@ -194,7 +194,7 @@ fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
 
 /// Decompose expression into a nested type to be inferred.
 fn extract_expr_nested_type(expr: &ExprImpl) -> Result<NestedType> {
-    if expr.is_unknown() {
+    if expr.is_untyped() {
         Ok(NestedType::Infer(expr.return_type()))
     } else if is_row_function(expr) {
         // For row function, recursively get the type requirement of each field.
@@ -372,7 +372,7 @@ fn infer_type_for_special(
         | ExprType::IsDistinctFrom
         | ExprType::IsNotDistinctFrom => {
             ensure_arity!("cmp", | inputs | == 2);
-            match (inputs[0].is_unknown(), inputs[1].is_unknown()) {
+            match (inputs[0].is_untyped(), inputs[1].is_untyped()) {
                 // `'a' = null` handled by general rules later
                 (true, true) => return Ok(None),
                 // `null = array[1]` where null should have same type as right side
@@ -477,8 +477,8 @@ fn infer_type_for_special(
         }
         ExprType::ArrayCat => {
             ensure_arity!("array_cat", | inputs | == 2);
-            let left_type = (!inputs[0].is_unknown()).then(|| inputs[0].return_type());
-            let right_type = (!inputs[1].is_unknown()).then(|| inputs[1].return_type());
+            let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
+            let right_type = (!inputs[1].is_untyped()).then(|| inputs[1].return_type());
             let return_type = match (left_type, right_type) {
                 (None, t @ None)
                 | (None, t @ Some(DataType::List(_)))
@@ -565,7 +565,7 @@ fn infer_type_for_special(
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
             let ret_type = inputs[0].return_type();
-            if inputs[0].is_unknown() {
+            if inputs[0].is_untyped() {
                 return Err(ErrorCode::BindError(
                     "could not determine polymorphic type because input has type unknown"
                         .to_string(),
@@ -581,7 +581,7 @@ fn infer_type_for_special(
             ensure_arity!("array_length", | inputs | == 1);
             let return_type = inputs[0].return_type();
 
-            if inputs[0].is_unknown() {
+            if inputs[0].is_untyped() {
                 return Err(ErrorCode::BindError(
                     "Cannot find length for unknown type".to_string(),
                 )
@@ -598,7 +598,7 @@ fn infer_type_for_special(
             ensure_arity!("cardinality", | inputs | == 1);
             let return_type = inputs[0].return_type();
 
-            if inputs[0].is_unknown() {
+            if inputs[0].is_untyped() {
                 return Err(ErrorCode::BindError(
                     "Cannot get cardinality of unknown type".to_string(),
                 )
