@@ -125,3 +125,26 @@ create table shipments (
  table.name = 'shipments',
  slot.name = 'shipments'
 );
+
+
+# columns missed and reordered
+statement ok
+create table shipments_2 (
+  origin STRING,
+  destination STRING,
+  shipment_id INTEGER,
+  order_id INTEGER,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+statement ok
+drop table shipments_2;

@@ -130,3 +130,24 @@ create table orders (
  table.name = 'orders',
  server.id = '5086'
 );
+
+# columns missed and reordered
+statement ok
+create table orders_2 (
+   order_id int,
+   price decimal,
+   customer_name string,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'orders',
+ server.id = '5086'
+);
+
+statement ok
+drop table orders_2;
