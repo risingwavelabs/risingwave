@@ -19,7 +19,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 bytes = "1"
 dyn-clone = "1"
 educe = "0.4"

@@ -15,11 +15,12 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
-use super::{stream, GenericPlanNode, GenericPlanRef};
+use super::{stream, DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, Order, OrderDisplay};
 use crate::TableCatalog;
@@ -143,6 +144,27 @@ impl<PlanRef: GenericPlanRef> TopN<PlanRef> {
             builder.field("group_key", &self.group_key);
         }
         builder.finish()
+    }
+}
+
+impl<PlanRef: GenericPlanRef> DistillUnit for TopN<PlanRef> {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+        let mut vec = Vec::with_capacity(5);
+        let input_schema = self.input.schema();
+        let order_d = Pretty::display(&OrderDisplay {
+            order: &self.order,
+            input_schema,
+        });
+        vec.push(("order", order_d));
+        vec.push(("limit", Pretty::debug(&self.limit_attr.limit())));
+        vec.push(("offset", Pretty::debug(&self.offset)));
+        if self.limit_attr.with_ties() {
+            vec.push(("with_ties", Pretty::debug(&true)));
+        }
+        if !self.group_key.is_empty() {
+            vec.push(("group_key", Pretty::debug(&self.group_key)));
+        }
+        Pretty::childless_record(name, vec)
     }
 }
 

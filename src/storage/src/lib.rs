@@ -17,7 +17,6 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
-#![feature(build_hasher_simple_hash_one)]
 #![feature(custom_test_frameworks)]
 #![feature(drain_filter)]
 #![feature(generators)]

@@ -79,7 +79,7 @@
     Bind error: failed to bind expression: array_cat(ARRAY[233], ARRAY[ARRAY[ARRAY[66]]])
 
     Caused by:
-      Bind error: unable to find least restrictive type between integer[] and integer[][][]
+      Bind error: Cannot concatenate integer[] and integer[][][]
 - sql: |
     select array_cat(array[233], 123);
   binder_error: |-
@@ -94,6 +94,34 @@
 
     Caused by:
       Bind error: Cannot concatenate integer and integer[]
+- name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  sql: |
+    select array_cat(null, null);
+  batch_plan: |
+    BatchValues { rows: [[null:List(Varchar)]] }
+- name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  sql: |
+    select array_cat('{a}', '{b}');
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }
+- name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  sql: |
+    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+  batch_plan: |
+    BatchValues { rows: [[true:Boolean]] }
+- name: array_cat(unknown as int[], int[]) -> int[]
+  sql: |
+    select array_cat('{1}', array[2]);
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[1, 2]:List(Int32)]] }
+- name: array_cat(unknown, int) -> err
+  sql: |
+    select array_cat('{1}', 2);
+  binder_error: |-
+    Bind error: failed to bind expression: array_cat('{1}', 2)
+
+    Caused by:
+      Bind error: Cannot concatenate varchar and integer
 - sql: |
     select array_append(array[66], 123);
   logical_plan: |
@@ -114,6 +142,26 @@
   logical_plan: |
     LogicalProject { exprs: [ArrayAppend(Array(Array(66:Int32)), Array(233:Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_append(unknown as text[], unknown as text) -> text[]
+  sql: |
+    select array_append(null, null);
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[null]:List(Varchar)]] }
+- name: array_append(unknown as text[], unknown as text) -> text[]
+  sql: |
+    select array_append('{a}', 'b');
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }
+- name: array_append(unknown as int[], int) -> int[]
+  sql: |
+    select array_append(null, 2);
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[2]:List(Int32)]] }
+- name: array_append(int[], unknown as int) -> int[]
+  sql: |
+    select array_append(array[1], null);
+  batch_plan: |
+    BatchValues { rows: [[ARRAY[1, null]:List(Int32)]] }
 - sql: |
     select array_prepend(123, array[66]);
   logical_plan: |

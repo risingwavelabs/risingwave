@@ -106,7 +106,7 @@ else
 fi
 
 diff -u ./e2e_test/sink/remote/mysql_expected_result_1.tsv \
-<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT id, v_varchar, v_text, v_integer, v_smallint, v_bigint, v_decimal, v_real, v_double, v_boolean, v_date, v_time, v_timestamp, v_jsonb, TO_BASE64(v_bytea) FROM test.t_remote_1 ORDER BY id")
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT id, v_varchar, v_text, v_integer, v_smallint, v_bigint, v_decimal, v_real, v_double, v_boolean, v_date, v_time, v_timestamp, v_timestamptz, v_interval, v_jsonb, TO_BASE64(v_bytea) FROM test.t_remote_1 ORDER BY id")
 if [ $? -eq 0 ]; then
   echo "mysql sink check 1 passed"
 else

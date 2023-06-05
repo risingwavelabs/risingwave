@@ -198,6 +198,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mview = Statement::CreateView {
             or_replace: false,
             materialized: true,
+            if_not_exists: false,
             name,
             columns: vec![],
             query,

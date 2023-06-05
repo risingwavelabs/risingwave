@@ -125,7 +125,7 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_row_expr(child, target, allows);
         }
-        if child.is_unknown() {
+        if child.is_untyped() {
             // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
             let literal = child.as_literal().unwrap();
             let datum = literal
@@ -147,7 +147,7 @@ impl FunctionCall {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
-        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
+        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,
@@ -263,7 +263,7 @@ impl FunctionCall {
         (self.func_type, input)
     }
 
-    pub fn get_expr_type(&self) -> ExprType {
+    pub fn func_type(&self) -> ExprType {
         self.func_type
     }
 
@@ -278,8 +278,8 @@ impl FunctionCall {
 
     pub(super) fn from_expr_proto(
         function_call: &risingwave_pb::expr::FunctionCall,
-        expr_type: ExprType,
-        ret_type: DataType,
+        func_type: ExprType,
+        return_type: DataType,
     ) -> RwResult<Self> {
         let inputs: Vec<_> = function_call
             .get_children()
@@ -287,8 +287,8 @@ impl FunctionCall {
             .map(ExprImpl::from_expr_proto)
             .try_collect()?;
         Ok(Self {
-            func_type: expr_type,
-            return_type: ret_type,
+            func_type,
+            return_type,
             inputs,
         })
     }
@@ -303,7 +303,7 @@ impl Expr for FunctionCall {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: self.get_expr_type().into(),
+            function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
@@ -419,7 +419,7 @@ fn explain_verbose_binary_op(
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr {
-        if func.get_expr_type() == ExprType::Row {
+        if func.func_type() == ExprType::Row {
             return true;
         }
     }

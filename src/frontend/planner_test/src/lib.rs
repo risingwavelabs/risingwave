@@ -451,24 +451,40 @@ impl TestCase {
                 Statement::CreateView {
                     materialized: true,
                     or_replace: false,
+                    if_not_exists,
                     name,
                     query,
                     columns,
                     emit_mode,
                     ..
                 } => {
-                    create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode)
-                        .await?;
+                    create_mv::handle_create_mv(
+                        handler_args,
+                        if_not_exists,
+                        name,
+                        *query,
+                        columns,
+                        emit_mode,
+                    )
+                    .await?;
                 }
                 Statement::CreateView {
                     materialized: false,
                     or_replace: false,
+                    if_not_exists,
                     name,
                     query,
                     columns,
                     ..
                 } => {
-                    create_view::handle_create_view(handler_args, name, columns, *query).await?;
+                    create_view::handle_create_view(
+                        handler_args,
+                        if_not_exists,
+                        name,
+                        columns,
+                        *query,
+                    )
+                    .await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(

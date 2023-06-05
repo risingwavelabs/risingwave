@@ -462,7 +462,7 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
-                        TaskStatusPb::Pending => {
+                        TaskStatusPb::Ping => {
                             debug!("Receive ping from task {:?}", status.task_id.unwrap());
                         }
                         status => {
