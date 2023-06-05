@@ -143,7 +143,7 @@ async fn cordoned_nodes_do_not_get_new_actors(
     assert!(cordoned_nodes.len() == cordoned_pus2.len());
     let cordoned_pus_ids = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
     // TODO: do this with map
-    let mut actors_on_cordoned2: Vec<u32> = vec![];
+    let actors_on_cordoned2: Vec<u32> = vec![];
     for frag in fragments2 {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
@@ -333,7 +333,10 @@ async fn invalid_reschedule(
         .choose(&mut rand::thread_rng())
         .expect("expect fragment to have at least 1 actor")
         .parallel_units_id;
-    let to = cordoned_pus.choose(&mut rand::thread_rng()).unwrap().id;
+    let to = cordoned_pus
+        .choose(&mut rand::thread_rng())
+        .expect("expected at least one cordoned PU")
+        .id;
     let result = cluster.reschedule(format!("{f_id}-[{from}]+[{to}]")).await;
     assert!(result.is_err());
     // TODO: in the future this should not panic, but return an error
@@ -430,16 +433,16 @@ macro_rules! test {
 
             // invalid scheduling request
             #[madsim::test]
-            async fn [< invalid_reschedule_ $query >]() {
+            async fn [< invalid_reschedule_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                invalid_reschedule(CREATE, SELECT, DROP, 3)
-                    .await.unwrap()
+                invalid_reschedule(CREATE, SELECT, DROP, 1)
+                    .await
             }
             #[madsim::test]
-            async fn [< invalid_reschedule_2_ $query >]() {
+            async fn [< invalid_reschedule_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::q3::*;
-                invalid_reschedule(CREATE, SELECT, DROP, 3)
-                    .await.unwrap()
+                invalid_reschedule(CREATE, SELECT, DROP, 2)
+                    .await
             }
         }
     };

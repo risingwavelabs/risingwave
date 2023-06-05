@@ -12,10 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -25,7 +21,6 @@ use risingwave_pb::meta::{
 use tonic::{Request, Response, Status};
 
 use crate::manager::ClusterManagerRef;
-use crate::model::Worker;
 use crate::storage::MetaStore;
 use crate::MetaError;
 

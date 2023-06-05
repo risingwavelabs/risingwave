@@ -196,11 +196,11 @@ where
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
         if worker.worker_node.state == State::Cordoned as i32 {
-            return Ok(worker_type.clone());
+            return Ok(worker_type);
         }
 
         worker.worker_node.state = State::Cordoned as i32;
-        Worker::insert(&worker, self.env.meta_store()).await?;
+        Worker::insert(worker, self.env.meta_store()).await?;
 
         Ok(worker_type)
     }
@@ -495,10 +495,8 @@ impl ClusterManagerCore {
         worker_type: WorkerType,
         worker_states: Option<Vec<State>>,
     ) -> Vec<WorkerNode> {
-        let worker_states = match worker_states {
-            None => None,
-            Some(state) => Some(state.iter().map(|s| *s as i32).collect_vec()),
-        };
+        let worker_states =
+            worker_states.map(|state| state.iter().map(|s| *s as i32).collect_vec());
         self.workers
             .values()
             .map(|worker| worker.to_protobuf())
