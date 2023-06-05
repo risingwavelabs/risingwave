@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{vec};
+use std::vec;
 
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
