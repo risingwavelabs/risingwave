@@ -62,6 +62,18 @@ pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;
 }
 
+#[macro_export]
+macro_rules! impl_distill_unit_from_fields {
+    ($name:ident, $bound:path) => {
+        use crate::optimizer::plan_node::generic::DistillUnit;
+        impl<PlanRef: $bound> DistillUnit for $name<PlanRef> {
+            fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+                Pretty::childless_record(name, self.fields_pretty())
+            }
+        }
+    };
+}
+
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];

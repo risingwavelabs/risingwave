@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
@@ -35,7 +35,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
 };
-use crate::TableCatalog;
+use crate::{TableCatalog, impl_distill_unit_from_fields};
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
 ///
@@ -597,7 +597,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         builder.field("aggs", &self.agg_calls_display());
     }
 
-    pub fn fields_pretty<'a>(&self) -> Vec<(&'a str, Pretty<'a>)> {
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let last = ("aggs", self.agg_calls_pretty());
         if self.group_key.count_ones(..) != 0 {
             let first = ("group_key", self.group_key_pretty());
@@ -635,6 +635,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         Pretty::Array(self.group_key.ones().map(f).collect())
     }
 }
+
+impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
