@@ -236,6 +236,7 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
         distinct: false,
         order_by: vec![],
         filter: None,
+        within_group: None,
     }
 }
 
