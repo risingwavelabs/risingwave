@@ -120,7 +120,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
@@ -132,7 +132,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
@@ -152,7 +152,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
@@ -263,7 +263,7 @@ pub struct MutGuard<'a, V: EstimateSize> {
     // The total size of a collection
     total_size: &'a mut usize,
     last_reported_size_bytes: &'a mut usize,
-    memory_usage_metrics: Option<IntGauge>,
+    memory_usage_metrics: &'a mut Option<IntGauge>,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
@@ -271,7 +271,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         inner: &'a mut V,
         total_size: &'a mut usize,
         last_reported_size_bytes: &'a mut usize,
-        memory_usage_metrics: Option<IntGauge>,
+        memory_usage_metrics: &'a mut Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -329,7 +329,7 @@ pub struct UnsafeMutGuard<V: EstimateSize> {
     // The total size of a collection
     total_size: NonNull<usize>,
     last_reported_size_bytes: NonNull<usize>,
-    memory_usage_metrics: Option<IntGauge>,
+    memory_usage_metrics: NonNull<Option<IntGauge>>,
 }
 
 impl<V: EstimateSize> UnsafeMutGuard<V> {
@@ -337,7 +337,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
         inner: &mut V,
         total_size: &mut usize,
         last_reported_size_bytes: &mut usize,
-        memory_usage_metrics: Option<IntGauge>,
+        memory_usage_metrics: &mut Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -345,7 +345,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size,
             total_size: total_size.into(),
             last_reported_size_bytes: last_reported_size_bytes.into(),
-            memory_usage_metrics,
+            memory_usage_metrics: memory_usage_metrics.into(),
         }
     }
 
@@ -359,7 +359,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size: self.original_val_size,
             total_size: self.total_size.as_mut(),
             last_reported_size_bytes: self.last_reported_size_bytes.as_mut(),
-            memory_usage_metrics: self.memory_usage_metrics.clone(),
+            memory_usage_metrics: self.memory_usage_metrics.as_mut(),
         }
     }
 }
