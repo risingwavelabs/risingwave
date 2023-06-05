@@ -6054,6 +6054,7 @@ dependencies = [
  "arrow-schema",
  "async-trait",
  "auto_enums",
+ "await-tree",
  "chrono",
  "chrono-tz",
  "criterion",
