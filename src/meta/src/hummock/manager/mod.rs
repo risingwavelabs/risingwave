@@ -14,7 +14,7 @@
 
 use core::panic;
 use std::borrow::BorrowMut;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
@@ -24,9 +24,12 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use fail::fail_point;
 use function_name::named;
+use futures::future::Either;
+use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids,
@@ -51,6 +54,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
+use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
 use crate::hummock::compaction::{
@@ -2128,47 +2132,126 @@ where
     }
 
     #[named]
-    pub async fn start_lsm_stat_report(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    pub async fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+        use futures::{FutureExt, StreamExt};
+
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(std::time::Duration::from_secs(10));
+            const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
+            const STAT_REPORT_PERIOD_SEC: u64 = 10;
+
+            pub enum HummockTimerEvent {
+                GroupSplit,
+                CheckDeadTask,
+                Report,
+            }
+
+            let mut check_compact_trigger_interval =
+                tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
+            check_compact_trigger_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            check_compact_trigger_interval.reset();
+
+            let check_compact_trigger = IntervalStream::new(check_compact_trigger_interval)
+                .map(|_| HummockTimerEvent::CheckDeadTask);
+
+            let mut stat_report_interval =
+                tokio::time::interval(std::time::Duration::from_secs(STAT_REPORT_PERIOD_SEC));
+            stat_report_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            stat_report_interval.reset();
+            let stat_report_trigger =
+                IntervalStream::new(stat_report_interval).map(|_| HummockTimerEvent::Report);
+
+            let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
+                Box::pin(check_compact_trigger),
+                Box::pin(stat_report_trigger),
+            ];
+
+            let periodic_check_split_group_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_split_compact_group_interval_sec;
+
+            if periodic_check_split_group_interval_sec > 0 {
+                let mut split_group_trigger_interval = tokio::time::interval(Duration::from_secs(
+                    periodic_check_split_group_interval_sec,
+                ));
+                split_group_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                split_group_trigger_interval.reset();
+
+                let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
+                    .map(|_| HummockTimerEvent::GroupSplit);
+                triggers.push(Box::pin(split_group_trigger));
+            }
+
+            let event_stream = select_all(triggers);
+            use futures::pin_mut;
+            pin_mut!(event_stream);
+
+            let shutdown_rx_shared = shutdown_rx.shared();
+            let mut group_infos = HashMap::default();
+
             loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = min_interval.tick() => {
-                    },
-                    // Shutdown
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Lsm stat reporter is stopped");
-                        return;
+                let item =
+                    futures::future::select(event_stream.next(), shutdown_rx_shared.clone()).await;
+
+                match item {
+                    Either::Left((event, _)) => {
+                        if let Some(event) = event {
+                            match event {
+                                HummockTimerEvent::CheckDeadTask => {
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager.check_dead_task().await;
+                                }
+
+                                HummockTimerEvent::GroupSplit => {
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager
+                                        .on_handle_check_split_multi_group(&mut group_infos)
+                                        .await;
+                                }
+
+                                HummockTimerEvent::Report => {
+                                    let (current_version, id_to_config) = {
+                                        let mut versioning_guard =
+                                            write_lock!(hummock_manager.as_ref(), versioning).await;
+                                        let configs =
+                                            hummock_manager.get_compaction_group_map().await;
+                                        (
+                                            versioning_guard.deref_mut().current_version.clone(),
+                                            configs,
+                                        )
+                                    };
+
+                                    for compaction_group_id in
+                                        get_compaction_group_ids(&current_version)
+                                    {
+                                        let compaction_group_config =
+                                            &id_to_config[&compaction_group_id];
+                                        trigger_lsm_stat(
+                                            &hummock_manager.metrics,
+                                            compaction_group_config.compaction_config(),
+                                            current_version.get_compaction_group_levels(
+                                                compaction_group_config.group_id(),
+                                            ),
+                                            compaction_group_config.group_id(),
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
-                }
 
-                {
-                    let (current_version, id_to_config) = {
-                        let mut versioning_guard =
-                            write_lock!(hummock_manager.as_ref(), versioning).await;
-                        let configs = hummock_manager.get_compaction_group_map().await;
-                        (
-                            versioning_guard.deref_mut().current_version.clone(),
-                            configs,
-                        )
-                    };
-
-                    for compaction_group_id in get_compaction_group_ids(&current_version) {
-                        let compaction_group_config = &id_to_config[&compaction_group_id];
-                        trigger_lsm_stat(
-                            &hummock_manager.metrics,
-                            compaction_group_config.compaction_config(),
-                            current_version
-                                .get_compaction_group_levels(compaction_group_config.group_id()),
-                            compaction_group_config.group_id(),
-                        )
+                    Either::Right((_, _shutdown)) => {
+                        break;
                     }
-                }
-
-                {
-                    hummock_manager.report_scale_compactor_info().await;
                 }
             }
         });
@@ -2246,6 +2329,125 @@ where
                 let group_size = *slowdown_groups.get(group_id).unwrap();
                 warn!("COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
                     task_id, *group_id,group_size / 1024 / 1024,*level_id, compact_time, status, task.ssts);
+            }
+        }
+    }
+
+    async fn on_handle_check_split_multi_group(
+        &self,
+        history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
+    ) {
+        const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 4;
+        let mut group_infos = self.calculate_compaction_group_statistic().await;
+        group_infos.sort_by_key(|group| group.group_size);
+        group_infos.reverse();
+        let group_size_limit = self.env.opts.split_group_size_limit;
+        let table_split_limit = self.env.opts.move_table_size_limit;
+        let mut table_infos = vec![];
+        // TODO: support move small state-table back to default-group to reduce IOPS.
+        for group in &group_infos {
+            if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
+                continue;
+            }
+            for (table_id, table_size) in &group.table_statistic {
+                let last_table_infos = history_table_infos
+                    .entry(*table_id)
+                    .or_insert_with(VecDeque::new);
+                last_table_infos.push_back(*table_size);
+                if last_table_infos.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
+                    last_table_infos.pop_front();
+                }
+                table_infos.push((*table_id, group.group_id, group.group_size));
+            }
+        }
+        table_infos.sort_by(|a, b| b.2.cmp(&a.2));
+        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        let mut partition_vnode_count = self.env.opts.partition_vnode_count;
+        for (table_id, parent_group_id, parent_group_size) in table_infos {
+            let table_info = history_table_infos.get(&table_id).unwrap();
+            let table_size = *table_info.back().unwrap();
+            if table_size < table_split_limit
+                || (table_size < group_size_limit
+                    && table_info.len() < HISTORY_TABLE_INFO_WINDOW_SIZE)
+            {
+                continue;
+            }
+
+            let mut target_compact_group_id = None;
+            let mut allow_split_by_table = false;
+            if table_size < group_size_limit {
+                let mut increase = true;
+                for idx in 1..table_info.len() {
+                    if table_info[idx] < table_info[idx - 1] {
+                        increase = false;
+                        break;
+                    }
+                }
+
+                if !increase {
+                    continue;
+                }
+
+                // do not split a large table and a small table because it would increase IOPS of
+                // small table.
+                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                    let rest_group_size = parent_group_size - table_size;
+                    if rest_group_size < table_size && rest_group_size < table_split_limit {
+                        continue;
+                    }
+                }
+
+                let increase_data_size = table_size.saturating_sub(*table_info.front().unwrap());
+                let increase_slow = increase_data_size < table_split_limit;
+
+                // if the size of this table increases too fast, we shall create one group for it.
+                if increase_slow
+                    && (parent_group_id == mv_group_id || parent_group_id == default_group_id)
+                {
+                    for group in &group_infos {
+                        // do not move to mv group or state group
+                        if !group.split_by_table || group.group_id == mv_group_id
+                            || group.group_id == default_group_id
+                            || group.group_id == parent_group_id
+                            // do not move state-table to a large group.
+                            || group.group_size + table_size > group_size_limit
+                            // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
+                            || group.group_size + table_size > parent_group_size - table_size
+                        {
+                            continue;
+                        }
+                        target_compact_group_id = Some(group.group_id);
+                    }
+                    allow_split_by_table = true;
+                    partition_vnode_count = 1;
+                }
+            }
+
+            let ret = self
+                .move_state_table_to_compaction_group(
+                    parent_group_id,
+                    &[table_id],
+                    target_compact_group_id,
+                    allow_split_by_table,
+                    partition_vnode_count,
+                )
+                .await;
+            match ret {
+                Ok(_) => {
+                    tracing::info!(
+                        "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
+                        table_id, parent_group_id, target_compact_group_id, allow_split_by_table
+                    );
+                    return;
+                }
+                Err(e) => tracing::info!(
+                    "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
+                    table_id,
+                    parent_group_id,
+                    target_compact_group_id,
+                    e
+                ),
             }
         }
     }
