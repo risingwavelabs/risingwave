@@ -39,18 +39,18 @@ use risingwave_expr_macro::function;
 /// statement error
 /// select array_replace(array[3, null, 4], true, false);
 ///
-/// -- Replacing `int` in multidimensional array is not supported yet. (OK in PostgreSQL)
+/// # Replacing `int` in multidimensional array is not supported yet. (OK in PostgreSQL)
 /// statement error
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], 3, 9);
 ///
-/// -- Unlike PostgreSQL, it is okay to replace `int[][]` inside `int[][][]`.
+/// # Unlike PostgreSQL, it is okay to replace `int[][]` inside `int[][][]`.
 /// query T
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], array[array[4, 5], array[6, 7]], array[array[2, 3], array[4, 5]]);
 /// ----
 /// {{{0,1},{2,3}},{{2,3},{4,5}}}
 ///
-/// -- Replacing `int[]` inside `int[][][]` is not supported by either PostgreSQL or RisingWave.
-/// -- This may or may not be supported later, whichever makes the `int` support above simpler.
+/// # Replacing `int[]` inside `int[][][]` is not supported by either PostgreSQL or RisingWave.
+/// # This may or may not be supported later, whichever makes the `int` support above simpler.
 /// statement error
 /// select array_replace(array[array[array[0, 1], array[2, 3]], array[array[4, 5], array[6, 7]]], array[4, 5], array[8, 9]);
 /// ```

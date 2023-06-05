@@ -50,11 +50,11 @@ use crate::Result;
 /// ----
 /// 1
 ///
-/// -- Like in PostgreSQL, searching `int` in multidimensional array is disallowed.
+/// # Like in PostgreSQL, searching `int` in multidimensional array is disallowed.
 /// statement error
 /// select array_position(array[array[1, 2], array[3, 4]], 1);
 ///
-/// -- Unlike in PostgreSQL, it is okay to search `int[]` inside `int[][]`.
+/// # Unlike in PostgreSQL, it is okay to search `int[]` inside `int[][]`.
 /// query I
 /// select array_position(array[array[1, 2], array[3, 4]], array[3, 4]);
 /// ----
