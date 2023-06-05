@@ -14,7 +14,6 @@
 
 package com.risingwave.connector.api;
 
-import com.google.common.collect.Lists;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
@@ -73,37 +72,6 @@ public class TableSchema {
 
     public List<ColumnDesc> getColumnDescs() {
         return columnDescs;
-    }
-
-    public static TableSchema getMockTableSchema() {
-        return new TableSchema(
-                Lists.newArrayList("id", "name"),
-                Lists.newArrayList(
-                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
-                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build()),
-                Lists.newArrayList("id"));
-    }
-
-    public static ConnectorServiceProto.TableSchema getMockTableProto() {
-        return ConnectorServiceProto.TableSchema.newBuilder()
-                .addColumns(
-                        ConnectorServiceProto.TableSchema.Column.newBuilder()
-                                .setName("id")
-                                .setDataType(
-                                        Data.DataType.newBuilder()
-                                                .setTypeName(TypeName.INT32)
-                                                .build())
-                                .build())
-                .addColumns(
-                        ConnectorServiceProto.TableSchema.Column.newBuilder()
-                                .setName("name")
-                                .setDataType(
-                                        Data.DataType.newBuilder()
-                                                .setTypeName(TypeName.VARCHAR)
-                                                .build())
-                                .build())
-                .addAllPkIndices(List.of(1))
-                .build();
     }
 
     public Object getFromRow(String columnName, SinkRow row) {
