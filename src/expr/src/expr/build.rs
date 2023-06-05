@@ -17,7 +17,7 @@ use std::iter::Peekable;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
-use risingwave_pb::expr::{ExprNode, FunctionCall};
+use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
 use super::expr_case::CaseExpression;
@@ -42,13 +42,12 @@ use crate::{bail, ExprError, Result};
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     use PbType as E;
 
-    let binding = FunctionCall { children: vec![] };
     let func_call = match prost.get_rex_node()? {
         RexNode::InputRef(_) => return InputRefExpression::try_from_boxed(prost),
         RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
         RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
         RexNode::FuncCall(func_call) => func_call,
-        RexNode::Now(_) => &binding,
+        RexNode::Now(_) => unreachable!("now should not be built at backend"),
     };
 
     let func_type = prost.function_type();
