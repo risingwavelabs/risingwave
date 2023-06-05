@@ -199,7 +199,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn report_memory_usage(&mut self) -> bool {
-        dbg!(&self.kv_heap_size, &self.last_reported_size_bytes);
         if self.kv_heap_size.abs_diff(self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
@@ -285,7 +284,6 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 
     fn report_memory_usage(&mut self) -> bool {
-        dbg!(&self.total_size, &self.last_reported_size_bytes);
         if self.total_size.abs_diff(*self.last_reported_size_bytes)
             > REPORT_SIZE_EVERY_N_KB_CHANGE << 10
         {
@@ -302,7 +300,6 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
 
 impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
-        dbg!(self.original_val_size, self.inner.estimated_size());
         *self.total_size = self
             .total_size
             .saturating_sub(self.original_val_size)

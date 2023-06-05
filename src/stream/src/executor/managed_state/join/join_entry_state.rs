@@ -51,7 +51,6 @@ impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
         self.kv_heap_size.add(&key, &value);
-        dbg!(self.estimated_size());
         self.cached.try_insert(key, value).unwrap();
     }
 
@@ -84,7 +83,6 @@ impl JoinEntryState {
         })
     }
 
-    #[expect(dead_code)]
     pub fn len(&self) -> usize {
         self.cached.len()
     }
