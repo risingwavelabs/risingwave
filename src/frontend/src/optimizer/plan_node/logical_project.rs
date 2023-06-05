@@ -86,10 +86,6 @@ impl LogicalProject {
         &self.core.exprs
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name, self.base.schema())
-    }
-
     pub fn is_identity(&self) -> bool {
         self.core.is_identity()
     }
