@@ -339,9 +339,7 @@ services:
     environment: {}
     container_name: message_queue
     healthcheck:
-      test:
-        - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9092; exit $?;'
+      test: curl -f localhost:9644/v1/status/ready
       interval: 1s
       timeout: 5s
       retries: 5
