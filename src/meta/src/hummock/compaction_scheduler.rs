@@ -461,6 +461,8 @@ where
         sched_channel: Arc<CompactionRequestChannel>,
         mut shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
+        const NOTIFIED_TIMEOUT: Duration = Duration::from_secs(30);
+
         // Wait for a compactor to become available.
         let compactor = loop {
             if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
@@ -468,7 +470,15 @@ where
             } else {
                 tracing::debug!("No available compactor, pausing compaction.");
                 tokio::select! {
-                    _ = self.compaction_resume_notifier.notified() => {},
+                    notify_result = tokio::time::timeout(NOTIFIED_TIMEOUT, self.compaction_resume_notifier.notified()) => {
+                        match notify_result {
+                            Ok(_) => {}
+
+                            Err(err) => {
+                                tracing::warn!("No available compactor notify timeout {}", err);
+                            }
+                        }
+                    }
                     _ = &mut shutdown_rx => {
                         return false;
                     }
