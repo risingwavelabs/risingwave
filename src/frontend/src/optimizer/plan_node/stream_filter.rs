@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::PlanBase;
@@ -51,11 +52,7 @@ impl StreamFilter {
     }
 }
 
-impl fmt::Display for StreamFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamFilter")
-    }
-}
+impl_distill_by_unit!(StreamFilter, logical, "StreamFilter");
 
 impl PlanTreeNodeUnary for StreamFilter {
     fn input(&self) -> PlanRef {
