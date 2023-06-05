@@ -505,6 +505,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_row,
                         build_data_types.len(),
                     ) {
+                        non_equi_state.first_output_row_id.clear();
                         yield spilled
                     }
                 }
