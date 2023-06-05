@@ -429,7 +429,6 @@ impl SpecificParserConfig {
             SpecificParserConfig::UpsertJson
                 | SpecificParserConfig::UpsertAvro(_)
                 | SpecificParserConfig::DebeziumAvro(_)
-                | SpecificParserConfig::DebeziumJson
         )
     }
 
