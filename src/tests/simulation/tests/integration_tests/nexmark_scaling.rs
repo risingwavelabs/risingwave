@@ -22,7 +22,34 @@ use madsim::time::sleep;
 use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_simulation::cluster::Configuration;
+use risingwave_simulation::nexmark::queries::{q3, q4};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
+
+// async fn actors_on_cordoned_nodes(info: GetClusterInfoResponse, cordoned_nodes: &Vec<WorkerNode>)
+// { No actors from other query on cordoned nodes
+//     let info2 = cluster.get_cluster_info().await?;
+// let (fragments2, workers2) = get_schedule(info).await;
+// let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
+//
+// TODO: do this fancy with map
+// let mut cordoned_pus2: Vec<Vec<ParallelUnit>> = vec![];
+// for worker in workers2 {
+// if cordoned_nodes_ids.contains(&worker.id) {
+// cordoned_pus2.push(worker.parallel_units);
+// }
+// }
+// assert!(cordoned_nodes.len() == cordoned_pus2.len());
+// TODO: do this with map
+// let mut actors_on_cordoned2: Vec<u32> = vec![];
+// for frag in fragments2 {
+// for actor in frag.actor_list {
+// let pu_id = actor.parallel_units_id;
+// if cordoned_pus.contains(pu_id) {
+// actors_on_cordoned.push(pu_id);
+// }
+// }
+// }
+// }
 
 /// create cluster, run query, cordon node, run other query. Cordoned node should NOT contain actors
 /// from other query
@@ -75,49 +102,49 @@ async fn cordoned_nodes_do_not_get_new_actors(
         }
     }
     assert!(cordoned_nodes.len() == cordoned_pus.len());
+    let cordoned_pus_ids = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
     let mut actors_on_cordoned: Vec<u32> = vec![];
     // TODO: do this with map
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            actors_on_cordoned.push(pu_id);
+            if cordoned_pus_ids.contains(&pu_id) {
+                actors_on_cordoned.push(pu_id);
+            }
         }
     }
 
-    // run the other query
-    let is_q3 = create == risingwave_simulation::nexmark::queries::q3::CREATE;
-    let other_create = if !is_q3 {
-        risingwave_simulation::nexmark::queries::q3::CREATE
-    } else {
-        risingwave_simulation::nexmark::queries::q4::CREATE
-    };
-    let other_select = if !is_q3 {
-        risingwave_simulation::nexmark::queries::q3::SELECT
-    } else {
-        risingwave_simulation::nexmark::queries::q4::SELECT
-    };
-    cluster.run(other_create).await?;
-    sleep(Duration::from_secs(sleep_sec)).await;
-    cluster.run(other_select).await?;
-    sleep(Duration::from_secs(sleep_sec)).await;
+    let dummy_create = "create table t (dummy date, v varchar);";
+    let dummy_mv = "create materialized view mv as select v from t;";
+    let dummy_in = "insert into t values ('2023-01-01', '1z');";
+    let dummy_select = "select * from mv;";
+    let dummy_drop = "drop materialized view mv; drop table t;";
+    for sql in vec![dummy_create, dummy_mv, dummy_in] {
+        cluster.run(sql).await?;
+        sleep(Duration::from_secs(sleep_sec)).await;
+    }
+    assert_eq!(cluster.run(dummy_select).await?, "1z");
 
     // No actors from other query on cordoned nodes
     let info2 = cluster.get_cluster_info().await?;
     let (fragments2, workers2) = get_schedule(info2).await;
     // TODO: do this fancy with map
-    let mut cordened_pus2: Vec<Vec<ParallelUnit>> = vec![];
+    let mut cordoned_pus2: Vec<Vec<ParallelUnit>> = vec![];
     for worker in workers2 {
         if cordoned_nodes_ids.contains(&worker.id) {
-            cordened_pus2.push(worker.parallel_units);
+            cordoned_pus2.push(worker.parallel_units);
         }
     }
-    assert!(cordoned_nodes.len() == cordened_pus2.len());
+    assert!(cordoned_nodes.len() == cordoned_pus2.len());
+    let cordoned_pus_ids = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
     // TODO: do this with map
     let mut actors_on_cordoned2: Vec<u32> = vec![];
     for frag in fragments2 {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            actors_on_cordoned2.push(pu_id);
+            if cordoned_pus_ids.contains(&pu_id) {
+                actors_on_cordoned.push(pu_id);
+            }
         }
     }
 
@@ -132,6 +159,8 @@ async fn cordoned_nodes_do_not_get_new_actors(
     assert_eq!(actors_on_cordoned, actors_on_cordoned2);
 
     // compare results of original query
+    cluster.run(dummy_drop).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
     cluster.run(drop).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
     cluster.run(create).await?;
@@ -246,30 +275,29 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-                //    #[madsim::test]
-                //    async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
-                //        use risingwave_simulation::nexmark::queries::$query::*;
-                //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
-                //    }
-                //    #[madsim::test]
-                //    async fn [< cordoned_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
-                //        use risingwave_simulation::nexmark::queries::$query::*;
-                //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
-                //    }
+        //    #[madsim::test]
+        //    async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
+        //        use risingwave_simulation::nexmark::queries::$query::*;
+        //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
+        //    }
+        //    #[madsim::test]
+        //    async fn [< cordoned_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
+        //        use risingwave_simulation::nexmark::queries::$query::*;
+        //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
+        //    }
         //
         //
-                //    #[madsim::test]
-                //    async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
-                //        use risingwave_simulation::nexmark::queries::$query::*;
-                //        cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
-                //    }
-                    #[madsim::test]
-                    async fn [< cordoned_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
-                        use risingwave_simulation::nexmark::queries::$query::*;
-                        cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 2).await
-                    }
-
-                }
+        //    #[madsim::test]
+        //    async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
+        //        use risingwave_simulation::nexmark::queries::$query::*;
+        //        cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
+        //    }
+            #[madsim::test]
+            async fn [< cordoned_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 0).await // reset to 2
+            }
+        }
     };
 }
 
@@ -316,4 +344,14 @@ test!(q3);
 
 // wg-scaling-compute-node update geben
 
-// https://github.com/risingwavelabs/risingwave-operator/pull/448 review
+// TODO: Another test:
+// corden nodes, manually schedule actors on cordnened node. Should throw error
+
+// TODO: test
+// cordon needs to be idempotent
+
+// cloud:
+// 1. cordon
+// 2. reschedules
+// 2.2. check if no actors on node?
+// 3. deleted CN
