@@ -30,7 +30,6 @@ use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::Notify;
 use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 use tracing::log::info;
 
@@ -100,11 +99,6 @@ impl CompactionRequestChannel {
 }
 
 /// Schedules compaction task picking and assignment.
-///
-/// When no idle compactor is available, the scheduling will be paused until
-/// `compaction_resume_notifier` is `notified`. Compaction should only be resumed by calling
-/// `HummockManager::try_resume_compaction`. See [`CompactionResumeTrigger`] for all cases that can
-/// resume compaction.
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
@@ -112,7 +106,6 @@ where
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    compaction_resume_notifier: Arc<Notify>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -128,7 +121,6 @@ where
             env,
             hummock_manager,
             compactor_manager,
-            compaction_resume_notifier: Arc::new(Notify::new()),
         }
     }
 
@@ -348,7 +340,11 @@ where
                                     )
                                     .await
                                 {
-                                    break;
+                                    self.hummock_manager
+                                        .metrics
+                                        .compact_skip_frequency
+                                        .with_label_values(&["total", "no-compactor"])
+                                        .inc();
                                 }
                             }
                             SchedulerEvent::DynamicTrigger => {

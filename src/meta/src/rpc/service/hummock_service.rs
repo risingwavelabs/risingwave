@@ -23,7 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
+use crate::hummock::{HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;

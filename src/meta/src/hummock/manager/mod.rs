@@ -49,7 +49,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{Notify, RwLockWriteGuard};
+use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tracing::warn;
 
@@ -108,7 +108,7 @@ pub struct HummockManager<S: MetaStore> {
     versioning: MonitoredRwLock<Versioning>,
     latest_snapshot: Snapshot,
 
-    metrics: Arc<MetaMetrics>,
+    pub metrics: Arc<MetaMetrics>,
 
     // `compaction_request_channel` is used to schedule a compaction for specified
     // CompactionGroupId
@@ -1222,7 +1222,6 @@ where
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let assignee_context_id = compact_task_assignment
