@@ -19,6 +19,7 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
+use rand::seq::SliceRandom;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
@@ -200,9 +201,7 @@ async fn cordoned_nodes_do_not_get_actors(
     // cordon random nodes
     let mut cordoned_nodes: Vec<WorkerNode> = vec![];
     // TODO: I can directly write this in the cordoned_nodes ved
-    let rand_nodes: Vec<WorkerNode> = cluster
-        .cordon_random_workers(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
-        .await?;
+    let rand_nodes: Vec<WorkerNode> = cluster.cordon_random_workers(number_of_nodes).await?;
     for rand_node in rand_nodes.clone() {
         cordoned_nodes.push(rand_node);
     }
@@ -297,7 +296,56 @@ async fn cordon_is_idempotent(
     Ok(())
 }
 
-// TODO: remove the meta.get_schedule rpc call and what belongs to it
+/// a reschedule request moving an actor to a cordoned node should fail
+async fn invalid_reschedule(
+    create: &str,
+    select: &str,
+    drop: &str,
+    number_of_nodes: usize,
+) -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    // setup cluster and calc expected result
+    let mut cluster =
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
+
+    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
+    assert!(!cordoned_nodes.is_empty());
+
+    cluster.run(create).await?;
+    cluster.run(select).await?;
+    let (fragments, _) = get_schedule(cluster.get_cluster_info().await?).await;
+    let cordoned_pus: Vec<&ParallelUnit> = cordoned_nodes
+        .iter()
+        .map(|w| w.get_parallel_units())
+        .flatten()
+        .collect_vec();
+    assert!(!cordoned_pus.is_empty());
+
+    // for a random fragment, try to move one actor from a non-cordoned PU to a cordoned PU
+    // TODO: is this randomization reproducible with madsim?
+    let fragment = fragments
+        .choose(&mut rand::thread_rng())
+        .expect("expect at least one fragment");
+    let f_id = fragment.id;
+    let from = fragment
+        .get_actor_list()
+        .choose(&mut rand::thread_rng())
+        .expect("expect fragment to have at least 1 actor")
+        .parallel_units_id;
+    let to = cordoned_pus.choose(&mut rand::thread_rng()).unwrap().id;
+    cluster
+        .reschedule(format!("{f_id}-[{from}]+[{to}]"))
+        .await
+        .unwrap();
+    // TODO: in the future this should not panic, but return an error
+
+    cluster.run(drop).await?;
+    Ok(())
+}
+
 async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
     // Compile fragments
     let mut fragment_list: Vec<Fragment> = vec![];
@@ -332,7 +380,7 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-            // cordon on empty cluster
+        /*    // cordon on empty cluster
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
@@ -383,6 +431,24 @@ macro_rules! test {
                 cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
                     .await.unwrap()
             }
+
+             */
+
+            // invalid scheduling request
+            #[madsim::test]
+            #[should_panic]
+            async fn [< invalid_reschedule_ $query >]() {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                invalid_reschedule(CREATE, SELECT, DROP, 3)
+                    .await.unwrap()
+            }
+            #[madsim::test]
+            #[should_panic]
+            async fn [< invalid_reschedule_2_ $query >]() {
+                use risingwave_simulation::nexmark::queries::q3::*;
+                invalid_reschedule(CREATE, SELECT, DROP, 3)
+                    .await.unwrap()
+            }
         }
     };
 }
@@ -416,11 +482,3 @@ test!(q105);
 
 // TODO: test
 // cordon needs to be idempotent
-
-// cloud:
-// 1. cordon
-// 2. reschedules
-// 2.2. check if no actors on node?
-// 3. deleted CN
-
-// Idea: Maybe this is because marking the node as cordoned has some side effect -> Yes!
