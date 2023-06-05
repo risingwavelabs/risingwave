@@ -468,7 +468,7 @@ impl Binder {
                     vec![(false, Field::with_name(tf.return_type(), tf.name()))]
                 };
 
-                self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
+                self.bind_table_to_context(columns, tf.name(), alias)?;
 
                 Ok(Relation::TableFunction(Box::new(tf)))
             }

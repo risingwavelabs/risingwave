@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
@@ -22,6 +20,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
@@ -862,11 +861,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
 
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
-impl fmt::Display for LogicalAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalAgg")
-    }
-}
+impl_distill_by_unit!(LogicalAgg, core, "LogicalAgg");
 
 impl ExprRewritable for LogicalAgg {
     fn has_rewritable_expr(&self) -> bool {
@@ -1235,7 +1230,7 @@ mod tests {
 
             assert_eq_input_ref!(&exprs[0], 0);
             if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
-                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                assert_eq!(func_call.func_type(), ExprType::Add);
                 let inputs = func_call.inputs();
                 assert_eq_input_ref!(&inputs[0], 1);
                 assert_eq_input_ref!(&inputs[1], 2);

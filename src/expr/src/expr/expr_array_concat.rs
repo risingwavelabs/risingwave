@@ -354,7 +354,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
         let left_type = left.return_type();
         let right_type = right.return_type();
         let ret_type = DataType::from(prost.get_return_type()?);
-        let op = match prost.get_expr_type()? {
+        let op = match prost.get_function_type()? {
             // the types are checked in frontend, so no need for type checking here
             Type::ArrayCat => {
                 if left_type == right_type {
@@ -389,7 +389,7 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: PbType::ConstantValue as i32,
+            function_type: PbType::Unspecified as _,
             return_type: Some(DataType::Int64.to_protobuf()),
             rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),
@@ -399,7 +399,7 @@ mod tests {
 
     fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
         ExprNode {
-            expr_type: PbType::Array as i32,
+            function_type: PbType::Array as i32,
             return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: values.into_iter().map(make_i64_expr_node).collect(),
@@ -409,7 +409,7 @@ mod tests {
 
     fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
         ExprNode {
-            expr_type: PbType::Array as i32,
+            function_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List(Box::new(DataType::List(Box::new(DataType::Int64)))).to_protobuf(),
             ),
@@ -425,7 +425,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayCat as i32,
+                function_type: PbType::ArrayCat as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
@@ -438,7 +438,7 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_array_expr_node(vec![vec![43]]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayCat as i32,
+                function_type: PbType::ArrayCat as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
@@ -451,7 +451,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![42]);
             let right = make_i64_expr_node(43);
             let expr = ExprNode {
-                expr_type: PbType::ArrayAppend as i32,
+                function_type: PbType::ArrayAppend as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
@@ -464,7 +464,7 @@ mod tests {
             let left = make_i64_array_array_expr_node(vec![vec![42]]);
             let right = make_i64_array_expr_node(vec![43]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayAppend as i32,
+                function_type: PbType::ArrayAppend as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
@@ -477,7 +477,7 @@ mod tests {
             let left = make_i64_expr_node(43);
             let right = make_i64_array_expr_node(vec![42]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayPrepend as i32,
+                function_type: PbType::ArrayPrepend as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],
@@ -490,7 +490,7 @@ mod tests {
             let left = make_i64_array_expr_node(vec![43]);
             let right = make_i64_array_array_expr_node(vec![vec![42]]);
             let expr = ExprNode {
-                expr_type: PbType::ArrayPrepend as i32,
+                function_type: PbType::ArrayPrepend as i32,
                 return_type: Some(DataType::List(Box::new(DataType::Int64)).to_protobuf()),
                 rex_node: Some(RexNode::FuncCall(FunctionCall {
                     children: vec![left, right],

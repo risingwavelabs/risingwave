@@ -25,7 +25,7 @@ use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
 use super::buffer::StreamWindowBuffer;
-use super::{StateEvictHint, StateKey, StateOutput, StatePos, WindowState};
+use super::{StateEvictHint, StateKey, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
@@ -83,14 +83,17 @@ impl WindowState for AggregateState {
         }
     }
 
-    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
+    fn curr_output(&self) -> StreamExecutorResult<Datum> {
         assert!(self.curr_window().is_ready);
         let wrapper = BatchAggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
         };
-        let return_value =
-            wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))?;
+        wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
+    }
+
+    fn slide_forward(&mut self) -> StateEvictHint {
+        assert!(self.curr_window().is_ready);
         let removed_keys: BTreeSet<_> = self
             .buffer
             .slide()
@@ -102,19 +105,16 @@ impl WindowState for AggregateState {
                 k
             })
             .collect();
-        Ok(StateOutput {
-            return_value,
-            evict_hint: if removed_keys.is_empty() {
-                StateEvictHint::CannotEvict(
-                    self.buffer
-                        .smallest_key()
-                        .expect("sliding without removing, must have some entry in the buffer")
-                        .clone(),
-                )
-            } else {
-                StateEvictHint::CanEvict(removed_keys)
-            },
-        })
+        if removed_keys.is_empty() {
+            StateEvictHint::CannotEvict(
+                self.buffer
+                    .smallest_key()
+                    .expect("sliding without removing, must have some entry in the buffer")
+                    .clone(),
+            )
+        } else {
+            StateEvictHint::CanEvict(removed_keys)
+        }
     }
 }
 

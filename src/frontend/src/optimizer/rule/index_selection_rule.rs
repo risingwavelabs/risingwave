@@ -393,7 +393,7 @@ impl IndexSelectionRule {
         for expr in conjunctions {
             // it's OR clause!
             if let ExprImpl::FunctionCall(function_call) = expr
-                && function_call.get_expr_type() == ExprType::Or
+                && function_call.func_type() == ExprType::Or
             {
                 let mut index_to_be_merged = vec![];
 
@@ -914,7 +914,7 @@ impl IndexCost {
 
 impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
-        match func_call.get_expr_type() {
+        match func_call.func_type() {
             ExprType::Or => func_call
                 .inputs()
                 .iter()
