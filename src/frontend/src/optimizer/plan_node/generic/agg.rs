@@ -16,7 +16,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
@@ -25,7 +26,7 @@ use risingwave_pb::expr::PbAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{stream, GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -126,6 +127,13 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
             .any(|call| matches!(call.agg_kind, AggKind::StringAgg | AggKind::ArrayAgg))
     }
 
+    pub(crate) fn watermark_group_key(&self, input_watermark_columns: &FixedBitSet) -> Vec<usize> {
+        self.group_key
+            .ones()
+            .filter(|&idx| input_watermark_columns.contains(idx))
+            .collect()
+    }
+
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: FixedBitSet, input: PlanRef) -> Self {
         Self {
             agg_calls,
@@ -167,7 +175,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.count_ones(..)).collect_vec())
+        Some((0..self.group_key.count_ones(..)).collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -255,16 +263,69 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> (
         TableCatalog,
         Vec<AggCallState>,
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_result_table(me, vnode_col_idx),
-            self.infer_stream_agg_state(me, vnode_col_idx),
-            self.infer_distinct_dedup_tables(me, vnode_col_idx),
+            self.infer_result_table(me, vnode_col_idx, window_col_idx),
+            self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
+            self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
         )
+    }
+
+    fn get_ordered_group_key(&self, window_col_idx: Option<usize>) -> Vec<usize> {
+        if let Some(window_col_idx) = window_col_idx {
+            assert!(self.group_key.contains(window_col_idx));
+            Either::Left(
+                std::iter::once(window_col_idx)
+                    .chain(self.group_key.ones().filter(move |&i| i != window_col_idx)),
+            )
+        } else {
+            Either::Right(self.group_key.ones())
+        }
+        .collect()
+    }
+
+    /// Create a new table builder with group key columns added.
+    ///
+    /// # Returns
+    ///
+    /// - table builder with group key columns added
+    /// - included upstream indices
+    /// - column mapping from upstream to table
+    fn create_table_builder(
+        &self,
+        ctx: OptimizerContextRef,
+        window_col_idx: Option<usize>,
+    ) -> (TableCatalogBuilder, Vec<usize>, BTreeMap<usize, usize>) {
+        // NOTE: this function should be called to get a table builder, so that all state tables
+        // created for Agg node have the same group key columns and pk ordering.
+        let mut table_builder =
+            TableCatalogBuilder::new(ctx.with_options().internal_table_subset());
+
+        assert!(table_builder.columns().is_empty());
+        assert_eq!(table_builder.get_current_pk_len(), 0);
+
+        // add group key column to table builder
+        let mut included_upstream_indices = vec![];
+        let mut column_mapping = BTreeMap::new();
+        let in_fields = self.input.schema().fields();
+        for idx in self.group_key.ones() {
+            let tbl_col_idx = table_builder.add_column(&in_fields[idx]);
+            included_upstream_indices.push(idx);
+            column_mapping.insert(idx, tbl_col_idx);
+        }
+
+        // configure state table primary key (ordering)
+        let ordered_group_key = self.get_ordered_group_key(window_col_idx);
+        for idx in ordered_group_key {
+            table_builder.add_order_column(column_mapping[&idx], OrderType::ascending());
+        }
+
+        (table_builder, included_upstream_indices, column_mapping)
     }
 
     /// Infer `AggCallState`s for streaming agg.
@@ -272,6 +333,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
         let in_fields = self.input.schema().fields().to_vec();
         let in_pks = self.input.logical_pk().to_vec();
@@ -281,23 +343,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+            let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
+                self.create_table_builder(me.ctx(), window_col_idx);
+            let read_prefix_len_hint = table_builder.get_current_pk_len();
 
-            let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
-            let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
             let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
             let mut add_column =
-                |upstream_idx,
-                 order_type,
-                 is_value,
-                 internal_table_catalog_builder: &mut TableCatalogBuilder| {
+                |upstream_idx, order_type, is_value, table_builder: &mut TableCatalogBuilder| {
                     column_mapping.entry(upstream_idx).or_insert_with(|| {
-                        let table_col_idx =
-                            internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
+                        let table_col_idx = table_builder.add_column(&in_fields[upstream_idx]);
                         if let Some(order_type) = order_type {
-                            internal_table_catalog_builder
-                                .add_order_column(table_col_idx, order_type);
+                            table_builder.add_order_column(table_col_idx, order_type);
                         }
                         included_upstream_indices.push(upstream_idx);
                         table_col_idx
@@ -309,72 +365,43 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 };
 
-            for idx in self.group_key.ones() {
-                add_column(
-                    idx,
-                    Some(OrderType::ascending()),
-                    false,
-                    &mut internal_table_catalog_builder,
-                );
-            }
-            let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
-
             for (order_type, idx) in sort_keys {
-                add_column(
-                    idx,
-                    Some(order_type),
-                    true,
-                    &mut internal_table_catalog_builder,
-                );
+                add_column(idx, Some(order_type), true, &mut table_builder);
             }
             for &idx in &in_pks {
-                add_column(
-                    idx,
-                    Some(OrderType::ascending()),
-                    true,
-                    &mut internal_table_catalog_builder,
-                );
+                add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
             }
             for idx in include_keys {
-                add_column(idx, None, true, &mut internal_table_catalog_builder);
+                add_column(idx, None, true, &mut table_builder);
             }
 
             let mapping =
                 ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+                table_builder.set_vnode_col_idx(tb_vnode_idx);
             }
 
             // set value indices to reduce ser/de overhead
             let table_value_indices = table_value_indices.into_iter().collect_vec();
-            internal_table_catalog_builder.set_value_indices(table_value_indices.clone());
+            table_builder.set_value_indices(table_value_indices.clone());
 
             MaterializedInputState {
-                table: internal_table_catalog_builder
-                    .build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
+                table: table_builder.build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
                 included_upstream_indices,
                 table_value_indices,
             }
         };
 
         let gen_table_state = |agg_kind: AggKind| -> TableState {
-            let mut internal_table_catalog_builder =
-                TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-
-            let mut included_upstream_indices = vec![];
-            for idx in self.group_key.ones() {
-                let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::ascending());
-                included_upstream_indices.push(idx);
-            }
-            let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
+            let (mut table_builder, included_upstream_indices, _) =
+                self.create_table_builder(me.ctx(), window_col_idx);
+            let read_prefix_len_hint = table_builder.get_current_pk_len();
 
             match agg_kind {
                 AggKind::ApproxCountDistinct => {
                     // Add register column.
-                    internal_table_catalog_builder.add_column(&Field {
+                    table_builder.add_column(&Field {
                         data_type: DataType::List(Box::new(DataType::Int64)),
                         name: String::from("registers"),
                         sub_fields: vec![],
@@ -388,11 +415,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 ColIndexMapping::with_included_columns(&included_upstream_indices, in_fields.len());
             let tb_dist = mapping.rewrite_dist_key(&in_dist_key);
             if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-                internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+                table_builder.set_vnode_col_idx(tb_vnode_idx);
             }
             TableState {
-                table: internal_table_catalog_builder
-                    .build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
+                table: table_builder.build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
             }
         };
 
@@ -474,32 +500,29 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> TableCatalog {
         let out_fields = me.schema().fields();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
-        let group_key_cardinality = self.group_key.count_ones(..);
-        for field in out_fields.iter() {
-            let tb_column_idx = internal_table_catalog_builder.add_column(field);
-            if tb_column_idx < group_key_cardinality {
-                internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::ascending());
-            }
+        let n_group_key_cols = self.group_key.count_ones(..);
+
+        let (mut table_builder, _, _) = self.create_table_builder(me.ctx(), window_col_idx);
+        let read_prefix_len_hint = table_builder.get_current_pk_len();
+
+        for field in out_fields.iter().skip(n_group_key_cols) {
+            table_builder.add_column(field);
         }
-        let read_prefix_len_hint = self.group_key.count_ones(..);
 
         let mapping = self.i2o_col_mapping();
         let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
         if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
-            internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
+            table_builder.set_vnode_col_idx(tb_vnode_idx);
         }
 
         // the result_table is composed of group_key and all agg_call's values, so the value_indices
         // of this table should skip group_key.len().
-        internal_table_catalog_builder
-            .set_value_indices((group_key_cardinality..out_fields.len()).collect());
-        internal_table_catalog_builder.build(tb_dist, read_prefix_len_hint)
+        table_builder.set_value_indices((n_group_key_cols..out_fields.len()).collect());
+        table_builder.build(tb_dist, read_prefix_len_hint)
     }
 
     /// Infer dedup tables for distinct agg calls, partitioned by distinct columns.
@@ -512,6 +535,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         &self,
         me: &impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
+        window_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
         let in_fields = self.input.schema().fields();
@@ -523,18 +547,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .into_group_map_by(|(_, call)| call.inputs[0].index) // one table per distinct column
             .into_iter()
             .map(|(distinct_col, indices_and_calls)| {
-                let mut table_builder =
-                    TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
+                let (mut table_builder, mut key_cols, _) =
+                    self.create_table_builder(me.ctx(), window_col_idx);
+                let table_col_idx = table_builder.add_column(&in_fields[distinct_col]);
+                table_builder.add_order_column(table_col_idx, OrderType::ascending());
+                key_cols.push(distinct_col);
 
-                let key_cols = self
-                    .group_key
-                    .ones()
-                    .chain(std::iter::once(distinct_col))
-                    .collect_vec();
-                for &idx in &key_cols {
-                    let table_col_idx = table_builder.add_column(&in_fields[idx]);
-                    table_builder.add_order_column(table_col_idx, OrderType::ascending());
-                }
                 let read_prefix_len_hint = table_builder.get_current_pk_len();
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
@@ -579,23 +597,46 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         builder.field("aggs", &self.agg_calls_display());
     }
 
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        let last = ("aggs", self.agg_calls_pretty());
+        if self.group_key.count_ones(..) != 0 {
+            let first = ("group_key", self.group_key_pretty());
+            vec![first, last]
+        } else {
+            vec![last]
+        }
+    }
+
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.agg_calls
-            .iter()
-            .map(|plan_agg_call| PlanAggCallDisplay {
+        let f = |plan_agg_call| PlanAggCallDisplay {
+            plan_agg_call,
+            input_schema: self.input.schema(),
+        };
+        self.agg_calls.iter().map(f).collect()
+    }
+
+    fn agg_calls_pretty<'a>(&self) -> Pretty<'a> {
+        let f = |plan_agg_call| {
+            Pretty::debug(&PlanAggCallDisplay {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+        };
+        Pretty::Array(self.agg_calls.iter().map(f).collect())
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.group_key
-            .ones()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+        let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
+        self.group_key.ones().map(f).collect()
+    }
+
+    fn group_key_pretty<'a>(&self) -> Pretty<'a> {
+        let f = |i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap()));
+        Pretty::Array(self.group_key.ones().map(f).collect())
     }
 }
+
+impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.

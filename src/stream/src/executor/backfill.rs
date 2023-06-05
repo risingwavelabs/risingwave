@@ -151,9 +151,14 @@ where
         // finished state to state store first.
         // As such we will wait for next barrier.
         let is_snapshot_empty: bool = {
-            let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
-            pin_mut!(snapshot);
-            snapshot.try_next().await?.unwrap().is_none()
+            if is_finished {
+                // It is finished, so just assign a value to avoid accessing storage table again.
+                false
+            } else {
+                let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
+                pin_mut!(snapshot);
+                snapshot.try_next().await?.unwrap().is_none()
+            }
         };
 
         // | backfill_is_finished | snapshot_empty | need_to_backfill |

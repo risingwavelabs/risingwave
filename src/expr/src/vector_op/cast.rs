@@ -263,7 +263,7 @@ pub fn literal_parsing(
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<F32>(s)?.into(),
         DataType::Float64 => str_parse::<F64>(s)?.into(),
-        DataType::Varchar => return Err(None),
+        DataType::Varchar => s.into(),
         DataType::Date => str_to_date(s)?.into(),
         DataType::Timestamp => str_to_timestamp(s)?.into(),
         // We only handle the case with timezone here, and leave the implicit session timezone case

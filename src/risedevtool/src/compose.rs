@@ -140,10 +140,41 @@ fn get_cmd_envs(cmd: &Command) -> Result<BTreeMap<String, String>> {
 fn health_check_port(port: u16) -> HealthCheck {
     HealthCheck {
         test: vec![
+            "CMD-SHELL".into(),
+            format!(
+                "bash -c 'printf \"GET / HTTP/1.1\\n\\n\" > /dev/tcp/127.0.0.1/{}; exit $?;'",
+                port
+            ),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
+fn health_check_port_etcd(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
             "CMD".into(),
-            "printf".into(),
-            "".into(),
-            format!("/dev/tcp/127.0.0.1/{}", port),
+            "etcdctl".into(),
+            format!("--endpoints=http://localhost:{port}"),
+            "endpoint".into(),
+            "health".into(),
+        ],
+        interval: "1s".to_string(),
+        timeout: "5s".to_string(),
+        retries: 5,
+    }
+}
+
+fn health_check_port_prometheus(port: u16) -> HealthCheck {
+    HealthCheck {
+        test: vec![
+            "CMD-SHELL".into(),
+            format!(
+                "sh -c 'printf \"GET /-/healthy HTTP/1.0\\n\\n\" | nc localhost {}; exit $?;'",
+                port
+            ),
         ],
         interval: "1s".to_string(),
         timeout: "5s".to_string(),
@@ -400,7 +431,7 @@ impl Compose for PrometheusConfig {
             expose: vec![self.port.to_string()],
             ports: vec![format!("{}:{}", self.port, self.port)],
             volumes: vec![format!("{}:/prometheus", self.id)],
-            healthcheck: Some(health_check_port(self.port)),
+            healthcheck: Some(health_check_port_prometheus(self.port)),
             ..Default::default()
         };
 
@@ -468,7 +499,7 @@ impl Compose for EtcdConfig {
                 format!("{}:{}", self.peer_port, self.peer_port),
             ],
             volumes: vec![format!("{}:/etcd-data", self.id)],
-            healthcheck: Some(health_check_port(self.port)),
+            healthcheck: Some(health_check_port_etcd(self.port)),
             ..Default::default()
         };
 

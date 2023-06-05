@@ -14,6 +14,7 @@
 
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::Ordering;
 
 use function_name::named;
 use itertools::Itertools;
@@ -22,7 +23,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::version_checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
-use risingwave_pb::hummock::HummockVersionCheckpoint;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
@@ -174,5 +175,31 @@ where
             )
             .await
             .map_err(Into::into)
+    }
+
+    pub(crate) fn pause_version_checkpoint(&self) {
+        self.pause_version_checkpoint.store(true, Ordering::Relaxed);
+        tracing::info!("hummock version checkpoint is paused.");
+    }
+
+    pub(crate) fn resume_version_checkpoint(&self) {
+        self.pause_version_checkpoint
+            .store(false, Ordering::Relaxed);
+        tracing::info!("hummock version checkpoint is resumed.");
+    }
+
+    pub(crate) fn is_version_checkpoint_paused(&self) -> bool {
+        self.pause_version_checkpoint.load(Ordering::Relaxed)
+    }
+
+    #[named]
+    pub(crate) async fn get_checkpoint_version(&self) -> HummockVersion {
+        let versioning_guard = read_lock!(self, versioning).await;
+        versioning_guard
+            .checkpoint
+            .version
+            .as_ref()
+            .unwrap()
+            .clone()
     }
 }

@@ -2,6 +2,8 @@ FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
 
+# Use AWS ubuntu mirror
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://us-east-2.ec2.archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel python3 python3-pip \
     openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat netcat mysql-client \

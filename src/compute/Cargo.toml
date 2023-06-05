@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

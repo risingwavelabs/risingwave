@@ -221,6 +221,11 @@ where
         }
     }
 
+    fn cancel_stashed_command(&mut self, id: TableId) {
+        self.finished_commands
+            .retain(|x| x.context.table_to_create() != Some(id));
+    }
+
     /// Before resolving the actors to be sent or collected, we should first record the newly
     /// created table and added actors into checkpoint control, so that `can_actor_send_or_collect`
     /// will return `true`.
@@ -964,16 +969,20 @@ where
                     checkpoint_control.stash_command_to_finish(command);
                 }
 
+                if let Some(command) = cancelled_command {
+                    checkpoint_control.cancel_command(command);
+                } else if let Some(table_id) = node.command_ctx.table_to_cancel() {
+                    // the cancelled command is possibly stashed in `finished_commands` and waiting
+                    // for checkpoint, we should also clear it.
+                    checkpoint_control.cancel_stashed_command(table_id);
+                }
+
                 let remaining = checkpoint_control.finish_commands(checkpoint).await?;
                 // If there are remaining commands (that requires checkpoint to finish), we force
                 // the next barrier to be a checkpoint.
                 if remaining {
                     assert!(!checkpoint);
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
-                }
-
-                if let Some(command) = cancelled_command {
-                    checkpoint_control.cancel_command(command);
                 }
 
                 node.timer.take().unwrap().observe_duration();

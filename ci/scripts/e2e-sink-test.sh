@@ -37,7 +37,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
 # grant access to `test` for ci test user
 mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
-# create a table named t_remote
+# creates two table named t_remote_0, t_remote_1
 mysql --host=mysql --port=3306 -u root -p123456 test < ./e2e_test/sink/remote/mysql_create_table.sql
 
 echo "--- preparing postgresql"
@@ -92,10 +92,19 @@ sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
 # check sink destination mysql using shell
-diff -u ./e2e_test/sink/remote/mysql_expected_result.tsv \
-<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote ORDER BY id")
+diff -u ./e2e_test/sink/remote/mysql_expected_result_0.tsv \
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote_0 ORDER BY id")
 if [ $? -eq 0 ]; then
-  echo "mysql sink check passed"
+  echo "mysql sink check 0 passed"
+else
+  echo "The output is not as expected."
+  exit 1
+fi
+
+diff -u ./e2e_test/sink/remote/mysql_expected_result_1.tsv \
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT id, v_varchar, v_text, v_integer, v_smallint, v_bigint, v_decimal, v_real, v_double, v_boolean, v_date, v_time, v_timestamp, v_timestamptz, v_interval, v_jsonb, TO_BASE64(v_bytea) FROM test.t_remote_1 ORDER BY id")
+if [ $? -eq 0 ]; then
+  echo "mysql sink check 1 passed"
 else
   echo "The output is not as expected."
   exit 1
