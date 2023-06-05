@@ -175,7 +175,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.count_ones(..)).collect_vec())
+        Some((0..self.group_key.count_ones(..)).collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -627,7 +627,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
         let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
-        self.group_key.ones().map(f).collect_vec()
+        self.group_key.ones().map(f).collect()
     }
 
     fn group_key_pretty<'a>(&self) -> Pretty<'a> {
