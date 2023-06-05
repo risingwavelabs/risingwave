@@ -77,7 +77,7 @@ async fn cordoned_nodes_do_not_get_new_actors(
 
     // cordon random nodes
     let mut cordoned_nodes: Vec<WorkerNode> = vec![];
-    // TODO: I can directly write this in the cordoned_nodes ved
+    // TODO: I can directly write this in the cordoned_nodes vec
     let rand_nodes: Vec<WorkerNode> = cluster
         .cordon_random_workers(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
         .await?;
@@ -117,7 +117,7 @@ async fn cordoned_nodes_do_not_get_new_actors(
         }
     }
 
-    println!("here is where the fun begins... Creating additional query");
+    println!("here is where the fun begins... Creating additional query"); // TODO: del line
 
     let dummy_create = "create table t (dummy date, v varchar);";
     let dummy_mv = "create materialized view mv as select v from t;";
@@ -148,20 +148,19 @@ async fn cordoned_nodes_do_not_get_new_actors(
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
             if cordoned_pus_ids.contains(&pu_id) {
-                actors_on_cordoned.push(pu_id);
+                actors_on_cordoned.push(pu_id); // actor.actor_id
             }
         }
     }
 
-    // TODO: clarify
-    // we assume that the actors on the cordoned nodes did not change, however the following 2
-    // changes are technically legal:
-    // 1. Change of an actor from a cordoned worker to another cordoned worker
-    // 2. Change of an actor from a cordoned worker no a non-cordoned worker
-
-    actors_on_cordoned.sort();
-    actors_on_cordoned2.sort();
-    assert_eq!(actors_on_cordoned, actors_on_cordoned2);
+    // TODO: Clarify
+    // We allow that an actor moves from a cordoned node to a non-cordoned node
+    // We disallow that an actor moves from a non-cordoned node to a cordoned node
+    // We disallow that an actor moves from a cordoned node to another cordoned node
+    assert!(actors_on_cordoned2.len() <= actors_on_cordoned.len());
+    for actors2 in actors_on_cordoned2 {
+        assert!(actors_on_cordoned.contains(&actors2));
+    }
 
     // compare results of original query
     cluster.run(dummy_drop).await?;
@@ -298,23 +297,22 @@ async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, V
 macro_rules! test {
     ($query:ident) => {
         paste::paste! {
-        //    #[madsim::test]
-        //    async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
-        //        use risingwave_simulation::nexmark::queries::$query::*;
-        //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
-        //    }
-        //    #[madsim::test]
-        //    async fn [< cordoned_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
-        //        use risingwave_simulation::nexmark::queries::$query::*;
-        //        cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
-        //    }
-        //
-        //
-           // #[madsim::test]
-           // async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
-           //     use risingwave_simulation::nexmark::queries::$query::*;
-           //     cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
-           // }
+            #[madsim::test]
+            async fn [< cordoned_nodes_do_not_get_actors_1_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 1).await
+            }
+            #[madsim::test]
+            async fn [< cordoned_nodes_do_not_get_actors_2_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 2).await
+            }
+
+            #[madsim::test]
+            async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
+                use risingwave_simulation::nexmark::queries::$query::*;
+                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
+            }
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
@@ -324,25 +322,23 @@ macro_rules! test {
     };
 }
 
-// TODO: test if we cordon all 3 nodes, then we should get an error
-
 // TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial
 test!(q3);
-// test!(q4);
-// test!(q5);
+test!(q4);
+test!(q5);
 // // q6: cannot plan
-// test!(q7);
-// test!(q8);
-// test!(q9);
+test!(q7);
+test!(q8);
+test!(q9);
 // // q10+: duplicated or unsupported
 //
 // // Self made queries.
-// test!(q101);
-// test!(q102);
-// test!(q103);
-// test!(q104);
-// test!(q105);
+test!(q101);
+test!(q102);
+test!(q103);
+test!(q104);
+test!(q105);
 
 // new requirement:
 // Tool for open source users to scale clusters
@@ -381,4 +377,4 @@ test!(q3);
 // 2.2. check if no actors on node?
 // 3. deleted CN
 
-// Idea: Maybe this is because marking the node as cordoned has some side effect
+// Idea: Maybe this is because marking the node as cordoned has some side effect -> Yes!

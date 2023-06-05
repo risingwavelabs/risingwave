@@ -104,20 +104,25 @@ where
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 
+    // TODO: refactor this. We should make clear which nodes we get
     async fn list_all_nodes(
         &self,
         request: Request<ListAllNodesRequest>,
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
-        let worker_state = if req.include_starting_nodes {
+        let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(risingwave_pb::common::worker_node::State::Running)
+            Some(vec![
+                risingwave_pb::common::worker_node::State::Running,
+                risingwave_pb::common::worker_node::State::Cordoned,
+            ])
         };
+
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_state)
+            .list_worker_node(worker_type, worker_states)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

@@ -343,16 +343,16 @@ where
     pub async fn list_worker_node(
         &self,
         worker_type: WorkerType,
-        worker_state: Option<State>,
+        worker_states: Option<Vec<State>>,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_state)
+        core.list_worker_node(worker_type, worker_states)
     }
 
     /// A convenient method to get all running compute nodes that can be used for streaming.
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_streaming_worker_node(Some(State::Running))
+        core.list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
     }
 
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
@@ -360,7 +360,8 @@ where
         core.list_active_streaming_parallel_units()
     }
 
-    /// Get the cluster info used for scheduling a streaming job.
+    /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
+    /// schedulable
     pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
         core.get_streaming_cluster_info()
@@ -488,23 +489,28 @@ impl ClusterManagerCore {
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
     }
 
+    // TODO: refactor this. We should make clear which nodes we get
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
-        worker_state: Option<State>,
+        worker_states: Option<Vec<State>>,
     ) -> Vec<WorkerNode> {
+        let worker_states = match worker_states {
+            None => None,
+            Some(state) => Some(state.iter().map(|s| *s as i32).collect_vec()),
+        };
         self.workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
-            .filter(|w| match worker_state {
+            .filter(|w| match worker_states.clone() {
                 None => true,
-                Some(state) => state as i32 == w.state,
+                Some(state) => state.contains(&w.state),
             })
             .collect_vec()
     }
 
-    pub fn list_streaming_worker_node(&self, worker_state: Option<State>) -> Vec<WorkerNode> {
+    pub fn list_streaming_worker_node(&self, worker_state: Option<Vec<State>>) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state)
             .into_iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
@@ -513,7 +519,7 @@ impl ClusterManagerCore {
 
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(State::Running))
+            .list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -527,7 +533,7 @@ impl ClusterManagerCore {
 
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
-            .list_streaming_worker_node(Some(State::Running))
+            .list_streaming_worker_node(Some(vec![State::Running]))
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
