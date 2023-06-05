@@ -193,11 +193,21 @@ impl DebeziumAvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        // https://debezium.io/documentation/reference/stable/transformations/event-flattening.html#event-flattening-behavior:
+        //
+        // A database DELETE operation causes Debezium to generate two Kafka records:
+        // - A record that contains "op": "d", the before row data, and some other fields.
+        // - A tombstone record that has the same key as the deleted row and a value of null. This
+        // record is a marker for Apache Kafka. It indicates that log compaction can remove
+        // all records that have this key.
+
         let UpsertMessage {
             primary_key: key,
             record: payload,
         } = bincode::deserialize(&payload[..]).unwrap();
 
+        // If message value == null, it must be a tombstone message. Emit DELETE to downstream using
+        // message key as the DELETE row. Throw an error if message key is empty.
         if payload.is_empty() {
             let (schema_id, mut raw_payload) = extract_schema_id(&key)?;
             let key_schema = self.schema_resolver.get(schema_id).await?;
@@ -222,6 +232,11 @@ impl DebeziumAvroParser {
         if let Value::String(op_str) = op {
             match op_str.as_str() {
                 DEBEZIUM_CREATE_OP | DEBEZIUM_UPDATE_OP | DEBEZIUM_READ_OP => {
+                    // - If debezium op == CREATE, emit INSERT to downstream using the after field
+                    //   in the debezium value as the INSERT row.
+                    // - If debezium op == UPDATE, emit INSERT to downstream using the after field
+                    //   in the debezium value as the INSERT row.
+
                     let after = get_field_from_avro_value(&avro_value, AFTER)?;
                     if *after == Value::Null {
                         return Err(RwError::from(ProtocolError(format!(
@@ -239,10 +254,13 @@ impl DebeziumAvroParser {
                     })
                 }
                 DEBEZIUM_DELETE_OP => {
+                    // If debezium op == DELETE, emit DELETE to downstream using the before field as
+                    // the DELETE row.
+
                     let before = get_field_from_avro_value(&avro_value, BEFORE)
                         .map_err(|_| {
                             RwError::from(ProtocolError(
-                                "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
+                                "before is missing for the Debezium delete op. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
                             ))
                         })?;
                     if *before == Value::Null {
