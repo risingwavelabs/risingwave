@@ -18,6 +18,7 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::impl_distill_unit_from_fields;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -78,4 +79,4 @@ impl<PlanRef: GenericPlanRef> Union<PlanRef> {
         vec![("all", Pretty::debug(&self.all))]
     }
 }
-impl_distill_unit_from_fields!(Intersect, GenericPlanRef);
+impl_distill_unit_from_fields!(Union, GenericPlanRef);
