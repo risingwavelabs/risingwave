@@ -32,6 +32,7 @@
 #![feature(async_fn_in_trait)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
+#![feature(result_option_inspect)]
 #![feature(assert_matches)]
 
 mod error;

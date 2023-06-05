@@ -46,14 +46,6 @@ pub(super) struct StatePos<'a> {
 }
 
 #[derive(Debug)]
-pub(super) struct StateOutput {
-    /// Window function return value for the current ready window frame.
-    pub return_value: Datum,
-    /// Hint for the executor to evict unneeded rows from the state table.
-    pub evict_hint: StateEvictHint,
-}
-
-#[derive(Debug)]
 pub(super) enum StateEvictHint {
     /// Use a set instead of a single key to avoid state table iter or too many range delete.
     /// Shouldn't be empty set.
@@ -109,10 +101,11 @@ pub(super) trait WindowState: EstimateSize {
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
 
-    // TODO(rc): split `output` into `curr_output` and `slide` to avoid unnecessary computation on
-    // recovery.
-    /// Return the output for the current ready window frame and push the window forward.
-    fn output(&mut self) -> StreamExecutorResult<StateOutput>;
+    /// Get the window function result of current window frame.
+    fn curr_output(&self) -> StreamExecutorResult<Datum>;
+
+    /// Slide the window frame forward.
+    fn slide_forward(&mut self) -> StateEvictHint;
 }
 
 pub(super) fn create_window_state(

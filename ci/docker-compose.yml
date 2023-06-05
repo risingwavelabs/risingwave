@@ -64,17 +64,13 @@ services:
     environment: {}
     container_name: message_queue
     healthcheck:
-      test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9092
+      test: curl -f localhost:9644/v1/status/ready
       interval: 1s
       timeout: 5s
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230526_2
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       - mysql
       - db
@@ -83,7 +79,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230526_2
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       - mysql
       - db
@@ -91,12 +87,12 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230526_2
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230526_2
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -107,7 +103,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230526_2
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       db:
         condition: service_healthy

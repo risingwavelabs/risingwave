@@ -117,7 +117,7 @@ impl DmlExecutor {
 
         yield Message::Barrier(barrier);
 
-        // Active transactions: txn_id -> rows have been sent.
+        // Active transactions: txn_id -> (the epoch of `Begin`, transaction chunks).
         let mut active_txn_map: BTreeMap<TxnId, (Epoch, Vec<StreamChunk>)> = Default::default();
 
         while let Some(input_msg) = stream.next().await {

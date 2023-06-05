@@ -420,12 +420,27 @@ pub struct FileCacheConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
+    /// Disabled.
     Off,
-    #[default]
+    /// Enabled with basic instruments.
     On,
-    Verbose,
+    /// Enabled with extra verbose instruments in release build.
+    /// Behaves the same as `on` in debug build due to performance concern.
+    #[default]
+    #[clap(alias = "verbose")]
+    ReleaseVerbose,
+}
+
+impl AsyncStackTraceOption {
+    pub fn is_verbose(self) -> Option<bool> {
+        match self {
+            Self::Off => None,
+            Self::On => Some(false),
+            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
+        }
+    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -723,7 +738,7 @@ mod default {
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
-            AsyncStackTraceOption::On
+            AsyncStackTraceOption::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
