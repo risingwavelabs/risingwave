@@ -26,6 +26,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.apache.commons.lang3.StringUtils;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
@@ -267,14 +268,8 @@ public class JDBCSink extends SinkBase {
                         // convert Array type to a string for other database
                         // reference:
                         // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
-                        StringBuilder sb = new StringBuilder();
-                        for (int j = 0; j < objArray.length; j++) {
-                            sb.append('"').append(objArray[j].toString()).append('"');
-                            if (j != objArray.length - 1) {
-                                sb.append(",");
-                            }
-                        }
-                        stmt.setString(placeholderIdx++, sb.toString());
+                        var arrayString = StringUtils.join(objArray, ",");
+                        stmt.setString(placeholderIdx++, arrayString);
                     }
                     break;
                 default:
