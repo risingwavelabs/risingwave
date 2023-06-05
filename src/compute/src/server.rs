@@ -264,7 +264,7 @@ pub async fn compute_node_serve(
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
-            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .verbose(c.is_verbose().unwrap())
             .build()
             .ok(),
     };
