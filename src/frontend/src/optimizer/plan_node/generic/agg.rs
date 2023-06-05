@@ -488,7 +488,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 }
                 // TODO: is its state a Table?
-                AggKind::BitAnd | AggKind::BitOr | AggKind::BoolAnd | AggKind::BoolOr => {
+                AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode => {
                     unimplemented!()
                 }
             })
@@ -712,7 +718,10 @@ impl PlanAggCall {
             | AggKind::Min
             | AggKind::Max
             | AggKind::StringAgg
-            | AggKind::FirstValue => self.agg_kind,
+            | AggKind::FirstValue
+            | AggKind::PercentileCont
+            | AggKind::PercentileDisc
+            | AggKind::Mode => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
             AggKind::Sum => AggKind::Sum,
             AggKind::Avg => {

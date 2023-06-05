@@ -141,6 +141,17 @@ impl Binder {
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
+        if f.within_group.is_some()
+            && !matches!(
+                kind,
+                AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "within group is disallowed here".to_string(),
+            )
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
         let inputs: Vec<ExprImpl> = f
             .args
