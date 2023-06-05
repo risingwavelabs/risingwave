@@ -25,6 +25,9 @@ use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::queries::{q3, q4};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
+// TODO: add test where that checks that if we have zero cordoned nodes that
+// actors_on_cordoned_nodes returns empty vec
+
 // async fn actors_on_cordoned_nodes(info: GetClusterInfoResponse, cordoned_nodes: &Vec<WorkerNode>)
 // { No actors from other query on cordoned nodes
 //     let info2 = cluster.get_cluster_info().await?;
@@ -113,6 +116,8 @@ async fn cordoned_nodes_do_not_get_new_actors(
             }
         }
     }
+
+    println!("here is where the fun begins... Creating additional query");
 
     let dummy_create = "create table t (dummy date, v varchar);";
     let dummy_mv = "create materialized view mv as select v from t;";
@@ -240,6 +245,24 @@ async fn cordoned_nodes_do_not_get_actors(
     Ok(())
 }
 
+#[madsim::test]
+#[should_panic]
+async fn cordon_all_nodes_error() {
+    use risingwave_simulation::nexmark::queries::q3::*;
+    cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
+        .await
+        .unwrap()
+}
+
+#[madsim::test]
+#[should_panic]
+async fn cordon_all_nodes_error_2() {
+    use risingwave_simulation::nexmark::queries::q3::*;
+    cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
+        .await
+        .unwrap()
+}
+
 // TODO: remove the meta.get_schedule rpc call and what belongs to it
 async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
     // Compile fragments
@@ -287,19 +310,21 @@ macro_rules! test {
         //    }
         //
         //
-        //    #[madsim::test]
-        //    async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
-        //        use risingwave_simulation::nexmark::queries::$query::*;
-        //        cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
-        //    }
+           // #[madsim::test]
+           // async fn [< cordoned_nodes_do_not_get_new_actors_1_ $query >]() -> Result<()> {
+           //     use risingwave_simulation::nexmark::queries::$query::*;
+           //     cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 1).await
+           // }
             #[madsim::test]
             async fn [< cordoned_nodes_do_not_get_new_actors_2_ $query >]() -> Result<()> {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 0).await // reset to 2
+                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 2).await
             }
         }
     };
 }
+
+// TODO: test if we cordon all 3 nodes, then we should get an error
 
 // TODO: uncommet all of these tests again
 // q0, q1, q2: too trivial
@@ -355,3 +380,5 @@ test!(q3);
 // 2. reschedules
 // 2.2. check if no actors on node?
 // 3. deleted CN
+
+// Idea: Maybe this is because marking the node as cordoned has some side effect
