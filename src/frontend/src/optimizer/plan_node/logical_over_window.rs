@@ -23,6 +23,7 @@ use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
@@ -558,12 +559,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
 }
 
 impl_plan_tree_node_for_unary! { LogicalOverWindow }
-
-impl fmt::Display for LogicalOverWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalOverWindow")
-    }
-}
+impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

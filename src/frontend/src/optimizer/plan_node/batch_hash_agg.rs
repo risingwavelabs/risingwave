@@ -21,6 +21,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
 use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::utils::impl_distill_by_unit;
 use super::{
     ExprRewritable, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
@@ -100,11 +101,7 @@ impl BatchHashAgg {
     }
 }
 
-impl fmt::Display for BatchHashAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchHashAgg")
-    }
-}
+impl_distill_by_unit!(BatchHashAgg, logical, "BatchHashAgg");
 
 impl PlanTreeNodeUnary for BatchHashAgg {
     fn input(&self) -> PlanRef {

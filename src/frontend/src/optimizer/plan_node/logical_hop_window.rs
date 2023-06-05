@@ -20,6 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::Interval;
 
 use super::generic::GenericPlanNode;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
@@ -217,12 +218,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
 }
 
 impl_plan_tree_node_for_unary! {LogicalHopWindow}
-
-impl fmt::Display for LogicalHopWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalHopWindow")
-    }
-}
+impl_distill_by_unit!(LogicalHopWindow, core, "LogicalHopWindow");
 
 impl ColPrunable for LogicalHopWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

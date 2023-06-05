@@ -16,8 +16,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 
+use super::utils::Distill;
 use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
@@ -136,7 +138,12 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProject")
+        self.core.fmt_with_name(f, "LogicalProject", self.base.schema())
+    }
+}
+impl Distill for LogicalProject {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        self.core.distill_with_name("LogicalProject", self.base.schema())
     }
 }
 

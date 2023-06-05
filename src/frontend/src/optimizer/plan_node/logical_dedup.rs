@@ -20,6 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::generic::Limit;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
     ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
@@ -183,8 +184,4 @@ impl ColPrunable for LogicalDedup {
     }
 }
 
-impl fmt::Display for LogicalDedup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalDedup")
-    }
-}
+impl_distill_by_unit!(LogicalDedup, core, "LogicalDedup");

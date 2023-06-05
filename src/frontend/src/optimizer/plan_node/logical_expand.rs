@@ -17,6 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
@@ -110,12 +111,7 @@ impl PlanTreeNodeUnary for LogicalExpand {
 }
 
 impl_plan_tree_node_for_unary! {LogicalExpand}
-
-impl fmt::Display for LogicalExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExpand")
-    }
-}
+impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {

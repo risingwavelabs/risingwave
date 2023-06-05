@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
+use super::utils::impl_distill_by_unit;
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -65,11 +66,7 @@ impl PlanTreeNode for LogicalExcept {
     }
 }
 
-impl fmt::Display for LogicalExcept {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalExcept")
-    }
-}
+impl_distill_by_unit!(LogicalExcept, core, "LogicalExcept");
 
 impl ColPrunable for LogicalExcept {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

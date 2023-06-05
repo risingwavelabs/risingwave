@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
+use super::utils::impl_distill_by_unit;
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
@@ -68,11 +69,7 @@ impl PlanTreeNode for LogicalIntersect {
     }
 }
 
-impl fmt::Display for LogicalIntersect {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalIntersect")
-    }
-}
+impl_distill_by_unit!(LogicalIntersect, core, "LogicalIntersect");
 
 impl ColPrunable for LogicalIntersect {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

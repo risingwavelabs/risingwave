@@ -18,6 +18,7 @@ use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchDelete, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -79,12 +80,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
 }
 
 impl_plan_tree_node_for_unary! { LogicalDelete }
-
-impl fmt::Display for LogicalDelete {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalDelete")
-    }
-}
+impl_distill_by_unit!(LogicalDelete, core, "LogicalDelete");
 
 impl ColPrunable for LogicalDelete {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

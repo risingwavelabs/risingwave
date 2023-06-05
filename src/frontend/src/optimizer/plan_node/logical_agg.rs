@@ -22,6 +22,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::agg::AggKind;
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
@@ -862,11 +863,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
 
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
-impl fmt::Display for LogicalAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalAgg")
-    }
-}
+impl_distill_by_unit!(LogicalAgg, core, "LogicalAgg");
 
 impl ExprRewritable for LogicalAgg {
     fn has_rewritable_expr(&self) -> bool {
