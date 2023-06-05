@@ -46,6 +46,8 @@ pub fn data_type(ty: &str) -> &str {
         return "Int32";
     } else if ty.ends_with("[]") {
         return "List";
+    } else if ty.starts_with("struct") {
+        return "Struct";
     }
     lookup_matrix(ty, 1)
 }
@@ -61,6 +63,8 @@ pub fn array_type(ty: &str) -> &str {
         return "ArrayImpl";
     } else if ty.ends_with("[]") {
         return "ListArray";
+    } else if ty.starts_with("struct") {
+        return "StructArray";
     }
     lookup_matrix(ty, 3)
 }

@@ -107,8 +107,7 @@ impl Binder {
         }
 
         // table function
-        let table_function_type = TableFunctionType::from_str(function_name.as_str());
-        if let Ok(function_type) = table_function_type {
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
@@ -531,7 +530,7 @@ impl Binder {
                     "pg_typeof",
                     guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
-                        let v = match input.is_unknown() {
+                        let v = match input.is_untyped() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };

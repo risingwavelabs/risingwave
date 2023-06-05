@@ -18,7 +18,7 @@ mod varchar;
 
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
@@ -145,7 +145,7 @@ impl FieldGeneratorImpl {
                 split_num,
                 offset,
             )?)),
-            _ => unimplemented!(),
+            _ => Err(anyhow!("unimplemented field generator {}", data_type)),
         }
     }
 
@@ -171,7 +171,7 @@ impl FieldGeneratorImpl {
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Random(F64RandomField::new(
                 min, max, seed,
             )?)),
-            _ => unimplemented!("DataType: {}", data_type),
+            _ => Err(anyhow!("unimplemented field generator {}", data_type)),
         }
     }
 
