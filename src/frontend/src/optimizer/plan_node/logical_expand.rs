@@ -63,10 +63,6 @@ impl LogicalExpand {
     pub fn column_subsets(&self) -> &Vec<Vec<usize>> {
         &self.core.column_subsets
     }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalExpand {
