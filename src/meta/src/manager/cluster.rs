@@ -158,6 +158,7 @@ where
         }
 
         // Notify frontends of new compute node.
+        // Always notify because a running worker's property may have been changed.
         let worker_type = worker.worker_type();
         if worker_type == WorkerType::ComputeNode {
             self.env
