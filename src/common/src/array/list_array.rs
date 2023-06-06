@@ -465,11 +465,9 @@ impl<'a> ListRef<'a> {
             // It's compatible with PostgreSQL, in which
             // `array_upper(Array[Array[Array[]::integer[]]], 1)` will returns `null`.
             iter_elems_ref!(self, it, {
-                for datum_ref in it {
-                    if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
-                        if list_ref.upper_bound(1) == None {
-                            return None;
-                        }
+                for datum_ref in it.flatten() {
+                    if let ScalarRefImpl::List(list_ref) = datum_ref && list_ref.upper_bound(1).is_none() {
+                        return None;
                     }
                 }
             });
@@ -508,11 +506,9 @@ impl<'a> ListRef<'a> {
             // list recursively. Otherwise return 1. It's compatible with PostgreSQL, in
             // which `array_lower(Array[Array[Array[]::integer[]]], 1)` will returns `null`.
             iter_elems_ref!(self, it, {
-                for datum_ref in it {
-                    if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
-                        if list_ref.lower_bound(1) == None {
-                            return None;
-                        }
+                for datum_ref in it.flatten() {
+                    if let ScalarRefImpl::List(list_ref) = datum_ref && list_ref.lower_bound(1).is_none() {
+                        return None;
                     }
                 }
             });
@@ -522,7 +518,7 @@ impl<'a> ListRef<'a> {
 
         let mut index = Some(usize::MAX);
         iter_elems_ref!(self, it, {
-            if index != None {
+            if index.is_some() {
                 for datum_ref in it {
                     if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
                         let idx = list_ref.lower_bound(dimension - 1);
