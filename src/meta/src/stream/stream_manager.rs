@@ -497,6 +497,7 @@ where
     /// be ignored because the recovery process will take over it in cleaning part. Check
     /// [`Command::DropStreamingJobs`] for details.
     pub async fn drop_streaming_jobs(&self, streaming_job_ids: Vec<TableId>) {
+        let _reschedule_lock = self.reschedule_revision_lock.lock().await;
         let _ = self
             .drop_streaming_jobs_impl(streaming_job_ids)
             .await

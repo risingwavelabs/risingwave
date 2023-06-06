@@ -325,6 +325,7 @@ message GetClusterInfoResponse {
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
+  uint64 revision = 5;
 }
 
 message RescheduleRequest {

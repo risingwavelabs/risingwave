@@ -85,6 +85,8 @@ where
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
+        let _reschedule_lock = self.stream_manager.reschedule_revision_lock.lock().await;
+
         let table_fragments = self
             .fragment_manager
             .list_table_fragments()
@@ -117,11 +119,14 @@ where
 
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
+        let revision = self.stream_manager.reschedule_revision().await?.into();
+
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
             table_fragments,
             actor_splits,
             source_infos,
+            revision,
         }))
     }
 
