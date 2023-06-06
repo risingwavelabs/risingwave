@@ -24,6 +24,7 @@ use risingwave_pb::hummock::{
     CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, GroupTableChange,
     HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
+use tracing::info;
 
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
@@ -640,8 +641,9 @@ impl HummockLevelsExt for Levels {
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
                 assert!(
                     index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}, sub level count: {}",
-                    insert_sub_level_id, l0.sub_levels.len()
+                    "group-{}, should find the level to insert epoch-{} into position {} when applying compaction generated delta. origin sub levels: {:?}, removed sstable files: {:?}",
+                    self.group_id, insert_sub_level_id, index, l0.sub_levels.iter().map(|level|level.sub_level_id).collect_vec(),
+                    delete_sst_ids_set,
                 );
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
@@ -650,11 +652,16 @@ impl HummockLevelsExt for Levels {
             }
         }
         if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
-            self.l0
-                .as_mut()
-                .unwrap()
-                .sub_levels
-                .retain(|level| !level.table_infos.is_empty());
+            self.l0.as_mut().unwrap().sub_levels.retain(|level| {
+                let keep = !level.table_infos.is_empty();
+                if !keep {
+                    info!(
+                        "remove sub-level-{} when rest sstable files are removed {:?}",
+                        level.sub_level_id, delete_sst_ids_set
+                    );
+                }
+                keep
+            });
             self.l0.as_mut().unwrap().total_file_size = self
                 .l0
                 .as_mut()
