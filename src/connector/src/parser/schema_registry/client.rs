@@ -94,7 +94,7 @@ impl Client {
     pub async fn get_subject(&self, subject: &str) -> Result<Subject> {
         let req = self.build_request(Method::GET, &["subjects", subject, "versions", "latest"]);
         let res: GetBySubjectResp = request(req).await?;
-        tracing::info!("res {:?}", res);
+        tracing::debug!("update schema: {:?}", res);
         Ok(Subject {
             schema: ConfluentSchema {
                 id: res.id,
