@@ -16,14 +16,16 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::value_encoding;
 use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
-use crate::expr::{build_from_prost, ExpressionRef};
+use crate::expr::{build_from_prost, ExpressionRef, LiteralExpression};
 use crate::Result;
 
 /// Represents an aggregation function.
@@ -44,12 +46,16 @@ pub struct AggCall {
 
     /// Should deduplicate the input before aggregation.
     pub distinct: bool,
+
+    /// Constant arguments.
+    pub direct_args: Vec<LiteralExpression>,
 }
 
 impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = AggArgs::from_protobuf(agg_call.get_args())?;
+        println!("args: {:?}", args);
         let column_orders = agg_call
             .get_order_by()
             .iter()
@@ -63,6 +69,21 @@ impl AggCall {
             Some(ref pb_filter) => Some(Arc::from(build_from_prost(pb_filter)?)),
             None => None,
         };
+        let direct_args = agg_call
+            .direct_args
+            .iter()
+            .map(|arg| {
+                let data_type = DataType::from(arg.get_type().unwrap());
+                LiteralExpression::new(
+                    data_type.clone(),
+                    value_encoding::deserialize_datum(
+                        arg.get_datum().unwrap().get_body().as_slice(),
+                        &data_type,
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect_vec();
         Ok(AggCall {
             kind: agg_kind,
             args,
@@ -70,6 +91,7 @@ impl AggCall {
             column_orders,
             filter,
             distinct: agg_call.distinct,
+            direct_args,
         })
     }
 }

@@ -154,12 +154,19 @@ impl Binder {
             .into());
         }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = f
-            .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+            f.within_group
+                .iter()
+                .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
+                .flatten_ok()
+                .try_collect()?
+        } else {
+            f.args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg.clone()))
+                .flatten_ok()
+                .try_collect()?
+        };
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -230,14 +237,53 @@ impl Binder {
             )
             .into());
         }
-        let order_by = OrderBy::new(
-            f.order_by
+        let order_by = if f.within_group.is_some() {
+            OrderBy::new(
+                f.within_group
+                    .iter()
+                    .map(|x| self.bind_order_by_expr(*x.clone()))
+                    .try_collect()?,
+            )
+        } else {
+            OrderBy::new(
+                f.order_by
+                    .into_iter()
+                    .map(|e| self.bind_order_by_expr(e))
+                    .try_collect()?,
+            )
+        };
+        let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
+            f.args
                 .into_iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
+                .map(|arg| self.bind_function_arg(arg))
+                .flatten_ok()
+                .map(|item| {
+                    if item.is_ok() {
+                        let inner = item.unwrap();
+                        if let Some(literal) = inner.as_literal() {
+                            Ok(*literal.clone())
+                        } else {
+                            Err(ErrorCode::InvalidInputSyntax(format!(
+                                "arg in {} must be constant",
+                                kind
+                            ))
+                            .into())
+                        }
+                    } else {
+                        Err(item.err().unwrap())
+                    }
+                })
+                .try_collect()?
+        } else {
+            vec![]
+        };
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind, inputs, f.distinct, order_by, filter,
+            kind,
+            inputs,
+            f.distinct,
+            order_by,
+            filter,
+            direct_args,
         )?)))
     }
 
