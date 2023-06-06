@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::Limit;
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
@@ -209,11 +208,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
-impl fmt::Display for LogicalTopN {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalTopN")
-    }
-}
+impl_distill_by_unit!(LogicalTopN, core, "LogicalTopN");
 
 impl ColPrunable for LogicalTopN {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

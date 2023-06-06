@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
 use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -66,11 +65,7 @@ impl StreamExpand {
     }
 }
 
-impl fmt::Display for StreamExpand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamExpand")
-    }
-}
+impl_distill_by_unit!(StreamExpand, logical, "StreamExpand");
 
 impl PlanTreeNodeUnary for StreamExpand {
     fn input(&self) -> PlanRef {
