@@ -528,6 +528,19 @@ impl Binder {
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
+                (
+                    "array_ndims",
+                    guard_by_len(1, raw(|_binder, inputs| {
+                        let input = &inputs[0];
+                        if input.is_untyped() {
+                            return Err(ErrorCode::BindError("could not determine polymorphic type because input has type unknown".into()).into());
+                        }
+                        match input.return_type().array_ndims() {
+                            0 => Err(ErrorCode::BindError("array_ndims expects an array".into()).into()),
+                            n => Ok(ExprImpl::literal_int(n.try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?))
+                        }
+                    })),
+                ),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

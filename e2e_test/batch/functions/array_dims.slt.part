@@ -1,0 +1,64 @@
+# First of all, some PostgreSQL compatible behavior.
+
+query I
+select array_ndims(array[2,3,4]);
+----
+1
+
+query I
+select array_ndims(array[array[2,3], array[4,5]]);
+----
+2
+
+statement error
+select array_ndims(7);
+
+statement error
+select array_ndims(null);
+
+statement error
+select array_ndims('{2,3}');
+
+query I
+select array_ndims('{2,3}'::int[]);
+----
+1
+
+query I
+select array_ndims('{2,3}'::varchar[]);
+----
+1
+
+query I
+select array_ndims('{{2,3},{4,5}}'::int[][]);
+----
+2
+
+# Then some "strange" PostgreSQL behavior we intentionally do not follow.
+# Because PostgreSQL treats `int[][]` the same type as `int[]`.
+
+statement error
+select array_ndims(array[array[2,3],array[4,5]]::int[]);
+
+statement error
+select array_ndims(array[2,3,4]::int[][]);
+
+query I
+select array_ndims(array[]::int[]);
+----
+1
+
+query I
+select array_ndims(array[]::int[][]);
+----
+2
+
+query I
+select array_ndims(null::int[]);
+----
+1
+
+query I
+select array_ndims(null::int[][]);
+----
+2

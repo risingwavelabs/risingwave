@@ -456,6 +456,16 @@ impl DataType {
             _ => self.clone(),
         }
     }
+
+    pub fn array_ndims(&self) -> usize {
+        let mut d = 0;
+        let mut t = self;
+        while let Self::List(inner) = t {
+            d += 1;
+            t = inner;
+        }
+        d
+    }
 }
 
 impl From<DataType> for PbDataType {
