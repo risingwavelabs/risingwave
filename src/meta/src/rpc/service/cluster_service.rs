@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -63,7 +64,6 @@ where
         }))
     }
 
-    /// TODO: Use HostAddr or host Address?
     /// mark node as unschedulable. Will not affect actors which are already running on that node
     async fn cordon_worker_node(
         &self,
@@ -99,7 +99,7 @@ where
         Ok(Response::new(DeleteWorkerNodeResponse { status: None }))
     }
 
-    // TODO: refactor this. We should make clear which nodes we get
+    // returns running and cordoned nodes by default
     async fn list_all_nodes(
         &self,
         request: Request<ListAllNodesRequest>,
@@ -109,10 +109,7 @@ where
         let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(vec![
-                risingwave_pb::common::worker_node::State::Running,
-                risingwave_pb::common::worker_node::State::Cordoned,
-            ])
+            Some(vec![State::Running, State::Cordoned])
         };
 
         let node_list = self
