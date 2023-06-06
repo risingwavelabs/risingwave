@@ -640,8 +640,9 @@ impl HummockLevelsExt for Levels {
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
                 assert!(
                     index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}, sub level count: {}",
-                    insert_sub_level_id, l0.sub_levels.len()
+                    "group-{}, should find the level to insert epoch-{} into position {} when applying compaction generated delta. origin sub levels: {:?}, removed sstable files: {:?}",
+                    self.group_id, insert_sub_level_id, index, l0.sub_levels.iter().map(|level|level.sub_level_id).collect_vec(),
+                    delete_sst_ids_set,
                 );
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
