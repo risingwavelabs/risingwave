@@ -564,6 +564,7 @@ impl Binder {
                         ).map(Into::into)
                     })),
                 ),
+                ("array_upper", raw_call(ExprType::ArrayLength)), // `lower == 1` implies `upper == length`
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

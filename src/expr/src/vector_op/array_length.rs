@@ -15,6 +15,8 @@
 use risingwave_common::array::ListRef;
 use risingwave_expr_macro::function;
 
+use crate::ExprError;
+
 /// Returns the length of an array.
 ///
 /// ```sql
@@ -40,9 +42,9 @@ use risingwave_expr_macro::function;
 /// 5
 ///
 /// query T
-/// select array_length(null::int[]);
+/// select array_length(array[]::int[]);
 /// ----
-/// NULL
+/// 0
 ///
 /// query T
 /// select array_length(array[array[1, 2, 3]]);
@@ -58,6 +60,80 @@ use risingwave_expr_macro::function;
 /// select array_length(null);
 /// ```
 #[function("array_length(list) -> int64")]
-fn array_length(array: ListRef<'_>) -> i64 {
-    array.iter().len() as _
+fn array_length(array: ListRef<'_>) -> Result<i64, ExprError> {
+    array
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOverflow)
+}
+
+/// Returns the length of the requested array dimension.
+///
+/// Examples:
+///
+/// ```slt
+/// query I
+/// select array_length(array[2,3,4], 1);
+/// ----
+/// 3
+///
+/// query I
+/// select array_length(array[2,3,4], 0);
+/// ----
+/// NULL
+///
+/// query I
+/// select array_length(array[2,3,4], -1);
+/// ----
+/// NULL
+///
+/// query I
+/// select array_length(array[2,3,4], null);
+/// ----
+/// NULL
+///
+/// query I
+/// select array_length(array[array[2,3,4],array[3,4,5]], '1');
+/// ----
+/// 2
+///
+/// statement error
+/// select array_length(array[2,3,4], true);
+///
+/// # This one could be supported later, but at the cost of checking all subarrays, to reject the next.
+/// statement error
+/// select array_length(array[array[2,3,4],array[3,4,5]], 2);
+///
+/// statement error
+/// select array_length(array[array[2,3],array[3,4,5]], 2);
+///
+/// # Different from PostgreSQL who treats empty `array[]` as zero dimension and returns NULL.
+/// query I
+/// select array_length(array[]::int[], 1);
+/// ----
+/// 0
+///
+/// query I
+/// select array_length(array[]::int[][], 1);
+/// ----
+/// 0
+///
+/// # This should be NULL but it is hard to access `DataType` in current expression framework.
+/// # The next should remain rejected.
+/// statement error
+/// select array_length(array[1,2,3], 2);
+///
+/// statement error
+/// select array_length(array[null, array[2]], 2);
+/// ```
+#[function("array_length(list, int32) -> int64")]
+fn array_length_d(array: ListRef<'_>, d: i32) -> Result<Option<i64>, ExprError> {
+    match d {
+        ..=0 => Ok(None),
+        1 => array_length(array).map(Some),
+        2.. => Err(ExprError::InvalidParam {
+            name: "dimension",
+            reason: "array_length for dimensions greater than 1 not supported".into(),
+        }),
+    }
 }

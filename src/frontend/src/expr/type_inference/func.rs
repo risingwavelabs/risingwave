@@ -604,7 +604,7 @@ fn infer_type_for_special(
             }
         }
         ExprType::ArrayLength => {
-            ensure_arity!("array_length", | inputs | == 1);
+            ensure_arity!("array_length", 1 <= | inputs | <= 2);
             let return_type = inputs[0].return_type();
 
             if inputs[0].is_untyped() {
@@ -612,6 +612,11 @@ fn infer_type_for_special(
                     "Cannot find length for unknown type".to_string(),
                 )
                 .into());
+            }
+
+            if let Some(arg1) = inputs.get_mut(1) {
+                let owned = std::mem::replace(arg1, ExprImpl::literal_bool(false));
+                *arg1 = owned.cast_implicit(DataType::Int32)?;
             }
 
             match return_type {

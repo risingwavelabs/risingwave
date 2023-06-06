@@ -91,3 +91,13 @@ NULL
 
 statement error
 select array_lower(array[array[2,3], array[4,5]], true);
+
+# `array_upper` is same as `array_length`
+
+query I
+select array_upper(array[array[2, 3, 4], array[3, 4, 5]], 1);
+----
+2
+
+statement error dimensions greater than 1 not supported
+select array_upper(array[array[2, 3, 4], array[3, 4, 5]], 2);
