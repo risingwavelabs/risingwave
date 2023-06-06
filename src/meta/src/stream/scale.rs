@@ -26,7 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode};
+use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -321,12 +321,11 @@ where
         // TODO: Do this with sets
         let cordoned_nodes = worker_nodes
             .iter()
-            .filter(|(id, w)| w.state() == State::Cordoned)
+            .filter(|(_, w)| w.state() == State::Cordoned)
             .collect_vec();
         let cordoned_pu_ids = cordoned_nodes
             .iter()
-            .map(|(id, w)| w.get_parallel_units())
-            .flatten()
+            .flat_map(|(_, w)| w.get_parallel_units())
             .map(|pu| pu.id)
             .collect_vec();
         for (_, pu_r) in reschedule.iter() {
