@@ -280,7 +280,7 @@ fn gen_batch_plan_fragmenter(
     );
     let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
-        !session.config().only_checkpoint_visible(),
+        session.is_barrier_read(),
     );
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
@@ -311,7 +311,7 @@ async fn execute(
         ..
     } = plan_fragmenter_result;
 
-    let only_checkpoint_visible = session.config().only_checkpoint_visible();
+    let is_barrier_read = session.is_barrier_read();
     let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
@@ -336,7 +336,7 @@ async fn execute(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
         };
         match query_mode {
             QueryMode::Auto => unreachable!(),

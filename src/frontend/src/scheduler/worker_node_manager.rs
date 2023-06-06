@@ -98,6 +98,14 @@ impl WorkerNodeManager {
         if node.property.as_ref().map_or(false, |p| p.is_serving) {
             write_guard.serving_fragment_vnode_mapping.clear();
         }
+        // update
+        for w in &mut write_guard.worker_nodes {
+            if w.id == node.id {
+                *w = node;
+                return;
+            }
+        }
+        // insert
         write_guard.worker_nodes.push(node);
     }
 
@@ -106,7 +114,7 @@ impl WorkerNodeManager {
         if node.property.as_ref().map_or(false, |p| p.is_serving) {
             write_guard.serving_fragment_vnode_mapping.clear();
         }
-        write_guard.worker_nodes.retain(|x| *x != node);
+        write_guard.worker_nodes.retain(|x| x.id != node.id);
     }
 
     pub fn refresh(
@@ -231,6 +239,7 @@ impl WorkerNodeManagerInner {
             .worker_nodes
             .iter()
             .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+            .sorted_by_key(|w| w.id)
             .map(|w| (w.id, w.parallel_units.clone()))
             .collect();
         let serving_pus_total_num = all_serving_pus.values().map(|p| p.len()).sum::<usize>();

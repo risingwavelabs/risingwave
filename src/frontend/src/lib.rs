@@ -136,6 +136,10 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
+
+    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[override_opts(path = batch.enable_barrier_read)]
+    pub enable_barrier_read: Option<bool>,
 }
 
 impl Default for FrontendOpts {
