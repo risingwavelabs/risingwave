@@ -103,7 +103,7 @@ create table orders_2 (
  password = '123456',
  database.name = 'mydb',
  table.name = 'orders',
- server.id = '5086'
+ server.id = '5087'
 );
 
 # Some columns missing and reordered (postgres-cdc)
@@ -122,5 +122,5 @@ create table shipments_2 (
  password = 'postgres',
  database.name = 'cdc_test',
  table.name = 'shipments',
- slot.name = 'shipments'
+ slot.name = 'shipments_2'
 );
