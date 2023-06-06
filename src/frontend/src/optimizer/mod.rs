@@ -175,7 +175,7 @@ impl PlanRoot {
         }
 
         let ctx = plan.ctx();
-        // Inline session timezone mainly for rewritting now()
+        // Inline session timezone mainly for rewriting now()
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         // Convert to physical plan node

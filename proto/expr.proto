@@ -9,6 +9,7 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  message NowRexNode {}
   // TODO: move this into `FunctionCall`.
   enum Type {
     // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
@@ -201,7 +202,6 @@ message ExprNode {
   }
   Type function_type = 1;
   data.DataType return_type = 3;
-  message NowRexNode {}
   oneof rex_node {
     uint32 input_ref = 4;
     data.Datum constant = 5;
