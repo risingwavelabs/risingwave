@@ -21,8 +21,10 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
+use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::AggKind;
-use risingwave_pb::expr::PbAggCall;
+use risingwave_pb::data::PbDatum;
+use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
@@ -730,7 +732,16 @@ impl PlanAggCall {
             distinct: self.distinct,
             order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
-            direct_args: vec![], // to do in this PR
+            direct_args: self
+                .direct_args
+                .iter()
+                .map(|x| PbConstant {
+                    datum: Some(PbDatum {
+                        body: value_encoding::serialize_datum(x.get_data()),
+                    }),
+                    r#type: Some(x.return_type().to_protobuf()),
+                })
+                .collect(),
         }
     }
 
