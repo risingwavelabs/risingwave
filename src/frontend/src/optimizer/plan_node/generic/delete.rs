@@ -13,9 +13,10 @@
 // limitations under the License.
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Schema, TableVersionId};
 
-use super::GenericPlanRef;
+use super::{DistillUnit, GenericPlanRef};
 use crate::catalog::TableId;
 use crate::OptimizerContextRef;
 
@@ -67,5 +68,16 @@ impl<PlanRef> Delete<PlanRef> {
                 ""
             }
         )
+    }
+}
+
+impl<PlanRef> DistillUnit for Delete<PlanRef> {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+        let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
+        vec.push(("table", Pretty::Text(self.table_name.clone().into())));
+        if self.returning {
+            vec.push(("returning", Pretty::display(&true)));
+        }
+        Pretty::childless_record(name, vec)
     }
 }

@@ -16,8 +16,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 
+use super::utils::Distill;
 use super::{
     gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
@@ -84,15 +86,6 @@ impl LogicalProject {
         &self.core.exprs
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name, self.base.schema())
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core
-            .fmt_fields_with_builder(builder, self.base.schema())
-    }
-
     pub fn is_identity(&self) -> bool {
         self.core.is_identity()
     }
@@ -141,7 +134,16 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProject")
+        self.core
+            .fmt_with_name(f, "LogicalProject", self.base.schema())
+    }
+}
+impl Distill for LogicalProject {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        Pretty::childless_record(
+            "LogicalProject",
+            self.core.fields_pretty(self.base.schema()),
+        )
     }
 }
 
