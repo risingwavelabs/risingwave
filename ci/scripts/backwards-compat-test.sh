@@ -47,6 +47,16 @@ full-without-monitoring:
     - use: compactor
 EOF
 fi
+cat <<EOF > risedev-components.user.env
+RISEDEV_CONFIGURED=true
+
+ENABLE_MINIO=true
+ENABLE_ETCD=true
+ENABLE_KAFKA=true
+ENABLE_COMPUTE_TRACING=true
+ENABLE_BUILD_RUST=true
+ENABLE_RELEASE_PROFILE=true
+EOF
 
 echo "--- Checking out old branch"
 git config --global --add safe.directory /risingwave
