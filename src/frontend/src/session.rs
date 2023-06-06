@@ -34,7 +34,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::session_config::ConfigMap;
+use risingwave_common::session_config::{ConfigMap, VisibilityMode};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
@@ -677,6 +677,14 @@ impl SessionImpl {
         let notice = str.into();
         tracing::trace!("notice to user:{}", notice);
         self.notices.write().push(notice);
+    }
+
+    pub fn is_barrier_read(&self) -> bool {
+        match self.config().get_visible_mode() {
+            VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
+            VisibilityMode::All => true,
+            VisibilityMode::Checkpoint => false,
+        }
     }
 }
 
