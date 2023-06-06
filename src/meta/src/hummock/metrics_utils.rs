@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
     HummockVersionCheckpoint, HummockVersionStats, LevelType,
@@ -384,4 +385,13 @@ pub fn trigger_lsm_stat(
                 .set(compression_ratio);
         }
     }
+}
+
+pub fn trigger_write_stop_stats(
+    metrics: &MetaMetrics,
+    write_limit: &HashMap<CompactionGroupId, WriteLimit>,
+) {
+    metrics
+        .write_stop_compaction_group_num
+        .set(write_limit.len() as _);
 }
