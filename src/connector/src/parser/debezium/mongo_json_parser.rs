@@ -164,13 +164,7 @@ impl DebeziumMongoJsonParser {
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let payload = event
-            .get("payload")
-            .and_then(ensure_not_null)
-            .ok_or_else(|| {
-                RwError::from(ProtocolError("no payload in debezium event".to_owned()))
-            })?;
-
+        let payload = ensure_not_null(event.get("payload").unwrap_or(&event));
         let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
             RwError::from(ProtocolError(
                 "op field not found in debezium json".to_owned(),
