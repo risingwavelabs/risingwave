@@ -652,16 +652,11 @@ impl HummockLevelsExt for Levels {
             }
         }
         if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
-            self.l0.as_mut().unwrap().sub_levels.retain(|level| {
-                let keep = !level.table_infos.is_empty();
-                if !keep && level.level_type() == LevelType::Nonoverlapping {
-                    info!(
-                        "remove sub-level-{} when rest sstable files are removed {:?}",
-                        level.sub_level_id, delete_sst_ids_set
-                    );
-                }
-                keep
-            });
+            self.l0
+                .as_mut()
+                .unwrap()
+                .sub_levels
+                .retain(|level| !level.table_infos.is_empty());
             self.l0.as_mut().unwrap().total_file_size = self
                 .l0
                 .as_mut()
