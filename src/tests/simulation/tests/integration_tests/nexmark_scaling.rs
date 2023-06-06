@@ -23,6 +23,7 @@ use rand::seq::SliceRandom;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::queries::{q3, q4};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
@@ -304,6 +305,7 @@ async fn invalid_reschedule(
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    let sleep_sec = 10;
 
     // setup cluster and calc expected result
     let mut cluster =
@@ -312,8 +314,11 @@ async fn invalid_reschedule(
     let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
     assert!(!cordoned_nodes.is_empty());
 
+    // create some actors which we can move
     cluster.run(create).await?;
     cluster.run(select).await?;
+    sleep(Duration::from_secs(sleep_sec)).await;
+
     let (fragments, _) = get_schedule(cluster.get_cluster_info().await?).await;
     let cordoned_pus: Vec<&ParallelUnit> = cordoned_nodes
         .iter()
@@ -322,13 +327,16 @@ async fn invalid_reschedule(
         .collect_vec();
     assert!(!cordoned_pus.is_empty());
 
-    // for a random fragment, try to move one actor from a non-cordoned PU to a cordoned PU
-    // TODO: is this randomization reproducible with madsim?
-    let fragment = fragments
-        .choose(&mut rand::thread_rng())
-        .expect("expect at least one fragment");
-    let f_id = fragment.id;
-    let from = fragment
+    // for a mv fragment, try to move one actor from a non-cordoned PU to a cordoned PU
+    // using an mv fragment, because they can be moved
+    let mv_frags = fragments
+        .iter()
+        .filter(|f| f.type_flag == FragmentTypeFlag::Mview as u32)
+        .collect_vec();
+    assert!(!mv_frags.is_empty());
+    let mv_frag = mv_frags.first().unwrap();
+
+    let from = mv_frag
         .get_actor_list()
         .choose(&mut rand::thread_rng())
         .expect("expect fragment to have at least 1 actor")
@@ -337,9 +345,9 @@ async fn invalid_reschedule(
         .choose(&mut rand::thread_rng())
         .expect("expected at least one cordoned PU")
         .id;
+    let f_id = mv_frag.id;
     let result = cluster.reschedule(format!("{f_id}-[{from}]+[{to}]")).await;
     assert!(result.is_err());
-    // TODO: in the future this should not panic, but return an error
 
     cluster.run(drop).await?;
     Ok(())
@@ -477,3 +485,8 @@ test!(q105);
 
 // TODO: test
 // cordon needs to be idempotent
+
+// work on
+//./risedev sit-test --nocapture invalid_reschedule_
+// this sometimes still fails
+// TODO: Test that moving an actor away from a cordoned node is legal

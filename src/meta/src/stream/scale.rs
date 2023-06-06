@@ -25,7 +25,8 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
+use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -316,6 +317,26 @@ where
             .map(|worker_node| (worker_node.id, worker_node))
             .collect();
 
+        // TODO: check if PUs are cordoned
+        // TODO: Do this with sets
+        let cordoned_nodes = worker_nodes
+            .iter()
+            .filter(|(id, w)| w.state() == State::Cordoned)
+            .collect_vec();
+        let cordoned_pu_ids = cordoned_nodes
+            .iter()
+            .map(|(id, w)| w.get_parallel_units())
+            .flatten()
+            .map(|pu| pu.id)
+            .collect_vec();
+        for (_, pu_r) in reschedule.iter() {
+            for added_pu_id in &pu_r.added_parallel_units {
+                if cordoned_pu_ids.contains(added_pu_id) {
+                    bail!("unable to move actor to cordoned node");
+                }
+            }
+        }
+
         if worker_nodes.is_empty() {
             bail!("no available compute node in the cluster");
         }
@@ -565,6 +586,7 @@ where
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
     ) -> MetaResult<()> {
+        // TODO: check if added pus are cordoned
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
