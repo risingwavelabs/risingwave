@@ -335,7 +335,8 @@ fn parse_select_count_wildcard() {
             over: None,
             distinct: false,
             order_by: vec![],
-            filter: None
+            filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -355,7 +356,8 @@ fn parse_select_count_distinct() {
             over: None,
             distinct: true,
             order_by: vec![],
-            filter: None
+            filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1073,7 +1075,8 @@ fn parse_select_having() {
                 over: None,
                 distinct: false,
                 order_by: vec![],
-                filter: None
+                filter: None,
+                within_group: None,
             })),
             op: BinaryOperator::Gt,
             right: Box::new(Expr::Value(number("1"))),
@@ -1829,6 +1832,7 @@ fn parse_named_argument_function() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1864,6 +1868,7 @@ fn parse_window_functions() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(&select.projection[0])
     );
@@ -1906,6 +1911,7 @@ fn parse_aggregate_with_order_by() {
                 }
             ],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection))
     );
@@ -1935,6 +1941,7 @@ fn parse_aggregate_with_filter() {
                     Expr::Identifier(Ident::new_unchecked("a"))
                 )))))
             })),
+            within_group: None,
         }),
         expr_from_projection(only(&select.projection)),
     );
@@ -2181,6 +2188,7 @@ fn parse_delimited_identifiers() {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }),
         expr_from_projection(&select.projection[1]),
     );
