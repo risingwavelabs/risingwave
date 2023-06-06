@@ -730,7 +730,7 @@ impl PlanAggCall {
             distinct: self.distinct,
             order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
-            direct_args: vec![],
+            direct_args: vec![], // to do in this PR
         }
     }
 
