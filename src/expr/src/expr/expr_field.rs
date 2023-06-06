@@ -153,17 +153,17 @@ mod tests {
             StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
                 I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
-                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
+                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into_ref(),
             ],
-            [true; 5].into_iter().collect(),
+            [true].into_iter().collect(),
         );
         let array = StructArray::new(
-            StructType::unnamed(vec![struct_array.data_type(), DataType::Float32]),
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
                 struct_array.into_ref(),
                 F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
             ],
-            [true; 5].into_iter().collect(),
+            [true].into_iter().collect(),
         );
 
         let data_chunk = DataChunk::new(vec![array.into_ref()], 1);

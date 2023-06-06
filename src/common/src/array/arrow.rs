@@ -615,7 +615,7 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
                 .iter()
                 .map(|a| ArrayImpl::try_from(a).map(Arc::new))
                 .try_collect()?,
-            (0..array.len()).map(|i| array.is_null(i)).collect(),
+            (0..array.len()).map(|i| !array.is_null(i)).collect(),
         ))
     }
 }
