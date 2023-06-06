@@ -98,6 +98,15 @@ profile:
       - use: compute-node
       - use: frontend
 
+  full-without-monitoring:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
   full:
     steps:
       - use: minio
