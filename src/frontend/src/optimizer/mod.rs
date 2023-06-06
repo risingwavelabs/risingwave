@@ -174,6 +174,10 @@ impl PlanRoot {
             .into());
         }
 
+        let ctx = plan.ctx();
+        // Inline session timezone mainly for rewritting now()
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
