@@ -731,6 +731,19 @@ pub async fn parse_remote_object_store(
             )
         }
 
+        s3_compatible if s3_compatible.starts_with("s3-compatible://") => ObjectStoreImpl::S3(
+            // For backward compatibility, s3-compatible is still reserved.
+            // todo: remove this after this change has been applied for downstream projects.
+            S3ObjectStore::new(
+                s3_compatible
+                    .strip_prefix("s3-compatible://")
+                    .unwrap()
+                    .to_string(),
+                metrics.clone(),
+            )
+            .await
+            .monitored(metrics),
+        ),
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
