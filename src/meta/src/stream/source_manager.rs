@@ -393,7 +393,7 @@ struct SplitDiffOptions {
 impl Default for SplitDiffOptions {
     fn default() -> Self {
         SplitDiffOptions {
-            enable_scale_in: false,
+            enable_scale_in: true,
         }
     }
 }
