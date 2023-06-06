@@ -39,9 +39,50 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
+
+#[derive(Copy, Clone, Debug)]
+pub struct RescheduleRevision(u64);
+
+const RESCHEDULE_VERSION_KEY: &[u8] = b"reschedule_version";
+
+impl From<RescheduleRevision> for u64 {
+    fn from(value: RescheduleRevision) -> Self {
+        value.0
+    }
+}
+
+impl RescheduleRevision {
+    pub async fn get<S>(store: &S) -> MetaResult<Self>
+    where
+        S: MetaStore,
+    {
+        let version = match store
+            .get_cf(DEFAULT_COLUMN_FAMILY, RESCHEDULE_VERSION_KEY)
+            .await
+        {
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
+            Err(MetaStoreError::ItemNotFound(_)) => 0,
+            Err(e) => return Err(MetaError::from(e)),
+        };
+
+        Ok(Self(version))
+    }
+
+    pub fn increase(&self) -> Self {
+        RescheduleRevision(self.0 + 1)
+    }
+
+    pub fn store(&self, txn: &mut Transaction) {
+        txn.put(
+            DEFAULT_COLUMN_FAMILY.to_string(),
+            RESCHEDULE_VERSION_KEY.to_vec(),
+            memcomparable::to_vec(&self.0).unwrap(),
+        );
+    }
+}
 
 #[derive(Debug)]
 pub struct ParallelUnitReschedule {
@@ -546,25 +587,27 @@ where
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<RescheduleRevision> {
         let mut revert_funcs = vec![];
-        if let Err(e) = self
+        match self
             .reschedule_actors_impl(&mut revert_funcs, reschedules)
             .await
         {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
+            Err(e) => {
+                for revert_func in revert_funcs.into_iter().rev() {
+                    revert_func.await;
+                }
+                return Err(e);
             }
-            return Err(e);
+            Ok(revision) => Ok(revision),
         }
-        Ok(())
     }
 
     async fn reschedule_actors_impl(
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<RescheduleRevision> {
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
         // Fragment Id => ( Actor Id => Parallel Unit Id )
@@ -1126,11 +1169,17 @@ where
 
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
+        let current_revision = self.reschedule_revision().await?;
+        let next_revision = current_revision.increase();
+
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
+            .run_command_with_paused(Command::RescheduleFragment {
+                reschedules: reschedule_fragment,
+                revision: next_revision,
+            })
             .await?;
 
-        Ok(())
+        Ok(next_revision)
     }
 
     async fn create_actors_on_compute_node(

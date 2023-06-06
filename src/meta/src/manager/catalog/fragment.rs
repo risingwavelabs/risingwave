@@ -36,13 +36,13 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{commit_meta, MetaSrvEnv};
+use crate::manager::{commit_meta, commit_meta_with_trx, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::SplitAssignment;
+use crate::stream::{RescheduleRevision, SplitAssignment};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
@@ -605,6 +605,7 @@ where
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
+        revision: RescheduleRevision,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
@@ -821,7 +822,11 @@ where
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
-        commit_meta!(self, table_fragments)?;
+        let mut trx = Transaction::default();
+
+        revision.store(&mut trx);
+
+        commit_meta_with_trx!(self, trx, table_fragments)?;
 
         for mapping in fragment_mapping_to_notify {
             self.env

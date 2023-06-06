@@ -86,10 +86,35 @@ macro_rules! commit_meta {
         }
     };
 }
-pub(crate) use commit_meta;
+
+/// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
+/// meta store.
+/// * $`manager`: metadata manager, which should contains an env field to access meta store.
+/// * $`val_txn`: transactions to commit.
+macro_rules! commit_meta_with_trx {
+    ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
+        {
+            async {
+                // Apply the change in `ValTransaction` to trx
+                $(
+                    $val_txn.apply_to_txn(&mut $trx)?;
+                )*
+                // Commit to meta store
+                $manager.env.meta_store().txn($trx).await?;
+                // Upon successful commit, commit the change to in-mem meta
+                $(
+                    $val_txn.commit();
+                )*
+                MetaResult::Ok(())
+            }.await
+        }
+    };
+}
+
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
+pub(crate) use {commit_meta, commit_meta_with_trx};
 
 use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,

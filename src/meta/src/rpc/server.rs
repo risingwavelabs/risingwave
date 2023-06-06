@@ -443,6 +443,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             source_manager.clone(),
             hummock_manager.clone(),
         )
+        .await
         .unwrap(),
     );
 

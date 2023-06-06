@@ -132,7 +132,10 @@ where
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
 
-        self.stream_manager
+        let _guard = self.stream_manager.reschedule_revision_lock.lock().await;
+
+        let next_revision = self
+            .stream_manager
             .reschedule_actors(
                 req.reschedules
                     .into_iter()
@@ -162,6 +165,9 @@ where
             )
             .await?;
 
-        Ok(Response::new(RescheduleResponse { success: true }))
+        Ok(Response::new(RescheduleResponse {
+            success: true,
+            revision: next_revision.into(),
+        }))
     }
 }
