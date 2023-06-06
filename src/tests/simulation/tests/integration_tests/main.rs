@@ -21,7 +21,5 @@
 #![cfg(madsim)]
 #![feature(lazy_cell)]
 
-// TODO: rename into cordon
-mod nexmark_scaling;
 mod recovery;
 mod scale;

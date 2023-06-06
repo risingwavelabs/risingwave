@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod cascade_materialized_view;
+mod cordon;
 mod dynamic_filter;
 mod nexmark_chaos;
 mod nexmark_q4;
