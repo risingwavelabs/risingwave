@@ -19,6 +19,7 @@ pub mod array_length;
 pub mod array_positions;
 pub mod array_range_access;
 pub mod array_remove;
+pub mod array_replace;
 pub mod ascii;
 pub mod bitwise_op;
 pub mod cardinality;
