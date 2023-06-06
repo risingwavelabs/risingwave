@@ -11,7 +11,7 @@ set -euo pipefail
 TAG=v0.18.0-rc
 RECOVERY_DURATION=20
 
-rc () {
+run_sql () {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
@@ -29,9 +29,9 @@ assert_eq() {
 seed_table() {
   for i in $(seq 1 10000)
   do
-    rc "INSERT into t values ($i);"
+    run_sql "INSERT into t values ($i);"
   done
-  rc "flush;"
+  run_sql "flush;"
 }
 
 echo "--- Setting up cluster config"
@@ -61,13 +61,13 @@ echo "--- Start cluster on tag $TAG"
 ./risedev d full-without-monitoring
 
 echo "--- Running queries"
-rc "CREATE TABLE t(v1 int);"
+run_sql "CREATE TABLE t(v1 int);"
 seed_table
-rc "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
+run_sql "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
 CREATE_MV_PID=$!
 seed_table
 wait $CREATE_MV_PID
-rc "select * from m ORDER BY v1;" > BEFORE
+run_sql "select * from m ORDER BY v1;" > BEFORE
 
 echo "--- Kill cluster on tag $TAG"
 ./risedev k
@@ -80,7 +80,7 @@ echo "--- Kill cluster on tag $TAG"
 
 echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
 sleep $RECOVERY_DURATION
-rc "SELECT * from m ORDER BY v1;" > AFTER
+run_sql "SELECT * from m ORDER BY v1;" > AFTER
 
 echo "--- Comparing results"
 assert_eq BEFORE AFTER
