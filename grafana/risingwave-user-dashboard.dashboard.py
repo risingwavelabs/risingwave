@@ -120,6 +120,9 @@ def section_overview(panels):
             - Lagging Epoch: the pinned or safe epoch is lagging behind the current max committed epoch. Check 'Hummock Manager' section in dev dashboard.
             - Lagging Compaction: there are too many files in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
             - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
+            - Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
+            - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
             """,
             [
                 panels.target(
@@ -151,15 +154,15 @@ def section_overview(panels):
                 ),
                 panels.target(
                     f"{metric('state_store_meta_cache_size')} >= bool 2*1024*1024*1024*1.1",
-                    "Meta cache memory usage is too large",
+                    "Abnormal Meta Cache Memory",
                 ),
                 panels.target(
                     f"{metric('state_store_block_cache_size')} >= bool 512*1024*1024*1.1",
-                    "The block cache memory usage is too large",
+                    "Abnormal Block Cache Memory",
                 ),
                 panels.target(
                     f"{metric('state_store_uploader_uploading_task_size')} >= bool 1024*1024*1024*0.7",
-                    "Uploading memory is more than 70 percent of the expected, and is about to spill",
+                    "Abnormal Uploading Memory Usage",
                 ),
             ],
             ["last"],
