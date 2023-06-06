@@ -87,10 +87,8 @@ macro_rules! commit_meta {
     };
 }
 
-/// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
-/// meta store.
-/// * $`manager`: metadata manager, which should contains an env field to access meta store.
-/// * $`val_txn`: transactions to commit.
+/// `commit_meta_with_trx` is similar to `commit_meta`, but it accepts an external trx (transaction)
+/// and commits it.
 macro_rules! commit_meta_with_trx {
     ($manager:expr, $trx:ident, $($val_txn:expr),*) => {
         {
