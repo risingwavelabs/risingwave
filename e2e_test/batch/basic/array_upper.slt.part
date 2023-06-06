@@ -1,0 +1,39 @@
+query I
+select array_upper(Array[Array[1],Array[2,3,4]], 0);
+----
+NULL
+
+query I
+select array_upper(Array[]::integer[], 1);
+----
+NULL
+
+query I
+select array_upper(Array[Array[Array[]::integer[]]], 1);
+----
+NULL
+
+query I
+select array_upper(Array[Array[]::integer[]], 2);
+----
+NULL
+
+query I
+select array_upper(Array[Array[]::integer[]], 1);
+----
+NULL
+
+query I
+select array_upper(Array[Array[1],Array[2,3,4]], 1);
+----
+2
+
+query I
+select array_upper(Array[Array[1],Array[2,3,4]], 2);
+----
+3
+
+query I
+select array_upper(Array[Array[1],Array[2,3,4]], 3);
+----
+NULL

@@ -179,6 +179,8 @@ message ExprNode {
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
     STRING_TO_ARRAY = 541;
+    ARRAY_UPPER = 542;
+    ARRAY_LOWER = 543;
 
     // Int256 functions
     HEX_TO_INT256 = 560;

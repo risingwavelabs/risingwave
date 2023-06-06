@@ -1,0 +1,39 @@
+query I
+select array_lower(Array[Array[1],Array[2,3,4]], 0);
+----
+NULL
+
+query I
+select array_lower(Array[]::integer[], 1);
+----
+NULL
+
+query I
+select array_lower(Array[Array[Array[]::integer[]]], 1);
+----
+NULL
+
+query I
+select array_lower(Array[Array[]::integer[]], 2);
+----
+NULL
+
+query I
+select array_lower(Array[Array[]::integer[]], 1);
+----
+NULL
+
+query I
+select array_lower(Array[Array[1],Array[2,3,4]], 1);
+----
+1
+
+query I
+select array_lower(Array[Array[1],Array[2,3,4]], 2);
+----
+1
+
+query I
+select array_lower(Array[Array[1],Array[2,3,4]], 3);
+----
+NULL

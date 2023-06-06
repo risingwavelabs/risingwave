@@ -526,6 +526,8 @@ impl Binder {
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
+                ("array_upper", raw_call(ExprType::ArrayUpper)),
+                ("array_lower", raw_call(ExprType::ArrayLower)),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

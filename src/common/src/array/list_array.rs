@@ -449,6 +449,102 @@ impl<'a> ListRef<'a> {
         })
     }
 
+    /// Returns the upper bound of the requested array dimension.
+    ///
+    /// Unlike `array_upper` in PostgreSQL, we allow lists of different dimensions as elements in
+    /// other lists. So here we iterate over all elements of the target dimension and return the
+    /// largest upper bound.
+    pub fn upper_bound(self, dimension: usize) -> Option<usize> {
+        // return None if the list is empty.
+        if self.is_empty() {
+            return None;
+        }
+        if dimension == 1 {
+            // return None if any element with list type in the list is empty or contains any empty
+            // list recursively. Otherwise return the length of the list.
+            // It's compatible with PostgreSQL, in which
+            // `array_upper(Array[Array[Array[]::integer[]]], 1)` will returns `null`.
+            iter_elems_ref!(self, it, {
+                for datum_ref in it {
+                    if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                        if list_ref.upper_bound(1) == None {
+                            return None;
+                        }
+                    }
+                }
+            });
+
+            return Some(self.len());
+        }
+
+        let mut index: Option<usize> = None;
+        iter_elems_ref!(self, it, {
+            it.for_each(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    let idx = list_ref.upper_bound(dimension - 1);
+                    if let Some(idx) = idx {
+                        index = index.map(|i| idx.max(i)).or(Some(idx));
+                    }
+                }
+            });
+        });
+        index
+    }
+
+    /// Returns the lower bound of the requested array dimension.
+    ///
+    /// Unlike `array_lower` in PostgreSQL, we allow lists of different dimensions as elements in
+    /// other lists and specifying list bound like `'[2:4][2:3]={{1,1},{1,1},{1,1}}'::integer[]` in
+    /// PostgreSQL is not supported. So here we iterate over all elements of the target dimension
+    /// and return 1 if the list is not empty or don't contains any empty list element recursively,
+    /// otherwise None.
+    pub fn lower_bound(self, dimension: usize) -> Option<usize> {
+        // return None if the list is empty.
+        if self.is_empty() {
+            return None;
+        }
+        if dimension == 1 {
+            // return None if any element with list type in the list is empty or contains any empty
+            // list recursively. Otherwise return 1. It's compatible with PostgreSQL, in
+            // which `array_lower(Array[Array[Array[]::integer[]]], 1)` will returns `null`.
+            iter_elems_ref!(self, it, {
+                for datum_ref in it {
+                    if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                        if list_ref.lower_bound(1) == None {
+                            return None;
+                        }
+                    }
+                }
+            });
+
+            return Some(1);
+        }
+
+        let mut index = Some(usize::MAX);
+        iter_elems_ref!(self, it, {
+            if index != None {
+                for datum_ref in it {
+                    if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                        let idx = list_ref.lower_bound(dimension - 1);
+                        if idx.is_none() {
+                            // return None if any element of the list is empty.
+                            index = None;
+                            break;
+                        } else if index == Some(usize::MAX) {
+                            index = Some(1);
+                        }
+                    } else {
+                        // return None if all element of the list is not a list, the type of all
+                        // elements is ensured to be the same.
+                        index = None;
+                        break;
+                    }
+                }
+            }
+        });
+        index
+    }
+
     /// Iterates over the elements of the list.
     ///
     /// Prefer using the macro `iter_elems_ref!` if possible to avoid the cost of enum dispatching.
