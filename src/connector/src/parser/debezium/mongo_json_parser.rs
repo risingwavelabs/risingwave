@@ -14,22 +14,19 @@
 
 use std::fmt::Debug;
 
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
-use crate::impl_common_parser_logic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
 
-impl_common_parser_logic!(DebeziumMongoJsonParser);
 #[inline]
 fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a BorrowedValue<'b>> {
     if let BorrowedValue::Static(StaticNode::Null) = value {
@@ -269,6 +266,24 @@ impl DebeziumMongoJsonParser {
                 op
             )))),
         }
+    }
+}
+
+impl ByteStreamSourceParser for DebeziumMongoJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

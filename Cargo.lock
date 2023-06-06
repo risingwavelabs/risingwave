@@ -5939,6 +5939,7 @@ dependencies = [
  "anyhow",
  "apache-avro",
  "async-trait",
+ "auto_enums",
  "aws-config",
  "aws-sdk-ec2",
  "aws-sdk-kinesis",
