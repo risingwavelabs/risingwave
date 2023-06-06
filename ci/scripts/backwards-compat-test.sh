@@ -49,6 +49,7 @@ EOF
 fi
 
 echo "--- Checking out old branch"
+git config --global --add safe.directory /risingwave
 git checkout origin/$TAG
 
 echo "--- Teardown any old cluster"
