@@ -14,9 +14,11 @@ rc () {
 
 assert_eq() {
   if [[ -z $(diff "$1" "$2") ]]; then
-    echo "No difference"
+    echo "PASSED"
   else
-    echo "Unexpected diff"
+    echo "FAILED"
+    buildkite-agent artifact upload "$1"
+    buildkite-agent artifact upload "$2"
     exit 1
   fi
 }
@@ -79,3 +81,4 @@ rc "SELECT * from m ORDER BY v1;" > AFTER
 
 echo "--- Comparing results"
 assert_eq BEFORE AFTER
+rm BEFORE AFTER
