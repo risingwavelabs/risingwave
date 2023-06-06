@@ -391,7 +391,11 @@ pub fn trigger_write_stop_stats(
     metrics: &MetaMetrics,
     write_limit: &HashMap<CompactionGroupId, WriteLimit>,
 ) {
-    metrics
-        .write_stop_compaction_group_num
-        .set(write_limit.len() as _);
+    metrics.write_stop_compaction_groups.reset();
+    for cg in write_limit.keys() {
+        metrics
+            .write_stop_compaction_groups
+            .with_label_values(&[&cg.to_string()])
+            .set(1);
+    }
 }

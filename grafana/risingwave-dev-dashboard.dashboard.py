@@ -2241,11 +2241,11 @@ Objects are classified into 3 groups:
                     ],
                 ),
                 panels.timeseries_count(
-                    "Write Stop Compaction Group Total Number",
+                    "Write Stop Compaction Groups",
                     "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
                     [
-                        panels.target(f"{metric('storage_write_stop_compaction_group_num')}",
-                                      "write_stop_compaction_group_num"),
+                        panels.target(f"{metric('storage_write_stop_compaction_groups')}",
+                                      "compaction_group_{compaction_group_id}"),
                     ],
                 ),
             ],
