@@ -348,6 +348,11 @@ async fn invalid_reschedule(
     let f_id = mv_frag.id;
     let result = cluster.reschedule(format!("{f_id}-[{from}]+[{to}]")).await;
     assert!(result.is_err());
+    let err_msg = result.err().unwrap().to_string();
+    assert_eq!(
+        err_msg,
+        "gRPC error (Internal error): unable to move actor to cordoned node"
+    );
 
     cluster.run(drop).await?;
     Ok(())

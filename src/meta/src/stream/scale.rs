@@ -316,28 +316,31 @@ where
             .into_iter()
             .map(|worker_node| (worker_node.id, worker_node))
             .collect();
+        if worker_nodes.is_empty() {
+            bail!("no available compute node in the cluster");
+        }
 
-        // TODO: check if PUs are cordoned
-        // TODO: Do this with sets
+        // Check if we are trying to move a fragment to a cordoned node
         let cordoned_nodes = worker_nodes
             .iter()
             .filter(|(_, w)| w.state() == State::Cordoned)
+            .map(|(_, w)| w)
             .collect_vec();
-        let cordoned_pu_ids = cordoned_nodes
+        let cordoned_pu_ids: HashSet<u32> = cordoned_nodes
             .iter()
-            .flat_map(|(_, w)| w.get_parallel_units())
+            .flat_map(|w| w.get_parallel_units())
             .map(|pu| pu.id)
-            .collect_vec();
-        for (_, pu_r) in reschedule.iter() {
-            for added_pu_id in &pu_r.added_parallel_units {
-                if cordoned_pu_ids.contains(added_pu_id) {
-                    bail!("unable to move actor to cordoned node");
-                }
-            }
-        }
-
-        if worker_nodes.is_empty() {
-            bail!("no available compute node in the cluster");
+            .collect();
+        let added_pu_ids: HashSet<u32> = reschedule
+            .iter()
+            .flat_map(|(_, pu_r)| pu_r.added_parallel_units.clone())
+            .collect();
+        if !added_pu_ids
+            .intersection(&cordoned_pu_ids)
+            .collect::<HashSet<&u32>>()
+            .is_empty()
+        {
+            bail!("unable to move actor to cordoned node");
         }
 
         // Associating ParallelUnit with Worker
