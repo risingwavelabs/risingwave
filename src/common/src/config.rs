@@ -283,6 +283,9 @@ pub struct BatchConfig {
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
 
+    #[serde(default = "default::batch::enable_barrier_read")]
+    pub enable_barrier_read: bool,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -831,6 +834,12 @@ mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+    }
+
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool {
+            true
         }
     }
 }
