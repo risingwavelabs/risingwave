@@ -60,6 +60,7 @@ echo "--- Start cluster on tag $TAG"
 # FIXME(kwannoel): We use this config because kafka encounters errors upon cluster restart.
 ./risedev d full-without-monitoring
 
+# TODO(kwannoel): This will be the section for which we run nexmark queries + tpch queries.
 echo "--- Running queries"
 run_sql "CREATE TABLE t(v1 int);"
 seed_table
