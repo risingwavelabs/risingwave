@@ -62,7 +62,7 @@ rc "CREATE MATERIALIZED VIEW m as SELECT * from t;" &
 CREATE_MV_PID=$!
 seed_table
 wait $CREATE_MV_PID
-rc "select * from m;" > BEFORE
+rc "select * from m ORDER BY v1;" > BEFORE
 
 echo "--- Kill cluster on tag $TAG"
 ./risedev k
@@ -75,7 +75,7 @@ echo "--- Kill cluster on tag $TAG"
 
 echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
 sleep $RECOVERY_DURATION
-rc "SELECT * from m;" > AFTER
+rc "SELECT * from m ORDER BY v1;" > AFTER
 
 echo "--- Comparing results"
 assert_eq BEFORE AFTER
