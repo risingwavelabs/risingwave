@@ -119,8 +119,18 @@ pub async fn reschedule(
 
     if !dry_run {
         println!("---------------------------");
-        let resp = meta_client.reschedule(reschedules, revision).await?;
-        println!("Response from meta {}", resp);
+        let (success, revision) = meta_client.reschedule(reschedules, revision).await?;
+
+        if !success {
+            println!(
+                "Reschedule failed, please check the plan or the revision, current revision is {}",
+                revision
+            );
+
+            return Err(anyhow!("reschedule failed"));
+        }
+
+        println!("Reschedule success, current revision is {}", revision);
     }
 
     Ok(())
