@@ -29,7 +29,20 @@ seed_table() {
   rc "flush;"
 }
 
-# Checkout <old-version>
+echo "--- Setting up cluster config"
+if [[ ! -f risedev-profiles.user.yml ]]; then
+cat <<EOF >> risedev-profiles.user.yml
+full-without-monitoring:
+  steps:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+    - use: compactor
+EOF
+fi
+
 echo "--- Checking out old branch"
 git checkout origin/$TAG
 
