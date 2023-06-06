@@ -258,8 +258,7 @@ impl Binder {
                 .map(|arg| self.bind_function_arg(arg))
                 .flatten_ok()
                 .map(|item| {
-                    if item.is_ok() {
-                        let inner = item.unwrap();
+                    if let Ok(inner) = item {
                         if let Some(literal) = inner.as_literal() {
                             Ok(*literal.clone())
                         } else {
