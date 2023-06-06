@@ -14,7 +14,6 @@ set -u
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
-export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
@@ -128,6 +127,16 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
+# Generate $TEST_NUM number of seeds.
+# if `RANDOM_SEED=1`, we will generate random seeds.
+gen_seed() {
+  if [[ $RANDOM_SEED -eq 1 ]]; then
+    seq 1 32768 | shuf | tail -n "$TEST_NUM"
+  else
+    seq 1 32678 | tail -n "$TEST_NUM"
+  fi
+}
+
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
@@ -136,19 +145,19 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  seq "$TEST_NUM" | env_parallel "
-    mkdir -p $OUTDIR/{}
+  gen_seed | env_parallel "
+    mkdir -p $OUTDIR/{%}
     echo '[INFO] Generating For Seed {}'
     MADSIM_TEST_SEED={} ./$MADSIM_BIN \
       --sqlsmith 100 \
-      --generate-sqlsmith-queries $OUTDIR/{} \
+      --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{}.log
-    echo '[INFO] Finished Generating For Seed {}'
-    echo '[INFO] Extracting Queries For Seed {}'
-    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql
-    echo '[INFO] Extracted Queries For Seed {}'
+      2>$LOGDIR/generate-{%}.log
+    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
+    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
+    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
     "
   set -e
 }
@@ -204,6 +213,13 @@ check_failed_to_run_queries() {
 
 setup() {
   set -euo pipefail
+  if [[ -z "$TEST_NUM" ]]; then
+    echo "TEST_NUM unset, default to TEST_NUM=100"
+    TEST_NUM=100
+  fi
+  if [[ -z "$RANDOM_SEED" ]]; then
+    echo "RANDOM_SEED unset, default RANDOM_SEED=false (0)"
+  fi
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
 }
