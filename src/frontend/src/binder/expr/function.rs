@@ -541,6 +541,29 @@ impl Binder {
                         }
                     })),
                 ),
+                (
+                    "array_lower",
+                    guard_by_len(2, raw(|binder, inputs| {
+                        let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
+                        // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+
+                        FunctionCall::new(
+                            ExprType::Case,
+                            vec![
+                                FunctionCall::new(
+                                    ExprType::And,
+                                    vec![
+                                        FunctionCall::new(ExprType::LessThan, vec![ExprImpl::literal_int(0), arg1.clone()])?.into(),
+                                        FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
+                                    ],
+                                )?.into(),
+                                ExprImpl::literal_int(1),
+                            ],
+                        ).map(Into::into)
+                    })),
+                ),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
