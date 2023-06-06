@@ -477,21 +477,3 @@ test!(q102);
 test!(q103);
 test!(q104);
 test!(q105);
-
-// new requirement:
-// Tool for open source users to scale clusters
-// add to risectl cmd line tool
-// cordan node -> K8s naming. No new scheduling done on this node
-// Do we have an issue for it? -> No
-// also provide uncordon command: Mark a Cordoned node as non-deleting
-
-// TODO: Another test:
-// corden nodes, manually schedule actors on cordnened node. Should throw error
-
-// TODO: test
-// cordon needs to be idempotent
-
-// work on
-//./risedev sit-test --nocapture invalid_reschedule_
-// this sometimes still fails
-// TODO: Test that moving an actor away from a cordoned node is legal
