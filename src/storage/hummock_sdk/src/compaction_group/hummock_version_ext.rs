@@ -47,7 +47,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut delete_sst_ids_set = HashSet::new();
     let mut insert_sst_level_id = u32::MAX;
     let mut insert_sub_level_id = u64::MAX;
-    let mut insert_table_mnfos = vec![];
+    let mut insert_table_infos = vec![];
     let mut group_construct = None;
     let mut group_destroy = None;
     let mut group_meta_changes = vec![];
