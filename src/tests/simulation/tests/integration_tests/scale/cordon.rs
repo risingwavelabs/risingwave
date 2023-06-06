@@ -28,34 +28,33 @@ use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::queries::{q3, q4};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
-// TODO: add test where that checks that if we have zero cordoned nodes that
-// actors_on_cordoned_nodes returns empty vec
+async fn get_pus_on_cordoned_nodes(
+    cluster: &NexmarkCluster,
+    cordoned_nodes: &Vec<WorkerNode>,
+) -> Result<Vec<Actor>> {
+    let info = cluster.get_cluster_info().await?;
+    let (fragments, workers) = get_schedule(info).await;
+    let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
 
-// async fn actors_on_cordoned_nodes(info: GetClusterInfoResponse, cordoned_nodes: &Vec<WorkerNode>)
-// { No actors from other query on cordoned nodes
-//     let info2 = cluster.get_cluster_info().await?;
-// let (fragments2, workers2) = get_schedule(info).await;
-// let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
-//
-// TODO: do this fancy with map
-// let mut cordoned_pus2: Vec<Vec<ParallelUnit>> = vec![];
-// for worker in workers2 {
-// if cordoned_nodes_ids.contains(&worker.id) {
-// cordoned_pus2.push(worker.parallel_units);
-// }
-// }
-// assert!(cordoned_nodes.len() == cordoned_pus2.len());
-// TODO: do this with map
-// let mut actors_on_cordoned2: Vec<u32> = vec![];
-// for frag in fragments2 {
-// for actor in frag.actor_list {
-// let pu_id = actor.parallel_units_id;
-// if cordoned_pus.contains(pu_id) {
-// actors_on_cordoned.push(pu_id);
-// }
-// }
-// }
-// }
+    let mut cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
+    for worker in workers {
+        if cordoned_nodes_ids.contains(&worker.id) {
+            cordoned_pus.push(worker.parallel_units);
+        }
+    }
+    let cordoned_pus = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
+
+    let mut actors_on_cordoned: Vec<Actor> = vec![];
+    for frag in fragments {
+        for actor in frag.actor_list {
+            let pu_id = actor.parallel_units_id;
+            if cordoned_pus.contains(&pu_id) {
+                actors_on_cordoned.push(actor);
+            }
+        }
+    }
+    Ok(actors_on_cordoned)
+}
 
 /// create cluster, run query, cordon node, run other query. Cordoned node should NOT contain actors
 /// from other query
@@ -92,8 +91,7 @@ async fn cordoned_nodes_do_not_get_new_actors(
     for rand_node in rand_nodes {
         log_msg = format!("{}{:?}\n", log_msg, rand_node);
     }
-    println!("{}", log_msg);
-    // tracing::info!(log_msg); // TODO: use trace
+    tracing::info!(log_msg);
 
     let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
 
@@ -149,12 +147,11 @@ async fn cordoned_nodes_do_not_get_new_actors(
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
             if cordoned_pus_ids.contains(&pu_id) {
-                actors_on_cordoned.push(pu_id); // actor.actor_id
+                actors_on_cordoned.push(pu_id); // TODO: actor.actor_id
             }
         }
     }
 
-    // TODO: Clarify
     // We allow that an actor moves from a cordoned node to a non-cordoned node
     // We disallow that an actor moves from a non-cordoned node to a cordoned node
     // We disallow that an actor moves from a cordoned node to another cordoned node
