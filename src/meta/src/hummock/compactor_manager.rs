@@ -348,9 +348,10 @@ impl CompactorManager {
                         cancellable_tasks.push((task.get_task_id(), (*context_id, task.clone())));
 
                         if task_duration_too_long {
-                            let (need_quota, file_counts) = estimate_state_for_compaction(task);
+                            let (need_quota, total_file_count, total_key_count) =
+                                estimate_state_for_compaction(task);
                             tracing::info!(
-                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} need_quota {} file_counts {} target_level {} base_level {} target_sub_level_id {} task_type {}",
+                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} need_quota {} total_file_count {} total_key_count {} target_level {} base_level {} target_sub_level_id {} task_type {}",
                                 task.compaction_group_id,
                                 task.task_id,
                                 create_time,
@@ -358,7 +359,8 @@ impl CompactorManager {
                                 num_ssts_uploaded,
                                 num_progress_key,
                                 need_quota,
-                                file_counts,
+                                total_file_count,
+                                total_key_count,
                                 task.target_level,
                                 task.base_level,
                                 task.target_sub_level_id,

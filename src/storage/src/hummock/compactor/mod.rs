@@ -41,7 +41,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -165,15 +165,8 @@ impl Compactor {
             ])
             .start_timer();
 
-        let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
-        tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} input_file_counts {} target_level {} compression_algorithm {:?}",
-            compact_task.task_id,
-            need_quota,
-            file_counts,
-            compact_task.target_level,
-            compact_task.compression_algorithm,
-        );
+        let (need_quota, total_file_count, total_key_count) =
+            estimate_state_for_compaction(&compact_task);
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
@@ -281,6 +274,18 @@ impl Compactor {
 
         let task_memory_capacity_with_parallelism =
             estimate_task_memory_capacity(context.clone(), &compact_task) * parallelism;
+
+        tracing::info!(
+                "Ready to handle compaction task: {} need memory: {} input_file_counts {} total_key_count {} target_level {} compression_algorithm {:?} parallelism {} task_memory_capacity_with_parallelism {}",
+                compact_task.task_id,
+                need_quota,
+                total_file_count,
+                total_key_count,
+                compact_task.target_level,
+                compact_task.compression_algorithm,
+                parallelism,
+                task_memory_capacity_with_parallelism
+            );
 
         // If the task does not have enough memory, it should cancel the task and let the meta
         // reschedule it, so that it does not occupy the compactor's resources.
@@ -807,6 +812,8 @@ impl Compactor {
         del_agg: Arc<CompactionDeleteRanges>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
+        task_id: Option<HummockCompactionTaskId>,
+        split_index: Option<usize>,
     ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
@@ -918,6 +925,13 @@ impl Compactor {
         debug_assert!(ssts
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
+
+        tracing::info!(
+            "Finish Task {:?} split_index {:?} sst count {}",
+            task_id,
+            split_index,
+            ssts.len()
+        );
         Ok((ssts, table_stats_map))
     }
 
