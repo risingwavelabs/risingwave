@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
 use super::stream::StreamPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -60,12 +59,7 @@ impl StreamProjectSet {
         StreamProjectSet { base, logical }
     }
 }
-
-impl fmt::Display for StreamProjectSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamProjectSet")
-    }
-}
+impl_distill_by_unit!(StreamProjectSet, logical, "StreamProjectSet");
 
 impl PlanTreeNodeUnary for StreamProjectSet {
     fn input(&self) -> PlanRef {

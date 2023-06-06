@@ -39,6 +39,7 @@ use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -510,7 +511,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetIntervalVa
             .datum_at(idx as usize)
             .unwrap()
             .into_interval()
-            .to_string();
+            .as_iso_8601();
         Ok(env.new_string(interval)?)
     })
 }
@@ -539,13 +540,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move || {
-        let millis = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_timestamp()
-            .0
-            .timestamp_millis();
+        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
+        let millis = match scalar_value {
+            // supports sinking rw timestamptz (ScalarRefImpl::Int64) to mysql timestamp
+            ScalarRefImpl::Int64(v) => v / 1000,
+            _ => scalar_value.into_timestamp().0.timestamp_millis(),
+        };
         let (ts_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
@@ -718,4 +718,20 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     pointer: Pointer<'a, JavaBindingRow>,
 ) {
     pointer.drop()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+    use risingwave_expr::vector_op::cast::literal_parsing;
+
+    /// make sure that the [`ScalarRefImpl::Int64`] received by
+    /// [`Java_com_risingwave_java_binding_Binding_rowGetTimestampValue`]
+    /// is of type [`DataType::Timestamptz`] stored in microseconds
+    #[test]
+    fn test_timestamptz_to_i64() {
+        let timestamptz_val =
+            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap();
+        assert_eq!(timestamptz_val.as_int64(), &1_685_583_900_000_000);
+    }
 }

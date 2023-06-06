@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -45,12 +44,7 @@ impl BatchFilter {
         &self.logical.predicate
     }
 }
-
-impl fmt::Display for BatchFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchFilter")
-    }
-}
+impl_distill_by_unit!(BatchFilter, logical, "BatchFilter");
 
 impl PlanTreeNodeUnary for BatchFilter {
     fn input(&self) -> PlanRef {

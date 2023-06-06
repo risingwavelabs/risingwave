@@ -192,7 +192,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
 
   - label: "S3 source check on lyvecloud.seagate.com (json parser)"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run"
@@ -207,7 +207,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
 
   - label: "S3 source check on AWS (csv parser)"
     command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv"
@@ -222,7 +222,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
 
   - label: "S3 source on OpenDAL fs engine"
     command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run"

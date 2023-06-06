@@ -35,6 +35,7 @@ pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
 pub mod pg_stat_activity;
+pub mod pg_tables;
 pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
@@ -66,6 +67,7 @@ pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
 pub use pg_stat_activity::*;
+pub use pg_tables::*;
 pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
@@ -685,6 +687,46 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_CONSTRAINT_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_pg_tables_info(&self) -> Result<Vec<OwnedRow>> {
+        // TODO: avoid acquire two read locks here. The order is the same as in `read_views_info`.
+        let reader = self.catalog_reader.read_guard();
+        let user_info_reader = self.user_info_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema
+                    .iter_table()
+                    .map(|table| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(schema.name().into())),
+                            Some(ScalarImpl::Utf8(table.name().into())),
+                            Some(ScalarImpl::Utf8(
+                                user_info_reader
+                                    .get_user_name_by_id(table.owner)
+                                    .unwrap()
+                                    .into(),
+                            )),
+                            None,
+                        ])
+                    })
+                    .chain(schema.iter_system_tables().map(|table| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(schema.name().into())),
+                            Some(ScalarImpl::Utf8(table.name().into())),
+                            Some(ScalarImpl::Utf8(
+                                user_info_reader
+                                    .get_user_name_by_id(table.owner)
+                                    .unwrap()
+                                    .into(),
+                            )),
+                            None,
+                        ])
+                    }))
+            })
+            .collect_vec())
     }
 
     pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {
