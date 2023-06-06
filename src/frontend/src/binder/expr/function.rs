@@ -152,14 +152,12 @@ impl Binder {
                 ))
                 .into());
             }
-        } else {
-            if f.within_group.is_some() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "within group is disallowed for the {}",
-                    kind
-                ))
-                .into());
-            }
+        } else if f.within_group.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "within group is disallowed for the {}",
+                kind
+            ))
+            .into());
         }
         self.ensure_aggregate_allowed()?;
         let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
