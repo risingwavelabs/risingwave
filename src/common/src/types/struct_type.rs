@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -22,8 +22,17 @@ use super::DataType;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
 /// A cheaply cloneable struct type.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StructType(Arc<StructTypeInner>);
+
+impl Debug for StructType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StructType")
+            .field("field_names", &self.0.field_names)
+            .field("field_types", &self.0.field_types)
+            .finish()
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct StructTypeInner {
