@@ -256,10 +256,10 @@ where
                                     // upstream buffer chunk
 
                                     // Consume upstream buffer chunk
-                                    for chunk in upstream_chunk_buffer.drain(..) {
-                                        cur_barrier_upstream_processed_rows +=
-                                            chunk.cardinality() as u64;
-                                        if let Some(current_pos) = &current_pos {
+                                    if let Some(current_pos) = &current_pos {
+                                        for chunk in upstream_chunk_buffer.drain(..) {
+                                            cur_barrier_upstream_processed_rows +=
+                                                chunk.cardinality() as u64;
                                             yield Message::Chunk(Self::mapping_chunk(
                                                 Self::mark_chunk(
                                                     chunk,

@@ -53,6 +53,7 @@ impl fmt::Display for BatchInsert {
         self.logical.fmt_with_name(f, "BatchInsert")
     }
 }
+// impl_distill_by_unit!(BatchInsert, logical, "BatchInsert");
 
 impl PlanTreeNodeUnary for BatchInsert {
     fn input(&self) -> PlanRef {
