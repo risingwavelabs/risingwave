@@ -139,6 +139,15 @@ where
 
         let _guard = self.stream_manager.reschedule_revision_lock.lock().await;
 
+        let current_revision = self.stream_manager.reschedule_revision().await?;
+
+        if req.revision != current_revision.inner() {
+            return Ok(Response::new(RescheduleResponse {
+                success: false,
+                revision: current_revision.into(),
+            }));
+        }
+
         let next_revision = self
             .stream_manager
             .reschedule_actors(
@@ -167,6 +176,7 @@ where
                         )
                     })
                     .collect(),
+                current_revision,
             )
             .await?;
 

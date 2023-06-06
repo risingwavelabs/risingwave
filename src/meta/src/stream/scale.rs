@@ -82,6 +82,10 @@ impl RescheduleRevision {
             memcomparable::to_vec(&self.0).unwrap(),
         );
     }
+
+    pub fn inner(&self) -> u64 {
+        self.0
+    }
 }
 
 #[derive(Debug)]
@@ -587,10 +591,11 @@ where
     pub async fn reschedule_actors(
         &self,
         reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        current_revision: RescheduleRevision,
     ) -> MetaResult<RescheduleRevision> {
         let mut revert_funcs = vec![];
         match self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules)
+            .reschedule_actors_impl(&mut revert_funcs, reschedules, current_revision)
             .await
         {
             Err(e) => {
@@ -607,6 +612,7 @@ where
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        current_revision: RescheduleRevision,
     ) -> MetaResult<RescheduleRevision> {
         let ctx = self.build_reschedule_context(&mut reschedules).await?;
         // Index of actors to create/remove
@@ -1169,7 +1175,6 @@ where
 
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
-        let current_revision = self.reschedule_revision().await?;
         let next_revision = current_revision.increase();
 
         self.barrier_scheduler
