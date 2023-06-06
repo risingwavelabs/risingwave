@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -197,15 +196,12 @@ impl DebeziumAvroParser {
         let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let accessor = AvroAccess {
-            value: &avro_value,
-            options: Cow::Owned(AvroParseOptions {
-                schema: Some(&self.outer_schema),
-                relax_numeric: true,
-            }),
-        };
+        let accessor = AvroAccess::new(
+            &avro_value,
+            AvroParseOptions::default().with_schema(&self.outer_schema),
+        );
 
-        let row_op = DebeziumAdapter { accessor };
+        let row_op = DebeziumAdapter::new(accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }

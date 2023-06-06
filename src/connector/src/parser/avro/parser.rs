@@ -256,26 +256,28 @@ impl AvroParser {
             None
         };
 
-        let accessor = UpsertAccess {
-            key_accessor: avro_key.as_ref().map(|value| AvroAccess {
-                value: value,
-                options: Cow::Owned(AvroParseOptions {
+        let mut accessor: UpsertAccess<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
+            UpsertAccess::default();
+        if let Some(key) = &avro_key {
+            accessor = accessor.with_key(AvroAccess::new(
+                key,
+                AvroParseOptions {
                     schema: self.key_schema.as_ref().map(|s| &**s),
-                    relax_numeric: true,
-                }),
-            }),
-            value_accessor: avro_value.as_ref().map(|value| AvroAccess {
-                value: value,
-                options: Cow::Owned(AvroParseOptions {
-                    schema: Some(&self.schema),
-                    relax_numeric: true,
-                }),
-            }),
-            primary_key_column_name: self
-                .upsert_primary_key_column_name
-                .clone()
-                .unwrap_or_default(),
-        };
+                    ..Default::default()
+                },
+            ));
+        }
+
+        if let Some(value) = &avro_value {
+            accessor = accessor.with_value(AvroAccess::new(
+                value,
+                AvroParseOptions::default().with_schema(&*self.schema),
+            ));
+        }
+
+        if let Some(pk) = &self.upsert_primary_key_column_name {
+            accessor = accessor.with_primary_key_column_name(pk);
+        }
 
         apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
     }

@@ -13,24 +13,21 @@ pub type AccessResult = std::result::Result<Datum, AccessError>;
 
 /// Access a certain field in an object according to the path
 pub trait Access {
-    fn access(&self, path: &[&str], shape: Option<&DataType>) -> AccessResult;
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
 }
 
 #[derive(Debug)]
-pub enum RowOperation {
-    Insert,
-    Update,
+pub enum ChangeEventOperation {
+    Upsert, // Insert or Update
     Delete,
 }
 
 /// Methods to access a CDC event.
-pub trait OperateRow {
+pub trait ChangeEvent {
     /// Access the operation type.
-    fn op(&self) -> std::result::Result<RowOperation, AccessError>;
+    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError>;
     /// Access the field after the operation.
-    fn access_field(&self, name: &str, shape: &DataType) -> AccessResult;
-    /// Access the field before the operation.
-    fn access_before(&self, name: &str, shape: &DataType) -> AccessResult;
+    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult;
 }
 
 #[derive(Error, Debug)]

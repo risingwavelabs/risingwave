@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::str::FromStr;
 
 use base64::Engine;
@@ -63,15 +62,7 @@ pub struct JsonParseOptions {
 
 impl Default for JsonParseOptions {
     fn default() -> Self {
-        Self {
-            bytea_handling: ByteaHandling::Standard,
-            time_handling: TimeHandling::Micro,
-            json_value_handling: JsonValueHandling::AsValue,
-            numeric_handling: NumericHandling::Relax {
-                string_parsing: false,
-            },
-            boolean_handing: BooleanHandling::Strict,
-        }
+        Self::DEFAULT.clone()
     }
 }
 
@@ -88,15 +79,28 @@ impl JsonParseOptions {
             string_integer_parsing: false,
         },
     };
+    pub const DEFAULT: JsonParseOptions = JsonParseOptions {
+        bytea_handling: ByteaHandling::Standard,
+        time_handling: TimeHandling::Micro,
+        json_value_handling: JsonValueHandling::AsValue,
+        numeric_handling: NumericHandling::Relax {
+            string_parsing: false,
+        },
+        boolean_handing: BooleanHandling::Strict,
+    };
 
-    pub fn parse(&self, value: &BorrowedValue<'_>, shape: Option<&DataType>) -> AccessResult {
+    pub fn parse(
+        &self,
+        value: &BorrowedValue<'_>,
+        type_expected: Option<&DataType>,
+    ) -> AccessResult {
         let create_error = || AccessError::TypeError {
-            expected: format!("{:?}", shape),
+            expected: format!("{:?}", type_expected),
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
 
-        let v: ScalarImpl = match (shape, value.value_type()) {
+        let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(None),
             // ---- Boolean -----
             (Some(DataType::Boolean) | None, ValueType::Bool) => value.as_bool().unwrap().into(),
@@ -410,16 +414,26 @@ impl JsonParseOptions {
 }
 
 pub struct JsonAccess<'a, 'b> {
-    pub value: Cow<'a, BorrowedValue<'b>>,
-    pub options: Cow<'a, JsonParseOptions>,
+    value: BorrowedValue<'b>,
+    options: &'a JsonParseOptions,
+}
+
+impl<'a, 'b> JsonAccess<'a, 'b> {
+    pub fn new_with_options(value: BorrowedValue<'b>, options: &'a JsonParseOptions) -> Self {
+        Self { value, options }
+    }
+
+    pub fn new(value: BorrowedValue<'b>) -> Self {
+        Self::new_with_options(value, &JsonParseOptions::DEBEZIUM)
+    }
 }
 
 impl<'a, 'b> Access for JsonAccess<'a, 'b>
 where
     'a: 'b,
 {
-    fn access(&self, path: &[&str], shape: Option<&DataType>) -> AccessResult {
-        let mut value = self.value.as_ref();
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+        let mut value = &self.value;
         for (idx, key) in path.iter().enumerate() {
             if let Some(sub_value) = value.get(*key) {
                 value = sub_value;
@@ -431,7 +445,7 @@ where
             }
         }
 
-        self.options.parse(value, shape)
+        self.options.parse(value, type_expected)
     }
 }
 

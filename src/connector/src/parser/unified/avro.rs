@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::str::FromStr;
 
 use apache_avro::types::Value;
@@ -14,6 +13,7 @@ use crate::parser::avro::util::{
     avro_decimal_to_rust_decimal, extract_inner_field_schema, unix_epoch_days,
 };
 #[derive(Clone)]
+/// Options for parsing an AvroValue into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
     pub schema: Option<&'a Schema>,
     /// Strict Mode
@@ -21,7 +21,21 @@ pub struct AvroParseOptions<'a> {
     pub relax_numeric: bool,
 }
 
+impl<'a> Default for AvroParseOptions<'a> {
+    fn default() -> Self {
+        Self {
+            schema: None,
+            relax_numeric: true,
+        }
+    }
+}
+
 impl<'a> AvroParseOptions<'a> {
+    pub fn with_schema(mut self, schema: &'a Schema) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
     fn extract_inner_schema(&self, key: Option<&'a str>) -> Option<&'a Schema> {
         self.schema
             .map(|schema| extract_inner_field_schema(schema, key))
@@ -31,17 +45,26 @@ impl<'a> AvroParseOptions<'a> {
             .flatten()
     }
 
-    pub fn parse<'b>(&self, value: &'b Value, shape: Option<&'b DataType>) -> AccessResult
+    /// Parse an avro value into expected type.
+    /// 3 kinds of type info are used to parsing things.
+    ///     - type_expected. The type that we expect the value is.
+    ///     - value type. The type info together with the value argument.
+    ///     - schema. The AvroSchema provided in option.
+    /// If both type_expected and schema are provided, it will check both strictly.
+    /// If only type_expected is provided, it will try to match the value type and the
+    /// type_expected, coverting the value if possible. If only value is provided (without
+    /// schema and type_expected), the DateType will be inferred.
+    pub fn parse<'b>(&self, value: &'b Value, type_expected: Option<&'b DataType>) -> AccessResult
     where
         'b: 'a,
     {
         let create_error = || AccessError::TypeError {
-            expected: format!("{:?}", shape),
+            expected: format!("{:?}", type_expected),
             got: format!("{:?}", value),
             value: String::new(),
         };
 
-        let v: ScalarImpl = match (shape, value) {
+        let v: ScalarImpl = match (type_expected, value) {
             (_, Value::Null) => return Ok(None),
             (_, Value::Union(_, v)) => {
                 let schema = self.extract_inner_schema(None);
@@ -49,7 +72,7 @@ impl<'a> AvroParseOptions<'a> {
                     schema,
                     relax_numeric: self.relax_numeric,
                 }
-                .parse(v, shape);
+                .parse(v, type_expected);
             }
             // ---- Boolean -----
             (Some(DataType::Boolean) | None, Value::Boolean(b)) => (*b).into(),
@@ -195,17 +218,23 @@ impl<'a> AvroParseOptions<'a> {
 }
 
 pub struct AvroAccess<'a, 'b> {
-    pub value: &'a Value,
-    pub options: Cow<'a, AvroParseOptions<'b>>,
+    value: &'a Value,
+    options: AvroParseOptions<'b>,
+}
+
+impl<'a, 'b> AvroAccess<'a, 'b> {
+    pub fn new(value: &'a Value, options: AvroParseOptions<'b>) -> Self {
+        Self { value, options }
+    }
 }
 
 impl<'a, 'b> Access for AvroAccess<'a, 'b>
 where
     'a: 'b,
 {
-    fn access(&self, path: &[&str], shape: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
         let mut value = self.value;
-        let mut options: AvroParseOptions<'_> = self.options.as_ref().clone();
+        let mut options: AvroParseOptions<'_> = self.options.clone();
 
         let mut i = 0;
         while i < path.len() {
@@ -239,6 +268,6 @@ where
             Err(create_error())?;
         }
 
-        options.parse(value, shape)
+        options.parse(value, type_expected)
     }
 }

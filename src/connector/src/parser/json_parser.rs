@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -96,10 +94,10 @@ impl JsonParser {
 
             let mut primary_key = msg.primary_key.to_vec();
             let mut record = msg.record.to_vec();
-            let key_value = simd_json::to_borrowed_value(&mut primary_key)
+            let key_decoded = simd_json::to_borrowed_value(&mut primary_key)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-            let value_value = if msg.record.is_empty() {
+            let value_decoded = if record.is_empty() {
                 None
             } else {
                 Some(
@@ -107,22 +105,11 @@ impl JsonParser {
                         .map_err(|e| RwError::from(ProtocolError(e.to_string())))?,
                 )
             };
-            let accessor = UpsertAccess {
-                key_accessor: Some(JsonAccess {
-                    value: Cow::Owned(key_value),
-                    options: Default::default(),
-                }),
-                value_accessor: if msg.record.is_empty() {
-                    None
-                } else {
-                    Some(JsonAccess {
-                        value: Cow::Owned(value_value.unwrap()),
-                        options: Default::default(),
-                    })
-                },
-                primary_key_column_name: String::new(),
-            };
 
+            let mut accessor = UpsertAccess::default().with_key(JsonAccess::new(key_decoded));
+            if let Some(value) = value_decoded {
+                accessor = accessor.with_value(JsonAccess::new(value));
+            }
             apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
         } else {
             let value = simd_json::to_borrowed_value(&mut payload)
@@ -135,14 +122,8 @@ impl JsonParser {
             let mut errors = Vec::new();
             let mut guard = None;
             for value in values {
-                let accessor = UpsertAccess {
-                    key_accessor: None as Option<JsonAccess<'_, '_>>,
-                    value_accessor: Some(JsonAccess {
-                        value: Cow::Owned(value),
-                        options: Default::default(),
-                    }),
-                    primary_key_column_name: String::new(),
-                };
+                let accessor: UpsertAccess<JsonAccess<'_, '_>, JsonAccess<'_, '_>> =
+                    UpsertAccess::default().with_value(JsonAccess::new(value));
 
                 match apply_row_operation_on_stream_chunk_writer(accessor, &mut writer) {
                     Ok(this_guard) => guard = Some(this_guard),

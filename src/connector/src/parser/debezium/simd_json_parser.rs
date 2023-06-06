@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt::Debug;
 
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, StaticNode, ValueAccess};
+use simd_json::{BorrowedValue, Mutable, StaticNode};
 
 use crate::impl_common_parser_logic;
 use crate::parser::unified::debezium::DebeziumAdapter;
@@ -62,22 +61,16 @@ impl DebeziumJsonParser {
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
+        let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let payload = event
-            .get("payload")
-            .and_then(ensure_not_null)
-            .ok_or_else(|| {
-                RwError::from(ProtocolError("no payload in debezium event".to_owned()))
-            })?;
+        let payload = std::mem::take(event.get_mut("payload").ok_or_else(|| {
+            RwError::from(ProtocolError("no payload in debezium event".to_owned()))
+        })?);
 
-        let accessor = JsonAccess {
-            value: Cow::Borrowed(payload),
-            options: Cow::Borrowed(&JsonParseOptions::DEBEZIUM),
-        };
+        let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let row_op = DebeziumAdapter { accessor };
+        let row_op = DebeziumAdapter::new(accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
