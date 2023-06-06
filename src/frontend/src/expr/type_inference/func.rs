@@ -182,8 +182,7 @@ pub enum NestedType {
 /// Convert struct type to a nested type
 fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
     let fields = ty
-        .fields
-        .iter()
+        .types()
         .map(|f| match f {
             DataType::Struct(s) => extract_struct_nested_type(s),
             _ => Ok(NestedType::Type(f.clone())),
@@ -237,13 +236,9 @@ fn infer_struct_cast_target_type(
                 let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
                 lcasts |= lcast;
                 rcasts |= rcast;
-                tys.push((ty, "".to_string())); // TODO(chi): generate field name
+                tys.push(("".to_string(), ty)); // TODO(chi): generate field name
             }
-            Ok((
-                lcasts,
-                rcasts,
-                DataType::Struct(StructType::new(tys).into()),
-            ))
+            Ok((lcasts, rcasts, DataType::Struct(StructType::new(tys))))
         }
         (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
             // If only one side is nested type, these two types can never be casted.
