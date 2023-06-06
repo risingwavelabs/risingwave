@@ -55,7 +55,6 @@ impl AggCall {
     pub fn from_protobuf(agg_call: &PbAggCall) -> Result<Self> {
         let agg_kind = AggKind::from_protobuf(agg_call.get_type()?)?;
         let args = AggArgs::from_protobuf(agg_call.get_args())?;
-        println!("args: {:?}", args);
         let column_orders = agg_call
             .get_order_by()
             .iter()
