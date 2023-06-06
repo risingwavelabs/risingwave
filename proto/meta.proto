@@ -3,6 +3,7 @@ syntax = "proto3";
 package meta;
 
 import "backup_service.proto";
+import "connector_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
@@ -398,4 +399,18 @@ message SetSystemParamResponse {}
 service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
+}
+
+message RwCloudValidateSourceRequest {
+  connector_service.SourceType source_type = 1;
+  map<string, string> source_config = 2;
+}
+
+message RwCloudValidateSourceResponse {
+  // On validation failure, we return the error.
+  connector_service.ValidationError error = 1;
+}
+
+service CloudService {
+  rpc RwCloudValidateSource(RwCloudValidateSourceRequest) returns (RwCloudValidateSourceResponse);
 }

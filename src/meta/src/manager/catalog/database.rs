@@ -268,6 +268,14 @@ impl DatabaseManager {
         self.connections.get(&connection_id)
     }
 
+    // only used for [`meta::rpc::cloud_service`]
+    // use get_connection for efficiency
+    pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Connection> {
+        self.connections
+            .values()
+            .find(|c| c.name == connection_name)
+    }
+
     pub fn list_connections(&self) -> Vec<Connection> {
         self.connections.values().cloned().collect()
     }

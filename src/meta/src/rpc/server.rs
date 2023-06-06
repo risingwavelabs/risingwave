@@ -31,6 +31,7 @@ use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::cloud_service_server::CloudServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
@@ -63,6 +64,7 @@ use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_fragment_info_monitor, start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
+use crate::rpc::service::cloud_service::CloudServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
@@ -483,7 +485,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
-        aws_cli,
+        aws_cli.clone(),
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
@@ -518,7 +520,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
-        catalog_manager,
+        catalog_manager.clone(),
         cluster_manager.clone(),
         hummock_manager.clone(),
         fragment_manager.clone(),
@@ -528,6 +530,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let backup_srv = BackupServiceImpl::new(backup_manager);
     let telemetry_srv = TelemetryInfoServiceImpl::new(meta_store.clone());
     let system_params_srv = SystemParamsServiceImpl::new(system_params_manager.clone());
+    let cloud_srv = CloudServiceImpl::<S>::new(catalog_manager, aws_cli);
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -668,6 +671,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .add_service(BackupServiceServer::new(backup_srv))
         .add_service(SystemParamsServiceServer::new(system_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
+        .add_service(CloudServiceServer::new(cloud_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 res = svc_shutdown_rx.changed() => {

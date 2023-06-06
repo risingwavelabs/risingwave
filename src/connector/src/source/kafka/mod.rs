@@ -28,9 +28,11 @@ pub use split::*;
 
 use crate::common::KafkaCommon;
 use crate::deserialize_duration_from_string;
+pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const KAFKA_CONNECTOR: &str = "kafka";
 pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
 pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
+pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 
 #[derive(Clone, Debug, Deserialize)]

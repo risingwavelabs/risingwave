@@ -1363,6 +1363,17 @@ where
             .ok_or_else(|| anyhow!(format!("could not find connection {}", connection_id)).into())
     }
 
+    // only used for [`meta::rpc::cloud_service`]
+    // use get_connection for efficiency
+    pub async fn get_connection_by_name(&self, connection_name: &str) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await;
+        let database_core = &core.database;
+        database_core
+            .get_connection_by_name(connection_name)
+            .cloned()
+            .ok_or_else(|| anyhow!(format!("could not find connection {}", connection_name)).into())
+    }
+
     pub async fn finish_create_source_procedure(
         &self,
         source: &Source,
