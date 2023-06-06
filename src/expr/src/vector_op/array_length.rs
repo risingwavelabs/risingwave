@@ -185,8 +185,7 @@ fn array_length_d(array: ListRef<'_>, d: i32) -> Result<Option<i64>, ExprError> 
 /// ```
 #[function("array_dims(list) -> varchar")]
 fn array_dims(array: ListRef<'_>, writer: &mut dyn std::fmt::Write) -> Result<(), ExprError> {
-    for upper in [array.len()] {
-        write!(writer, "[1:{}]", upper).unwrap();
-    }
+    let upper = array.len();
+    write!(writer, "[1:{}]", upper).unwrap();
     Ok(())
 }
