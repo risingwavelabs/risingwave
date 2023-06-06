@@ -24,6 +24,7 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
@@ -301,7 +302,7 @@ impl Cluster {
     }
 
     // mark a worker node as unschedulable
-    pub async fn cordon_worker(&self, addr: HostAddr) -> Result<()> {
+    pub async fn cordon_worker(&self, addr: HostAddress) -> Result<()> {
         let _ = self
             .ctl
             .spawn(async move {

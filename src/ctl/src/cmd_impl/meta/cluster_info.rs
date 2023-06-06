@@ -32,17 +32,11 @@ pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetCluster
     Ok(response)
 }
 
-// TODO: remove this
 pub async fn cordon_worker(
     context: &CtlContext,
-    // TODO: We should use HostAddress for all of these functions
-    addr: HostAddr,
+    addr: HostAddress,
 ) -> anyhow::Result<CordonWorkerNodeResponse> {
     let meta_client = context.meta_client().await?;
-    let addr = HostAddress {
-        host: addr.host,
-        port: addr.port as i32,
-    };
     let response = meta_client.cordon_worker(addr).await?;
     Ok(response)
 }

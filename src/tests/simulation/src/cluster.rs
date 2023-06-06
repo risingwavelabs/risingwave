@@ -30,7 +30,7 @@ use madsim::runtime::{Handle, NodeHandle};
 use rand::seq::IteratorRandom;
 use rand::Rng;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{HostAddress, WorkerNode};
 use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;
@@ -392,7 +392,7 @@ impl Cluster {
     // convenience function, wrapper for cordon_worker
     pub async fn cordon_node(&self, worker_node: &WorkerNode) -> Result<()> {
         let addr = worker_node.clone().host.expect("node does not have host");
-        let addr = HostAddr {
+        let addr = HostAddress {
             host: addr.host,
             port: addr.port as u16,
         };
@@ -405,7 +405,6 @@ impl Cluster {
         if worker_nodes.len() < n {
             return Err(anyhow!("cannot remove more nodes than present"));
         }
-        // TODO: is this affected by madsim?
         let rand_nodes = worker_nodes
             .iter()
             .choose_multiple(&mut rand::thread_rng(), n)
