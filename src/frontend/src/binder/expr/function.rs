@@ -244,6 +244,13 @@ impl Binder {
             .into());
         }
         let order_by = if f.within_group.is_some() {
+            if !f.order_by.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "order_by clause outside of within group is disallowed in {}",
+                    kind
+                ))
+                .into());
+            }
             OrderBy::new(
                 f.within_group
                     .iter()
