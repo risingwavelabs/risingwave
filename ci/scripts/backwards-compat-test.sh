@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Running it locally:
+# RW_COMMIT=$(git rev-parse HEAD) ./ci/scripts/backwards-compat-test.sh
+
 set -euo pipefail
 
 # FIXME(kwannoel): automatically derive this by:
