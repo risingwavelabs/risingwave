@@ -179,7 +179,7 @@ impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
+    pub fn new(
         env: MetaSrvEnv<S>,
         fragment_manager: FragmentManagerRef<S>,
         barrier_scheduler: BarrierScheduler<S>,

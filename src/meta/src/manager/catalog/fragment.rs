@@ -823,9 +823,7 @@ where
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
         let mut trx = Transaction::default();
-
         revision.store(&mut trx);
-
         commit_meta_with_trx!(self, trx, table_fragments)?;
 
         for mapping in fragment_mapping_to_notify {

@@ -597,7 +597,7 @@ where
                 for revert_func in revert_funcs.into_iter().rev() {
                     revert_func.await;
                 }
-                return Err(e);
+                Err(e)
             }
             Ok(revision) => Ok(revision),
         }

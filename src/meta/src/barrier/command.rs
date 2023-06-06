@@ -647,7 +647,7 @@ where
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
-                    .post_apply_reschedules(reschedules.clone(), revision.clone())
+                    .post_apply_reschedules(reschedules.clone(), *revision)
                     .await?;
 
                 let mut stream_source_actor_splits = HashMap::new();
