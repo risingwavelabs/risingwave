@@ -288,7 +288,7 @@ where
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
             .list_worker_node(WorkerType::Compactor, Some(vec![Running, Cordoned]))
-            .await, // TODO: use convenience function here
+            .await,
     ]
     .concat();
 

@@ -352,7 +352,8 @@ where
         core.list_worker_node(worker_type, worker_states)
     }
 
-    /// A convenient method to get all running compute nodes that can be used for streaming.
+    /// A convenient method to get all running compute nodes that may have running actors on them
+    /// i.e. CNs which are running or cordoned
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
@@ -364,7 +365,7 @@ where
     }
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
-    /// schedulable
+    /// running and schedulable
     pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
         core.get_streaming_cluster_info()
@@ -492,7 +493,6 @@ impl ClusterManagerCore {
         self.workers.remove(&WorkerKey(worker.key().unwrap()));
     }
 
-    // TODO: refactor this. We should make clear which nodes we get
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
@@ -518,6 +518,7 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    // List all parallel units on running or cordoned nodes
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
             .list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
@@ -532,6 +533,7 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    // Lists active worker nodes
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
             .list_streaming_worker_node(Some(vec![State::Running]))

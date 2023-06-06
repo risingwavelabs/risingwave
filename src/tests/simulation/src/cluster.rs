@@ -392,10 +392,6 @@ impl Cluster {
     // convenience function, wrapper for cordon_worker
     pub async fn cordon_node(&self, worker_node: &WorkerNode) -> Result<()> {
         let addr = worker_node.clone().host.expect("node does not have host");
-        let addr = HostAddress {
-            host: addr.host,
-            port: addr.port as u16,
-        };
         self.cordon_worker(addr).await?;
         Ok(())
     }
