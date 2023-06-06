@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+# USAGE:
+#   AWS_PROFILE=rwctest \
+#   BUILDKITE_BUILD_URL=... \
+#   RW_VERSION=latest \
+#   COMMIT=... \
+#   ./upload-micro-bench-results.sh \
+#   ```
+
+# Exits as soon as any line fails.
+set -euo pipefail
+
+echo "--- Install Necessary Tools"
+# pip install toml-cli
+# download qa files for use in nexmark-bench.
+if [[ ! -f "./qa" ]]; then
+  curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash && ./qa --help
+fi
+
+echo "--- AWS and Kube Config"
+set +u
+if [[ -z "$AWS_PROFILE" ]]; then
+   # FIXME(kwannoel): Ask @huangjw to help with configuring it.
+   aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
+   aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
+fi
+set -u
+
+# Get certs for command client from s3.
+# Use by qa command.
+echo "--- Download S3 Crt Keys"
+aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
+
+# Use this command to create the execution.
+# For microbench mark it need not be some complex.
+# There will be another command.
+# https://github.com/risingwavelabs/qa-infra/pull/35
+# Can add --tag and --commit.
+# 2 most important are the url and the time.
+# Can see "BUILDKITE_BUILD_URL" below.
+# We will fetch the artifacts from the URL above.
+# Get the url from buildkite pipeline environment variable.
+# End time can set to NOW. Obtain from buildkite? Or just see in nexmark-bench script how JW sets the time.
+# See the PR docs.
+# Add this script to RW repository buildkite ci.
+# For pipeline settings:
+# https://buildkite.com/risingwave-test/nexmark-benchmark
+./qa ctl -I 34.211.126.167:8081 execution create-micro-benchmark-executions
+  --exec-url ${BUILDKITE_BUILD_URL} \
+  --branch main
+  --tag ${RW_VERSION} \
+  --commit $COMMIT
+  --end-time $(date)
+  --status passed
