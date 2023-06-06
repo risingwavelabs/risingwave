@@ -378,6 +378,7 @@ message CompactTaskProgress {
   uint64 task_id = 1;
   uint32 num_ssts_sealed = 2;
   uint32 num_ssts_uploaded = 3;
+  uint64 num_progress_key = 4;
 }
 
 // The measurement of the workload on a compactor to determine whether it is idle.

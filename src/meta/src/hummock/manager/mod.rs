@@ -924,7 +924,7 @@ where
                 (count, size)
             };
 
-            let (compact_task_size, compact_task_file_count) =
+            let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
             if compact_task.input_ssts[0].level_idx == 0 {
