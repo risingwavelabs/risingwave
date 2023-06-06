@@ -603,6 +603,20 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::ArrayDims => {
+            ensure_arity!("array_dims", | inputs | == 1);
+            if inputs[0].is_untyped() {
+                return Ok(None);
+            }
+            match inputs[0].return_type() {
+                DataType::List(box DataType::List(_)) => Err(ErrorCode::BindError(
+                    "array_dims for dimensions greater than 1 not supported".into(),
+                )
+                .into()),
+                DataType::List(_) => Ok(Some(DataType::Varchar)),
+                _ => Ok(None),
+            }
+        }
         ExprType::ArrayLength => {
             ensure_arity!("array_length", 1 <= | inputs | <= 2);
             let return_type = inputs[0].return_type();

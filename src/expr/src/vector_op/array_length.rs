@@ -137,3 +137,56 @@ fn array_length_d(array: ListRef<'_>, d: i32) -> Result<Option<i64>, ExprError> 
         }),
     }
 }
+
+/// Returns a text representation of the array's dimensions.
+///
+/// Examples:
+///
+/// ```slt
+/// query T
+/// select array_dims(array[2,3,4]);
+/// ----
+/// [1:3]
+///
+/// query T
+/// select array_dims(null::int[]);
+/// ----
+/// NULL
+///
+/// query T
+/// select array_dims('{2,3,4}'::int[]);
+/// ----
+/// [1:3]
+///
+/// statement error
+/// select array_dims(null);
+///
+/// statement error
+/// select array_dims(1);
+///
+/// # Similar to `array_length`, higher dimension is rejected now but can be supported later in limited cases.
+/// statement error
+/// select array_dims(array[array[2,3,4],array[3,4,5]]);
+///
+/// statement error
+/// select array_dims(array[array[2,3],array[3,4,5]]);
+///
+/// # And empty array is also different from PostgreSQL, following the same convention as `array_length`.
+/// query T
+/// select array_dims(array[]::int[]);
+/// ----
+/// [1:0]
+///
+/// statement error
+/// select array_dims(array[]::int[][]); -- would be `[1:0][1:0]` after multidimension support
+///
+/// statement error
+/// select array_dims(array[array[]::int[]]); -- would be `[1:1][1:0]` after multidimension support
+/// ```
+#[function("array_dims(list) -> varchar")]
+fn array_dims(array: ListRef<'_>, writer: &mut dyn std::fmt::Write) -> Result<(), ExprError> {
+    for upper in [array.len()] {
+        write!(writer, "[1:{}]", upper).unwrap();
+    }
+    Ok(())
+}
