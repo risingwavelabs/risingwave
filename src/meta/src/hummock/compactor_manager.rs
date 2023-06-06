@@ -21,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -326,14 +327,44 @@ impl CompactorManager {
         now: u64,
     ) -> Vec<(HummockCompactionTaskId, (HummockContextId, CompactTask))> {
         let mut cancellable_tasks = vec![];
+        const MAX_TASK_DURATION_SEC: u64 = 2700;
+
         for (context_id, heartbeats) in task_heartbeats {
             {
                 for TaskHeartbeat {
-                    expire_at, task, ..
+                    expire_at,
+                    task,
+                    create_time,
+                    num_ssts_sealed,
+                    num_ssts_uploaded,
+                    num_progress_key,
                 } in heartbeats.values()
                 {
-                    if *expire_at < now {
+                    let task_duration_too_long =
+                        create_time.elapsed().as_secs() > MAX_TASK_DURATION_SEC;
+                    if *expire_at < now || task_duration_too_long {
+                        // 1. task heartbeat expire
+                        // 2. task duration is too long
                         cancellable_tasks.push((task.get_task_id(), (*context_id, task.clone())));
+
+                        if task_duration_too_long {
+                            let (need_quota, file_counts) = estimate_state_for_compaction(task);
+                            tracing::info!(
+                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} need_quota {} file_counts {} target_level {} base_level {} target_sub_level_id {} task_type {}",
+                                task.compaction_group_id,
+                                task.task_id,
+                                create_time,
+                                num_ssts_sealed,
+                                num_ssts_uploaded,
+                                num_progress_key,
+                                need_quota,
+                                file_counts,
+                                task.target_level,
+                                task.base_level,
+                                task.target_sub_level_id,
+                                task.task_type,
+                            );
+                        }
                     }
                 }
             }
