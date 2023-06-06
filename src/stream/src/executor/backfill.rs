@@ -139,11 +139,15 @@ where
             state_table.init_epoch(first_barrier.epoch);
         }
 
-        // Maintain backwards compatibility with no state table.
         let is_finished = if let Some(state_table) = self.state_table.as_mut() {
-            Self::check_all_vnode_finished(state_table, state_len).await?
+            let is_finished = Self::check_all_vnode_finished(state_table, state_len).await?;
+            if is_finished {
+                assert!(!first_barrier.is_newly_added(self.actor_id));
+            }
+            is_finished
         } else {
-            first_barrier.is_newly_added(self.actor_id)
+            // Maintain backwards compatibility with no state table
+            !first_barrier.is_newly_added(self.actor_id)
         };
 
         // If the snapshot is empty, we don't need to backfill.
