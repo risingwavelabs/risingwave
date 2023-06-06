@@ -18,9 +18,11 @@ use async_trait::async_trait;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
-use risingwave_pb::connector_service::{SourceType, ValidationError};
-use risingwave_pb::meta::cloud_service_server::CloudService;
-use risingwave_pb::meta::{RwCloudValidateSourceRequest, RwCloudValidateSourceResponse};
+use risingwave_pb::cloud_service::cloud_service_server::CloudService;
+use risingwave_pb::cloud_service::rw_cloud_validate_source_response::{Error, ErrorType};
+use risingwave_pb::cloud_service::{
+    RwCloudValidateSourceRequest, RwCloudValidateSourceResponse, SourceType,
+};
 use tonic::{Request, Response, Status};
 
 use crate::manager::CatalogManagerRef;
@@ -109,7 +111,8 @@ where
             .map_err(|e| Status::from(MetaError::from(e)))?;
         if let Err(e) = enumerator.list_splits().await {
             return Ok(Response::new(RwCloudValidateSourceResponse {
-                error: Some(ValidationError {
+                error: Some(Error {
+                    error_type: ErrorType::TopicNotFound.into(),
                     error_message: e.to_string(),
                 }),
             }));

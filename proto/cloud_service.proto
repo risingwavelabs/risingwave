@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package cloud_service;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+enum SourceType {
+  UNSPECIFIED = 0;
+  KAFKA = 1;
+}
+
+message RwCloudValidateSourceRequest {
+  SourceType source_type = 1;
+  map<string, string> source_config = 2;
+}
+
+message RwCloudValidateSourceResponse {
+  // On validation failure, we return the error.
+  enum ErrorType {
+    UNSPECIFIED = 0;
+    PRIVATELINK_UNAVAILABLE = 1;
+    TOPIC_NOT_FOUND = 2;
+    BROCKER_UNREACHABLE = 3;
+  }
+  
+  message Error {
+    ErrorType error_type = 1;
+    string error_message = 2;
+  }
+
+  Error error = 1;
+}
+
+service CloudService {
+  rpc RwCloudValidateSource(RwCloudValidateSourceRequest) returns (RwCloudValidateSourceResponse);
+}
