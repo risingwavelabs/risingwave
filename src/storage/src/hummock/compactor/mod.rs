@@ -667,8 +667,9 @@ impl Compactor {
         while iter.is_valid() {
             progress_key_num += 1;
 
-            if let Some(task_progress) = task_progress.as_ref() && progress_key_num % PROGRESS_KEY_INTERVAL == 0 {
-                task_progress.inc_progress_key(PROGRESS_KEY_INTERVAL);
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+                task_progress.inc_progress_key(progress_key_num);
+                progress_key_num = 0;
             }
 
             let mut iter_key = iter.key();
@@ -775,6 +776,12 @@ impl Compactor {
 
             iter.next().await?;
         }
+
+        if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
+            // Avoid losing the progress_key_num in the last Interval
+            task_progress.inc_progress_key(progress_key_num);
+        }
+
         if let Some(last_table_id) = last_table_id.take() {
             table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
         }
@@ -926,12 +933,15 @@ impl Compactor {
             .iter()
             .all(|table_info| table_info.sst_info.get_table_ids().is_sorted()));
 
-        tracing::info!(
-            "Finish Task {:?} split_index {:?} sst count {}",
-            task_id,
-            split_index,
-            ssts.len()
-        );
+        if task_id.is_some() {
+            // skip shared buffer compaction
+            tracing::info!(
+                "Finish Task {:?} split_index {:?} sst count {}",
+                task_id,
+                split_index,
+                ssts.len()
+            );
+        }
         Ok((ssts, table_stats_map))
     }
 

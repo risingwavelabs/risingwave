@@ -17,7 +17,6 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-// use prometheus::core::AtomicU64;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 
 pub type TaskProgressManagerRef = Arc<Mutex<HashMap<HummockCompactionTaskId, Arc<TaskProgress>>>>;
