@@ -58,6 +58,7 @@ struct TaskHeartbeat {
     task: CompactTask,
     num_ssts_sealed: u32,
     num_ssts_uploaded: u32,
+    num_progress_key: u64,
     create_time: Instant,
     expire_at: u64,
 }
@@ -353,6 +354,7 @@ impl CompactorManager {
                 task,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                num_progress_key: 0,
                 create_time: Instant::now(),
                 expire_at: now + self.task_expiry_seconds,
             },
@@ -382,10 +384,16 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    // Refresh the expiry of the task as it is showing progress.
-                    task_ref.expire_at = now + self.task_expiry_seconds;
-                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
-                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
+                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
+                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
+                        || task_ref.num_progress_key < progress.num_progress_key
+                    {
+                        // Refresh the expiry of the task as it is showing progress.
+                        task_ref.expire_at = now + self.task_expiry_seconds;
+                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
+                        task_ref.num_progress_key = progress.num_progress_key;
+                    }
                 }
             }
         }
@@ -485,6 +493,7 @@ mod tests {
                 task_id: expired[0].1.task_id,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                num_progress_key: 0,
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
@@ -496,6 +505,7 @@ mod tests {
                 task_id: expired[0].1.task_id + 1,
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
+                num_progress_key: 100,
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
@@ -507,6 +517,7 @@ mod tests {
                 task_id: expired[0].1.task_id,
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
+                num_progress_key: 100,
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);

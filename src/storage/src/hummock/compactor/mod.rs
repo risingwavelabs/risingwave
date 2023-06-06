@@ -498,6 +498,7 @@ impl Compactor {
                                     task_id,
                                     num_ssts_sealed: progress.num_ssts_sealed.load(Ordering::Relaxed),
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
+                                    num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
                                 });
                             }
 
@@ -623,6 +624,7 @@ impl Compactor {
         compactor_metrics: Arc<CompactorMetrics>,
         mut iter: impl HummockIterator<Direction = Forward>,
         mut compaction_filter: impl CompactionFilter,
+        task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<CompactionStatistics>
     where
         F: TableBuilderFactory,
@@ -655,7 +657,15 @@ impl Compactor {
         let mut last_table_stats = TableStats::default();
         let mut last_table_id = None;
         let mut compaction_statistics = CompactionStatistics::default();
+        let mut progress_key_num: u64 = 0;
+        const PROGRESS_KEY_INTERVAL: u64 = 100;
         while iter.is_valid() {
+            progress_key_num += 1;
+
+            if let Some(task_progress) = task_progress.as_ref() && progress_key_num % PROGRESS_KEY_INTERVAL == 0 {
+                task_progress.inc_progress_key(PROGRESS_KEY_INTERVAL);
+            }
+
             let mut iter_key = iter.key();
             compaction_statistics.iter_total_key_counts += 1;
 
@@ -934,7 +944,7 @@ impl Compactor {
         let mut sst_builder = CapacitySplitTableBuilder::new(
             builder_factory,
             self.context.compactor_metrics.clone(),
-            task_progress,
+            task_progress.clone(),
             del_agg,
             self.task_config.key_range.clone(),
             self.task_config.is_target_l0_or_lbase,
@@ -947,6 +957,7 @@ impl Compactor {
             self.context.compactor_metrics.clone(),
             iter,
             compaction_filter,
+            task_progress,
         )
         .await?;
 
