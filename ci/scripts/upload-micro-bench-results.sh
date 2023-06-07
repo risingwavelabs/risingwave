@@ -45,46 +45,8 @@ END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
-
-#echo "--- Install Necessary Tools"
-## pip3 install toml-cli
-## download qa files for use in nexmark-bench.
-#if [[ ! -f "./qa" ]]; then
-#  curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash && ./qa --help
-#fi
-#
-#echo "--- AWS and Kube Config"
-#set +u
-#if [[ -z "$AWS_PROFILE" ]]; then
-#  # FIXME(kwannoel): Ask @huangjw to help with configuring it.
-#  aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
-#  aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
-#fi
-#set -u
-
-# Get certs for command client from s3.
-# Use by qa command.
-#echo "--- Download S3 Crt Keys"
-#if [[ ! -d "./certs" ]]; then
-#  aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
-#fi
-
-# Use this command to create the execution.
-# For microbench mark it need not be some complex.
-# There will be another command.
-# https://github.com/risingwavelabs/qa-infra/pull/35
-# Can add --tag and --commit.
-# 2 most important are the url and the time.
-# Can see "BUILDKITE_BUILD_URL" below.
-# We will fetch the artifacts from the URL above.
-# Get the url from buildkite pipeline environment variable.
-# End time can set to NOW. Obtain from buildkite? Or just see in nexmark-bench script how JW sets the time.
-# See the PR docs.
-# Add this script to RW repository buildkite ci.
-# For pipeline settings:
-# https://buildkite.com/risingwave-test/nexmark-benchmark
-
-tar xzvf https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
+wget https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
+tar -xvf docker-24.0.2.tgz
 sudo cp docker/* /usr/bin
 sudo dockerd &
 
