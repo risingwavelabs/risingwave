@@ -18,7 +18,6 @@ export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
-export MADSIM_BIN="target/sim/ci-sim/risingwave_simulation"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 
 set +u
@@ -228,6 +227,7 @@ setup() {
 setup_madsim() {
   download-and-decompress-artifact risingwave_simulation .
   chmod +x ./risingwave_simulation
+  export MADSIM_BIN=./risingwave_simulation
 }
 
 build() {
