@@ -326,10 +326,8 @@ impl JsonParseOptions {
             }
             // ---- Struct -----
             (Some(DataType::Struct(struct_type_info)), ValueType::Object) => StructValue::new(
-                struct_type_info
-                    .field_names
-                    .iter()
-                    .zip_eq_fast(struct_type_info.fields.iter())
+                struct_type_info.names()
+                    .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
                         self.parse(
                             json_object_smart_get_value(value, field_name.into())

@@ -23,21 +23,16 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 
-use crate::impl_common_parser_logic;
-use crate::parser::avro::util::avro_field_to_column_desc;
-use crate::parser::schema_registry::{extract_schema_id, Client};
-use crate::parser::schema_resolver::ConfluentSchemaResolver;
-use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
-use crate::parser::unified::debezium::DebeziumAdapter;
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use super::operators::*;
+
 use crate::common::UpsertMessage;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::{
-    avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
-    get_field_from_avro_value,
+    avro_field_to_column_desc,
 };
 use crate::parser::schema_registry::{extract_schema_id, Client};
+use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
+use crate::parser::unified::debezium::DebeziumAdapter;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
@@ -215,29 +210,32 @@ impl DebeziumAvroParser {
             let key_schema = self.schema_resolver.get(schema_id).await?;
             let key = from_avro_datum(key_schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-            return writer.delete(|column| {
-                let field_schema =
-                    extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                from_avro_value(
-                    get_field_from_avro_value(&key, column.name.as_str())?.clone(),
-                    field_schema,
-                )
-            });
+
+            let row_op = DebeziumAdapter::new(
+                Some(AvroAccess::new(
+                    &key,
+                    AvroParseOptions::default().with_schema(&key_schema),
+                )),
+                None,
+            );
+
+            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+        } else {
+            let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
+            let writer_schema = self.schema_resolver.get(schema_id).await?;
+            let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+            let row_op = DebeziumAdapter::new(
+                None,
+                Some(AvroAccess::new(
+                    &avro_value,
+                    AvroParseOptions::default().with_schema(&self.outer_schema),
+                )),
+            );
+
+            apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
         }
-
-        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let writer_schema = self.schema_resolver.get(schema_id).await?;
-        let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        let accessor = AvroAccess::new(
-            &avro_value,
-            AvroParseOptions::default().with_schema(&self.outer_schema),
-        );
-
-        let row_op = DebeziumAdapter::new(accessor);
-
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
 }
 

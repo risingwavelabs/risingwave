@@ -141,10 +141,8 @@ impl<'a> AvroParseOptions<'a> {
             }
             // ---- Struct -----
             (Some(DataType::Struct(struct_type_info)), Value::Record(descs)) => StructValue::new(
-                struct_type_info
-                    .field_names
-                    .iter()
-                    .zip_eq_fast(struct_type_info.fields.iter())
+                struct_type_info.names()
+                    .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
                         let maybe_value = descs.iter().find(|(k, _v)| k == field_name);
                         if let Some((_, value)) = maybe_value {

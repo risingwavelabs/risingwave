@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_async_stream::try_stream;
+
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
-use itertools::Itertools;
+
 use risingwave_common::error::{Result, RwError};
 use simd_json::BorrowedValue;
 

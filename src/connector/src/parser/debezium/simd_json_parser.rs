@@ -18,16 +18,14 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, StaticNode};
 
-use crate::impl_common_parser_logic;
 use crate::parser::unified::debezium::DebeziumAdapter;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-use super::operators::*;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
+
+
+use crate::parser::{ByteStreamSourceParser,  };
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -71,7 +69,7 @@ impl DebeziumJsonParser {
 
         let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let row_op = DebeziumAdapter::new(accessor);
+        let row_op = DebeziumAdapter::new(None,Some(accessor));
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
