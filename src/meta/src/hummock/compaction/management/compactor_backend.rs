@@ -32,14 +32,11 @@ pub trait CompactorBackend {
         compaction_group: CompactionGroupId,
         compact_task: CompactTask,
         timeout: u64,
-    ) -> bool;
+    ) -> CompactTaskStatus;
 
     async fn cancel(&self, compact_task: &mut CompactTask) -> bool;
 
-    fn event_channel(
-        &mut self,
-        compact_task: &CompactTask,
-    ) -> Option<UnboundedReceiver<CompactionTaskEvent>>;
+    fn event_channel(&mut self) -> Option<UnboundedReceiver<CompactionTaskEvent>>;
 }
 
 pub struct DedicatedCompactorBackend<S>
@@ -78,9 +75,9 @@ where
         compaction_group_id: CompactionGroupId,
         compact_task: CompactTask,
         timeout: u64,
-    ) -> bool {
+    ) -> CompactTaskStatus {
         // how to trigger a new compaction when failed assign ?
-
+        let task_id = compact_task.task_id;
         if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
             // 2. Assign the compaction task to a compactor.
             match self
@@ -104,10 +101,10 @@ where
                             self.hummock_manager
                                 .compactor_manager
                                 .remove_compactor(context_id);
-                            return false;
+                            return CompactTaskStatus::AssignFailure(task_id);
                         }
                         _ => {
-                            return false;
+                            return CompactTaskStatus::AssignFailure(task_id);
                         }
                     }
                 }
@@ -120,7 +117,7 @@ where
             {
                 tracing::warn!(
                     "Failed to send task {} to {}. {:#?}",
-                    compact_task.task_id,
+                    task_id,
                     compactor.context_id(),
                     e
                 );
@@ -130,7 +127,7 @@ where
                     .compactor_manager
                     .pause_compactor(compactor.context_id());
 
-                return false;
+                return CompactTaskStatus::SendFailure(task_id);
             }
 
             // TODO: timeout configuration
@@ -140,9 +137,10 @@ where
                 timeout,
             ));
 
-            return true;
+            return CompactTaskStatus::Success(task_id);
         } else {
-            return false;
+            tracing::debug!("No available compactor, pausing compaction.");
+            return CompactTaskStatus::NoAvailableCompactorFailure(task_id);
         }
     }
 
@@ -166,14 +164,20 @@ where
                     compact_task.clone(),
                 ))
                 .await;
+            return false;
         }
         true
     }
 
-    fn event_channel(
-        &mut self,
-        compact_task: &CompactTask,
-    ) -> Option<UnboundedReceiver<CompactionTaskEvent>> {
+    fn event_channel(&mut self) -> Option<UnboundedReceiver<CompactionTaskEvent>> {
         self.event_receiver.take()
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum CompactTaskStatus {
+    Success(u64),
+    AssignFailure(u64),
+    SendFailure(u64),
+    NoAvailableCompactorFailure(u64),
 }
