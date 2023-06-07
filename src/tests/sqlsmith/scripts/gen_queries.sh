@@ -282,10 +282,6 @@ sync_queries() {
   git stash
   git checkout main
   git pull
-  set +e
-  git branch -D stage
-  set -e
-  git checkout -b stage
   popd
 }
 
@@ -303,9 +299,6 @@ upload_queries() {
   pushd "$OUTDIR"
   git add .
   git commit -m 'update queries'
-  git push -f origin stage
-  git checkout -
-  git branch -D stage
   popd
   set -x
 }
