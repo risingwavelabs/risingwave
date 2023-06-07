@@ -282,6 +282,12 @@ sync_queries() {
   git stash
   git checkout main
   git pull
+  set +e
+  git branch -D old-main
+  set -e
+  git checkout -b old-main
+  git push -f
+  git checkout -
   popd
 }
 
