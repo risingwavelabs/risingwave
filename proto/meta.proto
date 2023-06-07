@@ -3,9 +3,9 @@ syntax = "proto3";
 package meta;
 
 import "backup_service.proto";
-import "connector_service.proto";
 import "catalog.proto";
 import "common.proto";
+import "connector_service.proto";
 import "hummock.proto";
 import "source.proto";
 import "stream_plan.proto";

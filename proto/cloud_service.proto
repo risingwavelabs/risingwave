@@ -16,7 +16,6 @@ message RwCloudValidateSourceRequest {
 }
 
 message RwCloudValidateSourceResponse {
-  // On validation failure, we return the error.
   enum ErrorType {
     UNSPECIFIED = 0;
     PRIVATELINK_CONNECTION_NOT_FOUND = 1;
@@ -27,12 +26,13 @@ message RwCloudValidateSourceResponse {
     KAFKA_BROKER_UNREACHABLE = 6;
     KAFKA_OTHER = 7;
   }
-  
+
   message Error {
     ErrorType error_type = 1;
     string error_message = 2;
   }
 
+  // On validation failure, we return the error.
   Error error = 1;
 }
 
