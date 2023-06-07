@@ -104,7 +104,7 @@ echo "--- Kill cluster on tag $TAG"
 ./risedev k
 
 echo "--- Checking against $RW_COMMIT"
-git checkout $RW_COMMIT
+download_and_prepare_rw dev common
 
 echo "--- Kill cluster on tag $TAG"
 ./risedev d full-without-monitoring
