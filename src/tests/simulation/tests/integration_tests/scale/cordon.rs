@@ -48,20 +48,20 @@ fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
 fn actor_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> HashSet<u32> {
     let (fragments, workers) = get_schedule(info.clone());
     let cordoned_pus_ids = pu_ids_on_cordoned_nodes(&workers);
-    let mut actors_on_cordoned = HashSet::<u32>::new();
+    let mut actor_ids_on_cordoned = HashSet::<u32>::new();
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
             if cordoned_pus_ids.contains(&pu_id) {
-                actors_on_cordoned.insert(pu_id); // TODO: actor.actor_id
+                actor_ids_on_cordoned.insert(actor.actor_id);
             }
         }
     }
-    actors_on_cordoned
+    actor_ids_on_cordoned
 }
 
-/// create cluster, run query, cordon node, run other query. Cordoned node should NOT contain actors
-/// from other query
+/// create cluster, run query, cordon node, run other query.
+/// Cordoned node should NOT contain actors from other query
 async fn cordoned_nodes_do_not_get_new_actors(
     create: &str,
     select: &str,
@@ -99,14 +99,14 @@ async fn cordoned_nodes_do_not_get_new_actors(
 
     // check which actors are on cordoned nodes
     let info = cluster.get_cluster_info().await?;
-    let actors_on_cordoned = actor_ids_on_cordoned_nodes(info);
+    let actors_on_cordoned1 = actor_ids_on_cordoned_nodes(info);
 
     let dummy_create = "create table t (dummy date, v varchar);";
     let dummy_mv = "create materialized view mv as select v from t;";
-    let dummy_in = "insert into t values ('2023-01-01', '1z');";
+    let dummy_insert = "insert into t values ('2023-01-01', '1z');";
     let dummy_select = "select * from mv;";
     let dummy_drop = "drop materialized view mv; drop table t;";
-    for sql in vec![dummy_create, dummy_mv, dummy_in] {
+    for sql in vec![dummy_create, dummy_mv, dummy_insert] {
         cluster.run(sql).await?;
         sleep(Duration::from_secs(sleep_sec)).await;
     }
@@ -117,12 +117,9 @@ async fn cordoned_nodes_do_not_get_new_actors(
     let actors_on_cordoned2 = actor_ids_on_cordoned_nodes(info2);
 
     // We allow that an actor moves from a cordoned node to a non-cordoned node
+    // We allow that an actor moves from a cordoned node to another cordoned node
     // We disallow that an actor moves from a non-cordoned node to a cordoned node
-    // We disallow that an actor moves from a cordoned node to another cordoned node
-    assert!(actors_on_cordoned2.len() <= actors_on_cordoned.len());
-    for actors2 in actors_on_cordoned2 {
-        assert!(actors_on_cordoned.contains(&actors2));
-    }
+    assert!(actors_on_cordoned1.is_superset(&actors_on_cordoned2));
 
     // compare results of original query
     cluster.run(dummy_drop).await?;
