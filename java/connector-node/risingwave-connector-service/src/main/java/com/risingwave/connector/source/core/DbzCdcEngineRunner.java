@@ -21,6 +21,7 @@ import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,8 +33,8 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final CdcEngine engine;
 
-    public DbzCdcEngineRunner(CdcEngine engine) {
-        this.executor = Executors.newSingleThreadExecutor();
+    private DbzCdcEngineRunner(CdcEngine engine) {
+        this.executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
         this.engine = engine;
     }
 
@@ -42,6 +43,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
+            var sourceId = config.getSourceId();
             var engine =
                     new DbzCdcEngine(
                             config.getSourceId(),
@@ -50,10 +52,12 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 if (!success) {
                                     responseObserver.onError(error);
                                     LOG.error(
-                                            "the engine terminated with error. message: {}",
+                                            "engine#{} terminated with error. message: {}",
+                                            sourceId,
                                             message,
                                             error);
                                 } else {
+                                    LOG.info("engine#{} stopped normally. {}", sourceId, message);
                                     responseObserver.onCompleted();
                                 }
                             });
@@ -68,20 +72,20 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     /** Start to run the cdc engine */
     public void start() {
         if (isRunning()) {
-            LOG.info("CdcEngine#{} already started", engine.getId());
+            LOG.info("engine#{} already started", engine.getId());
             return;
         }
 
         executor.execute(engine);
         running.set(true);
-        LOG.info("CdcEngine#{} started", engine.getId());
+        LOG.info("engine#{} started", engine.getId());
     }
 
     public void stop() throws Exception {
         if (isRunning()) {
             engine.stop();
             cleanUp();
-            LOG.info("CdcEngine#{} terminated", engine.getId());
+            LOG.info("engine#{} terminated", engine.getId());
         }
     }
 
@@ -97,6 +101,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
 
     private void cleanUp() {
         running.set(false);
+        // interrupt the runner thread if it is still running
         executor.shutdownNow();
     }
 }
