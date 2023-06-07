@@ -276,4 +276,14 @@ steps:
           run: qa-infra-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            GITHUB_TOKEN: github-token
+            AWS_TOKEN: aws-token
+      - docker-login#v2.1.0:
+          server: ghcr.io
+          username: GHCR_USERNAME
+          password-env: GHCR_TOKEN
     timeout_in_minutes: 35
