@@ -4,6 +4,13 @@ export CARGO_HOME=/risingwave/.cargo
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
+export RUSTC_WRAPPER=sccache
+export SCCACHE_BUCKET=ci-sccache-bucket
+export SCCACHE_REGION=us-east-2
+export SCCACHE_IDLE_TIMEOUT=0
+export CARGO_INCREMENTAL=0
+export CARGO_MAKE_PRINT_TIME_SUMMARY=true
+
 
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT

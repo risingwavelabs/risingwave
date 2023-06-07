@@ -21,6 +21,7 @@ use std::time::{Duration, Instant, SystemTime};
 use fail::fail_point;
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_hummock_sdk::compact::estimate_state_for_compaction;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
@@ -58,6 +59,7 @@ struct TaskHeartbeat {
     task: CompactTask,
     num_ssts_sealed: u32,
     num_ssts_uploaded: u32,
+    num_progress_key: u64,
     create_time: Instant,
     expire_at: u64,
 }
@@ -325,14 +327,46 @@ impl CompactorManager {
         now: u64,
     ) -> Vec<(HummockCompactionTaskId, (HummockContextId, CompactTask))> {
         let mut cancellable_tasks = vec![];
+        const MAX_TASK_DURATION_SEC: u64 = 2700;
+
         for (context_id, heartbeats) in task_heartbeats {
             {
                 for TaskHeartbeat {
-                    expire_at, task, ..
+                    expire_at,
+                    task,
+                    create_time,
+                    num_ssts_sealed,
+                    num_ssts_uploaded,
+                    num_progress_key,
                 } in heartbeats.values()
                 {
-                    if *expire_at < now {
+                    let task_duration_too_long =
+                        create_time.elapsed().as_secs() > MAX_TASK_DURATION_SEC;
+                    if *expire_at < now || task_duration_too_long {
+                        // 1. task heartbeat expire
+                        // 2. task duration is too long
                         cancellable_tasks.push((task.get_task_id(), (*context_id, task.clone())));
+
+                        if task_duration_too_long {
+                            let (need_quota, total_file_count, total_key_count) =
+                                estimate_state_for_compaction(task);
+                            tracing::info!(
+                                "CompactionGroupId {} Task {} duration too long create_time {:?} num_ssts_sealed {} num_ssts_uploaded {} num_progress_key {} need_quota {} total_file_count {} total_key_count {} target_level {} base_level {} target_sub_level_id {} task_type {}",
+                                task.compaction_group_id,
+                                task.task_id,
+                                create_time,
+                                num_ssts_sealed,
+                                num_ssts_uploaded,
+                                num_progress_key,
+                                need_quota,
+                                total_file_count,
+                                total_key_count,
+                                task.target_level,
+                                task.base_level,
+                                task.target_sub_level_id,
+                                task.task_type,
+                            );
+                        }
                     }
                 }
             }
@@ -353,6 +387,7 @@ impl CompactorManager {
                 task,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                num_progress_key: 0,
                 create_time: Instant::now(),
                 expire_at: now + self.task_expiry_seconds,
             },
@@ -382,10 +417,16 @@ impl CompactorManager {
         if let Some(heartbeats) = guard.get_mut(&context_id) {
             for progress in progress_list {
                 if let Some(task_ref) = heartbeats.get_mut(&progress.task_id) {
-                    // Refresh the expiry of the task as it is showing progress.
-                    task_ref.expire_at = now + self.task_expiry_seconds;
-                    task_ref.num_ssts_sealed = progress.num_ssts_sealed;
-                    task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
+                    if task_ref.num_ssts_sealed < progress.num_ssts_sealed
+                        || task_ref.num_ssts_uploaded < progress.num_ssts_uploaded
+                        || task_ref.num_progress_key < progress.num_progress_key
+                    {
+                        // Refresh the expiry of the task as it is showing progress.
+                        task_ref.expire_at = now + self.task_expiry_seconds;
+                        task_ref.num_ssts_sealed = progress.num_ssts_sealed;
+                        task_ref.num_ssts_uploaded = progress.num_ssts_uploaded;
+                        task_ref.num_progress_key = progress.num_progress_key;
+                    }
                 }
             }
         }
@@ -485,9 +526,10 @@ mod tests {
                 task_id: expired[0].1.task_id,
                 num_ssts_sealed: 0,
                 num_ssts_uploaded: 0,
+                num_progress_key: 0,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
 
         // Mimic compaction heartbeat with invalid task id
         compactor_manager.update_task_heartbeats(
@@ -496,9 +538,10 @@ mod tests {
                 task_id: expired[0].1.task_id + 1,
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
+                num_progress_key: 100,
             }],
         );
-        assert_eq!(compactor_manager.get_expired_tasks().len(), 0);
+        assert_eq!(compactor_manager.get_expired_tasks().len(), 1);
 
         // Mimic effective compaction heartbeat
         compactor_manager.update_task_heartbeats(
@@ -507,6 +550,7 @@ mod tests {
                 task_id: expired[0].1.task_id,
                 num_ssts_sealed: 1,
                 num_ssts_uploaded: 1,
+                num_progress_key: 100,
             }],
         );
         assert_eq!(compactor_manager.get_expired_tasks().len(), 0);

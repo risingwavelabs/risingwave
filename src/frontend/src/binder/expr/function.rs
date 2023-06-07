@@ -107,8 +107,7 @@ impl Binder {
         }
 
         // table function
-        let table_function_type = TableFunctionType::from_str(function_name.as_str());
-        if let Ok(function_type) = table_function_type {
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
@@ -142,6 +141,18 @@ impl Binder {
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
+        if f.within_group.is_some()
+            && !matches!(
+                kind,
+                AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "within group is disallowed for the {}",
+                kind
+            ))
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
         let inputs: Vec<ExprImpl> = f
             .args
@@ -513,6 +524,8 @@ impl Binder {
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 // int256
@@ -531,7 +544,7 @@ impl Binder {
                     "pg_typeof",
                     guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
-                        let v = match input.is_unknown() {
+                        let v = match input.is_untyped() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
@@ -657,7 +670,7 @@ impl Binder {
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),

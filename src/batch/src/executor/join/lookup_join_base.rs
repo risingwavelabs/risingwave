@@ -21,6 +21,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -33,6 +34,7 @@ use crate::executor::{
     utils, BoxedDataChunkListStream, BoxedExecutor, BufferChunkExecutor, EquiJoinParams,
     HashJoinExecutor, JoinHashMap, JoinType, LookupExecutorBuilder, RowId,
 };
+use crate::risingwave_common::estimate_size::EstimateSize;
 use crate::task::ShutdownMsg;
 
 /// Lookup Join Base.
@@ -54,6 +56,7 @@ pub struct LookupJoinBase<K> {
     pub chunk_size: usize,
     pub identity: String,
     pub shutdown_rx: Option<Receiver<ShutdownMsg>>,
+    pub mem_ctx: MemoryContext,
     pub _phantom: PhantomData<K>,
 }
 
@@ -118,18 +121,26 @@ impl<K: HashKey> LookupJoinBase<K> {
             ]
             .concat();
 
-            let mut build_side = Vec::new();
+            // We need to temporary variable to record hash key heap size, since in each loop we
+            // will free build side hash map, and the subtraction is not executed automatically.
+            let mut hash_key_heap_size = 0i64;
+
+            let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
-                let build_chunk = build_chunk?;
+                let build_chunk = build_chunk?.compact();
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
-                    build_side.push(build_chunk.compact())
+                    self.mem_ctx.add(build_chunk.estimated_heap_size() as i64);
+                    build_side.push(build_chunk);
                 }
             }
-            let mut hash_map =
-                JoinHashMap::with_capacity_and_hasher(build_row_count, PrecomputedBuildHasher);
+            let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
+                build_row_count,
+                PrecomputedBuildHasher,
+                self.mem_ctx.global_allocator(),
+            );
             let mut next_build_row_with_same_key =
                 ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
 
@@ -142,6 +153,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     // restriction.
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
+                        self.mem_ctx.add(build_key.estimated_heap_size() as i64);
+                        hash_key_heap_size += build_key.estimated_heap_size() as i64;
                         next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
@@ -209,6 +222,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     yield chunk?.reorder_columns(&self.output_indices)
                 }
             }
+
+            self.mem_ctx.add(-hash_key_heap_size);
         }
     }
 }

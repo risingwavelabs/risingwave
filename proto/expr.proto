@@ -9,10 +9,16 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // TODO: move this into `FunctionCall`.
   enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
+    // Used for `InputRef`, `Constant`, and `UserDefinedFunction`.
     UNSPECIFIED = 0;
-    INPUT_REF = 1;
-    CONSTANT_VALUE = 2;
+
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
@@ -173,6 +179,8 @@ message ExprNode {
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
     STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -192,10 +200,8 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
-    // User defined functions
-    UDF = 3000;
   }
-  Type expr_type = 1;
+  Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
     uint32 input_ref = 4;
@@ -208,10 +214,16 @@ message ExprNode {
 message TableFunction {
   enum Type {
     UNSPECIFIED = 0;
-    GENERATE = 1;
+    GENERATE_SERIES = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // Jsonb functions
+    JSONB_ARRAY_ELEMENTS = 10;
+    JSONB_ARRAY_ELEMENTS_TEXT = 11;
+    JSONB_EACH = 12;
+    JSONB_EACH_TEXT = 13;
+    JSONB_OBJECT_KEYS = 14;
     // User defined table function
     UDTF = 100;
   }
@@ -290,6 +302,9 @@ message AggCall {
     BOOL_OR = 19;
     JSONB_AGG = 20;
     JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
   }
   Type type = 1;
   repeated InputRef args = 2;

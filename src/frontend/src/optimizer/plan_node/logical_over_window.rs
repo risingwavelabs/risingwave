@@ -12,23 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, InputRef, WindowFunction};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, WindowFunction};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -64,6 +64,27 @@ impl LogicalOverWindow {
         let mut input_len = input.schema().len();
         for expr in &select_exprs {
             if let ExprImpl::WindowFunction(window_function) = expr {
+                if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
+                    && matches!(
+                        agg_kind,
+                        AggKind::StddevPop
+                            | AggKind::StddevSamp
+                            | AggKind::VarPop
+                            | AggKind::VarSamp
+                    )
+                {
+                    let input = window_function.args.iter().exactly_one().unwrap();
+                    let squared_input_expr = ExprImpl::from(
+                        FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()])
+                            .unwrap(),
+                    );
+                    input_len = input_len.max(
+                        input_proj_builder
+                            .add_expr(&squared_input_expr)
+                            .unwrap_or(0)
+                            + 1,
+                    );
+                }
                 let input_idx_in_args: Vec<_> = window_function
                     .args
                     .iter()
@@ -98,14 +119,214 @@ impl LogicalOverWindow {
 
         let mut window_funcs = vec![];
         for expr in &mut select_exprs {
-            if let ExprImpl::WindowFunction(_) = expr {
-                let new_expr =
-                    InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
-                        .into();
-                let f = std::mem::replace(expr, new_expr)
-                    .into_window_function()
-                    .unwrap();
-                window_funcs.push(*f);
+            if let ExprImpl::WindowFunction(window) = expr {
+                let (kind, args, return_type, partition_by, order_by, frame) = (
+                    window.kind,
+                    &window.args,
+                    &window.return_type,
+                    &window.partition_by,
+                    &window.order_by,
+                    &window.frame,
+                );
+                if let WindowFuncKind::Aggregate(agg_kind) = kind
+                    && matches!(
+                        agg_kind,
+                        AggKind::Avg
+                            | AggKind::StddevPop
+                            | AggKind::StddevSamp
+                            | AggKind::VarPop
+                            | AggKind::VarSamp
+                    )
+                {
+                    // Refer to LogicalAggBuilder::try_rewrite_agg_call()
+                    match agg_kind {
+                        AggKind::Avg => {
+                            assert_eq!(args.len(), 1);
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let left_ref = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Count),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let right_ref = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ));
+                            let new_expr = ExprImpl::from(
+                                FunctionCall::new(ExprType::Divide, vec![left_ref, right_ref])
+                                    .unwrap(),
+                            );
+                            let _ = std::mem::replace(expr, new_expr);
+                        }
+                        AggKind::StddevPop
+                        | AggKind::StddevSamp
+                        | AggKind::VarPop
+                        | AggKind::VarSamp => {
+                            let input = args.first().unwrap();
+                            let squared_input_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Multiply,
+                                    vec![input.clone(), input.clone()],
+                                )
+                                .unwrap(),
+                            );
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                vec![squared_input_expr],
+                                frame.clone(),
+                            )?);
+
+                            let sum_of_squares_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Sum),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let sum_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ))
+                            .cast_explicit(return_type.clone())
+                            .unwrap();
+
+                            window_funcs.push(WindowFunction::new(
+                                WindowFuncKind::Aggregate(AggKind::Count),
+                                partition_by.clone(),
+                                order_by.clone(),
+                                args.clone(),
+                                frame.clone(),
+                            )?);
+                            let count_expr = ExprImpl::from(InputRef::new(
+                                input_len + window_funcs.len() - 1,
+                                window_funcs.last().unwrap().return_type(),
+                            ));
+
+                            let square_of_sum_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Multiply,
+                                    vec![sum_expr.clone(), sum_expr],
+                                )
+                                .unwrap(),
+                            );
+
+                            let numerator_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Subtract,
+                                    vec![
+                                        sum_of_squares_expr,
+                                        ExprImpl::from(
+                                            FunctionCall::new(
+                                                ExprType::Divide,
+                                                vec![square_of_sum_expr, count_expr.clone()],
+                                            )
+                                            .unwrap(),
+                                        ),
+                                    ],
+                                )
+                                .unwrap(),
+                            );
+
+                            let denominator_expr = match agg_kind {
+                                AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
+                                AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
+                                    FunctionCall::new(
+                                        ExprType::Subtract,
+                                        vec![
+                                            count_expr.clone(),
+                                            ExprImpl::from(Literal::new(
+                                                Datum::from(ScalarImpl::Int64(1)),
+                                                DataType::Int64,
+                                            )),
+                                        ],
+                                    )
+                                    .unwrap(),
+                                ),
+                                _ => unreachable!(),
+                            };
+
+                            let mut target_expr = ExprImpl::from(
+                                FunctionCall::new(
+                                    ExprType::Divide,
+                                    vec![numerator_expr, denominator_expr],
+                                )
+                                .unwrap(),
+                            );
+
+                            if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
+                                target_expr = ExprImpl::from(
+                                    FunctionCall::new(ExprType::Sqrt, vec![target_expr]).unwrap(),
+                                );
+                            }
+
+                            match agg_kind {
+                                AggKind::VarPop | AggKind::StddevPop => {
+                                    let _ = std::mem::replace(expr, target_expr);
+                                }
+                                AggKind::StddevSamp | AggKind::VarSamp => {
+                                    let less_than_expr = ExprImpl::from(
+                                        FunctionCall::new(
+                                            ExprType::LessThanOrEqual,
+                                            vec![
+                                                count_expr,
+                                                ExprImpl::from(Literal::new(
+                                                    Datum::from(ScalarImpl::Int64(1)),
+                                                    DataType::Int64,
+                                                )),
+                                            ],
+                                        )
+                                        .unwrap(),
+                                    );
+                                    let null_expr =
+                                        ExprImpl::from(Literal::new(None, return_type.clone()));
+
+                                    let case_expr = ExprImpl::from(
+                                        FunctionCall::new(
+                                            ExprType::Case,
+                                            vec![less_than_expr, null_expr, target_expr],
+                                        )
+                                        .unwrap(),
+                                    );
+                                    let _ = std::mem::replace(expr, case_expr);
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                } else {
+                    let new_expr =
+                        InputRef::new(input_len + window_funcs.len(), expr.return_type().clone())
+                            .into();
+                    let f = std::mem::replace(expr, new_expr)
+                        .into_window_function()
+                        .unwrap();
+                    window_funcs.push(*f);
+                }
             }
             if expr.has_window_function() {
                 return Err(ErrorCode::NotImplemented(
@@ -336,12 +557,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
 }
 
 impl_plan_tree_node_for_unary! { LogicalOverWindow }
-
-impl fmt::Display for LogicalOverWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalOverWindow")
-    }
-}
+impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

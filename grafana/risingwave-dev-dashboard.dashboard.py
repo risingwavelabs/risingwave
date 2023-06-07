@@ -595,6 +595,8 @@ def section_object_storage(outer_panels):
 
 
 def section_streaming(panels):
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
@@ -603,7 +605,7 @@ def section_streaming(panels):
             [
                 panels.target(
                     f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                    "source={{source_name}} {{source_id}} @ {{instance}}",
+                    "source={{source_name}} actor={{actor_id}} @ {{instance}}",
                 ),
             ],
         ),
@@ -663,11 +665,21 @@ def section_streaming(panels):
         ),
         panels.timeseries_rowsps(
             "Sink Throughput(rows/s)",
-            "The figure shows the number of rows output by each sink per second.",
+            "The figure shows the number of rows output by each sink executor actor per second.",
             [
                 panels.target(
-                    f"rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])",
-                    "sink={{sink_name}} {{sink_id}} @ {{instance}}",
+                    f"rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])",
+                    "sink={{executor_identity}} {{actor_id}} @ {{instance}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Materialized View Throughput(rows/s)",
+            "The figure shows the number of rows written into each materialized executor actor per second.",
+            [
+                panels.target(
+                    f"rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])",
+                    "MV={{executor_identity}} {{actor_id}} @ {{instance}}",
                 ),
             ],
         ),
@@ -800,7 +812,7 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_executor_row_count')}[$__rate_interval]) > 0",
-                            "{{actor_id}}->{{executor_id}}",
+                            "{{actor_id}}->{{executor_identity}}",
                         ),
                     ],
                 ),
@@ -817,12 +829,22 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Actor Memory Usage",
+                    "Actor Memory Usage (TaskLocalAlloc)",
                     "",
                     [
                         panels.target(
                             "rate(actor_memory_usage[$__rate_interval])",
                             "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(stream_memory_usage[$__rate_interval])",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
                 ),
@@ -1372,7 +1394,7 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_count(
                     "Batch Mpp Task Number",
                     "",
                     [
@@ -1382,12 +1404,22 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_memory(
                     "Batch Mem Usage",
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
                             f"{metric('batch_total_mem')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Batch Heartbeat Worker Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_heartbeat_worker_num')}",
                             "",
                         ),
                     ],
@@ -1912,12 +1944,12 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    f"sum({metric('uploading_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2206,6 +2238,14 @@ Objects are classified into 3 groups:
                             f"rate({metric('storage_version_checkpoint_latency_sum')}[$__rate_interval]) / rate({metric('storage_version_checkpoint_latency_count')}[$__rate_interval])",
                             "version_checkpoint_latency_avg",
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Write Stop Compaction Groups",
+                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
+                    [
+                        panels.target(f"{metric('storage_write_stop_compaction_groups')}",
+                                      "compaction_group_{{compaction_group_id}}"),
                     ],
                 ),
             ],

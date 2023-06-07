@@ -90,7 +90,7 @@ impl Expression for CaseExpression {
         let mut builder = self.return_type().create_array_builder(input.capacity());
         for (i, sel) in selection.into_iter().enumerate() {
             if let Some(when_idx) = sel {
-                builder.append_datum(result_array[when_idx].value_at(i));
+                builder.append(result_array[when_idx].value_at(i));
             } else {
                 builder.append_null();
             }
@@ -116,7 +116,7 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == PbType::Case);
+        ensure!(prost.get_function_type().unwrap() == PbType::Case);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {

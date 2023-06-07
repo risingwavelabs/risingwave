@@ -78,3 +78,18 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+# We should not prune table functions, because the final number of result rows is depended
+# by all table function calls
+# https://github.com/risingwavelabs/risingwave/issues/10080
+- name: issue-10080
+  sql: |
+    with cte as (SELECT 1 as v1, unnest(array[1,2,3,4,5]) AS v2) select v1 from cte;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    create table t(x int[]);
+    with cte as (SELECT 1 as v1, unnest(x) AS v2 FROM t) select v1 from cte;
+  expected_outputs:
+  - batch_plan
+  - stream_plan

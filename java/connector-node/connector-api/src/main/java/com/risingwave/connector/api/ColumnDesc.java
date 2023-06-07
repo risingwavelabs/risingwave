@@ -12,15 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::CtlContext;
+package com.risingwave.connector.api;
 
-pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let version = meta_client.disable_commit_epoch().await?;
-    println!(
-        "Disabled.\
-        Current version: id {}, max_committed_epoch {}",
-        version.id, version.max_committed_epoch
-    );
-    Ok(())
+import com.risingwave.proto.Data;
+
+public class ColumnDesc {
+    String name;
+    Data.DataType dataType;
+
+    public ColumnDesc(String name, Data.DataType dataType) {
+        this.name = name;
+        this.dataType = dataType;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public Data.DataType getDataType() {
+        return dataType;
+    }
+
+    public void setDataType(Data.DataType dataType) {
+        this.dataType = dataType;
+    }
 }

@@ -515,4 +515,30 @@ where
         resp.suggest_cores = scale_out_cores;
         Ok(Response::new(resp))
     }
+
+    async fn rise_ctl_pause_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlPauseVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlPauseVersionCheckpointResponse>, Status> {
+        self.hummock_manager.pause_version_checkpoint();
+        Ok(Response::new(RiseCtlPauseVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_resume_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlResumeVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlResumeVersionCheckpointResponse>, Status> {
+        self.hummock_manager.resume_version_checkpoint();
+        Ok(Response::new(RiseCtlResumeVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_get_checkpoint_version(
+        &self,
+        _request: Request<RiseCtlGetCheckpointVersionRequest>,
+    ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
+        let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
+        Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
+            checkpoint_version: Some(checkpoint_version),
+        }))
+    }
 }

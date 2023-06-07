@@ -17,6 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
@@ -159,6 +160,31 @@ impl TableCatalogBuilder {
     }
 }
 
+/// See also [`super::generic::DistillUnit`].
+pub trait Distill {
+    fn distill<'a>(&self) -> Pretty<'a>;
+}
+
+macro_rules! impl_distill_by_unit {
+    ($ty:ty, $core:ident, $name:expr) => {
+        use pretty_xmlish::Pretty;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        use $crate::optimizer::plan_node::utils::Distill;
+        impl Distill for $ty {
+            fn distill<'a>(&self) -> Pretty<'a> {
+                self.$core.distill_with_name($name)
+            }
+        }
+
+        impl std::fmt::Display for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.$core.fmt_with_name(f, $name)
+            }
+        }
+    };
+}
+pub(crate) use impl_distill_by_unit;
+
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {
     pub indices: &'a [usize],
@@ -181,3 +207,24 @@ impl fmt::Debug for IndicesDisplay<'_> {
         f.finish()
     }
 }
+
+/// Call `debug_struct` on the given formatter to create a debug struct builder.
+/// If a property list is provided, properties in it will be added to the struct name according to
+/// the condition of that property.
+macro_rules! formatter_debug_plan_node {
+    ($formatter:ident, $name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
+        {
+            #[allow(unused_mut)]
+            let mut properties: Vec<&str> = vec![];
+            $( if $cond { properties.push($prop); } )*
+            let mut name = $name.to_string();
+            if !properties.is_empty() {
+                name += " [";
+                name += &properties.join(", ");
+                name += "]";
+            }
+            $formatter.debug_struct(&name)
+        }
+    };
+}
+pub(crate) use formatter_debug_plan_node;

@@ -29,8 +29,6 @@ pub struct StreamSourceCore<S: StateStore> {
 
     pub(crate) column_ids: Vec<ColumnId>,
 
-    pub(crate) source_identify: String,
-
     /// `source_desc_builder` will be taken (`mem::take`) on execution. A `SourceDesc` (currently
     /// named `SourceDescV2`) will be constructed and used for execution.
     pub(crate) source_desc_builder: Option<SourceDescBuilder>,
@@ -61,7 +59,6 @@ where
             source_id,
             source_name,
             column_ids,
-            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
             stream_source_splits: HashMap::new(),
             split_state_store,
