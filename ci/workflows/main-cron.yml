@@ -273,7 +273,7 @@ steps:
     depends_on: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
-          run: qa-infra-env
+          run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - seek-oss/aws-sm#v2.3.1:

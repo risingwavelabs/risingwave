@@ -72,7 +72,8 @@ BRANCH=$(get_branch)
 # Add this script to RW repository buildkite ci.
 # For pipeline settings:
 # https://buildkite.com/risingwave-test/nexmark-benchmark
-./bin/qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
+
+docker -it -rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch "$BRANCH" \
   --tag latest \
