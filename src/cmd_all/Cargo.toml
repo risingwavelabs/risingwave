@@ -22,6 +22,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 anyhow = "1"
 clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
+lazy_static = "1"
 risingwave_cmd = { path = "../cmd" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
@@ -45,7 +46,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
-lazy_static = "1"
 
 [build-dependencies]
 vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
