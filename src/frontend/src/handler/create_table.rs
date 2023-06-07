@@ -119,7 +119,7 @@ impl ColumnIdGenerator {
     }
 }
 
-fn valid_column_options(c: &ColumnDef) -> Result<()> {
+fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     for option_def in &c.options {
         match option_def.option {
             ColumnOption::GeneratedColumns(_) => {}
@@ -147,7 +147,7 @@ pub fn bind_sql_columns(
     let mut column_descs = Vec::with_capacity(columns.len());
 
     for column in columns {
-        valid_column_options(&column)?;
+        ensure_column_options_supported(&column)?;
         let column_id = col_id_gen.generate(&column.name.real_value());
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
@@ -295,7 +295,7 @@ pub fn bind_sql_column_constraints(
     Ok(())
 }
 
-fn valid_table_constraints(table_constraints: &[TableConstraint]) -> Result<()> {
+fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
     for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
@@ -361,7 +361,7 @@ pub fn bind_sql_table_column_constraints(
     columns_defs: Vec<ColumnDef>,
     table_constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-    valid_table_constraints(&table_constraints)?;
+    ensure_table_constraints_supported(&table_constraints)?;
     // Mapping from column name to column id.
     let name_to_id = columns_descs
         .iter()
@@ -379,11 +379,11 @@ pub fn bind_sql_table_column_constraints(
         })
         .try_collect()?;
 
-    let mut columns_catalog: Vec<ColumnCatalog> = columns_descs
+    let mut columns_catalog = columns_descs
         .into_iter()
         .map(|c| {
             // All columns except `_row_id` or starts with `_rw` should be visible.
-            let is_hidden: bool = c.name.starts_with("_rw");
+            let is_hidden = c.name.starts_with("_rw");
             ColumnCatalog {
                 column_desc: c,
                 is_hidden,
