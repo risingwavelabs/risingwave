@@ -33,7 +33,7 @@ CREATE TABLE data_types (
 
 CREATE SINK data_types_mysql_sink
 FROM
-    target_count WITH (
+    data_types WITH (
         connector = 'jdbc',
         jdbc.url = 'jdbc:mysql://mysql:3306/mydb?user=root&password=123456',
         table.name = 'data_types',
