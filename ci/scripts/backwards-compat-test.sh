@@ -125,7 +125,7 @@ echo "--- Setup Risingwave @ $RW_COMMIT"
 download_and_prepare_rw ci-dev common
 
 echo "--- Start cluster on latest"
-configure_latest_rw
+configure_rw
 ./risedev d full-without-monitoring
 
 echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
