@@ -72,6 +72,7 @@ echo "--- Configuring RW"
 configure_rw
 
 echo "--- Build risedev for $TAG, it may not be backwards compatible"
+git config --global --add safe.directory /risingwave
 git checkout "${TAG}-rc"
 cargo build -p risedev
 
