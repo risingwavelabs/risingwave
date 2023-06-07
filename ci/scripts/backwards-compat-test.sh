@@ -72,6 +72,7 @@ echo "--- Configuring RW"
 configure_rw
 
 echo "--- Setup pre-built Risedev"
+mkdir -p target/debug
 download-and-decompress-artifact risedev-dev-dev target/debug/
 mv target/debug/risedev-dev-dev target/debug/risedev-dev
 
