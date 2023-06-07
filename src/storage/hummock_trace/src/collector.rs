@@ -23,6 +23,8 @@ use std::sync::LazyLock;
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use parking_lot::Mutex;
+use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -31,7 +33,7 @@ use tokio::task_local;
 use crate::write::{TraceWriter, TraceWriterImpl};
 use crate::{
     ConcurrentIdGenerator, Operation, OperationResult, Record, RecordId, RecordIdGenerator,
-    TracedNewLocalOptions, TracedReadOptions, TracedTableId, UniqueIdGenerator,
+    TracedNewLocalOptions, TracedReadOptions, TracedSubResp, UniqueIdGenerator,
 };
 
 // Global collector instance used for trace collection
@@ -161,6 +163,18 @@ impl MayTraceSpan {
             span.send_result(res)
         }
     }
+
+    pub fn may_send_op(&self, op: Operation) {
+        if let Some(span) = &self.0 {
+            span.send(op)
+        }
+    }
+
+    pub fn may_send_iter_next(&self) {
+        if let Some(span) = &self.0 {
+            span.send(Operation::IterNext(span.id))
+        }
+    }
 }
 
 impl TraceSpan {
@@ -172,11 +186,35 @@ impl TraceSpan {
         }
     }
 
-    pub fn new_global(op: Operation, storage_type: StorageType) -> MayTraceSpan {
+    pub fn new_global_op(op: Operation, storage_type: StorageType) -> MayTraceSpan {
         match should_use_trace() {
             true => Some(Self::new_to_global(op, storage_type)).into(),
             false => None.into(),
         }
+    }
+
+    pub fn new_epoch_span(storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::LocalStorageEpoch, storage_type)
+    }
+
+    pub fn new_is_dirty_span(storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::LocalStorageIsDirty, storage_type)
+    }
+
+    pub fn new_seal_current_epoch_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::SealCurrentEpoch(epoch), storage_type)
+    }
+
+    pub fn new_clear_shared_buffer_span() -> MayTraceSpan {
+        Self::new_global_op(Operation::ClearSharedBuffer, StorageType::Global)
+    }
+
+    pub fn new_validate_read_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
+        Self::new_global_op(Operation::ValidateReadEpoch(epoch), StorageType::Global)
+    }
+
+    pub fn new_try_wait_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
+        Self::new_global_op(Operation::TryWaitEpoch(epoch), StorageType::Global)
     }
 
     pub fn new_get_span(
@@ -185,7 +223,7 @@ impl TraceSpan {
         read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global(Operation::get(key, epoch, read_options), storage_type)
+        Self::new_global_op(Operation::get(key, epoch, read_options), storage_type)
     }
 
     pub fn new_iter_span(
@@ -194,7 +232,7 @@ impl TraceSpan {
         read_options: TracedReadOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global(
+        Self::new_global_op(
             Operation::Iter {
                 key_range: (
                     key_range.0.as_ref().map(|v| v.clone().into()),
@@ -213,7 +251,7 @@ impl TraceSpan {
         old_val: Option<Bytes>,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global(
+        Self::new_global_op(
             Operation::Insert {
                 key: key.into(),
                 new_val: new_val.into(),
@@ -224,7 +262,7 @@ impl TraceSpan {
     }
 
     pub fn new_delete_span(key: Bytes, old_val: Bytes, storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global(
+        Self::new_global_op(
             Operation::Delete {
                 key: key.into(),
                 old_val: old_val.into(),
@@ -234,7 +272,7 @@ impl TraceSpan {
     }
 
     pub fn new_sync_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global(Operation::Sync(epoch), storage_type)
+        Self::new_global_op(Operation::Sync(epoch), storage_type)
     }
 
     pub fn new_seal_span(
@@ -242,23 +280,45 @@ impl TraceSpan {
         is_checkpoint: bool,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global(Operation::Seal(epoch, is_checkpoint), storage_type)
+        Self::new_global_op(Operation::Seal(epoch, is_checkpoint), storage_type)
     }
 
     pub fn new_local_storage_span(
         option: TracedNewLocalOptions,
         storage_type: StorageType,
     ) -> MayTraceSpan {
-        Self::new_global(Operation::NewLocalStorage(option), storage_type)
+        Self::new_global_op(Operation::NewLocalStorage(option), storage_type)
+    }
+
+    pub fn new_drop_storage_span(storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::DropLocalStorage, storage_type)
+    }
+
+    pub fn new_flush_span(
+        delete_range: Vec<(Bytes, Bytes)>,
+        storage_type: StorageType,
+    ) -> MayTraceSpan {
+        let delete_range = delete_range
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect();
+        Self::new_global_op(Operation::Flush(delete_range), storage_type)
+    }
+
+    pub fn new_meta_message_span(resp: SubscribeResponse) -> MayTraceSpan {
+        Self::new_global_op(
+            Operation::MetaMessage(Box::new(TracedSubResp::from(resp))),
+            StorageType::Global,
+        )
+    }
+
+    pub fn new_local_storage_init_span(epoch: u64, storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::LocalStorageInit(epoch), storage_type)
     }
 
     pub fn send(&self, op: Operation) {
         self.tx
-            .send(Some(Record::new(
-                self.storage_type().clone(),
-                self.id(),
-                op,
-            )))
+            .send(Some(Record::new(*self.storage_type(), self.id(), op)))
             .expect("failed to log record");
     }
 
@@ -307,10 +367,10 @@ impl Drop for TraceSpan {
 pub type RecordMsg = Option<Record>;
 pub type ConcurrentId = u64;
 
-#[derive(Clone, Debug, Encode, Decode, PartialEq)]
+#[derive(Copy, Clone, Debug, Encode, Decode, PartialEq, Hash, Eq)]
 pub enum StorageType {
     Global,
-    Local(ConcurrentId, TracedTableId),
+    Local(ConcurrentId, TracedNewLocalOptions),
 }
 
 task_local! {
@@ -325,7 +385,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::MockTraceWriter;
+    use crate::{MockTraceWriter, TracedTableId, TracedTableOption};
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_new_spans_concurrent() {
@@ -398,7 +458,16 @@ mod tests {
                     tx,
                     generator.next(),
                     op,
-                    StorageType::Local(0, TracedTableId { table_id: 0 }),
+                    StorageType::Local(
+                        0,
+                        TracedNewLocalOptions {
+                            table_id: TracedTableId { table_id: 0 },
+                            is_consistent_op: false,
+                            table_option: TracedTableOption {
+                                retention_seconds: None,
+                            },
+                        },
+                    ),
                 );
             });
             handles.push(handle);

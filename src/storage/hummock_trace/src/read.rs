@@ -104,8 +104,8 @@ mod test {
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TraceSubResp,
-        TracedReadOptions, MAGIC_BYTES,
+        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TracedReadOptions,
+        TracedSubResp, MAGIC_BYTES,
     };
 
     mock! {
@@ -139,7 +139,7 @@ mod test {
     #[test]
     fn test_bincode_serialize_resp() {
         let deserializer = BincodeDeserializer::default();
-        let resp = TraceSubResp(SubscribeResponse {
+        let resp = TracedSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
                 message: "abc".to_string(),

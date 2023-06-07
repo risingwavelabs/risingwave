@@ -50,6 +50,18 @@ pub enum TraceError {
 
     #[error("{0}")]
     Other(&'static str),
+
+    #[error("failed to validate epoch")]
+    ValidateReadEpochFailed,
+
+    #[error("failed to try wait epoch")]
+    TryWaitEpochFailed,
+
+    #[error("failed to clear shared buffer")]
+    ClearSharedBufferFailed,
+
+    #[error("failed to flush")]
+    FlushFailed,
 }
 
 impl From<EncodeError> for TraceError {

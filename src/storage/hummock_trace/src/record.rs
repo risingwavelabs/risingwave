@@ -19,6 +19,7 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{StorageType, TracedNewLocalOptions, TracedReadOptions};
@@ -57,9 +58,9 @@ impl<T: UniqueId> UniqueIdGenerator<T> {
 
 #[derive(Encode, Decode, Debug, PartialEq, Clone)]
 pub struct Record {
-    storage_type: StorageType,
-    record_id: RecordId,
-    operation: Operation,
+    pub storage_type: StorageType,
+    pub record_id: RecordId,
+    pub operation: Operation,
 }
 
 impl Record {
@@ -149,7 +150,7 @@ pub enum Operation {
     Seal(u64, bool),
 
     /// MetaMessage operation of Hummock.
-    MetaMessage(Box<TraceSubResp>),
+    MetaMessage(Box<TracedSubResp>),
 
     /// Result operation of Hummock.
     Result(OperationResult),
@@ -160,6 +161,26 @@ pub enum Operation {
     /// DropLocalStorage operation of Hummock.
     DropLocalStorage,
 
+    /// Init of a local storage
+    LocalStorageInit(u64),
+
+    /// Try wait epoch
+    TryWaitEpoch(HummockReadEpoch),
+
+    /// clear shared buffer
+    ClearSharedBuffer,
+
+    /// Seal current epoch
+    SealCurrentEpoch(u64),
+
+    /// validate read epoch
+    ValidateReadEpoch(HummockReadEpoch),
+
+    LocalStorageEpoch,
+
+    LocalStorageIsDirty,
+
+    Flush(Vec<(TracedBytes, TracedBytes)>),
     /// Finish operation of Hummock.
     Finish,
 }
@@ -236,7 +257,6 @@ impl From<TracedBytes> for Bytes {
         value.0
     }
 }
-
 /// `TraceResult` discards Error and only traces whether succeeded or not.
 /// Use Option rather than Result because it's overhead to serialize Error.
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
@@ -263,21 +283,24 @@ impl<T, E> From<std::result::Result<T, E>> for TraceResult<T> {
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
-    Ingest(TraceResult<usize>),
     Insert(TraceResult<()>),
     Delete(TraceResult<()>),
-    Flush(TraceResult<()>),
+    Flush(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),
     Sync(TraceResult<usize>),
-    Seal(TraceResult<()>),
     NotifyHummock(TraceResult<()>),
+    TryWaitEpoch(TraceResult<()>),
+    ClearSharedBuffer(TraceResult<()>),
+    ValidateReadEpoch(TraceResult<()>),
+    LocalStorageEpoch(TraceResult<u64>),
+    LocalStorageIsDirty(TraceResult<bool>),
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub struct TraceSubResp(pub SubscribeResponse);
+pub struct TracedSubResp(pub SubscribeResponse);
 
-impl Encode for TraceSubResp {
+impl Encode for TracedSubResp {
     fn encode<E: bincode::enc::Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
         // SubscribeResponse and its implementation of Serialize is generated
         // by prost and pbjson for protobuf mapping.
@@ -291,7 +314,7 @@ impl Encode for TraceSubResp {
     }
 }
 
-impl Decode for TraceSubResp {
+impl Decode for TracedSubResp {
     fn decode<D: bincode::de::Decoder>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
@@ -303,7 +326,7 @@ impl Decode for TraceSubResp {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
+impl<'de> bincode::BorrowDecode<'de> for TracedSubResp {
     fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
@@ -312,6 +335,12 @@ impl<'de> bincode::BorrowDecode<'de> for TraceSubResp {
             DecodeError::OtherString("failed to decode subscribeResponse".to_string())
         })?;
         Ok(Self(resp))
+    }
+}
+
+impl From<SubscribeResponse> for TracedSubResp {
+    fn from(value: SubscribeResponse) -> Self {
+        Self(value)
     }
 }
 

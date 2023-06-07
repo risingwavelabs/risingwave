@@ -54,7 +54,7 @@ impl From<TracedCachePriority> for CachePriority {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+#[derive(Copy, Encode, Decode, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct TracedTableId {
     pub table_id: u32,
 }
@@ -107,7 +107,7 @@ pub struct TracedWriteOptions {
     pub table_id: TracedTableId,
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct TracedTableOption {
     pub retention_seconds: Option<u32>,
 }
@@ -128,7 +128,7 @@ impl From<TracedTableOption> for TableOption {
     }
 }
 
-#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
     pub is_consistent_op: bool,
