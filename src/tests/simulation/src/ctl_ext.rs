@@ -23,7 +23,6 @@ use madsim::rand::thread_rng;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::PbFragment;
