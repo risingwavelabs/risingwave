@@ -258,8 +258,17 @@ steps:
             - STREAMNATIVE_CLOUD_TEST_CONF
     timeout_in_minutes: 20
 
-  - label: "micro benchmark"
+  - label: "run micro benchmarks"
     command: "ci/scripts/run-micro-benchmarks.sh"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 35
+
+  - label: "upload micro benchmarks"
+    command: "ci/scripts/upload-micro-bench-results.sh"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env

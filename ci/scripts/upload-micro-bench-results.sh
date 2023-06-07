@@ -19,7 +19,7 @@ get_branch() {
 get_date() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NO" \
-  | jq '.jobs | .[] | select ( .name | contains("micro")) | .finished_at'
+  | jq '.jobs | .[] | select ( .name | contains("run micro benchmarks")) | .finished_at'
 }
 
 get_commit() {
