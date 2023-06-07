@@ -158,6 +158,12 @@ enum HummockCommands {
         #[clap(long)]
         table_ids: Vec<u32>,
     },
+    /// Pause version checkpoint, which subsequently pauses GC of delta log and SST object.
+    PauseVersionCheckpoint,
+    /// Resume version checkpoint, which subsequently resumes GC of delta log and SST object.
+    ResumeVersionCheckpoint,
+    /// Replay version from the checkpoint one to the latest one.
+    ReplayVersion,
 }
 
 #[derive(Subcommand)]
@@ -318,6 +324,15 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
+        }
+        Commands::Hummock(HummockCommands::PauseVersionCheckpoint) => {
+            cmd_impl::hummock::pause_version_checkpoint(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ResumeVersionCheckpoint) => {
+            cmd_impl::hummock::resume_version_checkpoint(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ReplayVersion) => {
+            cmd_impl::hummock::replay_version(context).await?;
         }
         Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
             cmd_impl::table::scan(context, mv_name, data_dir).await?

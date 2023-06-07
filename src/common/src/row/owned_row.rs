@@ -134,6 +134,15 @@ impl Row for OwnedRow {
     }
 }
 
+impl IntoIterator for OwnedRow {
+    type IntoIter = std::vec::IntoIter<Datum>;
+    type Item = Datum;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_vec().into_iter()
+    }
+}
+
 /// Deserializer of the [`OwnedRow`].
 #[derive(Clone, Debug)]
 pub struct RowDeserializer<D: AsRef<[DataType]> = Vec<DataType>> {

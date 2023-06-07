@@ -25,11 +25,12 @@ group by window_start;
 
 statement ok
 insert into t values
-('2023-05-06 16:51:00', 1),
-('2023-05-06 16:56:00', 8),
-('2023-05-06 17:30:00', 3),
-('2023-05-06 17:59:00', 4),
-('2023-05-06 18:01:00', 6);
+  ('2023-05-06 16:51:00', 1)
+, ('2023-05-06 16:56:00', 8)
+, ('2023-05-06 17:30:00', 3)
+, ('2023-05-06 17:59:00', 4)
+, ('2023-05-06 18:01:00', 6)
+;
 
 query TI
 select * from mv order by window_start;
@@ -38,7 +39,8 @@ select * from mv order by window_start;
 
 statement ok
 insert into t values
-('2023-05-06 18:10:00', 7);
+  ('2023-05-06 18:10:00', 7)
+;
 
 query TI
 select * from mv order by window_start;

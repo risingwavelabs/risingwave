@@ -28,6 +28,7 @@ use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     columns: Vec<Ident>,
     query: Query,
@@ -40,7 +41,16 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Err(e) = session.check_relation_name_duplicated(name.clone()) {
+        if if_not_exists {
+            return Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_VIEW,
+                format!("relation \"{}\" already exists, skipping", name),
+            ));
+        } else {
+            return Err(e);
+        }
+    }
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {

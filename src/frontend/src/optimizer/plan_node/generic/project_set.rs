@@ -14,10 +14,11 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
@@ -55,6 +56,13 @@ impl<PlanRef> ProjectSet<PlanRef> {
         let mut builder = f.debug_struct(name);
         builder.field("select_list", &self.select_list);
         builder.finish()
+    }
+}
+
+impl<PlanRef> DistillUnit for ProjectSet<PlanRef> {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+        let fields = vec![("select_list", Pretty::debug(&self.select_list))];
+        Pretty::childless_record(name, fields)
     }
 }
 

@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
+use super::utils::formatter_debug_plan_node;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -94,7 +95,7 @@ impl StreamTemporalJoin {
 
 impl fmt::Display for StreamTemporalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamTemporalJoin");
+        let mut builder = formatter_debug_plan_node!(f, "StreamTemporalJoin");
 
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &self.logical.join_type);

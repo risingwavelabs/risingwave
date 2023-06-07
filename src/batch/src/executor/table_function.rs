@@ -85,7 +85,7 @@ impl BoxedExecutorBuilder for TableFunctionExecutorBuilder {
         let table_function = build_from_prost(node.table_function.as_ref().unwrap(), chunk_size)?;
 
         let schema = if let DataType::Struct(fields) = table_function.return_type() {
-            (&*fields).into()
+            (&fields).into()
         } else {
             Schema {
                 // TODO: should be named

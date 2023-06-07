@@ -32,6 +32,7 @@ use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::select;
+use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::SenderError;
@@ -98,6 +99,7 @@ where
 /// status (Failed/Finished) update. `StateReporter::Mock` is only used in test and do not takes any
 /// effect. Local sender only report Failed update, Distributed sender will also report
 /// Finished/Pending/Starting/Aborted etc.
+#[derive(Clone)]
 pub enum StateReporter {
     Distributed(tokio::sync::mpsc::Sender<TaskInfoResponseResult>),
     Mock(),
@@ -302,6 +304,7 @@ pub struct BatchTaskExecution<C> {
 
     shutdown_tx: tokio::sync::watch::Sender<ShutdownMsg>,
     shutdown_rx: tokio::sync::watch::Receiver<ShutdownMsg>,
+    heartbeat_join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -335,6 +338,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             sender,
             shutdown_tx,
             shutdown_rx,
+            heartbeat_join_handle: Mutex::new(None),
         })
     }
 
@@ -507,9 +511,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let mut error = None;
 
         let mut shutdown_rx = self.shutdown_rx.clone();
-        let mut heartbeat_interval = tokio::time::interval(core::time::Duration::from_secs(600));
-        heartbeat_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        heartbeat_interval.reset();
         loop {
             select! {
                 biased;
@@ -578,19 +579,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                     }
                 }
-                _ = heartbeat_interval.tick() => {
-                    if let Some(&mut ref mut reporter) = state_tx {
-                        if reporter
-                            .send(TaskInfoResponse {
-                                task_id: Some(self.task_id.to_prost()),
-                                task_status: TaskStatus::Ping.into(),
-                                error_message: "".to_string(),
-                            })
-                            .await.is_err() {
-                            self.abort("ping failed".into());
-                        }
-                    }
-                },
             }
         }
 
@@ -686,6 +674,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         let guard = self.state.lock();
         !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
+}
+
+impl<C> BatchTaskExecution<C> {
+    pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
+        *self.heartbeat_join_handle.lock() = Some(join_handle);
+    }
+
+    pub(crate) fn heartbeat_join_handle(&self) -> Option<JoinHandle<()>> {
+        self.heartbeat_join_handle.lock().take()
     }
 }
 
