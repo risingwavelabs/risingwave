@@ -30,7 +30,7 @@ lazy_static::lazy_static! {
         // Usually it's only provided by docker/binary releases (including nightly builds).
         // We check it is the same as VERGEN_GIT_SHA when it's present.
         if let Some(git_sha) = option_env!("GIT_SHA") {
-            assert_eq!(git_sha, vergen_git_sha, "GIT_SHA ({git_sha}) mismatches VERGEN_GIT_SHA ({vergen_git_sha})");
+            assert!(git_sha.to_lowercase().contains(vergen_git_sha), "GIT_SHA ({git_sha}) mismatches VERGEN_GIT_SHA ({vergen_git_sha})");
         };
 
         format!("{} ({})", version, vergen_git_sha)
