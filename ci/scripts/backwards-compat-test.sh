@@ -36,7 +36,7 @@ seed_table() {
 
 echo "--- Setting up cluster config"
 if [[ ! -f risedev-profiles.user.yml ]]; then
-cat <<EOF >> risedev-profiles.user.yml
+cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
     - use: minio
