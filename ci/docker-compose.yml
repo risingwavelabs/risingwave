@@ -91,6 +91,11 @@ services:
     volumes:
       - ..:/risingwave
 
+  qa-infra-env:
+    image: ghcr.io/risingwavelabs/qa-infra:sha-8541451
+    volumes:
+      - ..:/qa-infra
+
   ci-flamegraph-env:
     image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     # NOTE(kwannoel): This is used in order to permit
