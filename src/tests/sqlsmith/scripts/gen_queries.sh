@@ -296,6 +296,8 @@ sync() {
 
 # Upload step
 upload_queries() {
+  git config --global user.email "buildkite-ci@risingwave-labs.com"
+  git config --global user.name "Buildkite CI"
   set +x
   pushd "$OUTDIR"
   git add .
