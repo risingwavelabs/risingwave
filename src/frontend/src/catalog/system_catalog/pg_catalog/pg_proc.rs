@@ -19,6 +19,9 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
+/// The catalog `pg_proc` stores information about functions, procedures, aggregate functions, and
+/// window functions (collectively also known as routines).
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-proc.html`]
 pub const PG_PROC_TABLE_NAME: &str = "pg_proc";
 pub const PG_PROC_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
