@@ -45,15 +45,13 @@ END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
-wget https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
-tar -xvf docker-24.0.2.tgz --no-same-owner
-cp docker/* /usr/bin
-dockerd &
+curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash
 
-# Wait for docker daemon
-sleep 20
+git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/qa-infra.git
+cp qa-infra/certs ./certs
+rm -rf qa-infra
 
-docker run -it --rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
+./qa --rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch "$BRANCH" \
   --tag latest \

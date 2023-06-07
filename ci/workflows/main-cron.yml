@@ -270,7 +270,8 @@ steps:
 
   # FIXME: Change the build number to use $BUILDKITE_BUILD_NUMBER
   - label: "upload micro-benchmark"
-    command: "BUILDKITE_BUILD_NUMBER=512 ci/scripts/upload-micro-bench-results.sh"
+    command:
+      - "BUILDKITE_BUILD_NUMBER=512 ci/scripts/upload-micro-bench-results.sh"
     # depends_on: "run-micro-benchmarks"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
@@ -279,7 +280,7 @@ steps:
             GHCR_TOKEN: ghcr-token
             BUILDKITE_TOKEN: buildkite_token
       - docker-compose#v4.9.0:
-          run: rw-build-env
+          run: qa-infra-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
