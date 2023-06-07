@@ -184,7 +184,9 @@ check_different_queries() {
 check_queries_have_at_least_create_table() {
   for QUERY_FILE in "$OUTDIR"/*/queries.sql
   do
-    N_CREATE_TABLE="$(grep -c "$QUERY_FILE" || true)"
+    set +e
+    N_CREATE_TABLE="$(grep -c "CREATE TABLE" "$QUERY_FILE")"
+    set -e
     if [[ $N_CREATE_TABLE -ge 1 ]]; then
       continue;
     else
