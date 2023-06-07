@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 
-# USAGE:
-#   AWS_PROFILE=rwctest \
-#   BUILDKITE_BUILD_URL=... \
-#   RW_VERSION=latest \
-#   COMMIT=... \
-#   ./upload-micro-bench-results.sh \
-#   ```
+# EXAMPLE USAGE:
+: '
+AWS_PROFILE=rwctest \
+BUILDKITE_BUILD_URL=https://buildkite.com/risingwavelabs/main-cron/builds/511 \
+RW_VERSION=latest \
+COMMIT=03d6985 \
+./ci/scripts/upload-micro-bench-results.sh
+'
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -46,10 +47,10 @@ aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
 # Add this script to RW repository buildkite ci.
 # For pipeline settings:
 # https://buildkite.com/risingwave-test/nexmark-benchmark
-./qa ctl -I 34.211.126.167:8081 execution create-micro-benchmark-executions
+./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch main
   --tag ${RW_VERSION} \
   --commit $COMMIT
-  --end-time $(date)
+  --end-time "$(date)"
   --status passed
