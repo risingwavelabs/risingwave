@@ -392,17 +392,10 @@ fn infer_type_for_special(
                         extract_expr_nested_type(&inputs[1])?,
                     )?;
                     if lcast {
-                        let owned0 =
-                            std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
-                        inputs[0] =
-                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
-                                .into();
+                        inputs[0].cast_implicit_mut(ret.clone())?;
                     }
                     if rcast {
-                        let owned1 =
-                            std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                        inputs[1] =
-                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
+                        inputs[1].cast_implicit_mut(ret)?;
                     }
                     true
                 }
