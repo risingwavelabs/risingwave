@@ -21,12 +21,12 @@ run_sql () {
 
 assert_not_empty() {
   set +e
-  if [[ $(wc -l < $1 | sed 's/^ *//g') -gt 1 ]]; then
-    echo "FAILED"
+  if [[ $(wc -l < "$1" | sed 's/^ *//g') -gt 1 ]]; then
+    echo "assert_not_empty PASSED for $1"
+  else
+    echo "assert_not_empty FAILED for $1"
     buildkite-agent artifact upload "$1"
     exit 1
-  else
-    echo "assert_not_empty PASSED for $1"
   fi
   set -e
 }
