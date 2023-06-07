@@ -10,6 +10,14 @@ BUILDKITE_BUILD_NUMBER=511 \
 # Exits as soon as any line fails.
 set -euo pipefail
 
+setup() {
+  echo "--- Installing utils"
+  echo ">>> Installing jq"
+  wget https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
+  chmod +x jq-linux64
+  mv jq-linux64 /usr/local/bin/jq
+}
+
 get_branch() {
    curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
@@ -30,10 +38,13 @@ get_commit() {
   | jq '.commit'
 }
 
+
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
 END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)
+
+setup
 
 #echo "--- Install Necessary Tools"
 ## pip3 install toml-cli
