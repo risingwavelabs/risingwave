@@ -71,10 +71,9 @@ EOF
 echo "--- Configuring RW"
 configure_rw
 
-echo "--- Setup pre-built Risedev"
-mkdir -p target/debug
-download-and-decompress-artifact risedev-dev-ci-dev target/debug/
-mv target/debug/risedev-dev-ci-dev target/debug/risedev-dev
+echo "--- Build risedev for $TAG, it may not be backwards compatible"
+git checkout "${TAG}-rc"
+cargo build -p risedev
 
 echo "--- Setup old release $TAG"
 wget "https://github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
@@ -109,7 +108,7 @@ echo "--- Kill cluster on tag $TAG"
 ./risedev k
 
 echo "--- Setup Risingwave @ $RW_COMMIT"
-download_and_prepare_rw dev common
+download_and_prepare_rw ci-dev common
 
 echo "--- Kill cluster on tag $TAG"
 ./risedev d full-without-monitoring
