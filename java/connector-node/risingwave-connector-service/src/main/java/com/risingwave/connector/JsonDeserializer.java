@@ -224,6 +224,13 @@ public class JsonDeserializer implements Deserializer {
                 }
                 byte[] bytes = Base64.getDecoder().decode((String) value);
                 return new ByteArrayInputStream(bytes);
+            case LIST:
+                if (!(value instanceof java.util.ArrayList<?>)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected list, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return value;
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)

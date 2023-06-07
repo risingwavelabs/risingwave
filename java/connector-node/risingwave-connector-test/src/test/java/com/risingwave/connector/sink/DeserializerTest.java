@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink;
 
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.JsonDeserializer;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
@@ -23,7 +24,7 @@ import junit.framework.TestCase;
 
 public class DeserializerTest extends TestCase {
     public void testJsonDeserializer() {
-        JsonDeserializer deserializer = new JsonDeserializer(TableSchema.getMockTableSchema());
+        JsonDeserializer deserializer = new JsonDeserializer(TestUtils.getMockTableSchema());
         JsonPayload jsonPayload =
                 JsonPayload.newBuilder()
                         .addRowOps(
