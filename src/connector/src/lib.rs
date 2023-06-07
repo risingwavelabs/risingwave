@@ -26,6 +26,8 @@
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(async_fn_in_trait)]
 
 use std::time::Duration;
 
