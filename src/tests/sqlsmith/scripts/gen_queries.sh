@@ -147,7 +147,7 @@ generate_deterministic() {
   gen_seed | env_parallel "
     mkdir -p $OUTDIR/{%}
     echo '[INFO] Generating For Seed {}'
-    MADSIM_TEST_SEED={} ./$MADSIM_BIN \
+    MADSIM_TEST_SEED={} $MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
@@ -209,7 +209,7 @@ check_failed_to_generate_queries() {
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
-    ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
