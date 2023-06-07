@@ -300,14 +300,25 @@ cleanup() {
 ################### ENTRY POINTS
 
 run_generate() {
+  echo "--- Running setup"
   setup
 
+  echo "--- Running build"
   build
+
+  echo "--- Running synchronizing with upstream snapshot"
   sync
+
+  echo "--- Generating"
   generate
+
+  echo "--- Validating"
   validate
+
+  echo "--- Uploading"
   upload
 
+  echo "--- Cleanup"
   cleanup
 }
 
