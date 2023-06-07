@@ -280,8 +280,6 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
-            GITHUB_TOKEN: github-token
-            AWS_TOKEN: aws-token
       - docker-login#v2.1.0:
           server: ghcr.io
           username: GHCR_USERNAME
