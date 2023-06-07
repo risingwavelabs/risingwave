@@ -92,7 +92,7 @@ services:
       - ..:/risingwave
 
   qa-infra-env:
-    image: ghcr.io/risingwavelabs/qa-infra:sha-8541451
+    image: ghcr.io/risingwavelabs/qa-infra:latest
     volumes:
       - ..:/qa-infra
 
