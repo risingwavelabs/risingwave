@@ -18,6 +18,16 @@ run_sql () {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
+assert_not_empty() {
+  if [[ -z "$1" ]]; then
+    echo "FAILED"
+    buildkite-agent artifact upload "$1"
+    exit 1
+  else
+    echo "PASSED"
+  fi
+}
+
 assert_eq() {
   if [[ -z $(diff "$1" "$2") ]]; then
     echo "PASSED"
@@ -39,7 +49,6 @@ seed_table() {
 
 configure_rw() {
 echo "--- Setting up cluster config"
-if [[ ! -f risedev-profiles.user.yml ]]; then
 cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
   steps:
@@ -50,7 +59,7 @@ full-without-monitoring:
     - use: frontend
     - use: compactor
 EOF
-fi
+
 cat <<EOF > risedev-components.user.env
 RISEDEV_CONFIGURED=true
 
@@ -134,4 +143,6 @@ run_sql "SELECT * from m ORDER BY v1;" > AFTER
 
 echo "--- Comparing results"
 assert_eq BEFORE AFTER
+assert_not_empty BEFORE
+assert_not_empty AFTER
 rm BEFORE AFTER
