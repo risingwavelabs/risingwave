@@ -167,6 +167,10 @@ impl ExprImpl {
         .into()
     }
 
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::literal_null(self.return_type()))
+    }
+
     /// A `count(*)` aggregate function.
     #[inline(always)]
     pub fn count_star() -> Self {
