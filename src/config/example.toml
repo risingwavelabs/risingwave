@@ -50,6 +50,7 @@ stream_exchange_concurrent_barriers = 2
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
+shared_buffer_flush_ratio = 0.800000011920929
 imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false
