@@ -28,7 +28,7 @@ use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
-// Get all the parallel units which are located on cordoned workers
+// Get the ids of all parallel unit which are located on cordoned workers
 fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
     let cordoned_nodes_ids = all_workers
         .iter()
@@ -44,7 +44,7 @@ fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
     cordoned_pu_ids.iter().flatten().map(|pu| pu.id).collect()
 }
 
-// TODO: write docstring
+// Get the ids of all actors which are located on cordoned workers
 fn actor_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> HashSet<u32> {
     let (fragments, workers) = get_schedule(info.clone());
     let cordoned_pus_ids = pu_ids_on_cordoned_nodes(&workers);
@@ -82,17 +82,10 @@ async fn cordoned_nodes_do_not_get_new_actors(
     // do not drop the query
 
     // cordon random nodes
-    let mut cordoned_nodes: Vec<WorkerNode> = vec![];
-    // TODO: I can directly write this in the cordoned_nodes vec
-    let rand_nodes: Vec<WorkerNode> = cluster
-        .cordon_random_workers(number_of_nodes) // TODO:  sometimes collect same node twice. This is not what we want!
-        .await?;
-    for rand_node in rand_nodes.clone() {
-        cordoned_nodes.push(rand_node);
-    }
+    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
 
     let mut log_msg = "Cordoned the following nodes:\n".to_string();
-    for rand_node in rand_nodes {
+    for rand_node in &cordoned_nodes {
         log_msg = format!("{}{:?}\n", log_msg, rand_node);
     }
     tracing::info!(log_msg);
@@ -156,19 +149,12 @@ async fn cordoned_nodes_do_not_get_actors(
     sleep(Duration::from_secs(sleep_sec)).await;
 
     // cordon random nodes
-    let mut cordoned_nodes: Vec<WorkerNode> = vec![];
-    // TODO: I can directly write this in the cordoned_nodes ved
-    let rand_nodes: Vec<WorkerNode> = cluster.cordon_random_workers(number_of_nodes).await?;
-    for rand_node in rand_nodes.clone() {
-        cordoned_nodes.push(rand_node);
-    }
-
+    let cordoned_nodes = cluster.cordon_random_workers(number_of_nodes).await?;
     let mut log_msg = "Cordoned the following nodes:\n".to_string();
-    for rand_node in rand_nodes {
+    for rand_node in &cordoned_nodes {
         log_msg = format!("{}{:?}\n", log_msg, rand_node);
     }
-    println!("{}", log_msg);
-    // tracing::info!(log_msg); // TODO: use trace
+    tracing::info!(log_msg);
 
     let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
 
@@ -183,19 +169,18 @@ async fn cordoned_nodes_do_not_get_actors(
     let info = cluster.get_cluster_info().await?;
     let (fragments, workers) = get_schedule(info);
 
-    // TODO: do this fancy with map
-    let mut cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
+    let mut cordoned_pu_ids = HashSet::<u32>::new();
     for worker in workers {
         if cordoned_nodes_ids.contains(&worker.id) {
-            cordoned_pus.push(worker.parallel_units);
+            for pu in worker.parallel_units {
+                cordoned_pu_ids.insert(pu.id);
+            }
         }
     }
-    assert!(cordoned_nodes.len() == cordoned_pus.len());
-    let cordoned_pus_flat = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            assert!(!cordoned_pus_flat.contains(&pu_id));
+            assert!(!cordoned_pu_ids.contains(&pu_id));
         }
     }
     Ok(())
@@ -214,8 +199,7 @@ async fn cordon_is_idempotent(
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
     let rand_workers = cluster.get_random_worker_nodes(number_of_nodes).await?;
-    let mut old_ids = rand_workers.iter().map(|w| w.id).collect_vec();
-    old_ids.sort();
+    let old_ids: HashSet<u32> = rand_workers.iter().map(|w| w.id).collect();
 
     cluster.run(create).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
@@ -238,15 +222,13 @@ async fn cordon_is_idempotent(
         assert_eq!(expected, got);
         cluster.run(drop).await?;
 
-        // TODO: do this with set operations
         // we only ever expect the same workers to be cordoned
         let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
-        let mut new_ids = workers
+        let new_ids: HashSet<u32> = workers
             .iter()
             .filter(|w| w.state() == State::Cordoned)
             .map(|w| w.id)
-            .collect_vec();
-        new_ids.sort();
+            .collect();
         assert_eq!(new_ids, old_ids);
     }
 
@@ -327,7 +309,7 @@ fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<Wor
                 let pu_id = table_fragment
                     .get_actor_status()
                     .get(&id)
-                    .expect("expected actor status") // TODO: handle gracefully
+                    .expect("expected actor status")
                     .get_parallel_unit()
                     .expect("Failed to retrieve parallel units")
                     .get_id();
