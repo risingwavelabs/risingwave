@@ -222,6 +222,7 @@ setup() {
   fi
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
+  mkdir -p $LOGDIR
 }
 
 setup_madsim() {
