@@ -75,7 +75,6 @@ full-without-monitoring:
     - use: minio
     - use: etcd
     - use: meta-node
-      enable-in-memory-kv-state-backend: false
     - use: compute-node
     - use: frontend
     - use: compactor
