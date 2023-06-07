@@ -74,7 +74,7 @@ configure_rw
 echo "--- Setup pre-built Risedev"
 mkdir -p target/debug
 download-and-decompress-artifact risedev-dev-ci-dev target/debug/
-mv target/debug/risedev-dev-dev target/debug/risedev-dev
+mv target/debug/risedev-dev-ci-dev target/debug/risedev-dev
 
 echo "--- Setup old release $TAG"
 wget "https://github.com/risingwavelabs/risingwave/releases/download/v${TAG}/risingwave-v${TAG}-x86_64-unknown-linux.tar.gz"
