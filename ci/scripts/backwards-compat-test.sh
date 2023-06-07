@@ -46,7 +46,6 @@ full-without-monitoring:
     - use: minio
     - use: etcd
     - use: meta-node
-      enable-in-memory-kv-state-backend: false
     - use: compute-node
     - use: frontend
     - use: compactor
@@ -66,6 +65,20 @@ ENABLE_BUILD_RUST=false
 ENABLE_ALL_IN_ONE=true
 
 # ENABLE_RELEASE_PROFILE=true
+EOF
+}
+
+configure_latest_rw() {
+cat <<EOF > risedev-profiles.user.yml
+full-without-monitoring:
+  steps:
+    - use: minio
+    - use: etcd
+    - use: meta-node
+      enable-in-memory-kv-state-backend: false
+    - use: compute-node
+    - use: frontend
+    - use: compactor
 EOF
 }
 
@@ -113,6 +126,7 @@ echo "--- Setup Risingwave @ $RW_COMMIT"
 download_and_prepare_rw ci-dev common
 
 echo "--- Start cluster on latest"
+configure_latest_rw
 ./risedev d full-without-monitoring
 
 echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
