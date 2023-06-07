@@ -13,34 +13,58 @@
 // limitations under the License.
 
 use risingwave_common::array::*;
-use risingwave_common::estimate_size::{EstimateSize, ZeroHeapSize};
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
 use crate::agg::AggCall;
-use crate::Result;
+use crate::{ExprError, Result};
 
-//#[build_aggregate("percentile_cont(int64) -> int64")]
-fn build<T>(agg: AggCall) -> Result<Box<dyn Aggregator>>
-where
-    T: for<'a> ScalarRef<'a>,
-{
+// TODO: better name
+pub trait MyScalar = Scalar + Into<f64> + Copy;
+
+#[build_aggregate("percentile_cont(*) -> auto")]
+fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction = agg.direct_args[0].literal().map(|x| x.as_float64().0);
-    Ok(Box::new(PercentileCont::<T>::new(
-        fraction,
-        agg.return_type.clone(),
-    )))
+
+    let aggregator = match agg.args.arg_types()[0] {
+        DataType::Int16 => Box::new(PercentileCont::<i16>::new(
+            fraction,
+            agg.return_type.clone(),
+        )) as _,
+        DataType::Int32 => Box::new(PercentileCont::<i32>::new(
+            fraction,
+            agg.return_type.clone(),
+        )) as _,
+        DataType::Int64 => todo!(), // FIXME: seems i64 cannot Into<f64>
+        DataType::Float32 => todo!(),
+        DataType::Float64 => todo!(),
+        _ => {
+            return Err(ExprError::InvalidParam {
+                name: "ORDER BY column",
+                reason: "TODO".to_string(),
+            })
+        }
+    };
+    Ok(aggregator)
 }
 
-#[derive(Clone, EstimateSize)]
-pub struct PercentileCont<T: for<'a> ScalarRef<'a>> {
+#[derive(Clone)]
+pub struct PercentileCont<T: MyScalar> {
     fractions: Option<f64>,
     return_type: DataType,
     data: Vec<T>,
 }
 
-impl<T: for<'a> ScalarRef<'a>> PercentileCont<T> {
+impl<T: MyScalar> EstimateSize for PercentileCont<T> {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO
+        0
+    }
+}
+
+impl<T: MyScalar> PercentileCont<T> {
     pub fn new(fractions: Option<f64>, return_type: DataType) -> Self {
         Self {
             fractions,
@@ -50,18 +74,14 @@ impl<T: for<'a> ScalarRef<'a>> PercentileCont<T> {
     }
 
     fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
-        if let Some(datum) = datum_ref {
+        if let Some(datum) = datum_ref.to_owned_datum() {
             self.data.push(TryInto::<T>::try_into(datum).unwrap());
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<T: for<'a> ScalarRef<'a>> Aggregator for PercentileCont<T>
-where
-    Option<T>: ToDatumRef,
-    f64: From<T>,
-{
+impl<T: MyScalar> Aggregator for PercentileCont<T> {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
@@ -84,14 +104,12 @@ where
             let rn = 1.0 + (fractions * (self.data.len() - 1) as f64);
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
-            let result = if crn == frn {
-                self.data[crn as usize]
+            let result: ScalarImpl = if crn == frn {
+                self.data[crn as usize].into()
             } else {
-                TryInto::<T>::try_into(
-                    (crn - rn) * TryInto::<f64>::try_into(self.data[frn as usize]).unwrap()
-                        + (rn - frn) * TryInto::<f64>::try_into(self.data[crn as usize]).unwrap(),
-                )
-                .unwrap()
+                ((crn - rn) * Into::<f64>::into(self.data[frn as usize])
+                    + (rn - frn) * Into::<f64>::into(self.data[crn as usize]))
+                .into()
             };
             builder.append(Some(result));
         }
