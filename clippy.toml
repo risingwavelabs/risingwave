@@ -3,6 +3,8 @@ disallowed-methods = [
     { path = "itertools::Itertools::zip_eq", reason = "Please use `zip_eq_fast` if it's available. Otherwise use `zip_eq_debug`" },
     { path = "futures::stream::select_all", reason = "Please use `risingwave_common::util::select_all` instead." },
     { path = "risingwave_common::array::JsonbVal::from_serde", reason = "Please add dedicated methods as part of `JsonbRef`/`JsonbVal`, rather than take inner `serde_json::Value` out, process, and put back." },
+    { path = "std::panic::catch_unwind", reason = "Please use `risingwave_common::util::panic::rw_catch_unwind` instead." },
+    { path = "futures::FutureExt::catch_unwind", reason = "Please use `risingwave_common::util::panic::FutureCatchUnwindExt::rw_catch_unwind` instead." },
 ]
 disallowed-types = [
     { path = "num_traits::AsPrimitive", reason = "Please use `From` or `TryFrom` with `OrderedFloat` instead." },
