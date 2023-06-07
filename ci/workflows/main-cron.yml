@@ -260,6 +260,7 @@ steps:
 
   - label: "run micro benchmarks"
     command: "ci/scripts/run-micro-benchmarks.sh"
+    key: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
@@ -269,6 +270,7 @@ steps:
 
   - label: "upload micro benchmarks"
     command: "ci/scripts/upload-micro-bench-results.sh"
+    depends_on: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
