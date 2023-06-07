@@ -54,13 +54,17 @@ ENABLE_MINIO=true
 ENABLE_ETCD=true
 ENABLE_KAFKA=true
 ENABLE_COMPUTE_TRACING=true
-ENABLE_BUILD_RUST=true
-ENABLE_RELEASE_PROFILE=true
+ENABLE_BUILD_RUST=false
 EOF
 
 echo "--- Checking out old branch"
-git config --global --add safe.directory /risingwave
-git checkout origin/$TAG
+wget https://github.com/risingwavelabs/risingwave/releases/download/v0.18.0/risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
+tar -xvf risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
+mkdir -p target/release
+cp risingwave target/release/risingwave
+# Rebuild from scratch.
+#git config --global --add safe.directory /risingwave
+#git checkout origin/$TAG
 
 echo "--- Teardown any old cluster"
 set +e
