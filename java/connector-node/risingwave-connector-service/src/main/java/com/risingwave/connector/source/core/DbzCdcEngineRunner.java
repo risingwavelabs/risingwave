@@ -21,7 +21,6 @@ import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,7 +33,9 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     private final CdcEngine engine;
 
     private DbzCdcEngineRunner(CdcEngine engine) {
-        this.executor = Executors.newSingleThreadExecutor(r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
+        this.executor =
+                Executors.newSingleThreadExecutor(
+                        r -> new Thread(r, "rw-dbz-engine-runner-" + engine.getId()));
         this.engine = engine;
     }
 
