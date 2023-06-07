@@ -5,10 +5,8 @@ set -euo pipefail
 pushd ..
 export SNAPSHOT_DIR=$PWD/sqlsmith-query-snapshots
 set +u
-if [[ ! -d $SNAPSHOT_DIR ]]; then
-  echo "--- Cloning snapshots"
-  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
-fi
+echo "--- Cloning snapshots"
+git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
 set -u
 popd
 
