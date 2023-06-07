@@ -165,12 +165,18 @@ public class MySQLSourceTest {
                         .addColumns(
                                 ConnectorServiceProto.TableSchema.Column.newBuilder()
                                         .setName("o_key")
-                                        .setDataType(Data.DataType.TypeName.INT64)
+                                        .setDataType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT64)
+                                                        .build())
                                         .build())
                         .addColumns(
                                 ConnectorServiceProto.TableSchema.Column.newBuilder()
                                         .setName("o_val")
-                                        .setDataType(Data.DataType.TypeName.INT32)
+                                        .setDataType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                                        .build())
                                         .build())
                         .addPkIndices(0)
                         .build();
