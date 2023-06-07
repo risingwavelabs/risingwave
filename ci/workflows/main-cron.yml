@@ -268,9 +268,10 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 35
 
+  # FIXME: Change the build number to use $BUILDKITE_BUILD_NUMBER
   - label: "upload micro-benchmark"
     command: "BUILDKITE_BUILD_NUMBER=512 ci/scripts/upload-micro-bench-results.sh"
-    depends_on: "run-micro-benchmarks"
+    # depends_on: "run-micro-benchmarks"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
