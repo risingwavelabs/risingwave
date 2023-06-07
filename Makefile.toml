@@ -201,7 +201,7 @@ script = '''
 set -e
 
 echo "~~~ Check logs"
-du -sh ${PREFIX_LOG}
+du -ah ${PREFIX_LOG}
 
 for out_file in ${PREFIX_LOG}/*.log
 do
