@@ -84,6 +84,10 @@ BRANCH=$(get_branch)
 # For pipeline settings:
 # https://buildkite.com/risingwave-test/nexmark-benchmark
 
+tar xzvf https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
+sudo cp docker/* /usr/bin
+sudo dockerd &
+
 docker -it -rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch "$BRANCH" \
