@@ -3,7 +3,7 @@
 # EXAMPLE USAGE:
 : '
 AWS_PROFILE=rwctest \
-BUILDKITE_BUILD_URL=https://buildkite.com/risingwavelabs/main-cron/builds/511 \
+BUILDKITE_BUILD_NO=511 \
 RW_VERSION=latest \
 COMMIT=03d6985 \
 ./ci/scripts/upload-micro-bench-results.sh
@@ -11,6 +11,15 @@ COMMIT=03d6985 \
 
 # Exits as soon as any line fails.
 set -euo pipefail
+
+get_date() {
+  curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NO" \
+  | jq '.jobs | .[] | select ( .name | contains("micro")) | .finished_at'
+}
+
+BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NO"
+END_DATE=$(get_date)
 
 echo "--- Install Necessary Tools"
 # pip install toml-cli
@@ -47,10 +56,10 @@ aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
 # Add this script to RW repository buildkite ci.
 # For pipeline settings:
 # https://buildkite.com/risingwave-test/nexmark-benchmark
-./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions
+./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
-  --branch main
+  --branch main \
   --tag ${RW_VERSION} \
-  --commit $COMMIT
-  --end-time "$(date)"
-  --status passed
+  --commit $COMMIT \
+  --end-time $END_DATE \
+  --status SUCCESS
