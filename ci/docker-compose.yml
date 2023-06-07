@@ -93,6 +93,7 @@ services:
 
   qa-infra-env:
     image: ghcr.io/risingwavelabs/qa-infra:latest
+    working_dir: "qa-infra"
     volumes:
       - ..:/qa-infra
 
