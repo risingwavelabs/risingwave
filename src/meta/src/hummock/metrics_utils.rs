@@ -238,17 +238,9 @@ pub fn remove_compaction_group_in_sst_stat(
 
         metrics
             .level_file_size
-            .with_label_values(&[&level_label])
-            .set(0);
-        metrics
-            .level_file_size
             .remove_label_values(&[&level_label])
             .ok();
 
-        metrics
-            .level_compact_cnt
-            .with_label_values(&[&level_label])
-            .set(0);
         metrics
             .level_compact_cnt
             .remove_label_values(&[&level_label])
@@ -263,17 +255,8 @@ pub fn remove_compaction_group_in_sst_stat(
     let non_overlap_level_label = format!("cg{}_l0_sub_non_overlap", compaction_group_id);
     metrics
         .level_sst_num
-        .with_label_values(&[&overlapping_level_label])
-        .set(0);
-    metrics
-        .level_sst_num
         .remove_label_values(&[&overlapping_level_label])
         .ok();
-
-    metrics
-        .level_sst_num
-        .with_label_values(&[&non_overlap_level_label])
-        .set(0);
     metrics
         .level_sst_num
         .remove_label_values(&[&non_overlap_level_label])
@@ -293,10 +276,6 @@ pub fn remove_compacting_task_stat(
                 "cg{} L{} -> L{}",
                 compaction_group_id, select_level, target_level
             );
-            metrics
-                .level_compact_task_cnt
-                .with_label_values(&[&label_str])
-                .set(0);
             metrics
                 .level_compact_task_cnt
                 .remove_label_values(&[&label_str])
