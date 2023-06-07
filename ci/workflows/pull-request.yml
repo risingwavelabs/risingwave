@@ -354,7 +354,6 @@ steps:
     command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh"
     depends_on:
       - "build"
-      - "docslt"
     plugins:
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
