@@ -13,8 +13,10 @@
 // limitations under the License.use risingwave
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::LazyLock;
 
 use async_trait::async_trait;
+use regex::Regex;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
 use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl};
 use risingwave_pb::catalog::connection::Info::PrivateLinkService;
@@ -89,7 +91,7 @@ where
                 .await;
             if let Err(e) = connection {
                 return Ok(new_rw_cloud_validate_source_err(
-                    ErrorType::ConnectionNotFound,
+                    ErrorType::PrivatelinkConnectionNotFound,
                     e.to_string(),
                 ));
             }
@@ -151,9 +153,28 @@ where
             }));
         }
         if let Err(e) = enumerator.unwrap().list_splits().await {
+            let error_message = e.to_string();
+            if error_message.contains("BrokerTransportFailure") {
+                return Ok(Response::new(RwCloudValidateSourceResponse {
+                    error: Some(Error {
+                        error_type: ErrorType::KafkaBrokerUnreachable.into(),
+                        error_message: e.to_string(),
+                    }),
+                }));
+            }
+            static TOPIC_NOT_FOUND: LazyLock<Regex> =
+                LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
+            if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
+                return Ok(Response::new(RwCloudValidateSourceResponse {
+                    error: Some(Error {
+                        error_type: ErrorType::KafkaTopicNotFound.into(),
+                        error_message: e.to_string(),
+                    }),
+                }));
+            }
             return Ok(Response::new(RwCloudValidateSourceResponse {
                 error: Some(Error {
-                    error_type: ErrorType::TopicNotFound.into(),
+                    error_type: ErrorType::KafkaOther.into(),
                     error_message: e.to_string(),
                 }),
             }));
