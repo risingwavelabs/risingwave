@@ -31,6 +31,7 @@ pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
@@ -63,6 +64,7 @@ pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
@@ -73,6 +75,7 @@ pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
@@ -156,7 +159,12 @@ fn get_acl_items(
 
 impl SysCatalogReaderImpl {
     pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
-        Ok(PG_TYPE_DATA_ROWS.clone())
+        let schema_id = self
+            .catalog_reader
+            .read_guard()
+            .get_schema_by_name(&self.auth_context.database, PG_CATALOG_SCHEMA_NAME)?
+            .id();
+        Ok(get_pg_type_data(schema_id))
     }
 
     pub(super) fn read_cast(&self) -> Result<Vec<OwnedRow>> {
@@ -687,6 +695,10 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_CONSTRAINT_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_pg_proc_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_PROC_DATA_ROWS.clone())
     }
 
     pub(crate) fn read_pg_tables_info(&self) -> Result<Vec<OwnedRow>> {

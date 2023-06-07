@@ -14,8 +14,6 @@
 
 package com.risingwave.java.binding;
 
-import java.io.ByteArrayInputStream;
-
 public class Binding {
     static {
         System.loadLibrary("risingwave_java_binding");
@@ -67,7 +65,7 @@ public class Binding {
 
     static native String rowGetJsonbValue(long pointer, int index);
 
-    static native ByteArrayInputStream rowGetByteaValue(long pointer, int index);
+    static native byte[] rowGetByteaValue(long pointer, int index);
 
     // TODO: object or object array?
     static native Object rowGetArrayValue(long pointer, int index, Class<?> clazz);

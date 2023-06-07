@@ -341,6 +341,11 @@ pub struct StorageConfig {
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
 
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    #[serde(default = "default::storage::shared_buffer_flush_ratio")]
+    pub shared_buffer_flush_ratio: f32,
+
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
     pub imm_merge_threshold: usize,
@@ -671,6 +676,10 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
+        }
+
+        pub fn shared_buffer_flush_ratio() -> f32 {
+            0.8
         }
 
         pub fn imm_merge_threshold() -> usize {
