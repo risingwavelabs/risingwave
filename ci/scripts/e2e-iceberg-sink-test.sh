@@ -23,10 +23,6 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
-download_java_binding "$profile"
-
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
-
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
