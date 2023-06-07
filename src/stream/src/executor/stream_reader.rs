@@ -19,16 +19,16 @@ use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
+use risingwave_connector::source::BoxMStream;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Message;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
-type StreamReaderData = StreamExecutorResult<Either<Message, StreamChunkWithState>>;
-type ReaderArm = BoxStream<'static, StreamReaderData>;
-type StreamReaderWithPauseInner =
-    SelectWithStrategy<ReaderArm, ReaderArm, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
+type StreamReaderData<M> = StreamExecutorResult<Either<Message, M>>;
+type ReaderArm<M> = BoxStream<'static, StreamReaderData<M>>;
+type StreamReaderWithPauseInner<M> =
+    SelectWithStrategy<ReaderArm<M>, ReaderArm<M>, impl FnMut(&mut PollNext) -> PollNext, PollNext>;
 
 /// [`StreamReaderWithPause`] merges two streams, with one receiving barriers (and maybe other types
 /// of messages) and the other receiving data only (no barrier). The merged stream can be paused
@@ -41,21 +41,21 @@ type StreamReaderWithPauseInner =
 /// If `BIASED` is `true`, the left-hand stream (the one receiving barriers) will get a higher
 /// priority over the right-hand one. Otherwise, the two streams will be polled in a round robin
 /// fashion.
-pub(super) struct StreamReaderWithPause<const BIASED: bool> {
-    inner: StreamReaderWithPauseInner,
+pub(super) struct StreamReaderWithPause<const BIASED: bool, M> {
+    inner: StreamReaderWithPauseInner<M>,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
-    /// Receive chunks and states from the reader. Hang up on error.
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn data_stream(stream: BoxSourceWithStateStream) {
+impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
+    /// Receive messages from the reader. Hang up on error.
+    #[try_stream(ok = M, error = StreamExecutorError)]
+    async fn data_stream(stream: BoxMStream<M>) {
         // TODO: support stack trace for Stream
         #[for_await]
-        for chunk in stream {
-            match chunk {
-                Ok(chunk) => yield chunk,
+        for m in stream {
+            match m {
+                Ok(m) => yield m,
                 Err(err) => {
                     return Err(StreamExecutorError::connector_error(err));
                 }
@@ -65,10 +65,7 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
 
     /// Construct a `StreamReaderWithPause` with one stream receiving barrier messages (and maybe
     /// other types of messages) and the other receiving data only (no barrier).
-    pub fn new(
-        message_stream: ExecutorMessageStream,
-        data_stream: BoxSourceWithStateStream,
-    ) -> Self {
+    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxMStream<M>) -> Self {
         let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
         let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
         let inner = Self::new_inner(message_stream_arm, data_stream_arm);
@@ -78,7 +75,10 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
         }
     }
 
-    fn new_inner(message_stream: ReaderArm, data_stream: ReaderArm) -> StreamReaderWithPauseInner {
+    fn new_inner(
+        message_stream: ReaderArm<M>,
+        data_stream: ReaderArm<M>,
+    ) -> StreamReaderWithPauseInner<M> {
         let strategy = if BIASED {
             |_: &mut PollNext| PollNext::Left
         } else {
@@ -89,7 +89,7 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
-    pub fn replace_data_stream(&mut self, data_stream: BoxSourceWithStateStream) {
+    pub fn replace_data_stream(&mut self, data_stream: BoxMStream<M>) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
@@ -117,8 +117,8 @@ impl<const BIASED: bool> StreamReaderWithPause<BIASED> {
     }
 }
 
-impl<const BIASED: bool> Stream for StreamReaderWithPause<BIASED> {
-    type Item = StreamReaderData;
+impl<const BIASED: bool, M> Stream for StreamReaderWithPause<BIASED, M> {
+    type Item = StreamReaderData<M>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -144,6 +144,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::transaction::TxnId;
+    use risingwave_connector::source::StreamChunkWithState;
     use risingwave_source::TableDmlHandle;
     use tokio::sync::mpsc;
 
@@ -160,7 +161,8 @@ mod tests {
             .into_stream_for_source_reader_test();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
-        let stream = StreamReaderWithPause::<true>::new(barrier_stream, source_stream);
+        let stream =
+            StreamReaderWithPause::<true, StreamChunkWithState>::new(barrier_stream, source_stream);
         pin_mut!(stream);
 
         macro_rules! next {

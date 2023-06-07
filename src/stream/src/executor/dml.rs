@@ -29,7 +29,7 @@ use super::{
     expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
     PkIndices, PkIndicesRef,
 };
-use crate::executor::dml_reader::DmlReaderWithPause;
+use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
@@ -104,7 +104,7 @@ impl DmlExecutor {
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
         // a round robin way.
-        let mut stream = DmlReaderWithPause::new(upstream, batch_reader);
+        let mut stream = StreamReaderWithPause::<false, TxnMsg>::new(upstream, batch_reader);
 
         // If the first barrier is configuration change, then the DML executor must be newly
         // created, and we should start with the paused state.
