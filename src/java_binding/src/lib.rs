@@ -32,13 +32,16 @@ use jni::objects::{
     AutoArray, GlobalRef, JClass, JMethodID, JObject, JStaticMethodID, JString, JValue, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort, jvalue};
+use jni::sys::{
+    jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jobject, jshort, jsize, jvalue,
+};
 use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
 use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -510,7 +513,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetIntervalVa
             .datum_at(idx as usize)
             .unwrap()
             .into_interval()
-            .to_string();
+            .as_iso_8601();
         Ok(env.new_string(interval)?)
     })
 }
@@ -539,13 +542,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetTimestampV
     idx: jint,
 ) -> JObject<'a> {
     execute_and_catch(env, move || {
-        let millis = pointer
-            .as_ref()
-            .datum_at(idx as usize)
-            .unwrap()
-            .into_timestamp()
-            .0
-            .timestamp_millis();
+        let scalar_value = pointer.as_ref().datum_at(idx as usize).unwrap();
+        let millis = match scalar_value {
+            // supports sinking rw timestamptz (ScalarRefImpl::Int64) to mysql timestamp
+            ScalarRefImpl::Int64(v) => v / 1000,
+            _ => scalar_value.into_timestamp().0.timestamp_millis(),
+        };
         let (ts_class_ref, constructor) = pointer
             .as_ref()
             .class_cache
@@ -713,9 +715,116 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetArrayValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+    class: JClass<'a>,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let elems = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_list()
+            .iter();
+
+        // convert the Rust elements to a Java object array (Object[])
+        let jarray = env.new_object_array(elems.len() as jsize, class, JObject::null())?;
+
+        for (i, ele) in elems.enumerate() {
+            let index = i as jsize;
+            match ele {
+                None => env.set_object_array_element(jarray, i as jsize, JObject::null())?,
+                Some(val) => match val {
+                    ScalarRefImpl::Int16(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(S)Ljava.lang.Short;",
+                            &[JValue::from(v as jshort)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Int32(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(I)Ljava.lang.Integer;",
+                            &[JValue::from(v as jint)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Int64(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(J)Ljava.lang.Long;",
+                            &[JValue::from(v as jlong)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Float32(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(F)Ljava/lang/Float;",
+                            &[JValue::from(v.into_inner() as jfloat)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Float64(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(D)Ljava/lang/Double;",
+                            &[JValue::from(v.into_inner() as jdouble)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Utf8(v) => {
+                        let obj = env.new_string(v)?;
+                        env.set_object_array_element(jarray, index, obj)?
+                    }
+                    _ => env.set_object_array_element(jarray, index, JObject::null())?,
+                },
+            }
+        }
+        let output = unsafe { JObject::from_raw(jarray as jobject) };
+        Ok(output)
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     _env: EnvParam<'a>,
     pointer: Pointer<'a, JavaBindingRow>,
 ) {
     pointer.drop()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+    use risingwave_expr::vector_op::cast::literal_parsing;
+
+    /// make sure that the [`ScalarRefImpl::Int64`] received by
+    /// [`Java_com_risingwave_java_binding_Binding_rowGetTimestampValue`]
+    /// is of type [`DataType::Timestamptz`] stored in microseconds
+    #[test]
+    fn test_timestamptz_to_i64() {
+        let timestamptz_val =
+            literal_parsing(&DataType::Timestamptz, "2023-06-01 09:45:00+08:00").unwrap();
+        assert_eq!(timestamptz_val.as_int64(), &1_685_583_900_000_000);
+    }
 }

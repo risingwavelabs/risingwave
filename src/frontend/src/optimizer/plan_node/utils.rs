@@ -17,6 +17,7 @@ use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
@@ -158,6 +159,31 @@ impl TableCatalogBuilder {
         &self.columns
     }
 }
+
+/// See also [`super::generic::DistillUnit`].
+pub trait Distill {
+    fn distill<'a>(&self) -> Pretty<'a>;
+}
+
+macro_rules! impl_distill_by_unit {
+    ($ty:ty, $core:ident, $name:expr) => {
+        use pretty_xmlish::Pretty;
+        use $crate::optimizer::plan_node::generic::DistillUnit;
+        use $crate::optimizer::plan_node::utils::Distill;
+        impl Distill for $ty {
+            fn distill<'a>(&self) -> Pretty<'a> {
+                self.$core.distill_with_name($name)
+            }
+        }
+
+        impl std::fmt::Display for $ty {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                self.$core.fmt_with_name(f, $name)
+            }
+        }
+    };
+}
+pub(crate) use impl_distill_by_unit;
 
 #[derive(Clone, Copy)]
 pub struct IndicesDisplay<'a> {

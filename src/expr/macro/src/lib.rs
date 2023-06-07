@@ -296,6 +296,8 @@ mod utils;
 ///
 /// # Appendix: Type Matrix
 ///
+/// ## Base Types
+///
 /// | name        | SQL type           | owned type    | reference type     | primitive? |
 /// | ----------- | ------------------ | ------------- | ------------------ | ---------- |
 /// | boolean     | `boolean`          | `bool`        | `bool`             | yes        |
@@ -315,9 +317,18 @@ mod utils;
 /// | varchar     | `varchar`          | `Box<str>`    | `&str`             | no         |
 /// | bytea       | `bytea`            | `Box<[u8]>`   | `&[u8]`            | no         |
 /// | jsonb       | `jsonb`            | `JsonbVal`    | `JsonbRef<'_>`     | no         |
-/// | list        | `any[]`            | `ListValue`   | `ListRef<'_>`      | no         |
-/// | struct      | `record`           | `StructValue` | `StructRef<'_>`    | no         |
-/// | any         | `any`              | `ScalarImpl`  | `ScalarRef<'_>`    | no         |
+/// | any         | `any`              | `ScalarImpl`  | `ScalarRefImpl<'_>`| no         |
+///
+/// ## Composite Types
+///
+/// | name                   | SQL type             | owned type    | reference type     |
+/// | ---------------------- | -------------------- | ------------- | ------------------ |
+/// | list                   | `any[]`              | `ListValue`   | `ListRef<'_>`      |
+/// | struct                 | `record`             | `StructValue` | `StructRef<'_>`    |
+/// | T[^1][]                | `T[]`                | `ListValue`   | `ListRef<'_>`      |
+/// | struct<name T[^1], ..> | `struct<name T, ..>` | `(T, ..)`     | `(&T, ..)`         |
+///
+/// [^1]: `T` could be any base type
 ///
 /// [type matrix]: #appendix-type-matrix
 #[proc_macro_attribute]
@@ -424,8 +435,12 @@ struct UserFunctionAttr {
     arg_option: bool,
     /// The return type.
     return_type: ReturnType,
+    /// The inner type `T` in `impl Iterator<Item = T>`
+    iterator_item_type: Option<ReturnType>,
     /// The number of generic types.
     generic: usize,
+    /// The span of return type.
+    return_type_span: proc_macro2::Span,
     // /// `#[list(0)]` in arguments.
     // list: Vec<(usize, usize)>,
     // /// `#[struct(0)]` in arguments.
@@ -453,7 +468,9 @@ impl ReturnType {
 impl FunctionAttr {
     /// Return a unique name that can be used as an identifier.
     fn ident_name(&self) -> String {
-        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret).replace("[]", "list")
+        format!("{}_{}_{}", self.name, self.args.join("_"), self.ret)
+            .replace("[]", "list")
+            .replace(['<', '>', ' ', ','], "_")
     }
 }
 

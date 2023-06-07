@@ -181,85 +181,11 @@ macro_rules! impl_connector_properties {
 }
 
 #[macro_export]
-macro_rules! impl_common_parser_logic {
-    ($parser_name:ty) => {
-        impl $parser_name {
-            #[allow(unused_mut)]
-            #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = RwError)]
-            async fn into_chunk_stream(mut self, data_stream: $crate::source::BoxSourceStream) {
-                #[for_await]
-                for batch in data_stream {
-                    let batch = batch?;
-                    let mut builder =
-                    $crate::parser::SourceStreamChunkBuilder::with_capacity(self.rw_columns.clone(), batch.len());
-                    let mut split_offset_mapping: std::collections::HashMap<$crate::source::SplitId, String> = std::collections::HashMap::new();
-
-                    for msg in batch {
-                        if let Some(content) = msg.payload {
-                            split_offset_mapping.insert(msg.split_id, msg.offset);
-
-                            let old_op_num = builder.op_num();
-
-                            if let Err(e) = self.parse_inner(content, builder.row_writer())
-                                .await
-                            {
-                                tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                                // This will throw an error for batch
-                                self.source_ctx.report_user_source_error(e)?;
-                                continue;
-                            }
-
-                            let new_op_num = builder.op_num();
-
-                            // new_op_num - old_op_num is the number of rows added to the builder
-                            for _ in old_op_num..new_op_num {
-                                // TODO: support more kinds of SourceMeta
-                                if let $crate::source::SourceMeta::Kafka(kafka_meta) = msg.meta.clone() {
-                                    let f = |desc: &SourceColumnDesc| -> Option<risingwave_common::types::Datum> {
-                                        if !desc.is_meta {
-                                            return None;
-                                        }
-                                        match desc.name.as_str() {
-                                            "_rw_kafka_timestamp" => Some(
-                                                kafka_meta
-                                                    .timestamp
-                                                    .map(|ts| risingwave_common::cast::i64_to_timestamptz(ts).unwrap().into()),
-                                            ),
-                                            _ => unreachable!(
-                                                "kafka will not have this meta column: {}",
-                                                desc.name
-                                            ),
-                                        }
-                                    };
-                                    builder.row_writer().fulfill_meta_column(f)?;
-                                }
-                            }
-                        }
-                    }
-                    yield $crate::source::StreamChunkWithState {
-                        chunk: builder.finish(),
-                        split_offset_mapping: Some(split_offset_mapping),
-                    };
-                }
-            }
-        }
-
-        impl $crate::parser::ByteStreamSourceParser for $parser_name {
-            fn into_stream(self, data_stream: $crate::source::BoxSourceStream) -> $crate::source::BoxSourceWithStateStream {
-                self.into_chunk_stream(data_stream)
-            }
-        }
-
-    }
-}
-
-#[macro_export]
 macro_rules! impl_common_split_reader_logic {
     ($reader:ty, $props:ty) => {
         impl $reader {
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
             pub(crate) async fn into_chunk_stream(self) {
-                use $crate::parser::ByteStreamSourceParser;
                 let parser_config = self.parser_config.clone();
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
