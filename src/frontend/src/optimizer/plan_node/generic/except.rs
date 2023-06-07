@@ -14,9 +14,10 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -49,11 +50,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Except<PlanRef> {
 impl<PlanRef: GenericPlanRef> Except<PlanRef> {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-        self.fmt_fields_with_builder(&mut builder);
+        builder.field("all", &self.all);
         builder.finish()
     }
+}
 
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        builder.field("all", &self.all);
+impl<PlanRef> DistillUnit for Except<PlanRef> {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+        Pretty::childless_record(name, vec![("all", Pretty::debug(&self.all))])
     }
 }

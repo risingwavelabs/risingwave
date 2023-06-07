@@ -1394,7 +1394,7 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_count(
                     "Batch Mpp Task Number",
                     "",
                     [
@@ -1404,12 +1404,22 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_row(
+                panels.timeseries_memory(
                     "Batch Mem Usage",
                     "All memory usage of batch executors in bytes",
                     [
                         panels.target(
                             f"{metric('batch_total_mem')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Batch Heartbeat Worker Number",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_heartbeat_worker_num')}",
                             "",
                         ),
                     ],
@@ -1934,12 +1944,12 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    f"sum({metric('uploading_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -2228,6 +2238,14 @@ Objects are classified into 3 groups:
                             f"rate({metric('storage_version_checkpoint_latency_sum')}[$__rate_interval]) / rate({metric('storage_version_checkpoint_latency_count')}[$__rate_interval])",
                             "version_checkpoint_latency_avg",
                         ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Write Stop Compaction Groups",
+                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
+                    [
+                        panels.target(f"{metric('storage_write_stop_compaction_groups')}",
+                                      "compaction_group_{{compaction_group_id}}"),
                     ],
                 ),
             ],

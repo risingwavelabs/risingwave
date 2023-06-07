@@ -179,6 +179,8 @@ message ExprNode {
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
     STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -300,6 +302,9 @@ message AggCall {
     BOOL_OR = 19;
     JSONB_AGG = 20;
     JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
   }
   Type type = 1;
   repeated InputRef args = 2;

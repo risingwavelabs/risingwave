@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::cast::*;
 
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{Expr as _, ExprImpl, InputRef, Literal};
 
 /// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
 /// It is a simplified version of the rule used in
@@ -52,7 +52,7 @@ pub fn align_types<'a>(
     // Essentially a filter_map followed by a try_reduce, which is unstable.
     let mut ret_type = None;
     for e in &exprs {
-        if e.is_unknown() {
+        if e.is_untyped() {
             continue;
         }
         ret_type = match ret_type {
@@ -82,9 +82,9 @@ pub fn align_array_and_element(
     element_indices: &[usize],
     inputs: &mut [ExprImpl],
 ) -> std::result::Result<DataType, ErrorCode> {
-    let mut dummy_element = match inputs[array_idx].is_unknown() {
+    let mut dummy_element = match inputs[array_idx].is_untyped() {
         // when array is unknown type, make an unknown typed value (e.g. null)
-        true => ExprImpl::literal_null(DataType::Varchar),
+        true => ExprImpl::from(Literal::new_untyped(None)),
         false => {
             let array_element_type = match inputs[array_idx].return_type() {
                 DataType::List(t) => *t,
@@ -94,7 +94,7 @@ pub fn align_array_and_element(
             InputRef::new(0, array_element_type).into()
         }
     };
-    assert_eq!(dummy_element.is_unknown(), inputs[array_idx].is_unknown());
+    assert_eq!(dummy_element.is_untyped(), inputs[array_idx].is_untyped());
 
     let common_element_type = align_types(
         inputs
@@ -126,17 +126,16 @@ pub fn cast_ok_base(source: DataTypeName, target: DataTypeName, allows: CastCont
 fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> bool {
     match (source, target) {
         (DataType::Struct(lty), DataType::Struct(rty)) => {
-            if lty.fields.is_empty() || rty.fields.is_empty() {
+            if lty.is_empty() || rty.is_empty() {
                 unreachable!("record type should be already processed at this point");
             }
-            if lty.fields.len() != rty.fields.len() {
+            if lty.len() != rty.len() {
                 // only cast structs of the same length
                 return false;
             }
             // ... and all fields are castable
-            lty.fields
-                .iter()
-                .zip_eq_fast(rty.fields.iter())
+            lty.types()
+                .zip_eq_fast(rty.types())
                 .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
