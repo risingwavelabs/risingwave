@@ -227,8 +227,8 @@ message CordonWorkerNodeResponse {
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
   rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
-  rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse); 
-  rpc CordonWorkerNode(CordonWorkerNodeRequest) returns (CordonWorkerNodeResponse); 
+  rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
+  rpc CordonWorkerNode(CordonWorkerNodeRequest) returns (CordonWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
 

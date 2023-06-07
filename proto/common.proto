@@ -6,19 +6,19 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message Actor {
-  uint32 actor_id = 1; 
+  uint32 actor_id = 1;
   uint32 parallel_units_id = 2;
 }
 
 message Fragment {
-  uint32 id = 1; 
-  repeated Actor actor_list = 2; 
-  uint32 type_flag = 3; 
+  uint32 id = 1;
+  repeated Actor actor_list = 2;
+  uint32 type_flag = 3;
 }
 
 message Schedule {
-  repeated Fragment fragments = 1; 
-  repeated WorkerNode workers = 2; 
+  repeated Fragment fragments = 1;
+  repeated WorkerNode workers = 2;
 }
 
 message Status {
