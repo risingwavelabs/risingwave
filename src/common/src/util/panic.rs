@@ -70,7 +70,7 @@ pub fn is_catching_unwind() -> bool {
     CATCH_UNWIND.try_with(|_| ()).is_ok()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 mod tests {
     #![allow(clippy::disallowed_methods)]
 
