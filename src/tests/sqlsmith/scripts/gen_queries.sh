@@ -180,6 +180,21 @@ check_different_queries() {
   fi
 }
 
+# Check that no queries are empty
+check_queries_have_at_least_create_table() {
+  for QUERY_FILE in "$OUTDIR"/*/queries.sql
+  do
+    N_CREATE_TABLE=$(cat "$QUERY_FILE" | grep "CREATE TABLE" | wc -l)
+    if [[ $N_CREATE_TABLE -ge 1 ]]; then
+      continue;
+    else
+      echo_err "[ERROR] Empty Query for $QUERY_FILE"
+      cat "$QUERY_FILE"
+      exit 1
+    fi
+  done
+}
+
 # Check if any query generation step failed, and any query file not generated.
 check_failed_to_generate_queries() {
   if [[ "$(ls "$OUTDIR"/* | grep -c queries.sql)" -lt "$TEST_NUM" ]]; then
@@ -246,6 +261,8 @@ validate() {
   echo_err "[CHECK PASSED] Generated queries should be different"
   check_failed_to_generate_queries
   echo_err "[CHECK PASSED] No seeds failed to generate queries"
+  check_queries_have_at_least_create_table
+  echo_err "[CHECK PASSED] All queries at least have CREATE TABLE"
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
