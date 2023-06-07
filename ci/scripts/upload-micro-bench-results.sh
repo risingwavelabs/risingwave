@@ -47,8 +47,8 @@ BRANCH=$(get_branch)
 
 wget https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
 tar -xvf docker-24.0.2.tgz --no-same-owner
-sudo cp docker/* /usr/bin
-sudo dockerd &
+cp docker/* /usr/bin
+dockerd &
 
 docker -it -rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
