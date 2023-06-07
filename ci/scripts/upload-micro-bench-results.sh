@@ -38,13 +38,13 @@ get_commit() {
   | jq '.commit'
 }
 
+setup
 
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
 END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
-setup
 
 #echo "--- Install Necessary Tools"
 ## pip3 install toml-cli
