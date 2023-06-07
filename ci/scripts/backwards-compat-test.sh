@@ -57,7 +57,6 @@ RISEDEV_CONFIGURED=true
 ENABLE_MINIO=true
 ENABLE_ETCD=true
 ENABLE_KAFKA=true
-ENABLE_COMPUTE_TRACING=true
 
 # Fetch `risingwave` binary from release.
 ENABLE_BUILD_RUST=false
