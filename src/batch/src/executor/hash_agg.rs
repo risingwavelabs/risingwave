@@ -331,6 +331,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let agg_prost = HashAggNode {
@@ -397,6 +398,7 @@ mod tests {
             distinct: false,
             order_by: vec![],
             filter: None,
+            direct_args: vec![],
         };
 
         let agg_prost = HashAggNode {

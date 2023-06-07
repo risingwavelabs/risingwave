@@ -56,6 +56,7 @@ impl AggregateState {
             filter: None,
             // TODO(rc): support distinct on window function call? PG doesn't support it either.
             distinct: false,
+            direct_args: vec![],
         };
         Ok(Self {
             agg_call,

@@ -60,6 +60,7 @@ async fn test_merger_sum_aggr() {
                     column_orders: vec![],
                     filter: None,
                     distinct: false,
+                    direct_args: vec![],
                 },
                 AggCall {
                     kind: AggKind::Sum,
@@ -68,6 +69,7 @@ async fn test_merger_sum_aggr() {
                     column_orders: vec![],
                     filter: None,
                     distinct: false,
+                    direct_args: vec![],
                 },
             ],
             vec![],
@@ -157,6 +159,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -165,6 +168,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Count, // as row count, index: 2
@@ -173,6 +177,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
         ],
         2, // row_count_index
