@@ -29,3 +29,23 @@ CREATE TABLE t_remote_1 (
     v_jsonb JSON,
     v_bytea BLOB
 );
+
+CREATE TABLE t_types (
+   id BIGINT PRIMARY KEY,
+   varchar_column VARCHAR(100),
+   text_column TEXT,
+   integer_column INTEGER,
+   smallint_column SMALLINT,
+   bigint_column BIGINT,
+   decimal_column DECIMAL(10,2),
+   real_column float,
+   double_column DOUBLE,
+   boolean_column TINYINT,
+   date_column DATE,
+   time_column TIME,
+   timestamp_column TIMESTAMP,
+   interval_column VARCHAR(100),
+   jsonb_column JSON,
+   array_column LONGTEXT,
+   array_column2 LONGTEXT
+);
