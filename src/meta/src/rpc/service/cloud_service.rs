@@ -49,11 +49,12 @@ impl<S: MetaStore> CloudServiceImpl<S> {
 }
 
 #[inline(always)]
-fn new_rw_cloud_validate_source_err(
+fn new_rwc_validate_fail_response(
     error_type: ErrorType,
     error_message: String,
 ) -> Response<RwCloudValidateSourceResponse> {
     Response::new(RwCloudValidateSourceResponse {
+        ok: false,
         error: Some(Error {
             error_type: error_type.into(),
             error_message,
@@ -90,7 +91,7 @@ where
                 .get_connection_by_name(connection_name)
                 .await;
             if let Err(e) = connection {
-                return Ok(new_rw_cloud_validate_source_err(
+                return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkConnectionNotFound,
                     e.to_string(),
                 ));
@@ -101,25 +102,28 @@ where
                         let privatelink_status = cli
                             .is_vpc_endpoint_ready(service.endpoint_id.as_str())
                             .await;
-                        if let Err(e) = privatelink_status {
-                            return Ok(new_rw_cloud_validate_source_err(
-                                ErrorType::PrivatelinkUnavailable,
-                                e.to_string(),
-                            ));
-                        }
-                        if !privatelink_status.unwrap() {
-                            return Ok(new_rw_cloud_validate_source_err(
-                                ErrorType::PrivatelinkUnavailable,
-                                format!(
-                                    "Private link endpoint {} is not ready",
-                                    service.endpoint_id,
-                                ),
-                            ));
-                        }
+                        match privatelink_status {
+                            Err(e) => {
+                                return Ok(new_rwc_validate_fail_response(
+                                    ErrorType::PrivatelinkUnavailable,
+                                    e.to_string(),
+                                ));
+                            }
+                            Ok(false) => {
+                                return Ok(new_rwc_validate_fail_response(
+                                    ErrorType::PrivatelinkUnavailable,
+                                    format!(
+                                        "Private link endpoint {} is not ready",
+                                        service.endpoint_id,
+                                    ),
+                                ));
+                            }
+                            _ => (),
+                        };
                         if let Err(e) =
                             insert_privatelink_broker_rewrite_map(&service, &mut source_cfg)
                         {
-                            return Ok(new_rw_cloud_validate_source_err(
+                            return Ok(new_rwc_validate_fail_response(
                                 ErrorType::PrivatelinkResolveErr,
                                 e.to_string(),
                             ));
@@ -127,7 +131,7 @@ where
                     }
                 }
             } else {
-                return Ok(new_rw_cloud_validate_source_err(
+                return Ok(new_rwc_validate_fail_response(
                     ErrorType::PrivatelinkResolveErr,
                     format!("connection {} has no info available", connection_name),
                 ));
@@ -138,47 +142,42 @@ where
             source_cfg.into_iter().map(|(k, v)| (k, v)).collect();
         let props = ConnectorProperties::extract(source_cfg);
         if let Err(e) = props {
-            return Ok(new_rw_cloud_validate_source_err(
+            return Ok(new_rwc_validate_fail_response(
                 ErrorType::KafkaInvalidProperties,
                 e.to_string(),
             ));
         };
         let enumerator = SplitEnumeratorImpl::create(props.unwrap()).await;
         if let Err(e) = enumerator {
-            return Ok(Response::new(RwCloudValidateSourceResponse {
-                error: Some(Error {
-                    error_type: ErrorType::KafkaInvalidProperties.into(),
-                    error_message: e.to_string(),
-                }),
-            }));
+            return Ok(new_rwc_validate_fail_response(
+                ErrorType::KafkaInvalidProperties,
+                e.to_string(),
+            ));
         }
         if let Err(e) = enumerator.unwrap().list_splits().await {
             let error_message = e.to_string();
             if error_message.contains("BrokerTransportFailure") {
-                return Ok(Response::new(RwCloudValidateSourceResponse {
-                    error: Some(Error {
-                        error_type: ErrorType::KafkaBrokerUnreachable.into(),
-                        error_message: e.to_string(),
-                    }),
-                }));
+                return Ok(new_rwc_validate_fail_response(
+                    ErrorType::KafkaBrokerUnreachable,
+                    e.to_string(),
+                ));
             }
             static TOPIC_NOT_FOUND: LazyLock<Regex> =
                 LazyLock::new(|| Regex::new(r"topic .* not found").unwrap());
             if TOPIC_NOT_FOUND.is_match(error_message.as_str()) {
-                return Ok(Response::new(RwCloudValidateSourceResponse {
-                    error: Some(Error {
-                        error_type: ErrorType::KafkaTopicNotFound.into(),
-                        error_message: e.to_string(),
-                    }),
-                }));
+                return Ok(new_rwc_validate_fail_response(
+                    ErrorType::KafkaTopicNotFound,
+                    e.to_string(),
+                ));
             }
-            return Ok(Response::new(RwCloudValidateSourceResponse {
-                error: Some(Error {
-                    error_type: ErrorType::KafkaOther.into(),
-                    error_message: e.to_string(),
-                }),
-            }));
+            return Ok(new_rwc_validate_fail_response(
+                ErrorType::KafkaOther,
+                e.to_string(),
+            ));
         }
-        Ok(Response::new(RwCloudValidateSourceResponse { error: None }))
+        Ok(Response::new(RwCloudValidateSourceResponse {
+            ok: true,
+            error: None,
+        }))
     }
 }
