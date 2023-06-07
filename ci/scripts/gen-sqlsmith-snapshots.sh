@@ -15,8 +15,8 @@ popd
 echo "source common utils"
 source ci/scripts/common.sh
 
-export RANDOM_SEED=1
-export TEST_NUM=1
+export ENABLE_RANDOM_SEED=1
+export TEST_NUM=100
 pushd src/tests/sqlsmith/scripts
 echo "--- Running generation"
 SNAPSHOT_DIR=$SNAPSHOT_DIR ./gen_queries.sh generate

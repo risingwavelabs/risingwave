@@ -127,9 +127,9 @@ extract_fail_info_from_logs() {
 ################# Generate
 
 # Generate $TEST_NUM number of seeds.
-# if `RANDOM_SEED=1`, we will generate random seeds.
+# if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
 gen_seed() {
-  if [[ $RANDOM_SEED -eq 1 ]]; then
+  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
     seq 1 32768 | shuf | tail -n "$TEST_NUM"
   else
     seq 1 32678 | tail -n "$TEST_NUM"
@@ -233,8 +233,9 @@ setup() {
     echo "TEST_NUM unset, default to TEST_NUM=100"
     TEST_NUM=100
   fi
-  if [[ -z "$RANDOM_SEED" ]]; then
-    echo "RANDOM_SEED unset, default RANDOM_SEED=false (0)"
+  if [[ -z "$ENABLE_RANDOM_SEED" ]]; then
+    echo "ENABLE_RANDOM_SEED unset, default ENABLE_RANDOM_SEED=false (0)"
+    ENABLE_RANDOM_SEED=0
   fi
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
