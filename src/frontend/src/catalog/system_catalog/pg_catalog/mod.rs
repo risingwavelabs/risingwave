@@ -31,6 +31,7 @@ pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
@@ -63,6 +64,7 @@ pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
@@ -687,6 +689,10 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_CONSTRAINT_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_pg_proc_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_PROC_DATA_ROWS.clone())
     }
 
     pub(crate) fn read_pg_tables_info(&self) -> Result<Vec<OwnedRow>> {

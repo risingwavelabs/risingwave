@@ -48,6 +48,8 @@ pub const PG_TYPE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "typdefault"),
     // None
     (DataType::Varchar, "typcategory"),
+    // None
+    (DataType::Int32, "typreceive"),
 ];
 
 // TODO: uniform the default data with `TypeOid` under `pg_field_descriptor`.
@@ -83,6 +85,7 @@ pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
                 Some(ScalarImpl::Int32(0)),
                 Some(ScalarImpl::Utf8("b".into())),
                 Some(ScalarImpl::Int32(0)),
+                None,
                 None,
                 None,
             ])
