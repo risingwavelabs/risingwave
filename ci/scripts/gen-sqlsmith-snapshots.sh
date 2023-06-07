@@ -10,8 +10,9 @@ if [[ ! -d $SNAPSHOT_DIR ]]; then
 fi
 set -u
 popd
+
 export RANDOM_SEED=1
 export TEST_NUM=1
 pushd src/tests/sqlsmith/scripts
-./gen_queries.sh generate
+SNAPSHOT_DIR=$SNAPSHOT_DIR ./gen_queries.sh generate
 popd
