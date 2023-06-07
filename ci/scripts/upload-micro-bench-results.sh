@@ -50,6 +50,9 @@ tar -xvf docker-24.0.2.tgz --no-same-owner
 cp docker/* /usr/bin
 dockerd &
 
+# Wait for docker daemon
+sleep 20
+
 docker run -it --rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch "$BRANCH" \
