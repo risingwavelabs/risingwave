@@ -103,7 +103,7 @@ run_sql "select * from m ORDER BY v1;" > BEFORE
 echo "--- Kill cluster on tag $TAG"
 ./risedev k
 
-echo "--- Checking against $RW_COMMIT"
+echo "--- Setup Risingwave @ $RW_COMMIT"
 download_and_prepare_rw dev common
 
 echo "--- Kill cluster on tag $TAG"
