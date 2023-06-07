@@ -38,10 +38,22 @@ body:
       description: Do you run RisingWave via Docker / Homebrew / RiseDev / RisingWave Cloud / ...?
       placeholder: |
         via Docker Compose. My `docker-compose.yml` is: ...
-  - type: input
+  - type: textarea
     attributes:
       label: The version of RisingWave
       description: The output of `select version()` and/or the docker image tag and ID.
+      placeholder: |
+        ```
+        dev=> select version();
+                                   version
+        -----------------------------------------------------------------------------
+        PostgreSQL 8.3-RisingWave-0.19.0 (01659936e12307e28e13287dcc3ca899b7f701e3)
+
+
+        docker image ls
+        REPOSITORY                                 TAG         IMAGE ID       CREATED         SIZE
+        risingwavelabs/risingwave                  latest      c0fb5556d7cb   6 days ago      1.99GB
+        ```
   - type: textarea
     attributes:
       label: Additional context
