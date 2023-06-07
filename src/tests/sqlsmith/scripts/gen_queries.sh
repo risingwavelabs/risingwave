@@ -224,13 +224,14 @@ setup() {
   pushd $RW_HOME
 }
 
-build_madsim() {
-  cargo make sslt-build-all --profile ci-sim
+setup_madsim() {
+  download-and-decompress-artifact risingwave_simulation .
+  chmod +x ./risingwave_simulation
 }
 
 build() {
-  build_madsim
-  echo_err "[INFO] Finished build"
+  setup_madsim
+  echo_err "[INFO] Finished setting up madsim"
 }
 
 generate() {

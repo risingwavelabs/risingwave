@@ -12,7 +12,9 @@ steps:
 
   - label: "Generate sqlsmith snapshots"
     command: "ci/scripts/gen-sqlsmith-snapshots.sh"
-    depends_on: "build"
+    depends_on:
+      - "build"
+      - "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
