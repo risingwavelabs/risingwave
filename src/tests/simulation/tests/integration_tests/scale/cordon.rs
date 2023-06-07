@@ -25,35 +25,29 @@ use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 use risingwave_simulation::cluster::Configuration;
-use risingwave_simulation::nexmark::queries::{q3, q4};
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
-async fn get_pus_on_cordoned_nodes(
-    cluster: &NexmarkCluster,
-    cordoned_nodes: &Vec<WorkerNode>,
-) -> Result<Vec<Actor>> {
-    let info = cluster.get_cluster_info().await?;
-    let (fragments, workers) = get_schedule(info).await;
-    let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
+// Get all the parallel units which are located on cordoned workers
+fn pu_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> Result<Vec<u32>> {
+    let (_, workers) = get_schedule(info);
+    let cordoned_nodes_ids = workers
+        .iter()
+        .filter(|w| w.state() == State::Cordoned)
+        .map(|n| n.id)
+        .collect_vec();
 
-    let mut cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
+    let mut cordoned_pu_ids: Vec<Vec<ParallelUnit>> = vec![];
     for worker in workers {
         if cordoned_nodes_ids.contains(&worker.id) {
-            cordoned_pus.push(worker.parallel_units);
+            cordoned_pu_ids.push(worker.parallel_units);
         }
     }
-    let cordoned_pus = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
 
-    let mut actors_on_cordoned: Vec<Actor> = vec![];
-    for frag in fragments {
-        for actor in frag.actor_list {
-            let pu_id = actor.parallel_units_id;
-            if cordoned_pus.contains(&pu_id) {
-                actors_on_cordoned.push(actor);
-            }
-        }
-    }
-    Ok(actors_on_cordoned)
+    Ok(cordoned_pu_ids
+        .iter()
+        .flatten()
+        .map(|pu| pu.id)
+        .collect_vec())
 }
 
 /// create cluster, run query, cordon node, run other query. Cordoned node should NOT contain actors
@@ -93,27 +87,17 @@ async fn cordoned_nodes_do_not_get_new_actors(
     }
     tracing::info!(log_msg);
 
-    let cordoned_nodes_ids = cordoned_nodes.iter().map(|n| n.id).collect_vec();
-
     // check which actors are on cordoned nodes
     let info = cluster.get_cluster_info().await?;
-    let (fragments, workers) = get_schedule(info).await;
-    // TODO: do this fancy with map
-    let mut cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
-    for worker in workers {
-        if cordoned_nodes_ids.contains(&worker.id) {
-            cordoned_pus.push(worker.parallel_units);
-        }
-    }
-    assert!(cordoned_nodes.len() == cordoned_pus.len());
-    let cordoned_pus_ids = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
+    let (fragments, _) = get_schedule(info.clone());
+    let cordoned_pus_ids = pu_ids_on_cordoned_nodes(info)?;
+
     let mut actors_on_cordoned: Vec<u32> = vec![];
-    // TODO: do this with map
     for frag in fragments {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
             if cordoned_pus_ids.contains(&pu_id) {
-                actors_on_cordoned.push(pu_id);
+                actors_on_cordoned.push(pu_id); // actor.id
             }
         }
     }
@@ -131,23 +115,15 @@ async fn cordoned_nodes_do_not_get_new_actors(
 
     // No actors from other query on cordoned nodes
     let info2 = cluster.get_cluster_info().await?;
-    let (fragments2, workers2) = get_schedule(info2).await;
-    // TODO: do this fancy with map
-    let mut cordoned_pus2: Vec<Vec<ParallelUnit>> = vec![];
-    for worker in workers2 {
-        if cordoned_nodes_ids.contains(&worker.id) {
-            cordoned_pus2.push(worker.parallel_units);
-        }
-    }
-    assert!(cordoned_nodes.len() == cordoned_pus2.len());
-    let cordoned_pus_ids = cordoned_pus.iter().flatten().map(|pu| pu.id).collect_vec();
-    // TODO: do this with map
-    let actors_on_cordoned2: Vec<u32> = vec![];
+    let (fragments2, _) = get_schedule(info2.clone());
+    let cordoned_pus_ids2 = pu_ids_on_cordoned_nodes(info2)?;
+
+    let mut actors_on_cordoned2: Vec<u32> = vec![];
     for frag in fragments2 {
         for actor in frag.actor_list {
             let pu_id = actor.parallel_units_id;
-            if cordoned_pus_ids.contains(&pu_id) {
-                actors_on_cordoned.push(pu_id); // TODO: actor.actor_id
+            if cordoned_pus_ids2.contains(&pu_id) {
+                actors_on_cordoned2.push(pu_id); // TODO: actor.actor_id
             }
         }
     }
@@ -220,7 +196,7 @@ async fn cordoned_nodes_do_not_get_actors(
 
     // no actors on cordoned nodes
     let info = cluster.get_cluster_info().await?;
-    let (fragments, workers) = get_schedule(info).await;
+    let (fragments, workers) = get_schedule(info);
 
     // TODO: do this fancy with map
     let mut cordoned_pus: Vec<Vec<ParallelUnit>> = vec![];
@@ -279,7 +255,7 @@ async fn cordon_is_idempotent(
 
         // TODO: do this with set operations
         // we only ever expect the same workers to be cordoned
-        let (_, workers) = get_schedule(cluster.get_cluster_info().await?).await;
+        let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
         let mut new_ids = workers
             .iter()
             .filter(|w| w.state() == State::Cordoned)
@@ -316,7 +292,7 @@ async fn invalid_reschedule(
     cluster.run(select).await?;
     sleep(Duration::from_secs(sleep_sec)).await;
 
-    let (fragments, _) = get_schedule(cluster.get_cluster_info().await?).await;
+    let (fragments, _) = get_schedule(cluster.get_cluster_info().await?);
     let cordoned_pus: Vec<&ParallelUnit> = cordoned_nodes
         .iter()
         .map(|w| w.get_parallel_units())
@@ -355,7 +331,7 @@ async fn invalid_reschedule(
     Ok(())
 }
 
-async fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
+fn get_schedule(cluster_info: GetClusterInfoResponse) -> (Vec<Fragment>, Vec<WorkerNode>) {
     // Compile fragments
     let mut fragment_list: Vec<Fragment> = vec![];
     for table_fragment in cluster_info.get_table_fragments() {
