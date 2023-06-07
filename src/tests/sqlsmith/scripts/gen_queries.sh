@@ -286,7 +286,7 @@ sync_queries() {
   git branch -D old-main
   set -e
   git checkout -b old-main
-  git push -f
+  git push -f --set-upstream origin old-main
   git checkout -
   popd
 }
