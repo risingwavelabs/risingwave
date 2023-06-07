@@ -46,6 +46,7 @@ full-without-monitoring:
     - use: minio
     - use: etcd
     - use: meta-node
+      enable-in-memory-kv-state-backend: false
     - use: compute-node
     - use: frontend
     - use: compactor
@@ -111,7 +112,7 @@ echo "--- Kill cluster on tag $TAG"
 echo "--- Setup Risingwave @ $RW_COMMIT"
 download_and_prepare_rw ci-dev common
 
-echo "--- Kill cluster on tag $TAG"
+echo "--- Start cluster on latest"
 ./risedev d full-without-monitoring
 
 echo "--- Wait ${RECOVERY_DURATION}s for Recovery"
