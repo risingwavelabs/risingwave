@@ -25,6 +25,7 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{
     unbounded_channel as channel, UnboundedReceiver as Receiver, UnboundedSender as Sender,
 };
@@ -70,7 +71,8 @@ fn set_should_use_trace() -> bool {
 
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
-    tokio::spawn(async move {
+    let rt = Runtime::new().unwrap();
+    rt.spawn(async move {
         let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_string());
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
