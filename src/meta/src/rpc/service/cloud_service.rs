@@ -28,7 +28,6 @@ use tonic::{Request, Response, Status};
 use crate::manager::CatalogManagerRef;
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::storage::MetaStore;
-use crate::MetaError;
 
 pub struct CloudServiceImpl<S>
 where
@@ -45,6 +44,19 @@ impl<S: MetaStore> CloudServiceImpl<S> {
             aws_client,
         }
     }
+}
+
+#[inline(always)]
+fn new_rw_cloud_validate_source_err(
+    error_type: ErrorType,
+    error_message: String,
+) -> Response<RwCloudValidateSourceResponse> {
+    Response::new(RwCloudValidateSourceResponse {
+        error: Some(Error {
+            error_type: error_type.into(),
+            error_message,
+        }),
+    })
 }
 
 #[async_trait]
@@ -68,48 +80,77 @@ where
         let cli = self.aws_client.as_ref().unwrap();
         let mut source_cfg: BTreeMap<String, String> =
             req.source_config.into_iter().map(|(k, v)| (k, v)).collect();
-        // if connection_name provided, check whether endpoint service is available
-        // currently only support aws privatelink connection
+        // if connection_name provided, check whether endpoint service is available and resolve
+        // broker rewrite map currently only support aws privatelink connection
         if let Some(connection_name) = source_cfg.get("connection.name") {
             let connection = self
                 .catalog_manager
                 .get_connection_by_name(connection_name)
-                .await
-                .map_err(Status::from)?;
-            if let Some(info) = connection.info {
+                .await;
+            if let Err(e) = connection {
+                return Ok(new_rw_cloud_validate_source_err(
+                    ErrorType::ConnectionNotFound,
+                    e.to_string(),
+                ));
+            }
+            if let Some(info) = connection.unwrap().info {
                 match info {
                     PrivateLinkService(service) => {
-                        if !cli
+                        let privatelink_status = cli
                             .is_vpc_endpoint_ready(service.endpoint_id.as_str())
-                            .await
-                            .map_err(Status::from)?
-                        {
-                            return Err(MetaError::unavailable(format!(
-                                "Private link endpoint {} is not ready",
-                                service.endpoint_id
-                            ))
-                            .into());
+                            .await;
+                        if let Err(e) = privatelink_status {
+                            return Ok(new_rw_cloud_validate_source_err(
+                                ErrorType::PrivatelinkUnavailable,
+                                e.to_string(),
+                            ));
                         }
-                        insert_privatelink_broker_rewrite_map(&service, &mut source_cfg)
-                            .map_err(|e| Status::from(MetaError::from(e)))?;
+                        if !privatelink_status.unwrap() {
+                            return Ok(new_rw_cloud_validate_source_err(
+                                ErrorType::PrivatelinkUnavailable,
+                                format!(
+                                    "Private link endpoint {} is not ready",
+                                    service.endpoint_id,
+                                ),
+                            ));
+                        }
+                        if let Err(e) =
+                            insert_privatelink_broker_rewrite_map(&service, &mut source_cfg)
+                        {
+                            return Ok(new_rw_cloud_validate_source_err(
+                                ErrorType::PrivatelinkResolveErr,
+                                e.to_string(),
+                            ));
+                        }
                     }
                 }
             } else {
-                return Err(Status::from(MetaError::unavailable(format!(
-                    "connection {} has no info available",
-                    connection_name
-                ))));
+                return Ok(new_rw_cloud_validate_source_err(
+                    ErrorType::PrivatelinkResolveErr,
+                    format!("connection {} has no info available", connection_name),
+                ));
             }
         }
         // try fetch kafka metadata, return error message on failure
         let source_cfg: HashMap<String, String> =
             source_cfg.into_iter().map(|(k, v)| (k, v)).collect();
-        let props = ConnectorProperties::extract(source_cfg)
-            .map_err(|e| Status::from(MetaError::from(e)))?;
-        let mut enumerator = SplitEnumeratorImpl::create(props)
-            .await
-            .map_err(|e| Status::from(MetaError::from(e)))?;
-        if let Err(e) = enumerator.list_splits().await {
+        let props = ConnectorProperties::extract(source_cfg);
+        if let Err(e) = props {
+            return Ok(new_rw_cloud_validate_source_err(
+                ErrorType::KafkaInvalidProperties,
+                e.to_string(),
+            ));
+        };
+        let enumerator = SplitEnumeratorImpl::create(props.unwrap()).await;
+        if let Err(e) = enumerator {
+            return Ok(Response::new(RwCloudValidateSourceResponse {
+                error: Some(Error {
+                    error_type: ErrorType::KafkaInvalidProperties.into(),
+                    error_message: e.to_string(),
+                }),
+            }));
+        }
+        if let Err(e) = enumerator.unwrap().list_splits().await {
             return Ok(Response::new(RwCloudValidateSourceResponse {
                 error: Some(Error {
                     error_type: ErrorType::TopicNotFound.into(),

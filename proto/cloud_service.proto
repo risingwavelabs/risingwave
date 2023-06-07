@@ -19,9 +19,13 @@ message RwCloudValidateSourceResponse {
   // On validation failure, we return the error.
   enum ErrorType {
     UNSPECIFIED = 0;
-    PRIVATELINK_UNAVAILABLE = 1;
-    TOPIC_NOT_FOUND = 2;
-    BROCKER_UNREACHABLE = 3;
+    CONNECTION_NOT_FOUND = 1;
+    PRIVATELINK_UNAVAILABLE = 2;
+    PRIVATELINK_RESOLVE_ERR = 3;
+    KAFKA_INVALID_PROPERTIES = 4;
+    TOPIC_NOT_FOUND = 5;
+    BROCKER_UNREACHABLE = 6;
+    OTHER = 7;
   }
   
   message Error {
