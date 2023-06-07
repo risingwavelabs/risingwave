@@ -3,7 +3,7 @@
 # EXAMPLE USAGE:
 : '
 AWS_PROFILE=rwctest \
-BUILDKITE_BUILD_NO=511 \
+BUILDKITE_BUILD_NUMBER=511 \
 ./ci/scripts/upload-micro-bench-results.sh
 '
 
@@ -12,23 +12,23 @@ set -euo pipefail
 
 get_branch() {
    curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
-   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NO" \
+   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
   | jq '.branch'
 }
 
 get_date() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
-   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NO" \
+   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
   | jq '.jobs | .[] | select ( .name | contains("run micro benchmarks")) | .finished_at'
 }
 
 get_commit() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
-   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NO" \
+   "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
   | jq '.commit'
 }
 
-BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NO"
+BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
 END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)

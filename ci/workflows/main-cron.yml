@@ -269,7 +269,7 @@ steps:
     timeout_in_minutes: 35
 
   - label: "upload micro benchmarks"
-    command: "ci/scripts/upload-micro-bench-results.sh"
+    command: "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
     depends_on: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
