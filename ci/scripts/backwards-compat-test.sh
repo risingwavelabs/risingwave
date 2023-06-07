@@ -78,7 +78,7 @@ mv target/debug/risedev-dev-ci-dev target/debug/risedev-dev
 
 echo "--- Setup old release $TAG"
 wget "https://github.com/risingwavelabs/risingwave/releases/download/${TAG}/risingwave-${TAG}-x86_64-unknown-linux.tar.gz"
-tar -xvf risingwave-v${TAG}-x86_64-unknown-linux.tar.gz
+tar -xvf risingwave-${TAG}-x86_64-unknown-linux.tar.gz
 mkdir -p target/debug
 cp risingwave target/debug/risingwave
 
