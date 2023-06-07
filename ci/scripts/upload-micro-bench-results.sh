@@ -19,7 +19,9 @@ get_branch() {
 get_date() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
-  | jq '.jobs | .[] | select ( .name | contains("run micro benchmarks")) | .finished_at'
+  | jq '.jobs | .[] | select ( .name | contains("micro benchmark")) | .finished_at' \
+  | sed 's/\.[0-9]*Z/Z/' \
+  | sed 's/\"//g'
 }
 
 get_commit() {
@@ -34,7 +36,7 @@ COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
 echo "--- Install Necessary Tools"
-# pip install toml-cli
+# pip3 install toml-cli
 # download qa files for use in nexmark-bench.
 if [[ ! -f "./qa" ]]; then
   curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash && ./qa --help
@@ -43,16 +45,18 @@ fi
 echo "--- AWS and Kube Config"
 set +u
 if [[ -z "$AWS_PROFILE" ]]; then
-   # FIXME(kwannoel): Ask @huangjw to help with configuring it.
-   aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
-   aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
+  # FIXME(kwannoel): Ask @huangjw to help with configuring it.
+  aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
+  aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
 fi
 set -u
 
 # Get certs for command client from s3.
 # Use by qa command.
 echo "--- Download S3 Crt Keys"
-aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
+if [[ ! -d "./certs" ]]; then
+  aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
+fi
 
 # Use this command to create the execution.
 # For microbench mark it need not be some complex.

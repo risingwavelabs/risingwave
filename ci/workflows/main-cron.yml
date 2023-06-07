@@ -268,7 +268,7 @@ steps:
           mount-buildkite-agent: true
     timeout_in_minutes: 35
 
-  - label: "upload micro benchmarks"
+  - label: "upload micro-benchmark"
     command: "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
     depends_on: "run-micro-benchmarks"
     plugins:
