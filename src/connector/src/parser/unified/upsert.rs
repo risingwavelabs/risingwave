@@ -3,7 +3,7 @@ use risingwave_common::types::DataType;
 use super::{Access, ChangeEvent, ChangeEventOperation};
 use crate::parser::unified::AccessError;
 
-/// UpsertAccess wraps a key-value message format into an upsert source.
+/// `UpsertAccess` wraps a key-value message format into an upsert source.
 /// A key accessor and a value accessor are required.
 pub struct UpsertAccess<K, V> {
     key_accessor: Option<K>,
@@ -51,7 +51,7 @@ where
 {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
         let create_error = |name: String| AccessError::Undefined {
-            name: name,
+            name,
             path: String::new(),
         };
         match path.first() {

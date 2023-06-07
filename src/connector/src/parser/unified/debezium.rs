@@ -17,15 +17,15 @@ pub const DEBEZIUM_UPDATE_OP: &str = "u";
 pub const DEBEZIUM_DELETE_OP: &str = "d";
 
 impl<A> DebeziumAdapter<A> {
-    /// Panic: one of the key_accessor or value_accessor must be provided.
+    /// Panic: one of the `key_accessor` or `value_accessor` must be provided.
     pub fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self
     where
         A: Access,
     {
         assert!(key_accessor.is_some() || value_accessor.is_some());
         Self {
-            key_accessor,
             value_accessor,
+            key_accessor,
         }
     }
 }
@@ -43,7 +43,7 @@ where
             ChangeEventOperation::Delete => self
                 .value_accessor
                 .as_ref()
-                .or_else(|| self.key_accessor.as_ref())
+                .or(self.key_accessor.as_ref())
                 .unwrap()
                 .access(&[BEFORE, name], Some(type_expected)),
             // value should not be None.

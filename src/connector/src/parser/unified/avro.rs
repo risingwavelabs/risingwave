@@ -13,7 +13,7 @@ use crate::parser::avro::util::{
     avro_decimal_to_rust_decimal, extract_inner_field_schema, unix_epoch_days,
 };
 #[derive(Clone)]
-/// Options for parsing an AvroValue into Datum, with an optional avro schema.
+/// Options for parsing an `AvroValue` into Datum, with an optional avro schema.
 pub struct AvroParseOptions<'a> {
     pub schema: Option<&'a Schema>,
     /// Strict Mode
@@ -47,13 +47,13 @@ impl<'a> AvroParseOptions<'a> {
 
     /// Parse an avro value into expected type.
     /// 3 kinds of type info are used to parsing things.
-    ///     - type_expected. The type that we expect the value is.
+    ///     - `type_expected`. The type that we expect the value is.
     ///     - value type. The type info together with the value argument.
-    ///     - schema. The AvroSchema provided in option.
-    /// If both type_expected and schema are provided, it will check both strictly.
-    /// If only type_expected is provided, it will try to match the value type and the
-    /// type_expected, coverting the value if possible. If only value is provided (without
-    /// schema and type_expected), the DateType will be inferred.
+    ///     - schema. The `AvroSchema` provided in option.
+    /// If both `type_expected` and schema are provided, it will check both strictly.
+    /// If only `type_expected` is provided, it will try to match the value type and the
+    /// `type_expected`, converting the value if possible. If only value is provided (without
+    /// schema and `type_expected`), the `DateType` will be inferred.
     pub fn parse<'b>(&self, value: &'b Value, type_expected: Option<&'b DataType>) -> AccessResult
     where
         'b: 'a,
@@ -141,7 +141,8 @@ impl<'a> AvroParseOptions<'a> {
             }
             // ---- Struct -----
             (Some(DataType::Struct(struct_type_info)), Value::Record(descs)) => StructValue::new(
-                struct_type_info.names()
+                struct_type_info
+                    .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
                         let maybe_value = descs.iter().find(|(k, _v)| k == field_name);
@@ -161,14 +162,14 @@ impl<'a> AvroParseOptions<'a> {
             .into(),
             (None, Value::Record(descs)) => {
                 let rw_values = descs
-                    .into_iter()
+                    .iter()
                     .map(|(field_name, field_value)| {
                         let schema = self.extract_inner_schema(Some(field_name));
-                        Ok(Self {
+                        Self {
                             schema,
                             relax_numeric: self.relax_numeric,
                         }
-                        .parse(field_value, None)?)
+                        .parse(field_value, None)
                     })
                     .collect::<Result<Vec<Datum>, AccessError>>()?;
                 ScalarImpl::Struct(StructValue::new(rw_values))

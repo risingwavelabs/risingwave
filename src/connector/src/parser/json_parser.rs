@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
-
 use risingwave_common::error::{Result, RwError};
 use simd_json::BorrowedValue;
 

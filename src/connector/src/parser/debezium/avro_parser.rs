@@ -23,12 +23,9 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
 
-
 use crate::common::UpsertMessage;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
-use crate::parser::avro::util::{
-    avro_field_to_column_desc,
-};
+use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::debezium::DebeziumAdapter;

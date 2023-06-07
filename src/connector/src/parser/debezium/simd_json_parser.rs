@@ -21,10 +21,7 @@ use simd_json::{BorrowedValue, Mutable, StaticNode};
 use crate::parser::unified::debezium::DebeziumAdapter;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-
-
-use crate::parser::{ByteStreamSourceParser,  };
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
@@ -69,7 +66,7 @@ impl DebeziumJsonParser {
 
         let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let row_op = DebeziumAdapter::new(None,Some(accessor));
+        let row_op = DebeziumAdapter::new(None, Some(accessor));
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }

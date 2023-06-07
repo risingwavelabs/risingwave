@@ -258,7 +258,7 @@ impl AvroParser {
             accessor = accessor.with_key(AvroAccess::new(
                 key,
                 AvroParseOptions {
-                    schema: self.key_schema.as_ref().map(|s| &**s),
+                    schema: self.key_schema.as_deref(),
                     ..Default::default()
                 },
             ));
@@ -267,7 +267,7 @@ impl AvroParser {
         if let Some(value) = &avro_value {
             accessor = accessor.with_value(AvroAccess::new(
                 value,
-                AvroParseOptions::default().with_schema(&*self.schema),
+                AvroParseOptions::default().with_schema(&self.schema),
             ));
         }
 

@@ -34,7 +34,7 @@ pub enum JsonValueHandling {
 #[derive(Clone)]
 pub enum NumericHandling {
     Strict,
-    // should integer be pasred to float
+    // should integer be parsed to float
     Relax {
         // should "3.14" be parsed to 3.14 in float
         string_parsing: bool,
@@ -45,7 +45,7 @@ pub enum BooleanHandling {
     Strict,
     // should integer 1,0 be parsed to boolean (debezium)
     Relax {
-        // should "TrUe" "FalSe" be parsed to true or false in boolean
+        // should "True" "False" be parsed to true or false in boolean
         string_parsing: bool,
         // should string "1" "0" be paesed to boolean (cannal + mysql)
         string_integer_parsing: bool,
@@ -326,7 +326,8 @@ impl JsonParseOptions {
             }
             // ---- Struct -----
             (Some(DataType::Struct(struct_type_info)), ValueType::Object) => StructValue::new(
-                struct_type_info.names()
+                struct_type_info
+                    .names()
                     .zip_eq_fast(struct_type_info.types())
                     .map(|(field_name, field_type)| {
                         self.parse(
