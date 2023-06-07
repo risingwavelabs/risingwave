@@ -130,6 +130,7 @@ steps:
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
+    cancel_on_build_failing: true
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
@@ -222,6 +223,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    cancel_on_build_failing: true
 
   - label: "scaling test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh scale::"
@@ -258,6 +260,7 @@ steps:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 21
+    cancel_on_build_failing: true
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
@@ -275,6 +278,7 @@ steps:
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
+    cancel_on_build_failing: true
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
