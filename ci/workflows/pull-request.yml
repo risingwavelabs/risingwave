@@ -359,4 +359,4 @@ steps:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 30
+    timeout_in_minutes: 20

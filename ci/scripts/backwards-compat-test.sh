@@ -24,13 +24,13 @@ assert_not_empty() {
     buildkite-agent artifact upload "$1"
     exit 1
   else
-    echo "PASSED"
+    echo "assert_not_empty PASSED for $1"
   fi
 }
 
 assert_eq() {
   if [[ -z $(diff "$1" "$2") ]]; then
-    echo "PASSED"
+    echo "assert_eq PASSED for $1 and $2"
   else
     echo "FAILED"
     buildkite-agent artifact upload "$1"
