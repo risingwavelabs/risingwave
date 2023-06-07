@@ -38,7 +38,7 @@ body:
       description: Do you run RisingWave via Docker / Homebrew / RiseDev / RisingWave Cloud / ...?
       placeholder: |
         via Docker Compose. My `docker-compose.yml` is: ...
-  - type: textare
+  - type: textarea
     attributes:
       label: The version of RisingWave
       description: The output of `select version()` and/or the docker image tag and ID.
