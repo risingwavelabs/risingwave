@@ -7,10 +7,11 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-# FIXME(kwannoel): automatically derive this by:
+# TODO(kwannoel): automatically derive this by:
 # 1. Fetching major version.
 # 2. Find the earliest minor version of that major version.
 TAG=v0.18.0
+# Duration to wait for recovery (seconds)
 RECOVERY_DURATION=20
 
 
@@ -19,16 +20,19 @@ run_sql () {
 }
 
 assert_not_empty() {
-  if [[ -z "$1" ]]; then
+  set +e
+  if [[ $(wc -l < $1 | sed 's/^ *//g') -gt 1 ]]; then
     echo "FAILED"
     buildkite-agent artifact upload "$1"
     exit 1
   else
     echo "assert_not_empty PASSED for $1"
   fi
+  set -e
 }
 
 assert_eq() {
+  set +e
   if [[ -z $(diff "$1" "$2") ]]; then
     echo "assert_eq PASSED for $1 and $2"
   else
@@ -37,6 +41,7 @@ assert_eq() {
     buildkite-agent artifact upload "$2"
     exit 1
   fi
+  set -e
 }
 
 seed_table() {
@@ -145,4 +150,5 @@ echo "--- Comparing results"
 assert_eq BEFORE AFTER
 assert_not_empty BEFORE
 assert_not_empty AFTER
+cat BEFORE | tail -n 10
 rm BEFORE AFTER
