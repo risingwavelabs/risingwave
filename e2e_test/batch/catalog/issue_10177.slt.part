@@ -43,16 +43,16 @@ ORDER BY CASE
        WHEN typtype = 'd' AND elemtyptype = 'a' THEN 6  -- Domains over arrays last
 END;
 ----
-public 1043 varchar b f NULL
-public 1082 date b f NULL
-public 1083 time b f NULL
-public 1114 timestamp b f NULL
-public 1184 timestamptz b f NULL
-public 1186 interval b f NULL
-public 16 bool b f NULL
-public 1700 numeric b f NULL
-public 20 int8 b f NULL
-public 21 int2 b f NULL
-public 23 int4 b f NULL
-public 700 float4 b f NULL
-public 701 float8 b f NULL
+pg_catalog 1043 varchar b f NULL
+pg_catalog 1082 date b f NULL
+pg_catalog 1083 time b f NULL
+pg_catalog 1114 timestamp b f NULL
+pg_catalog 1184 timestamptz b f NULL
+pg_catalog 1186 interval b f NULL
+pg_catalog 16 bool b f NULL
+pg_catalog 1700 numeric b f NULL
+pg_catalog 20 int8 b f NULL
+pg_catalog 21 int2 b f NULL
+pg_catalog 23 int4 b f NULL
+pg_catalog 700 float4 b f NULL
+pg_catalog 701 float8 b f NULL
