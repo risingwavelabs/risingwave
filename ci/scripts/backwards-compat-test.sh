@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Running it locally:
-# RW_COMMIT=$(git rev-parse HEAD) ./ci/scripts/backwards-compat-test.sh
-
 set -euo pipefail
 
 source ci/scripts/common.sh
@@ -116,7 +113,8 @@ set -e
 
 echo "--- Start cluster on tag $TAG"
 git config --global --add safe.directory /risingwave
-# FIXME(kwannoel): We use this config because kafka encounters errors upon cluster restart.
+# NOTE(kwannoel): We use this config because kafka encounters errors upon cluster restart,
+# If previous kafka topics and partitions were not removed.
 ./risedev d full-without-monitoring && rm .risingwave/log/*
 pushd .risingwave/log/
 buildkite-agent artifact upload "./*.log"

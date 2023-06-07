@@ -334,7 +334,6 @@ script = '''
 #!/usr/bin/env bash
 
 set -e
-echo $ENABLE_BUILD_RUST
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
