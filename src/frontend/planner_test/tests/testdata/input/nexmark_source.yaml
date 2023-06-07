@@ -459,13 +459,15 @@
             WHEN lower(channel) = 'google' THEN '1'
             WHEN lower(channel) = 'facebook' THEN '2'
             WHEN lower(channel) = 'baidu' THEN '3'
-            ELSE REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2)
+            ELSE REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2]
             END
         AS channel_id FROM bid
-        where REGEXP_EXTRACT(url, '(&|^)channel_id=([^&]*)', 2) is not null or
+        where REGEXP_MATCH(url, '(&|^)channel_id=([^&]*)')[2] is not null or
               lower(channel) in ('apple', 'google', 'facebook', 'baidu');
   expected_outputs:
-  - binder_error
+  - batch_plan
+  - stream_dist_plan
+  - stream_plan
 - id: nexmark_q22
   before:
   - create_sources

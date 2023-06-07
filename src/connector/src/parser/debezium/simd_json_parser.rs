@@ -14,7 +14,6 @@
 
 use std::fmt::Debug;
 
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, StaticNode};
@@ -25,6 +24,10 @@ use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContextRef};
+use super::operators::*;
+use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -38,8 +41,6 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
         Some(value)
     }
 }
-
-impl_common_parser_logic!(DebeziumJsonParser);
 
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
@@ -76,11 +77,27 @@ impl DebeziumJsonParser {
     }
 }
 
+impl ByteStreamSourceParser for DebeziumJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
-
     use std::convert::TryInto;
-    use std::sync::Arc;
 
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
@@ -145,21 +162,26 @@ mod tests {
             //       "description": "Small 2-wheel scooter",
             //       "weight": 1.234
             //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(_op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            let [(_op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
-
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+            }
         }
 
         #[tokio::test]
@@ -171,20 +193,27 @@ mod tests {
             //       "description": "12V car battery",
             //       "weight": 8.1
             //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
-            assert_eq!(op, Op::Insert);
 
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
+                assert_eq!(op, Op::Insert);
+
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
+            }
         }
 
         #[tokio::test]
@@ -196,21 +225,27 @@ mod tests {
             //       "weight": 1.234
             //     },
             //     "after": null,
-            let data = br#"{"payload":{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}"#.to_vec()];
 
-            let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
+            for data in input {
+                let columns = get_test1_columns();
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            assert_eq!(op, Op::Delete);
+                assert_eq!(op, Op::Delete);
 
-            assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
-            assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
-            assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
-            assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(101))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("scooter".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("Small 2-wheel scooter".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(1.234.into()))));
+            }
         }
 
         #[tokio::test]
@@ -227,28 +262,34 @@ mod tests {
             //       "description": "24V car battery",
             //       "weight": 9.1
             //     },
-            let data = br#"{"payload":{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
 
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
-                .await
-                .try_into()
-                .unwrap();
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+                let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns.clone(), data)
+                    .await
+                    .try_into()
+                    .unwrap();
 
-            assert_eq!(op1, Op::UpdateDelete);
-            assert_eq!(op2, Op::UpdateInsert);
+                assert_eq!(op1, Op::UpdateDelete);
+                assert_eq!(op2, Op::UpdateInsert);
 
-            assert!(row1[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
-            assert!(row1[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
+                assert!(row1[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
+                assert!(row1[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
 
-            assert!(row2[0].eq(&Some(ScalarImpl::Int32(102))));
-            assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-            assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
-            assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
+                assert!(row2[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
+                assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
+            }
         }
 
         #[tokio::test]
@@ -261,17 +302,23 @@ mod tests {
             //       "description": "12V car battery",
             //       "weight": 8.1
             //     },
-            let data = br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#;
+            let input = vec![
+                // data with payload field
+                br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#.to_vec(),
+                // data without payload field
+                br#"{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}"#.to_vec()];
 
             let columns = get_test1_columns();
-            let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+            for data in input {
+                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
 
-            let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-            let writer = builder.row_writer();
-            if let Err(e) = parser.parse_inner(data.to_vec(), writer).await {
-                println!("{:?}", e.to_string());
-            } else {
-                panic!("the test case is expected to be failed");
+                let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 2);
+                let writer = builder.row_writer();
+                if let Err(e) = parser.parse_inner(data, writer).await {
+                    println!("{:?}", e.to_string());
+                } else {
+                    panic!("the test case is expected to be failed");
+                }
             }
         }
     }
@@ -616,10 +663,6 @@ mod tests {
 
         // schema for the remaining types
         fn get_other_types_test_columns() -> Vec<SourceColumnDesc> {
-            let point_type = Arc::new(StructType {
-                fields: vec![DataType::Float32, DataType::Float32],
-                field_names: vec![String::from('x'), String::from('y')],
-            });
             vec![
                 SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
                 SourceColumnDesc::simple("o_boolean", DataType::Boolean, ColumnId::from(1)),
@@ -630,7 +673,10 @@ mod tests {
                 SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
                 SourceColumnDesc {
                     name: "o_point".to_string(),
-                    data_type: DataType::Struct(point_type),
+                    data_type: DataType::Struct(StructType::new(vec![
+                        ("x", DataType::Float32),
+                        ("y", DataType::Float32),
+                    ])),
                     column_id: 7.into(),
                     fields: vec![],
                     is_row_id: false,

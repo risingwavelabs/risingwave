@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use apache_avro::{from_avro_datum, Schema};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -31,16 +30,22 @@ use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::debezium::DebeziumAdapter;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use super::operators::*;
+use crate::common::UpsertMessage;
+use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
+use crate::parser::avro::util::{
+    avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
+    get_field_from_avro_value,
+};
+use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
 const PAYLOAD: &str = "payload";
-
-impl_common_parser_logic!(DebeziumAvroParser);
 
 // TODO: avoid duplicated codes with `AvroParser`
 #[derive(Debug)]
@@ -190,9 +195,38 @@ impl DebeziumAvroParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        // https://debezium.io/documentation/reference/stable/transformations/event-flattening.html#event-flattening-behavior:
+        //
+        // A database DELETE operation causes Debezium to generate two Kafka records:
+        // - A record that contains "op": "d", the before row data, and some other fields.
+        // - A tombstone record that has the same key as the deleted row and a value of null. This
+        // record is a marker for Apache Kafka. It indicates that log compaction can remove
+        // all records that have this key.
+
+        let UpsertMessage {
+            primary_key: key,
+            record: payload,
+        } = bincode::deserialize(&payload[..]).unwrap();
+
+        // If message value == null, it must be a tombstone message. Emit DELETE to downstream using
+        // message key as the DELETE row. Throw an error if message key is empty.
+        if payload.is_empty() {
+            let (schema_id, mut raw_payload) = extract_schema_id(&key)?;
+            let key_schema = self.schema_resolver.get(schema_id).await?;
+            let key = from_avro_datum(key_schema.as_ref(), &mut raw_payload, None)
+                .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+            return writer.delete(|column| {
+                let field_schema =
+                    extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
+                from_avro_value(
+                    get_field_from_avro_value(&key, column.name.as_str())?.clone(),
+                    field_schema,
+                )
+            });
+        }
+
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let writer_schema = self.schema_resolver.get(schema_id).await?;
-
         let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -204,6 +238,24 @@ impl DebeziumAvroParser {
         let row_op = DebeziumAdapter::new(accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for DebeziumAvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

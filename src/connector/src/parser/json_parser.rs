@@ -14,19 +14,18 @@
 
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
+use itertools::Itertools;
 use risingwave_common::error::{Result, RwError};
 use simd_json::BorrowedValue;
 
+use super::ByteStreamSourceParser;
 use crate::common::UpsertMessage;
-use crate::impl_common_parser_logic;
 use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertAccess;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
-
-impl_common_parser_logic!(JsonParser);
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -143,6 +142,24 @@ impl JsonParser {
                 ))))
             }
         }
+    }
+}
+
+impl ByteStreamSourceParser for JsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

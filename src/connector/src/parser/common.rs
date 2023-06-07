@@ -21,7 +21,6 @@ use simd_json::{BorrowedValue, ValueAccess};
 
 use super::unified::json::JsonParseOptions;
 use crate::source::SourceFormat;
-
 pub(crate) fn json_object_smart_get_value<'a, 'b>(
     v: &'b simd_json::BorrowedValue<'a>,
     key: Cow<'b, str>,
@@ -38,7 +37,7 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
     None
 }
 
-fn do_parse_simd_json_value(
+pub(crate) fn do_parse_simd_json_value(
     format: &SourceFormat,
     dtype: &DataType,
     v: &BorrowedValue<'_>,

@@ -32,14 +32,9 @@
 
 // These modules define concrete expression structures.
 mod expr_array_concat;
-mod expr_array_distinct;
-mod expr_array_length;
-mod expr_array_positions;
-mod expr_array_remove;
 mod expr_array_to_string;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
-mod expr_cardinality;
 mod expr_case;
 mod expr_coalesce;
 mod expr_concat_ws;
@@ -55,7 +50,6 @@ pub mod expr_regexp;
 mod expr_some_all;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
-mod expr_trim_array;
 pub(crate) mod expr_udf;
 mod expr_unary;
 mod expr_vnode;

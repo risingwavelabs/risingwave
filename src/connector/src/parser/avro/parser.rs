@@ -18,7 +18,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use apache_avro::{from_avro_datum, Reader, Schema};
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan_common::ColumnDesc;
@@ -26,17 +25,14 @@ use url::Url;
 
 use super::schema_resolver::*;
 use crate::common::UpsertMessage;
-use crate::impl_common_parser_logic;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::upsert::UpsertAccess;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-
-impl_common_parser_logic!(AvroParser);
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
 pub struct AvroParser {
@@ -280,6 +276,24 @@ impl AvroParser {
         }
 
         apply_row_operation_on_stream_chunk_writer(accessor, &mut writer)
+    }
+}
+
+impl ByteStreamSourceParser for AvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

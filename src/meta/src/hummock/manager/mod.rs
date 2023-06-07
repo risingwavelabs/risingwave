@@ -16,6 +16,7 @@ use core::panic;
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -60,6 +61,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
@@ -119,6 +121,7 @@ pub struct HummockManager<S: MetaStore> {
 
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
+    pause_version_checkpoint: AtomicBool,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -342,6 +345,7 @@ where
             event_sender: tx,
             object_store,
             version_checkpoint_path: checkpoint_path,
+            pause_version_checkpoint: AtomicBool::new(false),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -522,6 +526,7 @@ where
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
@@ -924,7 +929,7 @@ where
                 (count, size)
             };
 
-            let (compact_task_size, compact_task_file_count) =
+            let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
             if compact_task.input_ssts[0].level_idx == 0 {
@@ -934,15 +939,11 @@ where
                     "l0_trivial_move".to_string()
                 } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
                     "l0_overlapping".to_string()
-                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                } else if compact_task.target_level == 0 {
                     "l0_intra".to_string()
                 } else {
-                    let is_trivial_move = if compact_task
-                        .input_ssts
-                        .last()
-                        .unwrap()
-                        .table_infos
-                        .is_empty()
+                    let is_trivial_move = if compact_task.input_ssts.len() == 2
+                        && compact_task.input_ssts[1].table_infos.is_empty()
                     {
                         "trivial-move"
                     } else {

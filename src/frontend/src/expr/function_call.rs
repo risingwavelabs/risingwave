@@ -125,7 +125,7 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_row_expr(child, target, allows);
         }
-        if child.is_unknown() {
+        if child.is_untyped() {
             // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
             let literal = child.as_literal().unwrap();
             let datum = literal
@@ -147,7 +147,7 @@ impl FunctionCall {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
-        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
+        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,
@@ -171,9 +171,7 @@ impl FunctionCall {
         allows: CastContext,
     ) -> Result<ExprImpl, CastError> {
         let func = *expr.into_function_call().unwrap();
-        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
-            (t.fields.clone(), t.field_names.clone())
-        } else {
+        let DataType::Struct(t) = &target_type else {
             return Err(CastError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 func.return_type(),
@@ -182,16 +180,16 @@ impl FunctionCall {
             )));
         };
         let (func_type, inputs, _) = func.decompose();
-        match fields.len().cmp(&inputs.len()) {
+        match t.len().cmp(&inputs.len()) {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq_fast(fields.to_vec())
-                    .map(|(e, t)| Self::new_cast(e, t, allows))
+                    .zip_eq_fast(t.types())
+                    .map(|(e, t)| Self::new_cast(e, t.clone(), allows))
                     .collect::<Result<Vec<_>, CastError>>()?;
                 let return_type = DataType::new_struct(
-                    inputs.iter().map(|i| i.return_type()).collect_vec(),
-                    field_names,
+                    inputs.iter().map(|i| i.return_type()).collect(),
+                    t.names().map(|s| s.to_string()).collect(),
                 );
                 Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
             }
@@ -263,7 +261,7 @@ impl FunctionCall {
         (self.func_type, input)
     }
 
-    pub fn get_expr_type(&self) -> ExprType {
+    pub fn func_type(&self) -> ExprType {
         self.func_type
     }
 
@@ -278,8 +276,8 @@ impl FunctionCall {
 
     pub(super) fn from_expr_proto(
         function_call: &risingwave_pb::expr::FunctionCall,
-        expr_type: ExprType,
-        ret_type: DataType,
+        func_type: ExprType,
+        return_type: DataType,
     ) -> RwResult<Self> {
         let inputs: Vec<_> = function_call
             .get_children()
@@ -287,8 +285,8 @@ impl FunctionCall {
             .map(ExprImpl::from_expr_proto)
             .try_collect()?;
         Ok(Self {
-            func_type: expr_type,
-            return_type: ret_type,
+            func_type,
+            return_type,
             inputs,
         })
     }
@@ -303,7 +301,7 @@ impl Expr for FunctionCall {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: self.get_expr_type().into(),
+            function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::FuncCall(FunctionCall {
                 children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
@@ -419,7 +417,7 @@ fn explain_verbose_binary_op(
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr {
-        if func.get_expr_type() == ExprType::Row {
+        if func.func_type() == ExprType::Row {
             return true;
         }
     }
