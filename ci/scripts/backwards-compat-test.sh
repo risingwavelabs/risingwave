@@ -88,6 +88,7 @@ set +e
 set -e
 
 echo "--- Start cluster on tag $TAG"
+git config --global --add safe.directory /risingwave
 # FIXME(kwannoel): We use this config because kafka encounters errors upon cluster restart.
 ./risedev d full-without-monitoring
 
