@@ -35,28 +35,28 @@ END_DATE=$(get_date)
 COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
-echo "--- Install Necessary Tools"
-# pip3 install toml-cli
-# download qa files for use in nexmark-bench.
-if [[ ! -f "./qa" ]]; then
-  curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash && ./qa --help
-fi
-
-echo "--- AWS and Kube Config"
-set +u
-if [[ -z "$AWS_PROFILE" ]]; then
-  # FIXME(kwannoel): Ask @huangjw to help with configuring it.
-  aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
-  aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
-fi
-set -u
+#echo "--- Install Necessary Tools"
+## pip3 install toml-cli
+## download qa files for use in nexmark-bench.
+#if [[ ! -f "./qa" ]]; then
+#  curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash && ./qa --help
+#fi
+#
+#echo "--- AWS and Kube Config"
+#set +u
+#if [[ -z "$AWS_PROFILE" ]]; then
+#  # FIXME(kwannoel): Ask @huangjw to help with configuring it.
+#  aws configure set aws_access_key_id $RWCTEST_ACCESS_KEY
+#  aws configure set aws_secret_access_key $RWCTEST_SECRET_KEY
+#fi
+#set -u
 
 # Get certs for command client from s3.
 # Use by qa command.
-echo "--- Download S3 Crt Keys"
-if [[ ! -d "./certs" ]]; then
-  aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
-fi
+#echo "--- Download S3 Crt Keys"
+#if [[ ! -d "./certs" ]]; then
+#  aws s3 cp s3://rw-qa-infra/client-certs ./certs --recursive
+#fi
 
 # Use this command to create the execution.
 # For microbench mark it need not be some complex.
