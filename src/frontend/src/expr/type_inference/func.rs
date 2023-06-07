@@ -93,7 +93,7 @@ pub fn infer_some_all(
             )
             .into());
         }
-        inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
+        inputs[0].cast_implicit_mut(sig.inputs_type[0].into())?;
     }
     if element_type != Some(sig.inputs_type[1]) {
         if matches!(
@@ -104,9 +104,7 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         }
-        inputs[1] = inputs[1]
-            .clone()
-            .cast_implicit(DataType::List(Box::new(sig.inputs_type[1].into())))?;
+        inputs[1].cast_implicit_mut(DataType::List(Box::new(sig.inputs_type[1].into())))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -373,13 +371,13 @@ fn infer_type_for_special(
                 // `null = array[1]` where null should have same type as right side
                 // `null = 1` can use the general rule, but return `Ok(None)` here is less readable
                 (true, false) => {
-                    let owned = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
-                    inputs[0] = owned.cast_implicit(inputs[1].return_type())?;
+                    let t = inputs[1].return_type();
+                    inputs[0].cast_implicit_mut(t)?;
                     return Ok(Some(DataType::Boolean));
                 }
                 (false, true) => {
-                    let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                    inputs[1] = owned.cast_implicit(inputs[0].return_type())?;
+                    let t = inputs[0].return_type();
+                    inputs[1].cast_implicit_mut(t)?;
                     return Ok(Some(DataType::Boolean));
                 }
                 // Types of both sides are known. Continue.
@@ -561,8 +559,7 @@ fn infer_type_for_special(
         ExprType::ArrayPosition => {
             ensure_arity!("array_position", 2 <= | inputs | <= 3);
             if let Some(start) = inputs.get_mut(2) {
-                let owned = std::mem::replace(start, ExprImpl::literal_bool(false));
-                *start = owned.cast_implicit(DataType::Int32)?;
+                start.cast_implicit_mut(DataType::Int32)?;
             }
             let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
@@ -639,8 +636,7 @@ fn infer_type_for_special(
         ExprType::TrimArray => {
             ensure_arity!("trim_array", | inputs | == 2);
 
-            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+            inputs[1].cast_implicit_mut(DataType::Int32)?;
 
             match inputs[0].return_type() {
                 DataType::List(typ) => Ok(Some(DataType::List(typ))),

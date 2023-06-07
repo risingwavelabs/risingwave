@@ -216,18 +216,26 @@ impl ExprImpl {
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Implicit)
+    pub fn cast_implicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::new_cast(&mut self, target, CastContext::Implicit)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Assign)
+    pub fn cast_assign(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::new_cast(&mut self, target, CastContext::Assign)?;
+        Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Explicit)
+    pub fn cast_explicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
+        FunctionCall::new_cast(&mut self, target, CastContext::Explicit)?;
+        Ok(self)
+    }
+
+    /// Shorthand to inplace cast expr to `target` type in implicit context.
+    pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+        FunctionCall::new_cast(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to enforce implicit cast to boolean

@@ -111,16 +111,6 @@ impl FunctionCall {
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(
-        mut child: ExprImpl,
-        target: DataType,
-        allows: CastContext,
-    ) -> Result<ExprImpl, CastError> {
-        Self::new_cast_inner(&mut child, target, allows)?;
-        Ok(child)
-    }
-
-    /// next_gen
-    pub fn new_cast_inner(
         child: &mut ExprImpl,
         target: DataType,
         allows: CastContext,
@@ -196,7 +186,7 @@ impl FunctionCall {
                 func.inputs
                     .iter_mut()
                     .zip_eq_fast(t.types())
-                    .try_for_each(|(e, t)| Self::new_cast_inner(e, t.clone(), allows))?;
+                    .try_for_each(|(e, t)| Self::new_cast(e, t.clone(), allows))?;
                 func.return_type = target_type;
                 Ok(())
             }
