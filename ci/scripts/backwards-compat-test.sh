@@ -5,11 +5,14 @@
 
 set -euo pipefail
 
+source ci/scripts/common.sh
+
 # FIXME(kwannoel): automatically derive this by:
 # 1. Fetching major version.
 # 2. Find the earliest minor version of that major version.
-TAG=v0.18.0-rc
+TAG=v0.18.0
 RECOVERY_DURATION=20
+
 
 run_sql () {
     psql -h localhost -p 4566 -d dev -U root -c "$@"
@@ -34,6 +37,7 @@ seed_table() {
   run_sql "flush;"
 }
 
+configure_rw() {
 echo "--- Setting up cluster config"
 if [[ ! -f risedev-profiles.user.yml ]]; then
 cat <<EOF > risedev-profiles.user.yml
@@ -54,17 +58,29 @@ ENABLE_MINIO=true
 ENABLE_ETCD=true
 ENABLE_KAFKA=true
 ENABLE_COMPUTE_TRACING=true
-ENABLE_BUILD_RUST=false
-EOF
 
-echo "--- Checking out old branch"
-wget https://github.com/risingwavelabs/risingwave/releases/download/v0.18.0/risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
-tar -xvf risingwave-v0.18.0-x86_64-unknown-linux.tar.gz
-mkdir -p target/release
-cp risingwave target/release/risingwave
-# Rebuild from scratch.
-#git config --global --add safe.directory /risingwave
-#git checkout origin/$TAG
+# Fetch `risingwave` binary from release.
+ENABLE_BUILD_RUST=false
+
+# Ensure it will link the all-in-one binary from our release.
+ENABLE_ALL_IN_ONE=true
+
+# ENABLE_RELEASE_PROFILE=true
+EOF
+}
+
+echo "--- Configuring RW"
+configure_rw
+
+echo "--- Setup pre-built Risedev"
+download-and-decompress-artifact risedev-dev-dev target/debug/
+mv target/debug/risedev-dev-dev target/debug/risedev-dev
+
+echo "--- Setup old release $TAG"
+wget "https://github.com/risingwavelabs/risingwave/releases/download/v${TAG}/risingwave-v${TAG}-x86_64-unknown-linux.tar.gz"
+tar -xvf risingwave-v${TAG}-x86_64-unknown-linux.tar.gz
+mkdir -p target/debug
+cp risingwave target/debug/risingwave
 
 echo "--- Teardown any old cluster"
 set +e
