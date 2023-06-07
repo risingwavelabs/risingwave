@@ -46,7 +46,7 @@ COMMIT=$(get_commit)
 BRANCH=$(get_branch)
 
 wget https://download.docker.com/linux/static/stable/x86_64/docker-24.0.2.tgz
-tar -xvf docker-24.0.2.tgz
+tar -xvf docker-24.0.2.tgz --no-same-owner
 sudo cp docker/* /usr/bin
 sudo dockerd &
 
