@@ -33,4 +33,5 @@ pub const PG_PROC_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 ];
 
 // TODO: read real data including oid etc in rw, currently there are no such data in rw.
+// more details can be found here: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_proc.dat
 pub static PG_PROC_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);
