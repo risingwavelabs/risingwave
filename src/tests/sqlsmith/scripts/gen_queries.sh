@@ -227,7 +227,7 @@ setup() {
 setup_madsim() {
   download-and-decompress-artifact risingwave_simulation .
   chmod +x ./risingwave_simulation
-  export MADSIM_BIN=./risingwave_simulation
+  export MADSIM_BIN="$PWD/risingwave_simulation"
 }
 
 build() {
