@@ -8,7 +8,7 @@ BUILDKITE_BUILD_NUMBER=511 \
 '
 
 # Exits as soon as any line fails.
-set -euo pipefail
+set -uo pipefail
 
 setup() {
   echo "--- Installing utils"
