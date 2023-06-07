@@ -375,9 +375,30 @@ pub struct NewLocalOptions {
     /// `update` and `delete` should match the original stored value.
     pub is_consistent_op: bool,
     pub table_option: TableOption,
+
+    /// Used to indicate that we should not upload the data.
+    pub no_upload: bool,
 }
 
 impl NewLocalOptions {
+    pub fn new(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            no_upload: true,
+        }
+    }
+
+    pub fn new_temporary(table_id: TableId, is_consistent_op: bool, table_option: TableOption) -> Self {
+        NewLocalOptions {
+            table_id,
+            is_consistent_op,
+            table_option,
+            no_upload: false,
+        }
+    }
+
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
@@ -385,6 +406,7 @@ impl NewLocalOptions {
             table_option: TableOption {
                 retention_seconds: None,
             },
+            no_upload: false,
         }
     }
 }
