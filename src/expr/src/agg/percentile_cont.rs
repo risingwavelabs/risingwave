@@ -24,9 +24,21 @@ use crate::{ExprError, Result};
 // TODO: better name
 pub trait MyScalar = Scalar + Into<f64> + Copy;
 
-#[build_aggregate("percentile_cont(*) -> auto")]
+#[build_aggregate("percentile_cont(*) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    let fraction = agg.direct_args[0].literal().map(|x| x.as_float64().0);
+    let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
+        let arg = literal.as_decimal().clone();
+        if arg.gt(&Decimal::from(1)) || arg.lt(&Decimal::from(0)) {
+            return Err(ExprError::InvalidParam {
+                name: "fraction",
+                reason: "must between 0 and 1".to_string(),
+            });
+        }
+        Some(arg.try_into().unwrap())
+    } else {
+        None
+    };
+    println!("fraction {:?}", fraction);
 
     let aggregator = match agg.args.arg_types()[0] {
         DataType::Int16 => Box::new(PercentileCont::<i16>::new(
@@ -100,18 +112,17 @@ impl<T: MyScalar> Aggregator for PercentileCont<T> {
     }
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
-        if let Some(fractions) = self.fractions {
-            let rn = 1.0 + (fractions * (self.data.len() - 1) as f64);
+        if let Some(fractions) = self.fractions && !self.data.is_empty() {
+            let rn = fractions * (self.data.len() - 1) as f64;
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
-            let result: ScalarImpl = if crn == frn {
+            let result = if crn == frn {
                 self.data[crn as usize].into()
             } else {
-                ((crn - rn) * Into::<f64>::into(self.data[frn as usize])
-                    + (rn - frn) * Into::<f64>::into(self.data[crn as usize]))
-                .into()
+                (crn - rn) * Into::<f64>::into(self.data[frn as usize])
+                    + (rn - frn) * Into::<f64>::into(self.data[crn as usize])
             };
-            builder.append(Some(result));
+            builder.append(Some(ScalarImpl::Float64(result.into())));
         }
         Ok(())
     }

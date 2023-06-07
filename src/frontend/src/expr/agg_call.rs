@@ -73,7 +73,6 @@ impl AggCall {
                 AggKind::Min
                 | AggKind::Max
                 | AggKind::FirstValue
-                | AggKind::PercentileCont
                 | AggKind::PercentileDisc
                 | AggKind::Mode,
                 [input],
@@ -94,6 +93,7 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
+            (AggKind::PercentileCont, _) => Float64,
 
             // other functions are handled by signature map
             _ => {
