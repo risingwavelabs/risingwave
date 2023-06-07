@@ -276,7 +276,7 @@ steps:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
-            BUILDKITE_TOKEN: buildkite-token
+            BUILDKITE_TOKEN: buildkite_token
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
