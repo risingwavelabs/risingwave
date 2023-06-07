@@ -235,7 +235,6 @@ pub enum JavaBindingRowInner {
 #[derive(Default)]
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    byte_array_input_stream_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
 
     date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
@@ -692,25 +691,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
             .unwrap()
             .into_bytea();
         let bytes_value = env.byte_array_from_slice(bytes)?;
-        let (ts_class_ref, constructor) = pointer
-            .as_ref()
-            .class_cache
-            .byte_array_input_stream_ctor
-            .get_or_try_init(|| {
-                let cls = env.find_class("java/io/ByteArrayInputStream")?;
-                let init_method = env.get_method_id(cls, "<init>", "([B)V")?;
-                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
-            })?;
-        let ts_class = JClass::from(ts_class_ref.as_obj());
-        unsafe {
-            let input_stream_obj = env.new_object_unchecked(
-                ts_class,
-                *constructor,
-                &[JValue::Object(JObject::from_raw(bytes_value))],
-            )?;
-
-            Ok(input_stream_obj)
-        }
+        unsafe { Ok(JObject::from_raw(bytes_value)) }
     })
 }
 
