@@ -32,7 +32,7 @@ assert_eq() {
 seed_table() {
   for i in $(seq 1 10000)
   do
-    run_sql "INSERT into t values ($i);"
+    run_sql "INSERT into t values ($i);" 1>/dev/null 2>&1
   done
   run_sql "flush;"
 }
