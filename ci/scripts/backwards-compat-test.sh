@@ -90,7 +90,10 @@ set -e
 echo "--- Start cluster on tag $TAG"
 git config --global --add safe.directory /risingwave
 # FIXME(kwannoel): We use this config because kafka encounters errors upon cluster restart.
-./risedev d full-without-monitoring
+./risedev d full-without-monitoring && rm .risingwave/log/*
+pushd .risingwave/log/
+buildkite-agent artifact upload ./*.log
+popd
 
 # TODO(kwannoel): This will be the section for which we run nexmark queries + tpch queries.
 echo "--- Running queries"
