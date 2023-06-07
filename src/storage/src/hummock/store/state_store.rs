@@ -66,6 +66,8 @@ pub struct LocalHummockStorage {
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
 
+    no_upload: bool,
+
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
 
@@ -404,9 +406,11 @@ impl LocalHummockStorage {
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
-        self.event_sender
-            .send(HummockEvent::ImmToUploader(imm))
-            .unwrap();
+        if self.no_upload {
+            self.event_sender
+                .send(HummockEvent::ImmToUploader(imm))
+                .unwrap();
+        }
 
         timer.observe_duration();
 
@@ -437,6 +441,7 @@ impl LocalHummockStorage {
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
+            no_upload: option.no_upload,
             instance_guard,
             read_version,
             event_sender,
