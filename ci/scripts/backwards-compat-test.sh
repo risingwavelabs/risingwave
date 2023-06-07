@@ -150,5 +150,3 @@ echo "--- Comparing results"
 assert_eq BEFORE AFTER
 assert_not_empty BEFORE
 assert_not_empty AFTER
-cat BEFORE | tail -n 10
-rm BEFORE AFTER
