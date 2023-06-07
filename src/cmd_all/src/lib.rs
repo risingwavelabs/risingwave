@@ -16,3 +16,27 @@
 
 pub mod playground;
 pub use playground::*;
+
+lazy_static::lazy_static! {
+    static ref VERSION: String = {
+        let version = clap::crate_version!();
+        // VERGEN_GIT_SHA is provided by the build script. It will trigger rebuild
+        // for each commit, so we only use it for the final binary.
+        let vergen_git_sha = env!("VERGEN_GIT_SHA");
+
+        // GIT_SHA is a normal environment variable. It's risingwave_common::GIT_SHA
+        // and is used in logs/version queries.
+        //
+        // Usually it's only provided by docker/binary releases (including nightly builds).
+        // We check it is the same as VERGEN_GIT_SHA when it's present.
+        if let Some(git_sha) = option_env!("GIT_SHA") {
+            assert_eq!(git_sha, vergen_git_sha, "GIT_SHA ({git_sha}) mismatches VERGEN_GIT_SHA ({vergen_git_sha})");
+        };
+
+        format!("{} ({})", version, vergen_git_sha)
+    };
+}
+
+pub fn version() -> &'static str {
+    &VERSION
+}

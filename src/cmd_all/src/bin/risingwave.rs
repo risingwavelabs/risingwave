@@ -109,6 +109,7 @@ fn main() -> Result<()> {
     let risingwave = || {
         command!(BINARY_NAME)
             .about("All-in-one executable for components of RisingWave")
+            .version(risingwave_cmd_all::version())
             .propagate_version(true)
     };
     let command = risingwave()

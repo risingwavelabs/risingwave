@@ -45,6 +45,10 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
+lazy_static = "1"
+
+[build-dependencies]
+vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }

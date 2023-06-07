@@ -5719,6 +5719,7 @@ dependencies = [
  "anyhow",
  "clap 4.2.7",
  "console",
+ "lazy_static",
  "madsim-tokio",
  "risingwave_cmd",
  "risingwave_common",
@@ -5734,6 +5735,7 @@ dependencies = [
  "tempfile",
  "tikv-jemallocator",
  "tracing",
+ "vergen",
  "workspace-config",
  "workspace-hack",
 ]
@@ -8453,6 +8455,17 @@ name = "vcpkg"
 version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
+
+[[package]]
+name = "vergen"
+version = "8.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b3c89c2c7e50f33e4d35527e5bf9c11d6d132226dbbd1753f0fbe9f19ef88c6"
+dependencies = [
+ "anyhow",
+ "rustversion",
+ "time 0.3.21",
+]
 
 [[package]]
 name = "version_check"
