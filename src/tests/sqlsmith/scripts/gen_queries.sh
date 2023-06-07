@@ -305,6 +305,7 @@ upload_queries() {
   pushd "$OUTDIR"
   git add .
   git commit -m 'update queries'
+  git push origin main
   popd
   set -x
 }
