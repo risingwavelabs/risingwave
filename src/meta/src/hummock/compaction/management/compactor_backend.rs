@@ -19,24 +19,34 @@ use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 use super::CompactionTaskEvent;
+use crate::hummock::error::Error;
 use crate::hummock::HummockManagerRef;
 use crate::storage::MetaStore;
 
 #[async_trait]
 pub trait CompactorBackend {
+    // The `submit` interface accepts a compact task, and assigns the compact task to a remote for
+    // execution. The interface returns a unique id for the corresponding task, which is used for
+    // subsequent cancel.
     async fn submit(
         &self,
         compaction_group: CompactionGroupId,
         compact_task: CompactTask,
         timeout: u64,
-    ) -> bool;
+    ) -> std::result::Result<u64, Error>;
 
-    async fn cancel(&self, compact_task: &CompactTask) -> bool;
-
-    fn event_channel(
-        &mut self,
+    // The `cancel` interface will receive the id of the task and will `cancel` the
+    // corresponding task in the meta and remote execution.
+    async fn cancel(
+        &self,
+        task_id: u64,
         compact_task: &CompactTask,
-    ) -> Option<UnboundedReceiver<CompactionTaskEvent>>;
+    ) -> std::result::Result<(), Error>;
+
+    // The `event_channel` will try to return a `Receiver`, and will have only one external holder.
+    // The `Receiver` will receive the event from the backend. The main purpose is to decouple
+    // the backend from external implementations such as the task manager.
+    fn event_channel(&mut self) -> Option<UnboundedReceiver<CompactionTaskEvent>>;
 }
 
 pub struct DedicatedCompactorBackend<S>
@@ -75,7 +85,7 @@ where
         compaction_group_id: CompactionGroupId,
         compact_task: CompactTask,
         timeout: u64,
-    ) -> bool {
+    ) -> std::result::Result<u64, Error> {
         // how to trigger a new compaction when failed assign ?
 
         if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
@@ -89,7 +99,7 @@ where
                 Err(err) => {
                     // handle error
                     // log
-                    return false;
+                    return Err(Error::Internal(anyhow::anyhow!("error")));
                 }
             };
 
@@ -101,9 +111,10 @@ where
                 // handle error
                 // log
 
-                return false;
+                return Err(Error::Internal(anyhow::anyhow!("error")));
             }
 
+            let task_id = compact_task.task_id;
             // TODO: timeout configuration
             let _ = self.event_sender.send(CompactionTaskEvent::Register(
                 compaction_group_id,
@@ -111,20 +122,21 @@ where
                 timeout,
             ));
 
-            return true;
+            return Ok(task_id);
         } else {
-            return false;
+            return Err(Error::Internal(anyhow::anyhow!("error")));
         }
     }
 
-    async fn cancel(&self, compact_task: &CompactTask) -> bool {
+    async fn cancel(
+        &self,
+        task_id: u64,
+        compact_task: &CompactTask,
+    ) -> std::result::Result<(), Error> {
         todo!()
     }
 
-    fn event_channel(
-        &mut self,
-        compact_task: &CompactTask,
-    ) -> Option<UnboundedReceiver<CompactionTaskEvent>> {
+    fn event_channel(&mut self) -> Option<UnboundedReceiver<CompactionTaskEvent>> {
         self.event_receiver.take()
     }
 }

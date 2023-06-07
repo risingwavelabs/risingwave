@@ -28,7 +28,6 @@ pub enum CompactionTaskEvent {
     TaskProgress(CompactTask),
     Cancel(CompactTask),
     Timer(u64, Instant),
-
     // TODO add event for risectl
     // ListCompactionTask
     // GetCompactionTask
