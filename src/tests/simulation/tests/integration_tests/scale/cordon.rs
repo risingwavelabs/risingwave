@@ -14,6 +14,7 @@
 
 #![cfg(madsim)]
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -28,7 +29,7 @@ use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 
 // Get all the parallel units which are located on cordoned workers
-fn pu_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> Result<Vec<u32>> {
+fn pu_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> Result<HashSet<u32>> {
     let (_, workers) = get_schedule(info);
     let cordoned_nodes_ids = workers
         .iter()
@@ -43,11 +44,7 @@ fn pu_ids_on_cordoned_nodes(info: GetClusterInfoResponse) -> Result<Vec<u32>> {
         }
     }
 
-    Ok(cordoned_pu_ids
-        .iter()
-        .flatten()
-        .map(|pu| pu.id)
-        .collect_vec())
+    Ok(cordoned_pu_ids.iter().flatten().map(|pu| pu.id).collect())
 }
 
 /// create cluster, run query, cordon node, run other query. Cordoned node should NOT contain actors
@@ -63,7 +60,7 @@ async fn cordoned_nodes_do_not_get_new_actors(
         .init();
 
     // setup cluster and calc expected result
-    let sleep_sec = 30;
+    let sleep_sec = 10;
     let mut cluster =
         NexmarkCluster::new(Configuration::for_scale(), 6, Some(THROUGHPUT * 20), false).await?;
     cluster.run(create).await?;
