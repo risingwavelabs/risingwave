@@ -8,13 +8,42 @@ body:
       description: A clear and concise description of what the bug is.
   - type: textarea
     attributes:
+      label: Error message/log
+      description: The error message you see.
+      render: text
+  - type: textarea
+    attributes:
       label: To Reproduce
-      description: Steps to reproduce the behavior.
+      description: Steps to reproduce the behavior, including the SQLs you run and/or the operations you have done to trigger the bug.
+      placeholder: |
+        First create the tables/sources and materialized views with
+        
+        ```sql
+        CREATE TABLE ...
+        CREATE MATERIALIZED VIEW ...
+        ```
+        
+        Then the bug is triggered after ...
   - type: textarea
     attributes:
       label: Expected behavior
       description: A clear and concise description of what you expected to happen.
+      placeholder: |
+        I expected to see this happen: *explanation*
+        
+        Instead, this happened: *explanation*
+  - type: textarea
+    attributes:
+      label: How did you deploy RisingWave?
+      description: Do you run RisingWave via Docker / Homebrew / RiseDev / RisingWave Cloud / ...?
+      placeholder: |
+        via Docker Compose. My `docker-compose.yml` is: ...
+  - type: textare
+    attributes:
+      label: The version of RisingWave
+      description: The output of `select version()` and/or the docker image tag and ID.
   - type: textarea
     attributes:
       label: Additional context
-      description: Add any other context about the problem here.
+      description: Add any other context about the problem here. e.g., the full log files.
+ 
