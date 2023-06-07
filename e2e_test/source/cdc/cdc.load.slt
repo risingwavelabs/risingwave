@@ -121,6 +121,5 @@ create table shipments_2 (
  username = 'postgres',
  password = 'postgres',
  database.name = 'cdc_test',
- table.name = 'shipments',
- slot.name = 'shipments_2'
+ table.name = 'shipments'
 );
