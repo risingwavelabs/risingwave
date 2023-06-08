@@ -50,7 +50,10 @@ fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
         )) as _,
         DataType::Int64 => todo!(), // FIXME: seems i64 cannot Into<f64>
         DataType::Float32 => todo!(),
-        DataType::Float64 => todo!(),
+        DataType::Float64 => Box::new(PercentileCont::<F64>::new(
+            fraction,
+            agg.return_type.clone(),
+        )) as _,
         _ => {
             return Err(ExprError::InvalidParam {
                 name: "ORDER BY column",
@@ -122,6 +125,8 @@ impl<T: MyScalar> Aggregator for PercentileCont<T> {
                     + (rn - frn) * Into::<f64>::into(self.data[crn as usize])
             };
             builder.append(Some(ScalarImpl::Float64(result.into())));
+        } else {
+            builder.append(Datum::None);
         }
         Ok(())
     }
