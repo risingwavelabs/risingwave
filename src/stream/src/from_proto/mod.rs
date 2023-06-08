@@ -36,6 +36,7 @@ mod no_op;
 mod now;
 mod project;
 mod project_set;
+mod replicate;
 mod row_id_gen;
 mod simple_agg;
 mod sink;
