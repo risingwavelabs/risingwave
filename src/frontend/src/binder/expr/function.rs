@@ -21,7 +21,7 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -266,29 +266,33 @@ impl Binder {
             )
         };
         let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
-            f.args
-                .into_iter()
-                .map(|arg| self.bind_function_arg(arg))
-                .flatten_ok()
-                .map(|item| {
-                    if let Ok(inner) = item {
-                        if let Some(literal) = inner.as_literal() {
-                            Ok(*literal.clone())
-                        } else {
-                            Err(ErrorCode::InvalidInputSyntax(format!(
-                                "arg in {} must be constant",
-                                kind
-                            ))
-                            .into())
-                        }
-                    } else {
-                        Err(item.err().unwrap())
-                    }
-                })
-                .try_collect()?
+            let arg =
+                self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
+                    ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
+                })?)?;
+            if arg.len() != 1 || arg[0].clone().as_literal().is_none() {
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
+                        .into(),
+                )
+            } else {
+                if let Ok(casted) = arg[0]
+                    .clone()
+                    .cast_implicit(DataType::Float64)?
+                    .fold_const()
+                {
+                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                } else {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "arg in {} must be double precision",
+                        kind
+                    ))
+                    .into())
+                }
+            }
         } else {
-            vec![]
-        };
+            Ok(vec![])
+        }?;
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
             kind,
             inputs,

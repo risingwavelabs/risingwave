@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
-use tracing_subscriber::filter::{Directive, Targets};
+use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
@@ -113,7 +113,8 @@ impl LoggerSettings {
     }
 }
 
-/// Set panic hook to abort the process (without losing debug info and stack trace).
+/// Set panic hook to abort the process if we're not catching unwind, without losing the information
+/// of stack trace and await-tree.
 pub fn set_panic_hook() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
@@ -123,7 +124,9 @@ pub fn set_panic_hook() {
             println!("{}\n", context);
         }
 
-        std::process::abort();
+        if !risingwave_common::util::panic::is_catching_unwind() {
+            std::process::abort();
+        }
     });
 }
 
@@ -153,6 +156,8 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
+            .with_target("aws_smithy_types", Level::INFO)
+            .with_target("aws_credential_types", LevelFilter::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)

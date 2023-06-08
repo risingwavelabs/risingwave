@@ -1311,3 +1311,26 @@
       └─BatchHashAgg { group_key: [t.a], aggs: [count] }
         └─BatchExchange { order: [], dist: HashShard(t.a) }
           └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(x) within group (order by y) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: percentile_cont(x)
+
+    Caused by:
+      Invalid input syntax: arg in percentile_cont must be constant
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0, 0) within group (order by y) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: percentile_cont(0, 0)
+
+    Caused by:
+      Invalid input syntax: only one arg is expected in percentile_cont
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0) within group (order by y desc) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [percentile_cont(t.y order_by(t.y DESC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
