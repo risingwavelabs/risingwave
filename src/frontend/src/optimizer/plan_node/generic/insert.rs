@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::fmt;
+use std::hash::Hash;
 
+use educe::Educe;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Schema, TableVersionId};
@@ -22,8 +24,11 @@ use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::OptimizerContextRef;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Insert<PlanRef> {
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub struct Insert<PlanRef: Eq + Hash> {
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
@@ -34,7 +39,7 @@ pub struct Insert<PlanRef> {
     pub returning: bool,
 }
 
-impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
+impl<PlanRef: GenericPlanRef + Eq + Hash> Insert<PlanRef> {
     pub fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
     }
@@ -106,7 +111,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
     }
 }
 
-impl<PlanRef> Insert<PlanRef> {
+impl<PlanRef: Eq + Hash> Insert<PlanRef> {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
     #[allow(clippy::too_many_arguments)]
     pub fn new(

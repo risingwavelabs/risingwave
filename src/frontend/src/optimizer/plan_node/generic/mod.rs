@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 
@@ -76,7 +78,7 @@ macro_rules! impl_distill_unit_from_fields {
 }
 pub(super) use impl_distill_unit_from_fields;
 
-pub trait GenericPlanRef {
+pub trait GenericPlanRef: Eq + Hash {
     fn schema(&self) -> &Schema;
     fn logical_pk(&self) -> &[usize];
     fn functional_dependency(&self) -> &FunctionalDependencySet;
