@@ -303,7 +303,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                     stmt.setString(1, tableOwner);
                     var res = stmt.executeQuery();
                     while (res.next()) {
-                        String[] users = (String[]) res.getArray("members").getArray();
+                        var usersArray = res.getArray("members");
+                        if (usersArray == null) {
+                            break;
+                        }
+                        String[] users = (String[]) usersArray.getArray();
                         if (null != users
                                 && Arrays.asList(users)
                                         .contains(userProps.get(DbzConnectorConfig.USER))) {
