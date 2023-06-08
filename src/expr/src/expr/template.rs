@@ -23,7 +23,7 @@ use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
+use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
 use crate::expr::{BoxedExpression, Expression, ValueImpl, ValueRef};
@@ -373,6 +373,232 @@ gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 });
 gen_expr_nullable!(UnaryNullableExpression, { IA1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 });
 gen_expr_nullable!(TernaryNullableExpression, { IA1, IA2, IA3 });
+
+pub struct WithType<'a, T: ScalarRef<'a>> {
+    pub value: T,
+    pub data_type: &'a DataType,
+}
+
+pub struct UnaryTyExpression<
+    IA1: Array,
+    OA: Array,
+    F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem>,
+> {
+    expr_ia1: BoxedExpression,
+    return_type: DataType,
+    func: F,
+    _phantom: std::marker::PhantomData<(IA1, OA)>,
+}
+impl<
+        IA1: Array,
+        OA: Array,
+        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+    > fmt::Debug for UnaryTyExpression<IA1, OA, F>
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnaryExpression")
+            .field("func", &std::any::type_name::<F>())
+            .field("expr_ia1", &self.expr_ia1)
+            .field("return_type", &self.return_type)
+            .finish()
+    }
+}
+impl<
+        IA1: Array,
+        OA: Array,
+        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+    > Expression for UnaryTyExpression<IA1, OA, F>
+where
+    for<'a> ValueRef<'a, IA1>: std::convert::From<&'a ValueImpl>,
+    for<'a> ValueRef<'a, OA>: std::convert::From<&'a ValueImpl>,
+{
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    fn eval_v2<'a, 'b, 'async_trait>(
+        &'a self,
+        data_chunk: &'b DataChunk,
+    ) -> Pin<Box<dyn Future<Output = Result<ValueImpl>> + Send + 'async_trait>>
+    where
+        'a: 'async_trait,
+        'b: 'async_trait,
+    {
+        Box::pin(async move {
+            let ret_ia1 = self.expr_ia1.eval_v2(data_chunk).await?;
+            let val_ia1: ValueRef<'_, IA1> = (&ret_ia1).into();
+            let ty_ia1 = self.expr_ia1.return_type();
+            Ok(match (val_ia1,) {
+                (ValueRef::Scalar {
+                    value: scalar_ref_ia1,
+                    capacity: cap_ia1,
+                },) => {
+                    let output_scalar = if let (Some(scalar_ref_ia1),) = (scalar_ref_ia1,) {
+                        let ret = (self.func)(WithType {
+                            value: scalar_ref_ia1,
+                            data_type: &ty_ia1,
+                        })?;
+                        Some(ret)
+                    } else {
+                        None
+                    };
+                    let output_datum = output_scalar.map(|s| s.to_scalar_value());
+                    let capacity = data_chunk.capacity();
+
+                    if cfg!(debug_assertions) {
+                        let all_capacities = [capacity, cap_ia1];
+                        assert!(all_capacities.into_iter().all_equal(), "capacities mismatched: {:?}", all_capacities);
+                    }
+
+                    ValueImpl::Scalar {
+                        value: output_datum,
+                        capacity,
+                    }
+                }
+                (val_ia1,) => {
+                    let bitmap = data_chunk.visibility();
+                    let mut output_array = <OA as Array>::Builder::with_type(
+                        data_chunk.capacity(),
+                        self.return_type.clone(),
+                    );
+                    let array = match bitmap {
+                        Some(bitmap) => {
+                            for ((v_ia1,), visible) in
+                                multizip((val_ia1.iter(),)).zip_eq_debug(bitmap.iter())
+                            {
+                                if !visible {
+                                    output_array.append_null();
+                                    continue;
+                                }
+                                if let (Some(v_ia1),) = (v_ia1,) {
+                                    let ret = (self.func)(WithType {
+                                        value: v_ia1,
+                                        data_type: &ty_ia1,
+                                    })?;
+                                    let output = Some(ret.as_scalar_ref());
+                                    output_array.append(output);
+                                } else {
+                                    output_array.append(None);
+                                }
+                            }
+                            output_array.finish().into()
+                        }
+                        None => {
+                            for (v_ia1,) in multizip((val_ia1.iter(),)) {
+                                if let (Some(v_ia1),) = (v_ia1,) {
+                                    let ret = (self.func)(WithType {
+                                        value: v_ia1,
+                                        data_type: &ty_ia1,
+                                    })?;
+                                    let output = Some(ret.as_scalar_ref());
+                                    output_array.append(output);
+                                } else {
+                                    output_array.append(None);
+                                }
+                            }
+                            output_array.finish().into()
+                        }
+                    };
+                    ValueImpl::Array(Arc::new(array))
+                }
+            })
+        })
+    }
+
+    /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
+    /// then directly calls `$macro_row` to evaluate the current expression.
+    fn eval_row<'a, 'b, 'async_trait>(
+        &'a self,
+        row: &'b OwnedRow,
+    ) -> Pin<Box<dyn Future<Output = Result<Datum>> + Send + 'async_trait>>
+    where
+        'a: 'async_trait,
+        'b: 'async_trait,
+    {
+        Box::pin(async move {
+            let datum_ia1 = self.expr_ia1.eval_row(row).await?;
+            let scalar_ref_ia1 = datum_ia1
+                .as_ref()
+                .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+            let ty_ia1 = self.expr_ia1.return_type();
+            let output_scalar = if let (Some(scalar_ref_ia1),) = (scalar_ref_ia1,) {
+                let ret = (self.func)(WithType {
+                    value: scalar_ref_ia1,
+                    data_type: &ty_ia1,
+                })?;
+                Some(ret)
+            } else {
+                None
+            };
+            let output_datum = output_scalar.map(|s| s.to_scalar_value());
+            Ok(output_datum)
+        })
+    }
+}
+impl<
+        IA1: Array,
+        OA: Array,
+        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+    > UnaryTyExpression<IA1, OA, F>
+{
+    #[allow(dead_code)]
+    pub fn new(expr_ia1: BoxedExpression, return_type: DataType, func: F) -> Self {
+        Self {
+            expr_ia1,
+            return_type,
+            func,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{I32Array, ListArray};
+    use risingwave_common::types::{ListRef, ListValue};
+
+    use super::*;
+
+    fn foo_fs(x: ListRef<'_>) -> Result<i32> {
+        Ok(x.len() as _)
+    }
+
+    fn foo_fs_ty<'a>(x: WithType<'a, ListRef<'a>>) -> Result<i32> {
+        Ok(x.value.len() as _)
+    }
+
+    #[tokio::test]
+    async fn test_both() {
+        let arg_expr = crate::expr::LiteralExpression::new(
+            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            Some(ListValue::new(vec![None]).into()),
+        )
+        .boxed();
+        let e = UnaryExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, foo_fs);
+        let o = *e
+            .eval_row(&OwnedRow::empty())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_int32();
+        assert_eq!(o, 1);
+
+        let arg_expr = crate::expr::LiteralExpression::new(
+            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            Some(ListValue::new(vec![None]).into()),
+        )
+        .boxed();
+        let e =
+            UnaryTyExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, foo_fs_ty);
+        let o = *e
+            .eval_row(&OwnedRow::empty())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_int32();
+        assert_eq!(o, 1);
+    }
+}
 
 pub struct NullaryExpression<OA, F> {
     return_type: DataType,
