@@ -33,7 +33,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 15
-  
+
   - label: "docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
@@ -260,12 +260,31 @@ steps:
 
   - label: "micro benchmark"
     command: "ci/scripts/run-micro-benchmarks.sh"
+    key: "run-micro-benchmarks"
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 35
+
+  - label: "upload micro-benchmark"
+    command:
+      - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
+    depends_on: "run-micro-benchmarks"
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            BUILDKITE_TOKEN: buildkite_token
+            GITHUB_TOKEN: github-token
+      - docker-compose#v4.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+          environment:
+            - BUILDKITE_TOKEN
+            - GITHUB_TOKEN
+    timeout_in_minutes: 5
 
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
