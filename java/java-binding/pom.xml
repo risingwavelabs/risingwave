@@ -45,6 +45,11 @@
     <profiles>
         <profile>
             <id>no-build-jni-rust</id>
+            <activation>
+                <property>
+                    <name>no-build-rust</name>
+                </property>
+            </activation>
             <build>
                 <plugins>
                     <plugin>

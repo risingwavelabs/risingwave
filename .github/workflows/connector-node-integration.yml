@@ -41,7 +41,7 @@ jobs:
           
           echo "--- build connector node"
           cd ${RISINGWAVE_ROOT}/java
-          mvn --batch-mode --update-snapshots clean package -P no-build-jni-rust
+          mvn --batch-mode --update-snapshots clean package -Dno-build-rust
           
           echo "--- install postgresql client"
           sudo apt install postgresql postgresql-contrib libpq-dev
