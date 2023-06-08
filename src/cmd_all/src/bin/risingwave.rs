@@ -38,7 +38,7 @@ risingwave_common::enable_jemalloc_on_unix!();
 const BINARY_NAME: &str = "risingwave";
 const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
-/// for each commit, so we only use it for the final binary.
+/// for each commit, so we only use it for the final binary (`risingwave -V`).
 const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
 
 /// Component to launch.
@@ -156,7 +156,7 @@ const _: () = {
     /// and is used in logs/version queries.
     ///
     /// Usually it's only provided by docker/binary releases (including nightly builds).
-    /// We check it is the same as VERGEN_GIT_SHA when it's present.
+    /// We check it is the same as `VERGEN_GIT_SHA` when it's present.
     const GIT_SHA: &str = match option_env!("GIT_SHA") {
         Some(sha) => sha,
         None => VERGEN_GIT_SHA,
