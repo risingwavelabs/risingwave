@@ -13,6 +13,7 @@ public class UdfExample {
             server.addFunction("int42", new Int42());
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd());
+            server.addFunction("to_string", new ToString());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
@@ -44,6 +45,12 @@ public class UdfExample {
         // public static int eval(int a, int b, int c) {
         // return eval(eval(a, b), c);
         // }
+    }
+
+    public static class ToString extends ScalarFunction {
+        public static String eval(String s) {
+            return s;
+        }
     }
 
     public static class ExtractTcpInfo extends ScalarFunction {
