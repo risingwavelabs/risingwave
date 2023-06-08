@@ -81,24 +81,12 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
-        watermark_epoch: AtomicU64Ref,
-        conflict_behavior: ConflictBehavior,
-        metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = upstream.schema().clone();
 
-        let state_table = if table_catalog.version.is_some() {
-            // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
-            // with the new version of serializer is the same as the old one, even if they can be
-            // decoded into the same value. The table is now performing consistency check on the raw
-            // bytes, so we need to turn off the check here. We may turn it on if we can compare the
-            // decoded row.
-            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await
-        } else {
-            StateTableInner::from_table_catalog(table_catalog, store, vnodes).await
-        };
+        let state_table = StateTableInner::from_table_catalog(table_catalog, store, vnodes).await;
 
         let actor_id = actor_context.id;
         let table_id = table_catalog.id;
@@ -138,20 +126,13 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
                 }
                 Message::Barrier(b) => {
                     self.state_table.commit(b.epoch).await?;
-
-                    // Update the vnode bitmap for the state table if asked.
-                    if let Some(vnode_bitmap) = b.as_update_vnode_bitmap(self.actor_context.id) {
-                        let (_, cache_may_stale) =
-                            self.state_table.update_vnode_bitmap(vnode_bitmap);
-
-                        if cache_may_stale {}
-                    }
                     Message::Barrier(b)
                 }
             }
         }
     }
 }
+
 // impl<S: StateStore> ReplicateExecutor<S, BasicSerde> {
 //     /// Create a new `ReplicateExecutor` without distribution info for test purpose.
 //     #[allow(clippy::too_many_arguments)]
