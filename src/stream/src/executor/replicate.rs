@@ -56,7 +56,7 @@ use crate::task::AtomicU64Ref;
 /// 2. They need access to upstream uncommitted state.
 ///    This could be `backfill`, which does uncommitted snapshot reads.
 pub struct ReplicateExecutor<S: StateStore, SD: ValueRowSerde> {
-    input: BoxedExecutor,
+    upstream: BoxedExecutor,
 
     state_table: StateTableInner<S, SD>,
 
@@ -74,7 +74,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
     /// should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        input: BoxedExecutor,
+        upstream: BoxedExecutor,
         store: S,
         key: Vec<ColumnOrder>,
         executor_id: u64,
@@ -87,7 +87,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
-        let schema = input.schema().clone();
+        let schema = upstream.schema().clone();
 
         let state_table = if table_catalog.version.is_some() {
             // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
@@ -103,7 +103,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
         let actor_id = actor_context.id;
         let table_id = table_catalog.id;
         Self {
-            input,
+            upstream,
             state_table,
             arrange_columns: arrange_columns.clone(),
             actor_context,
@@ -118,16 +118,16 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let data_types = self.schema().data_types().clone();
-        let mut input = self.input.execute();
+        let mut upstream = self.upstream.execute();
 
-        let barrier = expect_first_barrier(&mut input).await?;
+        let barrier = expect_first_barrier(&mut upstream).await?;
         self.state_table.init_epoch(barrier.epoch);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
         #[for_await]
-        for msg in input {
+        for msg in upstream {
             let msg = msg?;
 
             yield match msg {
@@ -156,7 +156,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
 //     /// Create a new `ReplicateExecutor` without distribution info for test purpose.
 //     #[allow(clippy::too_many_arguments)]
 //     pub async fn for_test(
-//         input: BoxedExecutor,
+//         upstream: BoxedExecutor,
 //         store: S,
 //         table_id: TableId,
 //         keys: Vec<ColumnOrder>,
@@ -167,7 +167,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
 //     ) -> Self {
 //         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
 //         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
-//         let schema = input.schema().clone();
+//         let schema = upstream.schema().clone();
 //         let columns = column_ids
 //             .into_iter()
 //             .zip_eq_fast(schema.fields.iter())
@@ -184,7 +184,7 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
 //         .await;
 //
 //         Self {
-//             input,
+//             upstream,
 //             state_table,
 //             arrange_columns: arrange_columns.clone(),
 //             actor_context: ActorContext::create(0),
