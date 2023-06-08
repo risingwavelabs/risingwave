@@ -74,7 +74,7 @@ impl fmt::Display for LogicalJoin {
 
         if verbose {
             match IndicesDisplay::from(
-                &self.output_indices(),
+                self.output_indices(),
                 self.internal_column_num(),
                 &concat_schema,
             ) {
