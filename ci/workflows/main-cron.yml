@@ -290,7 +290,7 @@ steps:
           server: ghcr.io
           username: GHCR_USERNAME
           password-env: GHCR_TOKEN
-    timeout_in_minutes: 35
+    timeout_in_minutes: 5
 
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
