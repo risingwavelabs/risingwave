@@ -19,7 +19,6 @@ import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.io.InputStream;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -248,14 +247,10 @@ public class JDBCSink extends SinkBase {
                     }
                     break;
                 case BYTEA:
-                    stmt.setBinaryStream(placeholderIdx++, (InputStream) row.get(i));
+                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
                     break;
                 case LIST:
                     var val = row.get(i);
-                    // JSON payload returns a List, but JDBC expects an array
-                    if (val instanceof java.util.List<?>) {
-                        val = ((java.util.List<?>) val).toArray();
-                    }
                     assert (val instanceof Object[]);
                     Object[] objArray = (Object[]) val;
                     if (targetDbType == DatabaseType.POSTGRES) {
