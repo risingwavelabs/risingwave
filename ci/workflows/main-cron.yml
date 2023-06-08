@@ -275,8 +275,6 @@ steps:
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
-            GHCR_USERNAME: ghcr-username
-            GHCR_TOKEN: ghcr-token
             BUILDKITE_TOKEN: buildkite_token
             GITHUB_TOKEN: github-token
       - docker-compose#v4.9.0:
@@ -286,10 +284,6 @@ steps:
           environment:
             - BUILDKITE_TOKEN
             - GITHUB_TOKEN
-      - docker-login#v2.1.0:
-          server: ghcr.io
-          username: GHCR_USERNAME
-          password-env: GHCR_TOKEN
     timeout_in_minutes: 5
 
   # Backwards compatibility tests
