@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::panic;
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::ops::{Deref, DerefMut};
@@ -358,47 +357,6 @@ where
         // Release snapshots pinned by meta on restarting.
         instance.release_meta_context().await?;
         Ok(instance)
-    }
-
-    pub async fn start_compaction_heartbeat(
-        hummock_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let compactor_manager = hummock_manager.compactor_manager.clone();
-        let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(std::time::Duration::from_millis(1000));
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = min_interval.tick() => {
-                    },
-                    // Shutdown
-                    _ = &mut shutdown_rx => {
-                        tracing::info!("Compaction heartbeat checker is stopped");
-                        return;
-                    }
-                }
-                // TODO: add metrics to track expired tasks
-                for (context_id, mut task) in compactor_manager.get_expired_tasks() {
-                    tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
-                    if let Some(compactor) = compactor_manager.get_compactor(context_id) {
-                        // Forcefully cancel the task so that it terminates early on the compactor
-                        // node.
-                        let _ = compactor.cancel_task(task.task_id).await;
-                        tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
-                    }
-
-                    if let Err(e) = hummock_manager
-                        .cancel_compact_task(&mut task, TaskStatus::HeartbeatCanceled)
-                        .await
-                    {
-                        tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
-                            until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
-                    }
-                }
-            }
-        });
-        (join_handle, shutdown_tx)
     }
 
     /// Load state from meta store.
@@ -2144,6 +2102,7 @@ where
                 GroupSplit,
                 CheckDeadTask,
                 Report,
+                CompactionHeartBeat,
             }
 
             let mut check_compact_trigger_interval =
@@ -2162,9 +2121,18 @@ where
             let stat_report_trigger =
                 IntervalStream::new(stat_report_interval).map(|_| HummockTimerEvent::Report);
 
+            let mut compaction_heartbeat_interval =
+                tokio::time::interval(std::time::Duration::from_millis(1000));
+            compaction_heartbeat_interval
+                .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            compaction_heartbeat_interval.reset();
+            let compaction_heartbeat_trigger = IntervalStream::new(compaction_heartbeat_interval)
+                .map(|_| HummockTimerEvent::CompactionHeartBeat);
+
             let mut triggers: Vec<BoxStream<'static, HummockTimerEvent>> = vec![
                 Box::pin(check_compact_trigger),
                 Box::pin(stat_report_trigger),
+                Box::pin(compaction_heartbeat_trigger),
             ];
 
             let periodic_check_split_group_interval_sec = hummock_manager
@@ -2243,6 +2211,38 @@ where
                                             ),
                                             compaction_group_config.group_id(),
                                         )
+                                    }
+                                }
+
+                                HummockTimerEvent::CompactionHeartBeat => {
+                                    let compactor_manager =
+                                        hummock_manager.compactor_manager.clone();
+
+                                    // TODO: add metrics to track expired tasks
+                                    for (context_id, mut task) in
+                                        compactor_manager.get_expired_tasks()
+                                    {
+                                        tracing::info!("Task with task_id {} with context_id {context_id} has expired due to lack of visible progress", task.task_id);
+                                        if let Some(compactor) =
+                                            compactor_manager.get_compactor(context_id)
+                                        {
+                                            // Forcefully cancel the task so that it terminates
+                                            // early on the compactor
+                                            // node.
+                                            let _ = compactor.cancel_task(task.task_id).await;
+                                            tracing::info!("CancelTask operation for task_id {} has been sent to node with context_id {context_id}", task.task_id);
+                                        }
+
+                                        if let Err(e) = hummock_manager
+                                            .cancel_compact_task(
+                                                &mut task,
+                                                TaskStatus::HeartbeatCanceled,
+                                            )
+                                            .await
+                                        {
+                                            tracing::error!("Attempt to remove compaction task due to elapsed heartbeat failed. We will continue to track its heartbeat
+                                                until we can successfully report its status. {context_id}, task_id: {}, ERR: {e:?}", task.task_id);
+                                        }
                                     }
                                 }
                             }
