@@ -336,7 +336,7 @@ impl StateStoreCollector {
             "the ratio of uploading SSTs memory usage to it's pre-allocated memory",
         ))
         .unwrap();
-        descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
+        descs.extend(uploading_memory_usage_ratio.desc().into_iter().cloned());
 
         Self {
             memory_collector,
