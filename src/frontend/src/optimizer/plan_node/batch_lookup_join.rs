@@ -21,8 +21,8 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
 use super::generic::{self, GenericPlanRef};
-use super::ExprRewritable;
 use super::utils::Distill;
+use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -119,7 +119,7 @@ impl Distill for BatchLookupJoin {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.logical.join_type)));
-        
+
         let mut concat_schema = self.logical.left.schema().fields.clone();
         concat_schema.extend(self.logical.right.schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
@@ -130,27 +130,17 @@ impl Distill for BatchLookupJoin {
                 input_schema: &concat_schema,
             }),
         ));
-        
+
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                vec.push(("output", Pretty::from("all")));
-            } else {
-                vec.push((
-                    "output",
-                    Pretty::display(&IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    }),
-                ));
-            }
+            let data = IndicesDisplay::from(
+                &self.logical.output_indices,
+                self.logical.internal_column_num(),
+                &concat_schema,
+            )
+            .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
         }
-        
+
         Pretty::childless_record("BatchLookupJoin", vec)
     }
 }
@@ -173,23 +163,14 @@ impl fmt::Display for BatchLookupJoin {
         );
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from(
+                &self.logical.output_indices,
+                self.logical.internal_column_num(),
+                &concat_schema,
+            ) {
+                None => builder.field("output", &"all"),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()

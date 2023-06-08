@@ -68,23 +68,14 @@ impl fmt::Display for BatchNestedLoopJoin {
         );
 
         if verbose {
-            if self
-                .logical
-                .output_indices
-                .iter()
-                .copied()
-                .eq(0..self.logical.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: &self.logical.output_indices,
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from(
+                &self.logical.output_indices,
+                self.logical.internal_column_num(),
+                &concat_schema,
+            ) {
+                None => builder.field("output", &"all"),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
