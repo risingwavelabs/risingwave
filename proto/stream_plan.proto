@@ -173,6 +173,24 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+
+// A materialized view is regarded as a table.
+// In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
+//
+// The node will be used for both create mv and create index.
+// - When creating mv, `pk == distribution_key == column_orders`.
+// - When creating index, `column_orders` will contain both
+//   arrange columns and pk columns, while distribution key will be arrange columns.
+message ReplicateNode {
+  reserved 4;
+
+  uint32 table_id = 1;
+  // Column indexes and orders of primary key.
+  repeated common.ColumnOrder column_orders = 2;
+  // Used for internal table states.
+  catalog.Table table = 3;
+}
+
 // A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 //
