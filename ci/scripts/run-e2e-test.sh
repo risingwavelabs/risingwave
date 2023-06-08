@@ -24,6 +24,7 @@ download_and_prepare_rw "$profile" common
 echo "--- Download artifacts"
 download-and-decompress-artifact e2e_test_generated ./
 download-and-decompress-artifact risingwave_e2e_extended_mode_test-"$profile" target/debug/
+buildkite-agent artifact download risingwave-udf-examples.jar ./
 mv target/debug/risingwave_e2e_extended_mode_test-"$profile" target/debug/risingwave_e2e_extended_mode_test
 
 chmod +x ./target/debug/risingwave_e2e_extended_mode_test
@@ -46,11 +47,17 @@ sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
-echo "--- e2e, ci-3streaming-2serving-3fe, udf"
+echo "--- e2e, ci-3streaming-2serving-3fe, python udf"
 python3 e2e_test/udf/test.py &
 sleep 2
-sqllogictest -p 4566 -d dev './e2e_test/udf/python.slt'
+sqllogictest -p 4566 -d dev --label python './e2e_test/udf/python.slt'
 pkill python3
+
+echo "--- e2e, ci-3streaming-2serving-3fe, java udf"
+java -jar risingwave-udf-examples.jar &
+sleep 2
+sqllogictest -p 4566 -d dev --label java './e2e_test/udf/python.slt'
+pkill java
 
 echo "--- Kill cluster"
 cargo make ci-kill
