@@ -185,3 +185,56 @@ impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
         self.inner.into_iter()
     }
 }
+
+#[derive(Default)]
+pub struct KvSize(usize);
+
+impl KvSize {
+    pub fn new() -> Self {
+        Self(0)
+    }
+
+    pub fn with_size(size: usize) -> Self {
+        Self(size)
+    }
+
+    pub fn add<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) -> usize {
+        self.0 = self
+            .0
+            .saturating_add(key.estimated_size() + val.estimated_size());
+        self.0
+    }
+
+    pub fn sub<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) -> usize {
+        self.0 = self
+            .0
+            .saturating_sub(key.estimated_size() + val.estimated_size());
+        self.0
+    }
+
+    pub fn add_val<V: EstimateSize>(&mut self, val: &V) -> usize {
+        self.0 = self.0.saturating_add(val.estimated_size());
+        self.0
+    }
+
+    pub fn sub_val<V: EstimateSize>(&mut self, val: &V) -> usize {
+        self.0 = self.0.saturating_sub(val.estimated_size());
+        self.0
+    }
+
+    pub fn add_size(&mut self, size: usize) {
+        self.0 += size;
+    }
+
+    pub fn sub_size(&mut self, size: usize) {
+        self.0 -= size;
+    }
+
+    pub fn set(&mut self, size: usize) {
+        self.0 = size;
+    }
+
+    pub fn size(&self) -> usize {
+        self.0
+    }
+}
