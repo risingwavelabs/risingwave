@@ -271,7 +271,7 @@ steps:
   - label: "upload micro-benchmark"
     command:
       - "BUILDKITE_BUILD_NUMBER=$BUILDKITE_BUILD_NUMBER ci/scripts/upload-micro-bench-results.sh"
-    # depends_on: "run-micro-benchmarks"
+    depends_on: "run-micro-benchmarks"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
