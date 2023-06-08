@@ -704,9 +704,7 @@ mod tests {
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
-    use crate::hummock::test_utils::{
-        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
-    };
+    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
@@ -739,15 +737,7 @@ mod tests {
                 .await
         );
 
-        register_table_ids_to_compaction_group(
-            hummock_manager.as_ref(),
-            &[1],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
-        let _sst_infos = add_ssts(3, hummock_manager.as_ref(), context_id).await;
 
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
@@ -781,7 +771,7 @@ mod tests {
         );
 
         // Add more SSTs for compaction.
-        let _sst_infos = add_ssts(4, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
 
         // No idle compactor
         assert_eq!(
@@ -836,12 +826,6 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
-        register_table_ids_to_compaction_group(
-            hummock_manager.as_ref(),
-            &[1],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 
