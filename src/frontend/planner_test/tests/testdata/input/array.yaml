@@ -62,6 +62,31 @@
   expected_outputs:
   - binder_error
 - sql: |
+    select array_cat(null, null);
+  name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_cat('{a}', '{b}');
+  name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+  name: array_cat(unknown as text[], unknown as text[]) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_cat('{1}', array[2]);
+  name: array_cat(unknown as int[], int[]) -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_cat('{1}', 2);
+  name: array_cat(unknown, int) -> err
+  expected_outputs:
+  - binder_error
+- sql: |
     select array_append(array[66], 123);
   expected_outputs:
   - batch_plan
@@ -75,6 +100,26 @@
     select array_append(array[array[66]], array[233]);
   expected_outputs:
   - logical_plan
+- sql: |
+    select array_append(null, null);
+  name: array_append(unknown as text[], unknown as text) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_append('{a}', 'b');
+  name: array_append(unknown as text[], unknown as text) -> text[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_append(null, 2);
+  name: array_append(unknown as int[], int) -> int[]
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select array_append(array[1], null);
+  name: array_append(int[], unknown as int) -> int[]
+  expected_outputs:
+  - batch_plan
 - sql: |
     select array_prepend(123, array[66]);
   expected_outputs:

@@ -78,5 +78,6 @@ async fn test_project_set() {
               | - | 1 | 9  |   | 2 |
               +---+---+----+---+---+
         "#]],
+        SnapshotOptions::default(),
     );
 }

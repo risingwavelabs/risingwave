@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::ListRef;
-use risingwave_common::types::DatumRef;
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr_macro::function;
 
 use super::*;
@@ -22,6 +22,6 @@ use super::*;
     "unnest(list) -> setof any",
     type_infer = "|args| Ok(args[0].unnest_list())"
 )]
-fn unnest(list: ListRef<'_>) -> impl Iterator<Item = DatumRef<'_>> {
+fn unnest(list: ListRef<'_>) -> impl Iterator<Item = Option<ScalarRefImpl<'_>>> {
     list.flatten().into_iter()
 }

@@ -125,7 +125,7 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_row_expr(child, target, allows);
         }
-        if child.is_unknown() {
+        if child.is_untyped() {
             // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
             let literal = child.as_literal().unwrap();
             let datum = literal
@@ -147,7 +147,7 @@ impl FunctionCall {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
-        } else if child.is_unknown() || cast_ok(&source, &target, allows) {
+        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
                 return_type: target,
@@ -171,9 +171,7 @@ impl FunctionCall {
         allows: CastContext,
     ) -> Result<ExprImpl, CastError> {
         let func = *expr.into_function_call().unwrap();
-        let (fields, field_names) = if let DataType::Struct(t) = &target_type {
-            (t.fields.clone(), t.field_names.clone())
-        } else {
+        let DataType::Struct(t) = &target_type else {
             return Err(CastError(format!(
                 "cannot cast type \"{}\" to \"{}\" in {:?} context",
                 func.return_type(),
@@ -182,16 +180,16 @@ impl FunctionCall {
             )));
         };
         let (func_type, inputs, _) = func.decompose();
-        match fields.len().cmp(&inputs.len()) {
+        match t.len().cmp(&inputs.len()) {
             std::cmp::Ordering::Equal => {
                 let inputs = inputs
                     .into_iter()
-                    .zip_eq_fast(fields.to_vec())
-                    .map(|(e, t)| Self::new_cast(e, t, allows))
+                    .zip_eq_fast(t.types())
+                    .map(|(e, t)| Self::new_cast(e, t.clone(), allows))
                     .collect::<Result<Vec<_>, CastError>>()?;
                 let return_type = DataType::new_struct(
-                    inputs.iter().map(|i| i.return_type()).collect_vec(),
-                    field_names,
+                    inputs.iter().map(|i| i.return_type()).collect(),
+                    t.names().map(|s| s.to_string()).collect(),
                 );
                 Ok(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
             }

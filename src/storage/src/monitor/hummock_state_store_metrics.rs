@@ -286,7 +286,7 @@ struct StateStoreCollector {
     descs: Vec<Desc>,
     block_cache_size: IntGauge,
     meta_cache_size: IntGauge,
-    limit_memory_size: IntGauge,
+    uploading_memory_size: IntGauge,
     meta_cache_usage_ratio: Gauge,
     block_cache_usage_ratio: Gauge,
     uploading_memory_usage_ratio: Gauge,
@@ -324,12 +324,12 @@ impl StateStoreCollector {
         .unwrap();
         descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
 
-        let limit_memory_size = IntGauge::with_opts(Opts::new(
-            "state_store_limit_memory_size",
+        let uploading_memory_size = IntGauge::with_opts(Opts::new(
+            "uploading_memory_size",
             "the size of uploading SSTs memory usage",
         ))
         .unwrap();
-        descs.extend(limit_memory_size.desc().into_iter().cloned());
+        descs.extend(uploading_memory_size.desc().into_iter().cloned());
 
         let uploading_memory_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_uploading_memory_usage_ratio",
@@ -343,7 +343,7 @@ impl StateStoreCollector {
             descs,
             block_cache_size,
             meta_cache_size,
-            limit_memory_size,
+            uploading_memory_size,
             meta_cache_usage_ratio,
             block_cache_usage_ratio,
 
@@ -362,20 +362,19 @@ impl Collector for StateStoreCollector {
             .set(self.memory_collector.get_data_memory_usage() as i64);
         self.meta_cache_size
             .set(self.memory_collector.get_meta_memory_usage() as i64);
+        self.uploading_memory_size
+            .set(self.memory_collector.get_uploading_memory_usage() as i64);
         self.meta_cache_usage_ratio
             .set(self.memory_collector.get_meta_cache_memory_usage_ratio());
         self.block_cache_usage_ratio
             .set(self.memory_collector.get_block_cache_memory_usage_ratio());
         self.uploading_memory_usage_ratio
             .set(self.memory_collector.get_uploading_memory_usage_ratio());
-        self.limit_memory_size
-            .set(self.memory_collector.get_uploading_memory_usage() as i64);
-
         // collect MetricFamilies.
         let mut mfs = Vec::with_capacity(3);
         mfs.extend(self.block_cache_size.collect());
         mfs.extend(self.meta_cache_size.collect());
-        mfs.extend(self.limit_memory_size.collect());
+        mfs.extend(self.uploading_memory_size.collect());
         mfs
     }
 }

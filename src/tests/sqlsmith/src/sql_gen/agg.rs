@@ -144,5 +144,6 @@ fn make_agg_func(
         distinct,
         order_by,
         filter,
+        within_group: None,
     }
 }

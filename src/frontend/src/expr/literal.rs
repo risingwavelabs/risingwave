@@ -23,7 +23,8 @@ use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Literal {
     data: Datum,
-    data_type: DataType,
+    // `null` or `'foo'` is of `unknown` type until used in a typed context (e.g. func arg)
+    data_type: Option<DataType>,
 }
 
 impl std::fmt::Debug for Literal {
@@ -34,9 +35,10 @@ impl std::fmt::Debug for Literal {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
+            let data_type = self.return_type();
             match &self.data {
                 None => write!(f, "null"),
-                Some(v) => match self.data_type {
+                Some(v) => match data_type {
                     DataType::Boolean => write!(f, "{}", v.as_bool()),
                     DataType::Int16
                     | DataType::Int32
@@ -57,12 +59,12 @@ impl std::fmt::Debug for Literal {
                     | DataType::Struct(_) => write!(
                         f,
                         "'{}'",
-                        v.as_scalar_ref_impl().to_text_with_type(&self.data_type)
+                        v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
                     DataType::List { .. } => write!(f, "{}", display_for_explain(v.as_list())),
                 },
             }?;
-            write!(f, ":{:?}", self.data_type)
+            write!(f, ":{:?}", data_type)
         }
     }
 }
@@ -70,11 +72,25 @@ impl std::fmt::Debug for Literal {
 impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
         assert!(literal_type_match(&data_type, data.as_ref()));
-        Literal { data, data_type }
+        Literal {
+            data,
+            data_type: Some(data_type),
+        }
+    }
+
+    pub fn new_untyped(data: Option<String>) -> Self {
+        Literal {
+            data: data.map(Into::into),
+            data_type: None,
+        }
     }
 
     pub fn get_data(&self) -> &Datum {
         &self.data
+    }
+
+    pub fn is_untyped(&self) -> bool {
+        self.data_type.is_none()
     }
 
     pub(super) fn from_expr_proto(
@@ -83,14 +99,14 @@ impl Literal {
         let data_type = proto.get_return_type()?;
         Ok(Self {
             data: value_encoding_to_literal(&proto.rex_node, &data_type.into())?,
-            data_type: data_type.into(),
+            data_type: Some(data_type.into()),
         })
     }
 }
 
 impl Expr for Literal {
     fn return_type(&self) -> DataType {
-        self.data_type.clone()
+        self.data_type.clone().unwrap_or(DataType::Varchar)
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
