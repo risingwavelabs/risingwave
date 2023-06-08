@@ -110,12 +110,14 @@ impl FunctionCall {
     }
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
-    pub fn new_cast(
+    /// The input `child` remains unchanged when this returns an error.
+    pub fn cast_mut(
         child: &mut ExprImpl,
         target: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
         if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+            // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
             return Ok(());
         }
@@ -149,6 +151,7 @@ impl FunctionCall {
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
         } else if child.is_untyped() || cast_ok(&source, &target, allows) {
+            // Always Ok below. Safe to mutate `child`.
             let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
             *child = Self {
                 func_type: ExprType::Cast,
@@ -183,10 +186,12 @@ impl FunctionCall {
         };
         match t.len().cmp(&func.inputs.len()) {
             std::cmp::Ordering::Equal => {
+                // FIXME: `func` shall not be in a partially mutated state when one of its fields
+                // fails to cast.
                 func.inputs
                     .iter_mut()
                     .zip_eq_fast(t.types())
-                    .try_for_each(|(e, t)| Self::new_cast(e, t.clone(), allows))?;
+                    .try_for_each(|(e, t)| Self::cast_mut(e, t.clone(), allows))?;
                 func.return_type = target_type;
                 Ok(())
             }

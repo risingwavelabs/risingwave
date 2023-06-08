@@ -167,6 +167,7 @@ impl ExprImpl {
         .into()
     }
 
+    /// Takes the expression, leaving a literal null of the same type in its place.
     pub fn take(&mut self) -> Self {
         std::mem::replace(self, Self::literal_null(self.return_type()))
     }
@@ -221,25 +222,25 @@ impl ExprImpl {
 
     /// Shorthand to create cast expr to `target` type in implicit context.
     pub fn cast_implicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(&mut self, target, CastContext::Implicit)?;
+        FunctionCall::cast_mut(&mut self, target, CastContext::Implicit)?;
         Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
     pub fn cast_assign(mut self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(&mut self, target, CastContext::Assign)?;
+        FunctionCall::cast_mut(&mut self, target, CastContext::Assign)?;
         Ok(self)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
     pub fn cast_explicit(mut self, target: DataType) -> Result<ExprImpl, CastError> {
-        FunctionCall::new_cast(&mut self, target, CastContext::Explicit)?;
+        FunctionCall::cast_mut(&mut self, target, CastContext::Explicit)?;
         Ok(self)
     }
 
     /// Shorthand to inplace cast expr to `target` type in implicit context.
     pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
-        FunctionCall::new_cast(self, target, CastContext::Implicit)
+        FunctionCall::cast_mut(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to enforce implicit cast to boolean
