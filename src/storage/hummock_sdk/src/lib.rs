@@ -171,7 +171,7 @@ impl PartialEq for LocalSstableInfo {
 }
 
 /// Package read epoch of hummock, it be used for `wait_epoch`
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+#[derive(Debug, Clone, Copy)]
 pub enum HummockReadEpoch {
     /// We need to wait the `max_committed_epoch`
     Committed(HummockEpoch),
