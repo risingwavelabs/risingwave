@@ -112,8 +112,6 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
                 pk_indices: arrange_columns,
                 identity: format!("ReplicateExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch, metrics, actor_id, table_id),
-            conflict_behavior,
         }
     }
 
@@ -131,51 +129,12 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
         #[for_await]
         for msg in input {
             let msg = msg?;
-            self.materialize_cache.evict();
 
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    match self.conflict_behavior {
-                        ConflictBehavior::Overwrite | ConflictBehavior::IgnoreConflict => {
-                            // create MaterializeBuffer from chunk
-                            let buffer = MaterializeBuffer::fill_buffer_from_chunk(
-                                chunk,
-                                self.state_table.value_indices(),
-                                self.state_table.pk_indices(),
-                                self.state_table.pk_serde(),
-                            );
-
-                            if buffer.is_empty() {
-                                // empty chunk
-                                continue;
-                            }
-
-                            let fixed_changes = self
-                                .materialize_cache
-                                .handle_conflict(buffer, &self.state_table, &self.conflict_behavior)
-                                .await?;
-
-                            // TODO(st1page): when materialize partial columns(), we should
-                            // construct some columns in the pk
-                            if self.state_table.value_indices().is_some() {
-                                panic!("materialize executor with data check can not handle only materialize partial columns")
-                            }
-
-                            match generate_output(fixed_changes, data_types.clone())? {
-                                Some(output_chunk) => {
-                                    self.state_table.write_chunk(output_chunk.clone());
-                                    Message::Chunk(output_chunk)
-                                }
-                                None => continue,
-                            }
-                        }
-
-                        ConflictBehavior::NoCheck => {
-                            self.state_table.write_chunk(chunk.clone());
-                            Message::Chunk(chunk)
-                        }
-                    }
+                    self.state_table.write_chunk(chunk.clone());
+                    Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
                     self.state_table.commit(b.epoch).await?;
@@ -185,18 +144,14 @@ impl<S: StateStore, SD: ValueRowSerde> ReplicateExecutor<S, SD> {
                         let (_, cache_may_stale) =
                             self.state_table.update_vnode_bitmap(vnode_bitmap);
 
-                        if cache_may_stale {
-                            self.materialize_cache.data.clear();
-                        }
+                        if cache_may_stale {}
                     }
-                    self.materialize_cache.data.update_epoch(b.epoch.curr);
                     Message::Barrier(b)
                 }
             }
         }
     }
 }
-//
 // impl<S: StateStore> ReplicateExecutor<S, BasicSerde> {
 //     /// Create a new `ReplicateExecutor` without distribution info for test purpose.
 //     #[allow(clippy::too_many_arguments)]

@@ -80,6 +80,7 @@ mod project;
 mod project_set;
 mod rearranged_chain;
 mod receiver;
+mod replicate;
 pub mod row_id_gen;
 mod simple_agg;
 mod sink;
