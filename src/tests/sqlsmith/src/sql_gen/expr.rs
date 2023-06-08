@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -166,17 +164,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
         let num_fields = self.rng.gen_range(1..4);
-        let fields = (0..num_fields)
-            .map(|_| self.gen_data_type_inner(depth))
-            .collect();
-        let field_names = STRUCT_FIELD_NAMES[0..num_fields]
-            .iter()
-            .map(|s| (*s).into())
-            .collect();
-        DataType::Struct(Arc::new(StructType {
-            fields,
-            field_names,
-        }))
+        DataType::Struct(StructType::new(
+            STRUCT_FIELD_NAMES[0..num_fields]
+                .iter()
+                .map(|s| (s.to_string(), self.gen_data_type_inner(depth)))
+                .collect(),
+        ))
     }
 
     /// Generates an arbitrary expression, but biased towards datatypes present in bound columns.

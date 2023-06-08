@@ -14,16 +14,14 @@
 
 use std::fmt::Debug;
 
-use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
-use crate::impl_common_parser_logic;
 use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef, SourceFormat};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -37,8 +35,6 @@ fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a Borro
         Some(value)
     }
 }
-
-impl_common_parser_logic!(DebeziumJsonParser);
 
 #[derive(Debug)]
 pub struct DebeziumJsonParser {
@@ -151,11 +147,27 @@ impl DebeziumJsonParser {
     }
 }
 
+impl ByteStreamSourceParser for DebeziumJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
-
     use std::convert::TryInto;
-    use std::sync::Arc;
 
     use chrono::{NaiveDate, NaiveTime};
     use risingwave_common::array::{Op, StructValue};
@@ -721,10 +733,6 @@ mod tests {
 
         // schema for the remaining types
         fn get_other_types_test_columns() -> Vec<SourceColumnDesc> {
-            let point_type = Arc::new(StructType {
-                fields: vec![DataType::Float32, DataType::Float32],
-                field_names: vec![String::from('x'), String::from('y')],
-            });
             vec![
                 SourceColumnDesc::simple("o_key", DataType::Int32, ColumnId::from(0)),
                 SourceColumnDesc::simple("o_boolean", DataType::Boolean, ColumnId::from(1)),
@@ -735,7 +743,10 @@ mod tests {
                 SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
                 SourceColumnDesc {
                     name: "o_point".to_string(),
-                    data_type: DataType::Struct(point_type),
+                    data_type: DataType::Struct(StructType::new(vec![
+                        ("x", DataType::Float32),
+                        ("y", DataType::Float32),
+                    ])),
                     column_id: 7.into(),
                     fields: vec![],
                     is_row_id: false,

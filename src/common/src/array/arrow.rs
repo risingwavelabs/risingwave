@@ -22,7 +22,7 @@ use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::ZipEqDebug;
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
 
@@ -122,15 +122,23 @@ impl From<&arrow_schema::DataType> for DataType {
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
             LargeUtf8 => Self::Jsonb,
-            Struct(field) => Self::Struct(Arc::new(StructType {
-                fields: field.iter().map(|f| f.data_type().into()).collect(),
-                field_names: field.iter().map(|f| f.name().clone()).collect(),
-            })),
+            Struct(field) => Self::Struct(field.as_slice().into()),
             List(field) => Self::List(Box::new(field.data_type().into())),
             Decimal128(_, _) => Self::Decimal,
             Decimal256(_, _) => Self::Int256,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
+    }
+}
+
+impl From<&[arrow_schema::Field]> for StructType {
+    fn from(fields: &[arrow_schema::Field]) -> Self {
+        Self::new(
+            fields
+                .iter()
+                .map(|f| (f.name().clone(), f.data_type().into()))
+                .collect(),
+        )
     }
 }
 
@@ -158,9 +166,12 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Jsonb => Self::LargeUtf8,
             DataType::Bytea => Self::Binary,
             DataType::Decimal => Self::Decimal128(28, 0), // arrow precision can not be 0
-            DataType::Struct(struct_type) => {
-                Self::Struct(get_field_vector_from_struct_type(struct_type))
-            }
+            DataType::Struct(struct_type) => Self::Struct(
+                struct_type
+                    .iter()
+                    .map(|(name, ty)| Field::new(name, ty.into(), true))
+                    .collect(),
+            ),
             DataType::List(datatype) => {
                 Self::List(Box::new(Field::new("item", datatype.as_ref().into(), true)))
             }
@@ -172,24 +183,6 @@ impl From<&DataType> for arrow_schema::DataType {
 impl From<DataType> for arrow_schema::DataType {
     fn from(value: DataType) -> Self {
         (&value).into()
-    }
-}
-
-fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
-    // Check for length equality between field_name vector and datatype vector.
-    if struct_type.field_names.len() != struct_type.fields.len() {
-        struct_type
-            .fields
-            .iter()
-            .map(|f| Field::new("", f.into(), true))
-            .collect()
-    } else {
-        struct_type
-            .fields
-            .iter()
-            .zip_eq_fast(struct_type.field_names.clone())
-            .map(|(f, f_name)| Field::new(f_name, f.into(), true))
-            .collect()
     }
 }
 
@@ -598,28 +591,11 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
 
 impl From<&StructArray> for arrow_array::StructArray {
     fn from(array: &StructArray) -> Self {
-        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> =
-            if array.children_names().len() != array.children_array_types().len() {
-                array
-                    .fields()
-                    .zip_eq_fast(array.children_array_types())
-                    .map(|(arr, datatype)| {
-                        (Field::new("", datatype.into(), true), arr.as_ref().into())
-                    })
-                    .collect()
-            } else {
-                array
-                    .fields()
-                    .zip_eq_fast(array.children_array_types())
-                    .zip_eq_fast(array.children_names())
-                    .map(|((arr, datatype), field_name)| {
-                        (
-                            Field::new(field_name, datatype.into(), true),
-                            arr.as_ref().into(),
-                        )
-                    })
-                    .collect()
-            };
+        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> = array
+            .fields()
+            .zip_eq_debug(array.data_type().as_struct().iter())
+            .map(|(arr, (name, ty))| (Field::new(name, ty.into(), true), arr.as_ref().into()))
+            .collect();
         arrow_array::StructArray::from(struct_data_vector)
     }
 }
@@ -628,26 +604,19 @@ impl TryFrom<&arrow_array::StructArray> for StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &arrow_array::StructArray) -> Result<Self, Self::Error> {
-        let mut null_bitmap = Vec::new();
-        for i in 0..arrow_array::Array::len(&array) {
-            null_bitmap.push(!arrow_array::Array::is_null(&array, i))
-        }
-        Ok(match arrow_array::Array::data_type(&array) {
-            arrow_schema::DataType::Struct(fields) => StructArray::from_slices_with_field_names(
-                &(null_bitmap),
-                array
-                    .columns()
-                    .iter()
-                    .map(ArrayImpl::try_from)
-                    .try_collect()?,
-                fields
-                    .iter()
-                    .map(|f| DataType::from(f.data_type()))
-                    .collect(),
-                array.column_names().into_iter().map(String::from).collect(),
-            ),
-            _ => panic!("nested field types cannot be determined."),
-        })
+        use arrow_array::Array;
+        let arrow_schema::DataType::Struct(fields) = array.data_type() else {
+            panic!("nested field types cannot be determined.");
+        };
+        Ok(StructArray::new(
+            fields.as_slice().into(),
+            array
+                .columns()
+                .iter()
+                .map(|a| ArrayImpl::try_from(a).map(Arc::new))
+                .try_collect()?,
+            (0..array.len()).map(|i| !array.is_null(i)).collect(),
+        ))
     }
 }
 
@@ -785,7 +754,7 @@ mod tests {
         use arrow_array::Array as _;
 
         // Empty array - risingwave to arrow conversion.
-        let test_arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
+        let test_arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         assert_eq!(arrow_array::StructArray::from(&test_arr).len(), 0);
 
         // Empty array - arrow to risingwave conversion.
@@ -816,14 +785,13 @@ mod tests {
         .unwrap();
         let actual_risingwave_struct_array =
             StructArray::try_from(&test_arrow_struct_array).unwrap();
-        let expected_risingwave_struct_array = StructArray::from_slices_with_field_names(
-            &[true, true, true, false],
+        let expected_risingwave_struct_array = StructArray::new(
+            StructType::new(vec![("a", DataType::Boolean), ("b", DataType::Int32)]),
             vec![
-                BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into(),
-                I32Array::from_iter([Some(42), Some(28), Some(19), None]).into(),
+                BoolArray::from_iter([Some(false), Some(false), Some(true), None]).into_ref(),
+                I32Array::from_iter([Some(42), Some(28), Some(19), None]).into_ref(),
             ],
-            vec![DataType::Boolean, DataType::Int32],
-            vec![String::from("a"), String::from("b")],
+            [true, true, true, false].into_iter().collect(),
         );
         assert_eq!(
             expected_risingwave_struct_array,
