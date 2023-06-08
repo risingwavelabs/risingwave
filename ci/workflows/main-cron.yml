@@ -279,12 +279,14 @@ steps:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
             BUILDKITE_TOKEN: buildkite_token
+            GITHUB_TOKEN: github-token
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
             - BUILDKITE_TOKEN
+            - GITHUB_TOKEN
       - docker-login#v2.1.0:
           server: ghcr.io
           username: GHCR_USERNAME
