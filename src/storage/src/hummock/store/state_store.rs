@@ -406,7 +406,7 @@ impl LocalHummockStorage {
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
-        if self.no_upload {
+        if !self.no_upload {
             self.event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
