@@ -74,7 +74,7 @@ impl<PlanRef> Delete<PlanRef> {
 impl<PlanRef> DistillUnit for Delete<PlanRef> {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
-        vec.push(("table", Pretty::Text(self.table_name.clone().into())));
+        vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }

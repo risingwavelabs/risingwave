@@ -14,7 +14,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use pretty_xmlish::Pretty;
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Schema, TableVersionId};
 
 use super::GenericPlanRef;
@@ -43,7 +43,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
         self.input.schema()
     }
 
-    pub(crate) fn distill_with_name<'a>(&self, name: &str, verbose: bool) -> Pretty<'a> {
+    pub fn fields_pretty<'a>(&self, verbose: bool) -> StrAssocArr<'a> {
         let mut capacity = 1;
         if self.returning {
             capacity += 1;
@@ -55,7 +55,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
             }
         }
         let mut vec = Vec::with_capacity(capacity);
-        vec.push(("table", Pretty::from(&self.table_name)));
+        vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::debug(&true)));
         }
@@ -73,7 +73,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
                 vec.push(("default", Pretty::Array(collect)));
             }
         }
-        Pretty::childless_record(name, vec)
+        vec
     }
 
     pub(crate) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
