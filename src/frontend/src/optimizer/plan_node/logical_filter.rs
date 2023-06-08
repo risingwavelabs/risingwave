@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
@@ -117,12 +116,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 }
 
 impl_plan_tree_node_for_unary! {LogicalFilter}
-
-impl fmt::Display for LogicalFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalFilter")
-    }
-}
+impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

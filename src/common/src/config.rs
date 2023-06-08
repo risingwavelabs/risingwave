@@ -286,6 +286,9 @@ pub struct BatchConfig {
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
 
+    #[serde(default = "default::batch::enable_barrier_read")]
+    pub enable_barrier_read: bool,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -337,6 +340,11 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
+
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    #[serde(default = "default::storage::shared_buffer_flush_ratio")]
+    pub shared_buffer_flush_ratio: f32,
 
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
@@ -670,6 +678,10 @@ mod default {
             1024
         }
 
+        pub fn shared_buffer_flush_ratio() -> f32 {
+            0.8
+        }
+
         pub fn imm_merge_threshold() -> usize {
             4
         }
@@ -853,6 +865,12 @@ mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+    }
+
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool {
+            true
         }
     }
 }

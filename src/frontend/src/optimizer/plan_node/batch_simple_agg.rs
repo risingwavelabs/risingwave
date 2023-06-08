@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
 use super::generic::{self, PlanAggCall};
+use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
@@ -50,12 +49,7 @@ impl BatchSimpleAgg {
         self.logical.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 }
-
-impl fmt::Display for BatchSimpleAgg {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchSimpleAgg")
-    }
-}
+impl_distill_by_unit!(BatchSimpleAgg, logical, "BatchSimpleAgg");
 
 impl PlanTreeNodeUnary for BatchSimpleAgg {
     fn input(&self) -> PlanRef {

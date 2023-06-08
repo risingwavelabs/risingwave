@@ -5224,6 +5224,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
+
+[[package]]
 name = "quick-xml"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5789,6 +5795,7 @@ dependencies = [
  "risingwave_common_proc_macro",
  "risingwave_pb",
  "rust_decimal",
+ "rusty-fork",
  "ryu",
  "serde",
  "serde_default",
@@ -5939,6 +5946,7 @@ dependencies = [
  "anyhow",
  "apache-avro",
  "async-trait",
+ "auto_enums",
  "aws-config",
  "aws-sdk-ec2",
  "aws-sdk-kinesis",
@@ -6408,6 +6416,7 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "pprof",
+ "risingwave_common",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -6868,6 +6877,18 @@ name = "rustversion"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f3208ce4d8448b3f3e7d168a73f5e0c43a61e32930de3bceeccedb388b6bf06"
+
+[[package]]
+name = "rusty-fork"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb3dcc6e454c328bb824492db107ab7c0ae8fcffe4ad210136ef014458c1bc4f"
+dependencies = [
+ "fnv",
+ "quick-error",
+ "tempfile",
+ "wait-timeout",
+]
 
 [[package]]
 name = "ryu"
@@ -8440,6 +8461,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
+name = "wait-timeout"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f200f5b12eb75f8c1ed65abd4b2db8a6e1b138a20de009dacee265a2498f3f6"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "waker-fn"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8824,7 +8854,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
- "arrayvec",
  "auto_enums",
  "aws-sdk-s3",
  "aws-smithy-client",
