@@ -15,23 +15,23 @@ use simd_json::{BorrowedValue, TryTypeError, ValueAccess, ValueType};
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_smart_get_value;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ByteaHandling {
     Standard,
     // debezium converts postgres bytea to base64 format
     Base64,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum TimeHandling {
     Milli,
     Micro,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum JsonValueHandling {
     AsValue,
     AsString,
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum NumericHandling {
     Strict,
     // should integer be parsed to float
@@ -40,7 +40,7 @@ pub enum NumericHandling {
         string_parsing: bool,
     },
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BooleanHandling {
     Strict,
     // should integer 1,0 be parsed to boolean (debezium)
@@ -51,7 +51,7 @@ pub enum BooleanHandling {
         string_integer_parsing: bool,
     },
 }
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
     pub time_handling: TimeHandling,
@@ -99,7 +99,6 @@ impl JsonParseOptions {
             got: value.value_type().to_string(),
             value: value.to_string(),
         };
-
         let v: ScalarImpl = match (type_expected, value.value_type()) {
             (_, ValueType::Null) => return Ok(None),
             // ---- Boolean -----
@@ -423,7 +422,7 @@ impl<'a, 'b> JsonAccess<'a, 'b> {
     }
 
     pub fn new(value: BorrowedValue<'b>) -> Self {
-        Self::new_with_options(value, &JsonParseOptions::DEBEZIUM)
+        Self::new_with_options(value, &JsonParseOptions::DEFAULT)
     }
 }
 
