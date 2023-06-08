@@ -27,12 +27,6 @@ select count(*) as cnt from mytable;
 ----
 4
 
-# Skipped due to https://github.com/risingwavelabs/risingwave/issues/10206
-# query IIII
-# select count(*) from orders_2;
-# ----
-# 3
-
 query IIII
 select count(*) from shipments_2;
 ----

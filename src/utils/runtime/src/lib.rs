@@ -113,7 +113,8 @@ impl LoggerSettings {
     }
 }
 
-/// Set panic hook to abort the process (without losing debug info and stack trace).
+/// Set panic hook to abort the process if we're not catching unwind, without losing the information
+/// of stack trace and await-tree.
 pub fn set_panic_hook() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
@@ -123,7 +124,9 @@ pub fn set_panic_hook() {
             println!("{}\n", context);
         }
 
-        std::process::abort();
+        if !risingwave_common::util::panic::is_catching_unwind() {
+            std::process::abort();
+        }
     });
 }
 

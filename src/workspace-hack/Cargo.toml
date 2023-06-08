@@ -20,7 +20,6 @@ publish = false
 [dependencies]
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
-arrayvec = { version = "0.7", default-features = false, features = ["std"] }
 aws-credential-types = { version = "0.55", default-features = false, features = ["hardcoded-credentials"] }
 aws-sdk-s3 = { version = "0.28", features = ["native-tls"] }
 aws-smithy-client = { version = "0.55", default-features = false, features = ["native-tls", "rustls"] }
