@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
 use crate::optimizer::property::Distribution;
@@ -146,11 +147,11 @@ impl StreamHashAgg {
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = if self.input().append_only() {
-            f.debug_struct("StreamAppendOnlyHashAgg")
-        } else {
-            f.debug_struct("StreamHashAgg")
-        };
+        let mut builder = formatter_debug_plan_node!(
+            f, "StreamHashAgg",
+            { "append_only", self.input().append_only() },
+            { "eowc", self.emit_on_window_close },
+        );
         self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;

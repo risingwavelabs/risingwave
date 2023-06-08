@@ -15,6 +15,7 @@
 //! Parse the tokens of the macro.
 
 use proc_macro2::Span;
+use syn::spanned::Spanned;
 
 use super::*;
 
@@ -68,12 +69,22 @@ impl FunctionAttr {
 
 impl UserFunctionAttr {
     fn parse(item: &mut syn::ItemFn) -> Result<Self> {
+        let (return_type, iterator_item_type) = match &item.sig.output {
+            syn::ReturnType::Default => (ReturnType::T, None),
+            syn::ReturnType::Type(_, ty) => {
+                let (return_type, inner) = check_type(ty);
+                let iterator_item_type = strip_iterator(inner).map(|ty| check_type(ty).0);
+                (return_type, iterator_item_type)
+            }
+        };
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
             arg_option: args_are_all_option(item),
-            return_type: return_type(item),
+            return_type,
+            iterator_item_type,
             generic: item.sig.generics.params.len(),
+            return_type_span: item.sig.output.span(),
         })
     }
 }
@@ -110,35 +121,36 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
 }
 
 /// Check the return type.
-fn return_type(item: &syn::ItemFn) -> ReturnType {
-    if return_value_is_result_option(item) {
-        ReturnType::ResultOption
-    } else if return_value_is(item, "Result") {
-        ReturnType::Result
-    } else if return_value_is(item, "Option") || return_value_is(item, "DatumRef") {
-        ReturnType::Option
+fn check_type(ty: &syn::Type) -> (ReturnType, &syn::Type) {
+    if let Some(inner) = strip_outer_type(ty, "Result") {
+        if let Some(inner) = strip_outer_type(inner, "Option") {
+            (ReturnType::ResultOption, inner)
+        } else {
+            (ReturnType::Result, inner)
+        }
+    } else if let Some(inner) = strip_outer_type(ty, "Option") {
+        (ReturnType::Option, inner)
+    } else if let Some(inner) = strip_outer_type(ty, "DatumRef") {
+        (ReturnType::Option, inner)
     } else {
-        ReturnType::T
+        (ReturnType::T, ty)
     }
 }
 
-/// Check if the return value is `type_` or `impl Iterator<Item = type_>`.
-fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
-    let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let ty = match ty.as_ref() {
-        syn::Type::ImplTrait(_) => match iterator_item(ty) {
-            Some(ty) => ty,
-            None => return false,
-        },
-        ty => ty,
-    };
-    let syn::Type::Path(path) = ty else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    seg.ident == type_
+/// Check if the type is `type_<T>` and return `T`.
+fn strip_outer_type<'a>(ty: &'a syn::Type, type_: &str) -> Option<&'a syn::Type> {
+    let syn::Type::Path(path) = ty else { return None };
+    let Some(seg) = path.path.segments.last() else { return None };
+    if seg.ident != type_ {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else { return None };
+    let Some(syn::GenericArgument::Type(ty)) = args.args.first() else { return None };
+    Some(ty)
 }
 
-/// Extract item from `impl Iterator<Item = ???>`
-fn iterator_item(ty: &syn::Type) -> Option<&syn::Type> {
+/// Check if the type is `impl Iterator<Item = T>` and return `T`.
+fn strip_iterator(ty: &syn::Type) -> Option<&syn::Type> {
     let syn::Type::ImplTrait(impl_trait) = ty else { return None; };
     let syn::TypeParamBound::Trait(trait_bound) = impl_trait.bounds.first()? else { return None; };
     let segment = trait_bound.path.segments.last().unwrap();
@@ -154,21 +166,6 @@ fn iterator_item(ty: &syn::Type) -> Option<&syn::Type> {
         }
     }
     None
-}
-
-/// Check if the return value is `Result<Option<T>>`.
-fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
-    let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    if seg.ident != "Result" {
-        return false;
-    }
-    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else { return false };
-    let Some(syn::GenericArgument::Type(ty)) = args.args.first() else { return false };
-    let syn::Type::Path(path) = ty else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    seg.ident == "Option"
 }
 
 /// Find argument `#[xxx(.., name = "value")]`.

@@ -294,7 +294,10 @@ impl DistinctAggRule {
                     | AggKind::StddevPop
                     | AggKind::StddevSamp
                     | AggKind::VarPop
-                    | AggKind::VarSamp => (),
+                    | AggKind::VarSamp
+                    | AggKind::PercentileCont
+                    | AggKind::PercentileDisc
+                    | AggKind::Mode => (),
                     AggKind::Count => {
                         agg_call.agg_kind = AggKind::Sum0;
                     }

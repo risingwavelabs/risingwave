@@ -462,13 +462,13 @@ impl Binder {
                     .into());
                 };
                 let columns = if let DataType::Struct(s) = tf.return_type() {
-                    let schema = Schema::from(&*s);
+                    let schema = Schema::from(&s);
                     schema.fields.into_iter().map(|f| (false, f)).collect_vec()
                 } else {
                     vec![(false, Field::with_name(tf.return_type(), tf.name()))]
                 };
 
-                self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
+                self.bind_table_to_context(columns, tf.name(), alias)?;
 
                 Ok(Relation::TableFunction(Box::new(tf)))
             }

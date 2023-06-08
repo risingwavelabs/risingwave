@@ -32,6 +32,9 @@ pub struct StorageOpts {
     /// Maximum shared buffer size, writes attempting to exceed the capacity will stall until there
     /// is enough space.
     pub shared_buffer_capacity_mb: usize,
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    pub shared_buffer_flush_ratio: f32,
     /// The threshold for the number of immutable memtables to merge to a new imm.
     pub imm_merge_threshold: usize,
     /// Remote directory for storing data and metadata objects.
@@ -89,6 +92,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .share_buffer_compaction_worker_threads_number,
             shared_buffer_capacity_mb: s.shared_buffer_capacity_mb,
+            shared_buffer_flush_ratio: c.storage.shared_buffer_flush_ratio,
             imm_merge_threshold: c.storage.imm_merge_threshold,
             data_directory: p.data_directory().to_string(),
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,

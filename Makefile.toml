@@ -14,6 +14,7 @@ extend = [
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
+  { path = "src/stream/tests/integration_tests/integration_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -328,7 +329,7 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 [tasks.build-risingwave]
 category = "RiseDev - Build"
 description = "Build Rust components"
-condition = { env_set = ["ENABLE_BUILD_RUST"] }
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 

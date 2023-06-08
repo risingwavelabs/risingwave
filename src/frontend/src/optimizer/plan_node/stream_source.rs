@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::utils::formatter_debug_plan_node;
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::property::Distribution;
@@ -69,7 +70,7 @@ impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSource");
+        let mut builder = formatter_debug_plan_node!(f, "StreamSource");
         if let Some(catalog) = self.source_catalog() {
             builder
                 .field("source", &catalog.name)

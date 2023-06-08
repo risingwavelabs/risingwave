@@ -207,6 +207,8 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_INDEXES, vec![0, 2], read_indexes_info },
     { PG_CATALOG, PG_INHERITS, vec![0], read_inherits_info },
     { PG_CATALOG, PG_CONSTRAINT, vec![0], read_constraint_info },
+    { PG_CATALOG, PG_TABLES, vec![], read_pg_tables_info },
+    { PG_CATALOG, PG_PROC, vec![0], read_pg_proc_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },

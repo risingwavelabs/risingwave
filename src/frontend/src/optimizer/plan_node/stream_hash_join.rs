@@ -22,6 +22,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
+use super::utils::formatter_debug_plan_node;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
@@ -297,19 +298,12 @@ impl fmt::Display for StreamHashJoin {
             .cloned()
             .expect("first join key");
 
-        let mut builder = if self.left().watermark_columns().contains(ljk)
-            && self.right().watermark_columns().contains(rjk)
-        {
-            f.debug_struct("StreamWindowJoin")
-        } else if self.clean_left_state_conjunction_idx.is_some()
-            && self.clean_right_state_conjunction_idx.is_some()
-        {
-            f.debug_struct("StreamIntervalJoin")
-        } else if self.is_append_only {
-            f.debug_struct("StreamAppendOnlyHashJoin")
-        } else {
-            f.debug_struct("StreamHashJoin")
-        };
+        let mut builder = formatter_debug_plan_node!(
+            f, "StreamHashJoin",
+            { "window", self.left().watermark_columns().contains(ljk) && self.right().watermark_columns().contains(rjk) },
+            { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() },
+            { "append_only", self.is_append_only },
+        );
 
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &self.logical.join_type);

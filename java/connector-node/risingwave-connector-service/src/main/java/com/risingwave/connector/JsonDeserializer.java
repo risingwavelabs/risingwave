@@ -22,7 +22,6 @@ import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
-import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Time;
@@ -222,8 +221,14 @@ public class JsonDeserializer implements Deserializer {
                             .withDescription("Expected bytea, got " + value.getClass())
                             .asRuntimeException();
                 }
-                byte[] bytes = Base64.getDecoder().decode((String) value);
-                return new ByteArrayInputStream(bytes);
+                return Base64.getDecoder().decode((String) value);
+            case LIST:
+                if (!(value instanceof java.util.ArrayList<?>)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected list, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return ((java.util.ArrayList<?>) value).toArray();
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)
