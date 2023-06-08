@@ -129,6 +129,8 @@ where
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
+        self.hummock_manager
+            .init_compaction_scheduler(sched_channel.clone());
         tracing::info!("Start compaction scheduler.");
 
         let compaction_selectors = Self::init_selectors();
@@ -141,7 +143,7 @@ where
             self.env.opts.periodic_split_compact_group_interval_sec,
         );
         self.schedule_loop(
-            sched_channel.clone(),
+            sched_channel,
             shutdown_rx,
             compaction_selectors,
             schedule_event_stream,
@@ -448,15 +450,13 @@ where
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         sched_channel: Arc<CompactionRequestChannel>,
     ) -> bool {
-        const NOTIFIED_TIMEOUT: Duration = Duration::from_secs(30);
-
         // Wait for a compactor to become available.
         let compactor = match self.hummock_manager.get_idle_compactor().await {
             Some(compactor) => compactor,
             None => return false,
         };
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
-        self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
+        self.pick_and_assign(compaction_group, compactor, sched_channel, selector)
             .await;
 
         true

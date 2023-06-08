@@ -1880,6 +1880,10 @@ where
         Ok(())
     }
 
+    pub fn init_compaction_scheduler(&self, sched_channel: CompactionRequestChannelRef) {
+        *self.compaction_request_channel.write() = Some(sched_channel);
+    }
+
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
     #[named]
     async fn cancel_unassigned_compaction_task(&self) -> Result<()> {
