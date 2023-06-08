@@ -22,7 +22,6 @@
 mod key_cmp;
 use std::cmp::Ordering;
 
-use bincode::{Decode, Encode};
 pub use key_cmp::*;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
