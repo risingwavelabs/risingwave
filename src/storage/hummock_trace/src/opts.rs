@@ -15,6 +15,7 @@
 use bincode::{Decode, Encode};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::TracedBytes;
 
@@ -133,4 +134,36 @@ pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
     pub is_consistent_op: bool,
     pub table_option: TracedTableOption,
+}
+
+pub type TracedHummockEpoch = u64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]
+pub enum TracedHummockReadEpoch {
+    Committed(TracedHummockEpoch),
+    Current(TracedHummockEpoch),
+    NoWait(TracedHummockEpoch),
+    Backup(TracedHummockEpoch),
+}
+
+impl From<HummockReadEpoch> for TracedHummockReadEpoch {
+    fn from(value: HummockReadEpoch) -> Self {
+        match value {
+            HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
+            HummockReadEpoch::Current(epoch) => Self::Current(epoch),
+            HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
+            HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+        }
+    }
+}
+
+impl From<TracedHummockReadEpoch> for HummockReadEpoch {
+    fn from(value: TracedHummockReadEpoch) -> Self {
+        match value {
+            TracedHummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
+            TracedHummockReadEpoch::Current(epoch) => Self::Current(epoch),
+            TracedHummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
+            TracedHummockReadEpoch::Backup(epoch) => Self::Backup(epoch),
+        }
+    }
 }

@@ -19,10 +19,9 @@ use bincode::error::{DecodeError, EncodeError};
 use bincode::{Decode, Encode};
 use bytes::Bytes;
 use prost::Message;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::meta::SubscribeResponse;
 
-use crate::{StorageType, TracedNewLocalOptions, TracedReadOptions};
+use crate::{StorageType, TracedHummockReadEpoch, TracedNewLocalOptions, TracedReadOptions};
 
 pub type RecordId = u64;
 
@@ -165,7 +164,7 @@ pub enum Operation {
     LocalStorageInit(u64),
 
     /// Try wait epoch
-    TryWaitEpoch(HummockReadEpoch),
+    TryWaitEpoch(TracedHummockReadEpoch),
 
     /// clear shared buffer
     ClearSharedBuffer,
@@ -174,7 +173,7 @@ pub enum Operation {
     SealCurrentEpoch(u64),
 
     /// validate read epoch
-    ValidateReadEpoch(HummockReadEpoch),
+    ValidateReadEpoch(TracedHummockReadEpoch),
 
     LocalStorageEpoch,
 

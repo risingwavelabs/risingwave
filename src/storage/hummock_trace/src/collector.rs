@@ -212,11 +212,14 @@ impl TraceSpan {
     }
 
     pub fn new_validate_read_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(Operation::ValidateReadEpoch(epoch), StorageType::Global)
+        Self::new_global_op(
+            Operation::ValidateReadEpoch(epoch.into()),
+            StorageType::Global,
+        )
     }
 
     pub fn new_try_wait_epoch_span(epoch: HummockReadEpoch) -> MayTraceSpan {
-        Self::new_global_op(Operation::TryWaitEpoch(epoch), StorageType::Global)
+        Self::new_global_op(Operation::TryWaitEpoch(epoch.into()), StorageType::Global)
     }
 
     pub fn new_get_span(
