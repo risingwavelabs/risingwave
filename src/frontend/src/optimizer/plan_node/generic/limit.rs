@@ -14,14 +14,10 @@
 use std::fmt;
 use std::hash::Hash;
 
-
-
-use pretty_xmlish::{Pretty};
-use risingwave_common::catalog::{Schema};
+use pretty_xmlish::Pretty;
+use risingwave_common::catalog::Schema;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
-
-
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
