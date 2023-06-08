@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -44,12 +43,7 @@ impl BatchInsert {
     }
 }
 
-impl fmt::Display for BatchInsert {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchInsert")
-    }
-}
-// impl_distill_by_unit!(BatchInsert, logical, "BatchInsert");
+impl_distill_by_unit!(BatchInsert, logical, "BatchInsert");
 
 impl PlanTreeNodeUnary for BatchInsert {
     fn input(&self) -> PlanRef {

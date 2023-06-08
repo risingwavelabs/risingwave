@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -21,6 +22,7 @@ use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::{self, GenericPlanRef};
+use super::utils::Distill;
 use super::{
     EqJoinPredicate, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
     ToDistributedBatch,
@@ -95,6 +97,45 @@ impl BatchHashJoin {
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
+    }
+}
+
+impl Distill for BatchHashJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose {3} else {2});
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+        let mut concat_schema = self.left().schema().fields.clone();
+        concat_schema.extend(self.right().schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+        if verbose {
+            if self
+                .logical
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                vec.push(("output", Pretty::from("all")));
+            } else {
+                vec.push((
+                    "output",
+                    Pretty::debug(&IndicesDisplay {
+                        indices: &self.logical.output_indices,
+                        input_schema: &concat_schema,
+                    }),
+                ));
+            }
+        }
+        Pretty::childless_record("BatchHashJoin", vec)
     }
 }
 
