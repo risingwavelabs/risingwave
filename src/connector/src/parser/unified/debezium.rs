@@ -2,7 +2,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::{Access, ChangeEvent, ChangeEventOperation};
 
-pub struct DebeziumAdapter<A> {
+pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
 }
@@ -16,12 +16,20 @@ pub const DEBEZIUM_CREATE_OP: &str = "c";
 pub const DEBEZIUM_UPDATE_OP: &str = "u";
 pub const DEBEZIUM_DELETE_OP: &str = "d";
 
-impl<A> DebeziumAdapter<A> {
+impl<A> DebeziumChangeEvent<A>
+where
+    A: Access,
+{
+    pub fn with_value(value_accessor: A) -> Self {
+        Self::new(None, Some(value_accessor))
+    }
+
+    pub fn with_key(key_accessor: A) -> Self {
+        Self::new(Some(key_accessor), None)
+    }
+
     /// Panic: one of the `key_accessor` or `value_accessor` must be provided.
-    pub fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self
-    where
-        A: Access,
-    {
+    fn new(key_accessor: Option<A>, value_accessor: Option<A>) -> Self {
         assert!(key_accessor.is_some() || value_accessor.is_some());
         Self {
             value_accessor,
@@ -30,7 +38,7 @@ impl<A> DebeziumAdapter<A> {
     }
 }
 
-impl<A> ChangeEvent for DebeziumAdapter<A>
+impl<A> ChangeEvent for DebeziumChangeEvent<A>
 where
     A: Access,
 {

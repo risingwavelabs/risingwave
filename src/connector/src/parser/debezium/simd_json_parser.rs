@@ -18,7 +18,7 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, Mutable, StaticNode};
 
-use crate::parser::unified::debezium::DebeziumAdapter;
+use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
@@ -60,13 +60,15 @@ impl DebeziumJsonParser {
         let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let payload = std::mem::take(event.get_mut("payload").ok_or_else(|| {
-            RwError::from(ProtocolError("no payload in debezium event".to_owned()))
-        })?);
+        let payload = if let Some(payload) = event.get_mut("payload") {
+            std::mem::take(payload)
+        } else {
+            event
+        };
 
         let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let row_op = DebeziumAdapter::new(None, Some(accessor));
+        let row_op = DebeziumChangeEvent::with_value(accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }

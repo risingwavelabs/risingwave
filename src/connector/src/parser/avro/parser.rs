@@ -28,7 +28,7 @@ use crate::common::UpsertMessage;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
-use crate::parser::unified::upsert::UpsertAccess;
+use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
@@ -252,8 +252,8 @@ impl AvroParser {
             None
         };
 
-        let mut accessor: UpsertAccess<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
-            UpsertAccess::default();
+        let mut accessor: UpsertChangeEvent<AvroAccess<'_, '_>, AvroAccess<'_, '_>> =
+            UpsertChangeEvent::default();
         if let Some(key) = &avro_key {
             accessor = accessor.with_key(AvroAccess::new(
                 key,

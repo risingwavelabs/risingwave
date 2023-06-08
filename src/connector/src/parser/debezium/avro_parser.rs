@@ -28,7 +28,7 @@ use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_field_to_column_desc;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
-use crate::parser::unified::debezium::DebeziumAdapter;
+use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
@@ -208,13 +208,10 @@ impl DebeziumAvroParser {
             let key = from_avro_datum(key_schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-            let row_op = DebeziumAdapter::new(
-                Some(AvroAccess::new(
-                    &key,
-                    AvroParseOptions::default().with_schema(&key_schema),
-                )),
-                None,
-            );
+            let row_op = DebeziumChangeEvent::with_key(AvroAccess::new(
+                &key,
+                AvroParseOptions::default().with_schema(&key_schema),
+            ));
 
             apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
         } else {
@@ -223,13 +220,10 @@ impl DebeziumAvroParser {
             let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-            let row_op = DebeziumAdapter::new(
-                None,
-                Some(AvroAccess::new(
-                    &avro_value,
-                    AvroParseOptions::default().with_schema(&self.outer_schema),
-                )),
-            );
+            let row_op = DebeziumChangeEvent::with_value(AvroAccess::new(
+                &avro_value,
+                AvroParseOptions::default().with_schema(&self.outer_schema),
+            ));
 
             apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
         }

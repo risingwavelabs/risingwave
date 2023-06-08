@@ -5,13 +5,13 @@ use crate::parser::unified::AccessError;
 
 /// `UpsertAccess` wraps a key-value message format into an upsert source.
 /// A key accessor and a value accessor are required.
-pub struct UpsertAccess<K, V> {
+pub struct UpsertChangeEvent<K, V> {
     key_accessor: Option<K>,
     value_accessor: Option<V>,
     primary_key_column_name: Option<String>,
 }
 
-impl<K, V> Default for UpsertAccess<K, V> {
+impl<K, V> Default for UpsertChangeEvent<K, V> {
     fn default() -> Self {
         Self {
             key_accessor: None,
@@ -21,7 +21,7 @@ impl<K, V> Default for UpsertAccess<K, V> {
     }
 }
 
-impl<K, V> UpsertAccess<K, V> {
+impl<K, V> UpsertChangeEvent<K, V> {
     pub fn with_key(mut self, key: K) -> Self
     where
         K: Access,
@@ -44,7 +44,7 @@ impl<K, V> UpsertAccess<K, V> {
     }
 }
 
-impl<K, V> Access for UpsertAccess<K, V>
+impl<K, V> Access for UpsertChangeEvent<K, V>
 where
     K: Access,
     V: Access,
@@ -75,7 +75,7 @@ where
     }
 }
 
-impl<K, V> ChangeEvent for UpsertAccess<K, V>
+impl<K, V> ChangeEvent for UpsertChangeEvent<K, V>
 where
     K: Access,
     V: Access,

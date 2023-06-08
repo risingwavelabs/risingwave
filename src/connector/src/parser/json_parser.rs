@@ -20,7 +20,7 @@ use super::ByteStreamSourceParser;
 use crate::common::UpsertMessage;
 use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::unified::json::JsonAccess;
-use crate::parser::unified::upsert::UpsertAccess;
+use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
@@ -103,7 +103,7 @@ impl JsonParser {
                 )
             };
 
-            let mut accessor = UpsertAccess::default().with_key(JsonAccess::new(key_decoded));
+            let mut accessor = UpsertChangeEvent::default().with_key(JsonAccess::new(key_decoded));
             if let Some(value) = value_decoded {
                 accessor = accessor.with_value(JsonAccess::new(value));
             }
@@ -119,8 +119,8 @@ impl JsonParser {
             let mut errors = Vec::new();
             let mut guard = None;
             for value in values {
-                let accessor: UpsertAccess<JsonAccess<'_, '_>, JsonAccess<'_, '_>> =
-                    UpsertAccess::default().with_value(JsonAccess::new(value));
+                let accessor: UpsertChangeEvent<JsonAccess<'_, '_>, JsonAccess<'_, '_>> =
+                    UpsertChangeEvent::default().with_value(JsonAccess::new(value));
 
                 match apply_row_operation_on_stream_chunk_writer(accessor, &mut writer) {
                     Ok(this_guard) => guard = Some(this_guard),
