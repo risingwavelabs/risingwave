@@ -51,7 +51,7 @@ git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/qa-infra.g
 cp qa-infra/certs ./certs
 rm -rf qa-infra
 
-./qa --rm ghcr.io/risingwavelabs/qa-infra ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
+./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url ${BUILDKITE_BUILD_URL} \
   --branch "$BRANCH" \
   --tag latest \
