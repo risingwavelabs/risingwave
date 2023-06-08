@@ -153,15 +153,15 @@ def section_overview(panels):
                     "Lagging Vacuum",
                 ),
                 panels.target(
-                    f"{metric('state_store_meta_cache_size')} >= bool 2*1024*1024*1024*1.1",
+                    f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
                     "Abnormal Meta Cache Memory",
                 ),
                 panels.target(
-                    f"{metric('state_store_block_cache_size')} >= bool 512*1024*1024*1.1",
+                    f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
                     "Abnormal Block Cache Memory",
                 ),
                 panels.target(
-                    f"{metric('state_store_uploader_uploading_task_size')} >= bool 1024*1024*1024*0.7",
+                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
                     "Abnormal Uploading Memory Usage",
                 ),
             ],
