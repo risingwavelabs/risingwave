@@ -42,6 +42,28 @@
         </dependency>
     </dependencies>
 
+    <profiles>
+        <profile>
+            <id>no-build-jni-rust</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.questdb</groupId>
+                        <artifactId>rust-maven-plugin</artifactId>
+                        <version>${jni.loader.version}</version>
+                        <executions>
+                            <execution>
+                                <id>build-jni-rust</id>
+                                <!--disable the plugin-->
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
     <build>
         <plugins>
             <plugin>
@@ -50,7 +72,7 @@
                 <version>${jni.loader.version}</version>
                 <executions>
                     <execution>
-                        <id>str-reverse</id>
+                        <id>build-jni-rust</id>
                         <goals>
                             <goal>build</goal>
                         </goals>
