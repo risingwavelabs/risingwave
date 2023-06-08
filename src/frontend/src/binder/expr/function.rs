@@ -266,16 +266,16 @@ impl Binder {
             )
         };
         let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
-            let arg =
+            let args =
                 self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
                     ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
                 })?)?;
-            if arg.len() != 1 || arg[0].clone().as_literal().is_none() {
+            if args.len() != 1 || args[0].clone().as_literal().is_none() {
                 Err(
                     ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
                         .into(),
                 )
-            } else if let Ok(casted) = arg[0]
+            } else if let Ok(casted) = args[0]
                 .clone()
                 .cast_implicit(DataType::Float64)?
                 .fold_const()
