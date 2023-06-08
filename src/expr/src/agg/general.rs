@@ -214,6 +214,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
@@ -404,6 +405,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: true,
+            direct_args: vec![],
         })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
