@@ -51,6 +51,9 @@ static SHOULD_USE_TRACE: LazyLock<bool> = LazyLock::new(set_should_use_trace);
 pub static CONCURRENT_ID: LazyLock<ConcurrentIdGenerator> =
     LazyLock::new(|| UniqueIdGenerator::new(AtomicU64::new(0)));
 
+// A tokio runtime for hummock tracing
+static TRACE_RT: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().unwrap());
+
 pub const USE_TRACE: &str = "USE_HM_TRACE"; // Environment variable name for enabling trace
 const LOG_PATH: &str = "HM_TRACE_PATH"; // Environment variable name for specifying trace log path
 const DEFAULT_PATH: &str = ".trace/hummock.ht"; // Default trace log path
@@ -71,8 +74,7 @@ fn set_should_use_trace() -> bool {
 
 /// Initialize the `GLOBAL_COLLECTOR` with configured log file
 pub fn init_collector() {
-    let rt = Runtime::new().unwrap();
-    rt.spawn(async move {
+    TRACE_RT.spawn(async move {
         let path = env::var(LOG_PATH).unwrap_or_else(|_| DEFAULT_PATH.to_string());
         let path = Path::new(&path);
         tracing::info!("Hummock Tracing log path {}", path.to_string_lossy());
