@@ -26,3 +26,8 @@ query V
 select count(*) as cnt from mytable;
 ----
 4
+
+query IIII
+select count(*) from shipments_2;
+----
+3
