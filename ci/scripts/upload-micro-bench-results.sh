@@ -48,7 +48,7 @@ BRANCH=$(get_branch)
 curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-qa.sh | bash
 
 git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/qa-infra.git
-cp qa-infra/certs ./certs
+cp -r qa-infra/certs ./certs
 rm -rf qa-infra
 
 ./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
