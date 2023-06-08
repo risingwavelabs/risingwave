@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
-use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef, generic};
+use crate::optimizer::plan_node::{generic, LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
