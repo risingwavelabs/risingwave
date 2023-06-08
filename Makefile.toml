@@ -329,7 +329,7 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 [tasks.build-risingwave]
 category = "RiseDev - Build"
 description = "Build Rust components"
-condition = { env_set = ["ENABLE_BUILD_RUST"] }
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 
