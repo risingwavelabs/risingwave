@@ -66,6 +66,8 @@ pub struct LocalHummockStorage {
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
 
+    /// This could be used when `LocalHummockStorage` is used
+    /// solely for local storage, e.g. when replicating data for executors in different CNs.
     no_upload: bool,
 
     /// Event sender.
