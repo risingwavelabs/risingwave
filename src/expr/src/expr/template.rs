@@ -559,12 +559,14 @@ mod tests {
 
     use super::*;
 
-    fn foo_fs(x: ListRef<'_>) -> Result<i32> {
-        Ok(x.len() as _)
-    }
-
-    fn foo_fs_ty<'a>(x: WithType<'a, ListRef<'a>>) -> Result<i32> {
-        Ok(x.value.len() as _)
+    fn array_ndims<'a>(x: WithType<'a, ListRef<'a>>) -> Result<i32> {
+        let mut n = 0;
+        let mut t = x.data_type;
+        while let DataType::List(inner) = t {
+            n += 1;
+            t = inner;
+        }
+        Ok(n)
     }
 
     #[tokio::test]
@@ -574,29 +576,15 @@ mod tests {
             Some(ListValue::new(vec![None]).into()),
         )
         .boxed();
-        let e = UnaryExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, foo_fs);
-        let o = *e
-            .eval_row(&OwnedRow::empty())
-            .await
-            .unwrap()
-            .unwrap()
-            .as_int32();
-        assert_eq!(o, 1);
-
-        let arg_expr = crate::expr::LiteralExpression::new(
-            DataType::List(DataType::List(DataType::Int32.into()).into()),
-            Some(ListValue::new(vec![None]).into()),
-        )
-        .boxed();
         let e =
-            UnaryTyExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, foo_fs_ty);
+            UnaryTyExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, array_ndims);
         let o = *e
             .eval_row(&OwnedRow::empty())
             .await
             .unwrap()
             .unwrap()
             .as_int32();
-        assert_eq!(o, 1);
+        assert_eq!(o, 2);
     }
 }
 
