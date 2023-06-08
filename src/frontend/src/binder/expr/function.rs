@@ -275,20 +275,18 @@ impl Binder {
                     ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
                         .into(),
                 )
+            } else if let Ok(casted) = arg[0]
+                .clone()
+                .cast_implicit(DataType::Float64)?
+                .fold_const()
+            {
+                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
             } else {
-                if let Ok(casted) = arg[0]
-                    .clone()
-                    .cast_implicit(DataType::Float64)?
-                    .fold_const()
-                {
-                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
-                } else {
-                    Err(ErrorCode::InvalidInputSyntax(format!(
-                        "arg in {} must be double precision",
-                        kind
-                    ))
-                    .into())
-                }
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "arg in {} must be double precision",
+                    kind
+                ))
+                .into())
             }
         } else {
             Ok(vec![])
