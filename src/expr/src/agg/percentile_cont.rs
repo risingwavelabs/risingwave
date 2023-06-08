@@ -21,9 +21,6 @@ use super::Aggregator;
 use crate::agg::AggCall;
 use crate::{ExprError, Result};
 
-// TODO: better name
-pub trait MyScalar = Scalar + Into<f64> + Copy;
-
 #[build_aggregate("percentile_cont(*) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
@@ -39,65 +36,34 @@ fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
         None
     };
 
-    let aggregator = match agg.args.arg_types()[0] {
-        DataType::Int16 => Box::new(PercentileCont::<i16>::new(
-            fraction,
-            agg.return_type.clone(),
-        )) as _,
-        DataType::Int32 => Box::new(PercentileCont::<i32>::new(
-            fraction,
-            agg.return_type.clone(),
-        )) as _,
-        DataType::Int64 => todo!(), // FIXME: seems i64 cannot Into<f64>
-        DataType::Float32 => todo!(),
-        DataType::Float64 => Box::new(PercentileCont::<F64>::new(
-            fraction,
-            agg.return_type.clone(),
-        )) as _,
-        _ => {
-            return Err(ExprError::InvalidParam {
-                name: "ORDER BY column",
-                reason: "TODO".to_string(),
-            })
-        }
-    };
-    Ok(aggregator)
+    Ok(Box::new(PercentileCont::new(fraction)))
 }
 
-#[derive(Clone)]
-pub struct PercentileCont<T: MyScalar> {
+#[derive(Clone, EstimateSize)]
+pub struct PercentileCont {
     fractions: Option<f64>,
-    return_type: DataType,
-    data: Vec<T>,
+    data: Vec<f64>,
 }
 
-impl<T: MyScalar> EstimateSize for PercentileCont<T> {
-    fn estimated_heap_size(&self) -> usize {
-        // TODO
-        0
-    }
-}
-
-impl<T: MyScalar> PercentileCont<T> {
-    pub fn new(fractions: Option<f64>, return_type: DataType) -> Self {
+impl PercentileCont {
+    pub fn new(fractions: Option<f64>) -> Self {
         Self {
             fractions,
-            return_type,
             data: vec![],
         }
     }
 
     fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            self.data.push(TryInto::<T>::try_into(datum).unwrap());
+            self.data.push(datum.as_float64().clone().into());
         }
     }
 }
 
 #[async_trait::async_trait]
-impl<T: MyScalar> Aggregator for PercentileCont<T> {
+impl Aggregator for PercentileCont {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Float64
     }
 
     async fn update_multi(
@@ -119,10 +85,10 @@ impl<T: MyScalar> Aggregator for PercentileCont<T> {
             let crn = f64::ceil(rn);
             let frn = f64::floor(rn);
             let result = if crn == frn {
-                self.data[crn as usize].into()
+                self.data[crn as usize]
             } else {
-                (crn - rn) * Into::<f64>::into(self.data[frn as usize])
-                    + (rn - frn) * Into::<f64>::into(self.data[crn as usize])
+                (crn - rn) * self.data[frn as usize]
+                    + (rn - frn) * self.data[crn as usize]
             };
             builder.append(Some(ScalarImpl::Float64(result.into())));
         } else {
