@@ -39,7 +39,7 @@ get_commit() {
   | sed 's/\"//g'
 }
 
-# setup
+setup
 
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
 END_DATE=$(get_date)
