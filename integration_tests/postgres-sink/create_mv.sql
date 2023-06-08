@@ -46,4 +46,4 @@ CREATE table rw_types (
       schema.name = 'public',
       table.name = 'data_types',
       slot.name = 'data_types'
-) ROW FORMAT JSON;
+);

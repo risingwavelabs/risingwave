@@ -20,5 +20,5 @@ CREATE TABLE data_types (
     time_column TIME,
     timestamp_column TIMESTAMP,
     jsonb_column JSON,
-    bytea_column BLOB,
+    bytea_column BLOB
 );
