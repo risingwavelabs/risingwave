@@ -206,6 +206,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }];
 
         let simple_agg = Box::new(
@@ -263,6 +264,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -271,6 +273,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -279,6 +282,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
         ];
 

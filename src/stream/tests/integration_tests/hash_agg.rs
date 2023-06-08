@@ -39,6 +39,7 @@ async fn test_hash_agg_count_sum() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         AggCall {
             kind: AggKind::Sum,
@@ -47,6 +48,7 @@ async fn test_hash_agg_count_sum() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         // This is local hash aggregation, so we add another sum state
         AggCall {
@@ -56,6 +58,7 @@ async fn test_hash_agg_count_sum() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
     ];
 
@@ -140,6 +143,7 @@ async fn test_hash_agg_min() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         AggCall {
             kind: AggKind::Min,
@@ -148,6 +152,7 @@ async fn test_hash_agg_min() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
     ];
 
@@ -229,6 +234,7 @@ async fn test_hash_agg_min_append_only() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         AggCall {
             kind: AggKind::Min,
@@ -237,6 +243,7 @@ async fn test_hash_agg_min_append_only() {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
     ];
 
@@ -319,6 +326,7 @@ async fn test_hash_agg_emit_on_window_close() {
         column_orders: vec![],
         filter: None,
         distinct: false,
+        direct_args: vec![],
     }];
 
     let create_executor = || async {
