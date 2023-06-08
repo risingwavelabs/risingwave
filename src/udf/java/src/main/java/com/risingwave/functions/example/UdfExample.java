@@ -12,9 +12,9 @@ import com.risingwave.functions.UdfServer;
 public class UdfExample {
     public static void main(String[] args) throws IOException {
         try (var server = new UdfServer("0.0.0.0", 8815)) {
-            server.addFunction("int42", new Int42());
+            server.addFunction("int_42", new Int42());
             server.addFunction("gcd", new Gcd());
-            server.addFunction("gcd3", new Gcd());
+            server.addFunction("gcd3", new Gcd3());
             server.addFunction("to_string", new ToString());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
@@ -44,11 +44,12 @@ public class UdfExample {
             }
             return a;
         }
+    }
 
-        // TODO: support multiple eval functions
-        // public static int eval(int a, int b, int c) {
-        // return eval(eval(a, b), c);
-        // }
+    public static class Gcd3 extends ScalarFunction {
+        public static int eval(int a, int b, int c) {
+            return Gcd.eval(Gcd.eval(a, b), c);
+        }
     }
 
     public static class ToString extends ScalarFunction {
