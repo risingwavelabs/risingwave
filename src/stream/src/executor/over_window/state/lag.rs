@@ -12,28 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
-
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::function::window::{Frame, FrameBound};
+use risingwave_expr::function::window::{Frame, FrameBound, FrameBounds};
 use smallvec::SmallVec;
 
-use super::{StateKey, StateOutput, StatePos, WindowState};
+use super::{EstimatedVecDeque, StateKey, StatePos, WindowState};
 use crate::executor::over_window::state::StateEvictHint;
 use crate::executor::StreamExecutorResult;
 
 struct BufferEntry(StateKey, Datum);
 
+impl EstimateSize for BufferEntry {
+    fn estimated_heap_size(&self) -> usize {
+        self.0.estimated_heap_size() + self.1.estimated_heap_size()
+    }
+}
+
+#[derive(EstimateSize)]
 pub(super) struct LagState {
     offset: usize,
-    buffer: VecDeque<BufferEntry>,
+    buffer: EstimatedVecDeque<BufferEntry>,
     curr_idx: usize,
 }
 
 impl LagState {
     pub fn new(frame: &Frame) -> Self {
-        let offset = must_match!(frame, Frame::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow) => *offset);
+        let offset = must_match!(&frame.bounds, FrameBounds::Rows(FrameBound::Preceding(offset), FrameBound::CurrentRow) => *offset);
         Self {
             offset,
             buffer: Default::default(),
@@ -63,24 +69,29 @@ impl WindowState for LagState {
         }
     }
 
-    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
-        debug_assert!(self.curr_window().is_ready);
+    fn curr_output(&self) -> StreamExecutorResult<Datum> {
+        assert!(self.curr_window().is_ready);
         Ok(if self.curr_idx < self.offset {
             // the ready window doesn't have enough preceding rows, just return NULL
-            self.curr_idx += 1;
-            StateOutput {
-                return_value: None,
-                evict_hint: StateEvictHint::CannotEvict(self.buffer.front().unwrap().0.clone()),
-            }
+            None
         } else {
             // in the other case, the first entry in buffer is always the `lag(offset)` row
             assert_eq!(self.curr_idx, self.offset);
-            let BufferEntry(key, value) = self.buffer.pop_front().unwrap();
-            StateOutput {
-                return_value: value,
-                evict_hint: StateEvictHint::CanEvict(std::iter::once(key).collect()),
-            }
+            self.buffer.front().unwrap().1.clone()
         })
+    }
+
+    fn slide_forward(&mut self) -> StateEvictHint {
+        assert!(self.curr_window().is_ready);
+        if self.curr_idx < self.offset {
+            self.curr_idx += 1;
+            StateEvictHint::CannotEvict(self.buffer.front().unwrap().0.clone())
+        } else {
+            // in the other case, the first entry in buffer is always the `lag(offset)` row
+            assert_eq!(self.curr_idx, self.offset);
+            let BufferEntry(key, _) = self.buffer.pop_front().unwrap();
+            StateEvictHint::CanEvict(std::iter::once(key).collect())
+        }
     }
 }
 

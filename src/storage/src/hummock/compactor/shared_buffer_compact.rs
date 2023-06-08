@@ -245,7 +245,6 @@ async fn compact_shared_buffer(
 
     if compact_success {
         let mut level0 = Vec::with_capacity(parallelism);
-
         for (_, ssts, _) in output_ssts {
             for sst_info in &ssts {
                 context
@@ -255,7 +254,6 @@ async fn compact_shared_buffer(
             }
             level0.extend(ssts);
         }
-
         Ok(level0)
     } else {
         Err(err.unwrap())
@@ -433,6 +431,7 @@ impl SharedBufferCompactRunner {
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
                 split_by_table: false,
+                split_weight_by_vnode: 0,
             },
         );
         Self {
@@ -455,6 +454,8 @@ impl SharedBufferCompactRunner {
                 dummy_compaction_filter,
                 del_agg,
                 filter_key_extractor,
+                None,
+                None,
                 None,
             )
             .await?;

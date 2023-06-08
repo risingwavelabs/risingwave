@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use core::panic;
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -60,6 +61,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
@@ -119,6 +121,7 @@ pub struct HummockManager<S: MetaStore> {
 
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
+    pause_version_checkpoint: AtomicBool,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -289,6 +292,7 @@ where
         let sys_params = sys_params_manager.get_params().await;
         let state_store_url = sys_params.state_store();
         let state_store_dir: &str = sys_params.data_directory();
+        let deterministic_mode = env.opts.compaction_deterministic_test;
         let object_store = Arc::new(
             parse_remote_object_store(
                 state_store_url.strip_prefix("hummock+").unwrap_or("memory"),
@@ -297,15 +301,23 @@ where
             )
             .await,
         );
-
         // Make sure data dir is not used by another cluster.
-        if env.cluster_first_launch() {
+        // Skip this check in e2e compaction test, which needs to start a secondary cluster with
+        // same bucket
+        if env.cluster_first_launch() && !deterministic_mode {
             write_exclusive_cluster_id(
                 state_store_dir,
                 env.cluster_id().clone(),
                 object_store.clone(),
             )
             .await?;
+
+            // config bucket lifecycle for new cluster.
+            if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
+                && !env.opts.do_not_config_object_storage_lifecycle
+            {
+                s3.inner().configure_bucket_lifecycle().await;
+            }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -333,6 +345,7 @@ where
             event_sender: tx,
             object_store,
             version_checkpoint_path: checkpoint_path,
+            pause_version_checkpoint: AtomicBool::new(false),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -506,10 +519,14 @@ where
             .compaction_group_manager
             .write()
             .await
-            .get_or_insert_compaction_group_configs(&all_group_ids, self.env.meta_store())
+            .get_or_insert_compaction_group_configs(
+                &all_group_ids.collect_vec(),
+                self.env.meta_store(),
+            )
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
@@ -912,7 +929,7 @@ where
                 (count, size)
             };
 
-            let (compact_task_size, compact_task_file_count) =
+            let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
             if compact_task.input_ssts[0].level_idx == 0 {
@@ -922,15 +939,11 @@ where
                     "l0_trivial_move".to_string()
                 } else if compact_task.input_ssts[0].level_type() == LevelType::Overlapping {
                     "l0_overlapping".to_string()
-                } else if compact_task.input_ssts.last().unwrap().level_idx == 0 {
+                } else if compact_task.target_level == 0 {
                     "l0_intra".to_string()
                 } else {
-                    let is_trivial_move = if compact_task
-                        .input_ssts
-                        .last()
-                        .unwrap()
-                        .table_infos
-                        .is_empty()
+                    let is_trivial_move = if compact_task.input_ssts.len() == 2
+                        && compact_task.input_ssts[1].table_infos.is_empty()
                     {
                         "trivial-move"
                     } else {
@@ -1404,7 +1417,7 @@ where
             compaction
                 .compaction_statuses
                 .get(&compact_task.compaction_group_id),
-            read_lock!(self, versioning).await.current_version.borrow(),
+            &read_lock!(self, versioning).await.current_version,
             compact_task.compaction_group_id,
         );
 
@@ -1708,7 +1721,6 @@ where
     #[named]
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
-        use std::borrow::Borrow;
         let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
         // We don't check `checkpoint` because it's allowed to update its in memory state without
@@ -1735,16 +1747,14 @@ where
                     branched_ssts,
                 )
             };
-        let (mem_state, branched_ssts) =
-            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (mem_state, branched_ssts) = get_state(&compaction_guard, &versioning_guard);
         self.load_meta_store_state_impl(
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
         .await
         .expect("Failed to load state from meta store");
-        let (loaded_state, load_branched_ssts) =
-            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (loaded_state, load_branched_ssts) = get_state(&compaction_guard, &versioning_guard);
         assert_eq!(branched_ssts, load_branched_ssts);
         assert_eq!(
             mem_state, loaded_state,
@@ -2162,10 +2172,8 @@ where
                         )
                     };
 
-                    let compaction_group_ids_from_version =
-                        get_compaction_group_ids(&current_version);
-                    for compaction_group_id in &compaction_group_ids_from_version {
-                        let compaction_group_config = &id_to_config[compaction_group_id];
+                    for compaction_group_id in get_compaction_group_ids(&current_version) {
+                        let compaction_group_config = &id_to_config[&compaction_group_id];
                         trigger_lsm_stat(
                             &hummock_manager.metrics,
                             compaction_group_config.compaction_config(),

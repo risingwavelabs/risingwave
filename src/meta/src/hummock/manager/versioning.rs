@@ -36,7 +36,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
-use crate::hummock::metrics_utils::trigger_safepoint_stat;
+use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
@@ -248,12 +248,14 @@ where
             guard.write_limit.clone(),
             &guard.current_version,
         );
-        let all_group_ids = get_compaction_group_ids(&guard.current_version);
+        let all_group_ids: HashSet<_> =
+            HashSet::from_iter(get_compaction_group_ids(&guard.current_version));
         new_write_limits.drain_filter(|group_id, _| !all_group_ids.contains(group_id));
         if new_write_limits == guard.write_limit {
             return false;
         }
         tracing::info!("Hummock stopped write is updated: {:#?}", new_write_limits);
+        trigger_write_stop_stats(&self.metrics, &new_write_limits);
         guard.write_limit = new_write_limits;
         self.env
             .notification_manager()

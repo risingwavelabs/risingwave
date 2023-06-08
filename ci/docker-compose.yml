@@ -32,17 +32,54 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+  message_queue:
+    image: "docker.vectorized.io/vectorized/redpanda:latest"
+    command:
+      - redpanda
+      - start
+      - "--smp"
+      - "1"
+      - "--reserve-memory"
+      - 0M
+      - "--memory"
+      - 4G
+      - "--overprovisioned"
+      - "--node-id"
+      - "0"
+      - "--check=false"
+      - "--kafka-addr"
+      - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
+      - "--advertise-kafka-addr"
+      - "PLAINTEXT://message_queue:29092,OUTSIDE://localhost:9092"
+    expose:
+      - "29092"
+      - "9092"
+      - "9644"
+    ports:
+      - "29092:29092"
+      - "9092:9092"
+      - "9644:9644"
+      - "8081:8081"
+    environment: {}
+    container_name: message_queue
+    healthcheck:
+      test: curl -f localhost:9644/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230504
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       - mysql
       - db
+      - message_queue
     volumes:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230504
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       - mysql
       - db
@@ -50,12 +87,12 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230504
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     volumes:
       - ..:/risingwave
 
   ci-flamegraph-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230504
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     # NOTE(kwannoel): This is used in order to permit
     # syscalls for `nperf` (perf_event_open),
     # so it can do CPU profiling.
@@ -66,7 +103,7 @@ services:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230504
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230531
     depends_on:
       db:
         condition: service_healthy

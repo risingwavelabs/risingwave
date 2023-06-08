@@ -25,6 +25,7 @@ use std::sync::Arc;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::error::Result;
+use risingwave_common::util::pretty_bytes::convert;
 use risingwave_stream::task::LocalStreamManager;
 
 /// The minimal memory requirement of computing tasks in megabytes.
@@ -32,8 +33,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const MAX_SYSTEM_RESERVED_MEMORY_MB: usize = 2048;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.1;
+pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
 pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -105,14 +105,11 @@ impl MemoryControl for DummyPolicy {
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
-/// size belongs to [`MIN_SYSTEM_RESERVED_MEMORY_MB`, `MAX_SYSTEM_RESERVED_MEMORY_MB`]
+/// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
 pub fn reserve_memory_bytes(total_memory_bytes: usize) -> (usize, usize) {
-    let reserved = std::cmp::min(
-        std::cmp::max(
-            (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
-            MIN_SYSTEM_RESERVED_MEMORY_MB << 20,
-        ),
-        MAX_SYSTEM_RESERVED_MEMORY_MB << 20,
+    let reserved = std::cmp::max(
+        (total_memory_bytes as f64 * SYSTEM_RESERVED_MEMORY_PROPORTION).ceil() as usize,
+        MIN_SYSTEM_RESERVED_MEMORY_MB << 20,
     );
     (reserved, total_memory_bytes - reserved)
 }
@@ -173,6 +170,24 @@ pub fn storage_memory_config(
         ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
 
+    let total_calculated_mb = block_cache_capacity_mb
+        + meta_cache_capacity_mb
+        + shared_buffer_capacity_mb
+        + file_cache_total_buffer_capacity_mb
+        + compactor_memory_limit_mb;
+    let soft_limit_mb = (non_reserved_memory_bytes as f64
+        * (storage_memory_proportion + compactor_memory_proportion).ceil())
+        as usize
+        >> 20;
+    // + 5 because ceil is used when calculating `total_bytes`.
+    if total_calculated_mb > soft_limit_mb + 5 {
+        tracing::warn!(
+            "The storage memory ({}) exceeds soft limit ({}).",
+            convert((total_calculated_mb << 20) as _),
+            convert((soft_limit_mb << 20) as _)
+        );
+    }
+
     StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
@@ -198,13 +213,8 @@ mod tests {
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 1 << 30);
-        assert_eq!(non_reserved, 9 << 30);
-
-        // at most 2 GB
-        let (reserved, non_reserved) = reserve_memory_bytes(100 << 30);
         assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 98 << 30);
+        assert_eq!(non_reserved, 8 << 30);
     }
 
     #[test]

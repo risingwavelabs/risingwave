@@ -27,7 +27,6 @@ pub(crate) mod tests {
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
-    use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
     use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::key::{next_key, TABLE_PREFIX_LEN};
@@ -192,9 +191,6 @@ pub(crate) mod tests {
                 options.sstable_id_remote_fetch_number,
             )),
             task_progress_manager: Default::default(),
-            compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
-                CompactorRuntimeConfig::default(),
-            )),
         }
     }
 
@@ -520,9 +516,7 @@ pub(crate) mod tests {
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         get_compactor_context_with_filter_key_extractor_manager(
@@ -651,16 +645,12 @@ pub(crate) mod tests {
         let filter_key_extractor_manager = global_storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         filter_key_extractor_manager.update(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
@@ -848,9 +838,7 @@ pub(crate) mod tests {
         );
         filter_key_extractor_manager.update(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         // 1. add sstables
@@ -1216,8 +1204,8 @@ pub(crate) mod tests {
         local.init(130);
         let prefix_key_range = |key: [u8; 1]| {
             (
-                Bytes::copy_from_slice(key.as_slice()),
-                Bytes::copy_from_slice(next_key(key.as_slice()).as_slice()),
+                Bound::Included(Bytes::copy_from_slice(key.as_slice())),
+                Bound::Excluded(Bytes::copy_from_slice(next_key(key.as_slice()).as_slice())),
             )
         };
         local

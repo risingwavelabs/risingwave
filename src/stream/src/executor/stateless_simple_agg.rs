@@ -15,7 +15,6 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -84,7 +83,7 @@ impl StatelessSimpleAggExecutor {
                     .args
                     .val_indices()
                     .iter()
-                    .map(|idx| columns[*idx].array_ref())
+                    .map(|idx| columns[*idx].as_ref())
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &col_refs)
             })?;
@@ -133,12 +132,12 @@ impl StatelessSimpleAggExecutor {
                             .zip_eq_fast(builders.iter_mut())
                             .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
-                                trace!("append_datum: {:?}", data);
-                                builder.append_datum(&data);
+                                trace!("append: {:?}", data);
+                                builder.append(&data);
                                 state.reset();
                                 Ok::<_, StreamExecutorError>(())
                             })?;
-                        let columns: Vec<Column> = builders
+                        let columns = builders
                             .into_iter()
                             .map(|builder| Ok::<_, StreamExecutorError>(builder.finish().into()))
                             .try_collect()?;
@@ -207,6 +206,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }];
 
         let simple_agg = Box::new(
@@ -264,6 +264,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -272,6 +273,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -280,6 +282,7 @@ mod tests {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
         ];
 

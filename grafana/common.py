@@ -1,6 +1,6 @@
-from grafanalib.core import Dashboard, TimeSeries, Target, GridPos, RowPanel, Time, Templating, Table
-import logging
 import os
+
+from grafanalib.core import *
 
 # We use DASHBOARD_NAMESPACE_ENABLED env variable to indicate whether to add
 # a filter for the namespace field in the prometheus metric.
@@ -14,6 +14,8 @@ SOURCE_UID = "DASHBOARD_SOURCE_UID"
 DASHBOARD_UID = "DASHBOARD_UID"
 # We use DASHBOARD_VERSION env variable to pass custom version
 DASHBOARD_VERSION = "DASHBOARD_VERSION"
+# We use DASHBOARD_VERSION env variable to indicate whether to use a variable as the datasource
+DASHBOARD_DYNAMIC_SOURCE = "DASHBOARD_DYNAMIC_SOURCE"
 
 namespace_filter_enabled = os.environ.get(
     NAMESPACE_FILTER_ENABLED, "") == "true"
@@ -23,6 +25,10 @@ risingwave_name_filter_enabled = os.environ.get(
     RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
 if risingwave_name_filter_enabled:
     print("Enable filter for namespace_filter field in the generated prometheus query")
+dynamic_source_enabled = os.environ.get(
+    DASHBOARD_DYNAMIC_SOURCE, "") == "true"
+if dynamic_source_enabled:
+    print("Enable use the datasource variable as the dashboard datasource")
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -90,11 +96,11 @@ class Layout:
 
 
 class Panels:
-
     common_options = {
         "fillOpacity": 10,
         "interval": "1s",
         "maxDataPoints": 1000,
+        "legendDisplayMode": "table",
     }
 
     def __init__(self, datasource):
@@ -102,8 +108,8 @@ class Panels:
         self.datasource = datasource
 
     def row(
-        self,
-        title,
+            self,
+            title,
     ):
         gridPos = self.layout.next_row()
         return RowPanel(title=title, gridPos=gridPos)
@@ -132,6 +138,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -146,6 +153,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -162,6 +170,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -178,6 +187,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -194,6 +204,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -210,6 +221,7 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -226,6 +238,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -242,6 +255,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -258,6 +272,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -270,6 +285,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -282,6 +298,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -297,6 +314,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -313,6 +331,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -325,6 +344,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -341,6 +361,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -357,6 +378,7 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -373,6 +395,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -382,13 +405,14 @@ class Panels:
         )
 
     def timeseries_bytesps(self,
-                          title,
-                          description,
-                          targets,
-                          legendCols=["mean"]):
+                           title,
+                           description,
+                           targets,
+                           legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -401,6 +425,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -412,6 +437,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -423,6 +449,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -434,6 +461,7 @@ class Panels:
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -445,6 +473,7 @@ class Panels:
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -458,6 +487,7 @@ class Panels:
             "excludeByName": excludedByName}}]
         return Table(
             title=title,
+            dataSource=self.datasource,
             description=description,
             targets=targets,
             gridPos=gridPos,
@@ -470,16 +500,24 @@ class Panels:
         return Panels(self.datasource)
 
 
-def metric(name, filter=None):
+def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=False):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
         filters.append("namespace=~\"$namespace\"")
     if risingwave_name_filter_enabled:
         filters.append("risingwave_name=~\"$instance\"")
+    if table_id_filter_enabled:
+        filters.append("table_id=~\"$table\"")
+    if node_filter_enabled:
+        filters.append("job=~\"$job\"")
+        filters.append("instance=~\"$node\"")
     if filters:
         return f"{name}{{{','.join(filters)}}}"
     else:
         return name
+
+def table_metric(name, filter=None):
+    return metric(name, filter, True, True)
 
 
 def quantile(f, percentiles):

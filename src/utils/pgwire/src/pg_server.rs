@@ -38,7 +38,7 @@ pub trait SessionManager<VS, PS, PO>: Send + Sync + 'static
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send,
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
 {
     type Session: Session<VS, PS, PO>;
 
@@ -58,7 +58,7 @@ pub trait Session<VS, PS, PO>: Send + Sync
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send,
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
 {
     /// The str sql can not use the unparse from AST: There is some problem when dealing with create
     /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
@@ -73,6 +73,10 @@ where
         sql: Statement,
         params_types: Vec<DataType>,
     ) -> Result<PS, BoxedError>;
+
+    // TODO: maybe this function should be async and return the notice more timely
+    /// try to take the current notices from the session
+    fn take_notices(self: Arc<Self>) -> Vec<String>;
 
     fn bind(
         self: Arc<Self>,
@@ -130,7 +134,7 @@ pub async fn pg_serve<VS, PS, PO>(
 where
     VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
 {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
@@ -165,7 +169,7 @@ where
     SM: SessionManager<VS, PS, PO>,
     VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
     PS: Send + Clone + 'static,
-    PO: Send + Clone + 'static,
+    PO: Send + Clone + std::fmt::Display + 'static,
 {
     let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
     async {
@@ -303,6 +307,10 @@ mod tests {
 
         fn id(&self) -> SessionId {
             (0, 0)
+        }
+
+        fn take_notices(self: Arc<Self>) -> Vec<String> {
+            vec![]
         }
     }
 

@@ -67,8 +67,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
-    PredicatePushdown, PredicatePushdownContext,
+    generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
+    PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -393,7 +393,7 @@ impl IndexSelectionRule {
         for expr in conjunctions {
             // it's OR clause!
             if let ExprImpl::FunctionCall(function_call) = expr
-                && function_call.get_expr_type() == ExprType::Or
+                && function_call.func_type() == ExprType::Or
             {
                 let mut index_to_be_merged = vec![];
 
@@ -554,7 +554,7 @@ impl IndexSelectionRule {
             }
         }
 
-        let primary_access = LogicalScan::new(
+        let primary_access = generic::Scan::new(
             logical_scan.table_name().to_string(),
             false,
             primary_table_desc
@@ -596,7 +596,7 @@ impl IndexSelectionRule {
         }
 
         Some(
-            LogicalScan::new(
+            generic::Scan::new(
                 index.index_table.name.to_string(),
                 false,
                 index
@@ -914,7 +914,7 @@ impl IndexCost {
 
 impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
-        match func_call.get_expr_type() {
+        match func_call.func_type() {
             ExprType::Or => func_call
                 .inputs()
                 .iter()

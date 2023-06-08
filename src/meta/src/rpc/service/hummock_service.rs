@@ -239,11 +239,13 @@ where
         let max_compactor_task_multiplier =
             self.hummock_manager.env.opts.max_compactor_task_multiplier;
 
-        let max_task_num = std::cmp::min(
-            req.max_concurrent_task_number,
+        let rx: tokio::sync::mpsc::Receiver<
+            Result<SubscribeCompactTasksResponse, crate::MetaError>,
+        > = compactor_manager.add_compactor(
+            context_id,
             (req.cpu_core_num * max_compactor_task_multiplier) as u64,
+            req.cpu_core_num,
         );
-        let rx = compactor_manager.add_compactor(context_id, max_task_num, req.cpu_core_num);
 
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
@@ -475,17 +477,6 @@ where
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }
 
-    async fn set_compactor_runtime_config(
-        &self,
-        request: Request<SetCompactorRuntimeConfigRequest>,
-    ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
-        let request = request.into_inner();
-        let compactor_manager = self.hummock_manager.compactor_manager.clone();
-
-        compactor_manager.set_compactor_config(request.context_id, request.config.unwrap().into());
-        Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
-    }
-
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,
@@ -523,5 +514,31 @@ where
         let mut resp: GetScaleCompactorResponse = info.into();
         resp.suggest_cores = scale_out_cores;
         Ok(Response::new(resp))
+    }
+
+    async fn rise_ctl_pause_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlPauseVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlPauseVersionCheckpointResponse>, Status> {
+        self.hummock_manager.pause_version_checkpoint();
+        Ok(Response::new(RiseCtlPauseVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_resume_version_checkpoint(
+        &self,
+        _request: Request<RiseCtlResumeVersionCheckpointRequest>,
+    ) -> Result<Response<RiseCtlResumeVersionCheckpointResponse>, Status> {
+        self.hummock_manager.resume_version_checkpoint();
+        Ok(Response::new(RiseCtlResumeVersionCheckpointResponse {}))
+    }
+
+    async fn rise_ctl_get_checkpoint_version(
+        &self,
+        _request: Request<RiseCtlGetCheckpointVersionRequest>,
+    ) -> Result<Response<RiseCtlGetCheckpointVersionResponse>, Status> {
+        let checkpoint_version = self.hummock_manager.get_checkpoint_version().await;
+        Ok(Response::new(RiseCtlGetCheckpointVersionResponse {
+            checkpoint_version: Some(checkpoint_version),
+        }))
     }
 }

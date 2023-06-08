@@ -16,6 +16,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
+use num_integer::Integer;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::LocalSstableInfo;
@@ -28,7 +30,7 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, XorFilterBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -73,6 +75,11 @@ where
     last_table_id: u32,
     is_target_level_l0_or_lbase: bool,
     split_by_table: bool,
+    split_weight_by_vnode: u32,
+    /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
+    /// switch SST.
+    largest_vnode_in_current_partition: usize,
+    last_vnode: usize,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -80,6 +87,7 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -87,13 +95,22 @@ where
         del_agg: Arc<CompactionDeleteRanges>,
         key_range: KeyRange,
         is_target_level_l0_or_lbase: bool,
-        split_by_table: bool,
+        mut split_by_table: bool,
+        mut split_weight_by_vnode: u32,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
             UserKey::default()
         } else {
             FullKey::decode(&key_range.left).user_key.to_vec()
         };
+
+        if !is_target_level_l0_or_lbase {
+            split_weight_by_vnode = 0;
+        }
+
+        if split_weight_by_vnode > 0 {
+            split_by_table = true;
+        }
 
         Self {
             builder_factory,
@@ -107,6 +124,9 @@ where
             last_table_id: 0,
             is_target_level_l0_or_lbase,
             split_by_table,
+            split_weight_by_vnode,
+            largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -123,6 +143,9 @@ where
             last_table_id: 0,
             is_target_level_l0_or_lbase: false,
             split_by_table: false,
+            split_weight_by_vnode: 0,
+            largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -159,10 +182,41 @@ where
         is_new_user_key: bool,
     ) -> HummockResult<()> {
         let mut switch_builder = false;
+        let mut vnode_changed = false;
         if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
             self.last_table_id = full_key.user_key.table_id.table_id;
             switch_builder = true;
+            self.last_vnode = 0;
+            vnode_changed = true;
+            if self.split_weight_by_vnode > 1 {
+                self.largest_vnode_in_current_partition =
+                    VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
+            }
         }
+        if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
+            let key_vnode = full_key.user_key.get_vnode_id();
+            if key_vnode != self.last_vnode {
+                self.last_vnode = key_vnode;
+                vnode_changed = true;
+            }
+            if key_vnode > self.largest_vnode_in_current_partition {
+                switch_builder = true;
+
+                // SAFETY: `self.split_weight_by_vnode > 1` here.
+                let (basic, remainder) =
+                    VirtualNode::COUNT.div_rem(&(self.split_weight_by_vnode as usize));
+                let small_segments_area = basic * (self.split_weight_by_vnode as usize - remainder);
+                self.largest_vnode_in_current_partition = (if key_vnode < small_segments_area {
+                    (key_vnode / basic + 1) * basic
+                } else {
+                    ((key_vnode - small_segments_area) / (basic + 1) + 1) * (basic + 1)
+                        + small_segments_area
+                }) - 1;
+                self.last_vnode = key_vnode;
+                debug_assert!(key_vnode <= self.largest_vnode_in_current_partition);
+            }
+        }
+
         // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
         // then call `seal_current` later outside the `if let` instead of calling
         // `seal_current` at where we set `need_seal_current = true`. This is because
@@ -173,12 +227,13 @@ where
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key
-                && (switch_builder
-                    || (!(self.is_target_level_l0_or_lbase && self.split_by_table)
-                        && builder.reach_capacity()))
-            {
-                need_seal_current = true;
+            if is_new_user_key {
+                if switch_builder {
+                    need_seal_current = true;
+                } else if builder.reach_capacity() {
+                    need_seal_current = self.split_weight_by_vnode == 0
+                        || (self.is_target_level_l0_or_lbase && vnode_changed);
+                }
             }
         }
         if need_seal_current {
@@ -300,12 +355,12 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
-    type Filter = XorFilterBuilder;
+    type Filter = Xor16FilterBuilder;
     type Writer = BatchUploadWriter;
 
     async fn open_builder(
         &mut self,
-    ) -> HummockResult<SstableBuilder<BatchUploadWriter, XorFilterBuilder>> {
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, Xor16FilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
@@ -326,6 +381,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -449,8 +505,30 @@ mod tests {
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
         let events = create_monotonic_events(vec![
-            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
-            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
+            DeleteRangeTombstone::new(
+                table_id,
+                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"]
+                    .concat()
+                    .to_vec(),
+                false,
+                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"]
+                    .concat()
+                    .to_vec(),
+                false,
+                100,
+            ),
+            DeleteRangeTombstone::new(
+                table_id,
+                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"]
+                    .concat()
+                    .to_vec(),
+                false,
+                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ddd"]
+                    .concat()
+                    .to_vec(),
+                false,
+                200,
+            ),
         ]);
         builder.add_delete_events(events);
         let mut builder = CapacitySplitTableBuilder::new(
@@ -461,10 +539,15 @@ mod tests {
             KeyRange::inf(),
             false,
             false,
+            0,
         );
         builder
-            .add_full_key_for_test(
-                FullKey::for_test(table_id, b"k", 233),
+            .add_full_key(
+                FullKey::for_test(
+                    table_id,
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
+                    233,
+                ),
                 HummockValue::put(b"v"),
                 false,
             )
@@ -480,11 +563,21 @@ mod tests {
             .unwrap();
         assert_eq!(
             key_range.left,
-            FullKey::for_test(table_id, b"aaa", u64::MAX).encode()
+            FullKey::for_test(
+                table_id,
+                &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
+                u64::MAX,
+            )
+            .encode()
         );
         assert_eq!(
             key_range.right,
-            FullKey::for_test(table_id, b"kkk", u64::MAX).encode()
+            FullKey::for_test(
+                table_id,
+                &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
+                u64::MAX
+            )
+            .encode()
         );
     }
 
@@ -502,8 +595,8 @@ mod tests {
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
         builder.add_delete_events(create_monotonic_events(vec![
-            DeleteRangeTombstone::new(table_id, b"k".to_vec(), false, b"kkk".to_vec(), true, 100),
-            DeleteRangeTombstone::new(table_id, b"aaa".to_vec(), true, b"ddd".to_vec(), true, 200),
+            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
+            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
         ]));
         let builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
@@ -513,6 +606,7 @@ mod tests {
             KeyRange::inf(),
             false,
             false,
+            0,
         );
         let results = builder.finish().await.unwrap();
         assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);

@@ -47,7 +47,6 @@ use risingwave_sqlparser::ast::{
 use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::connection_catalog::resolve_private_link_connection;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
@@ -57,6 +56,7 @@ use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
+use crate::utils::resolve_connection_in_with_option;
 use crate::WithOptions;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -178,13 +178,6 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-#[inline(always)]
-fn get_connection_name(with_properties: &HashMap<String, String>) -> Option<String> {
-    with_properties
-        .get(CONNECTION_NAME_KEY)
-        .map(|s| s.to_lowercase())
-}
-
 pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
     columns: &mut Vec<ColumnCatalog>,
@@ -269,17 +262,22 @@ pub(crate) async fn resolve_source_schema(
                 }
                 let pk_name = columns[0].column_desc.name.clone();
 
-                *columns = extract_avro_table_schema(avro_schema, with_properties).await?;
-                let pk_col = columns
+                let value_columns = extract_avro_table_schema(avro_schema, with_properties).await?;
+                if let Some(pk_col) = value_columns
                     .iter()
                     .find(|col| col.column_desc.name == pk_name)
-                    .ok_or_else(|| {
-                        RwError::from(ProtocolError(format!(
-                            "Primary key {pk_name} is not found."
-                        )))
-                    })?;
+                {
+                    *pk_column_ids = vec![pk_col.column_id()];
+                    *columns = value_columns;
+                } else {
+                    columns_extend(columns, value_columns);
+                    *pk_column_ids = vec![columns
+                        .iter()
+                        .find(|c| c.column_desc.name == pk_name)
+                        .unwrap()
+                        .column_id()];
+                }
 
-                *pk_column_ids = vec![pk_col.column_id()];
                 upsert_avro_primary_key = pk_name;
             } else {
                 // contains row_id, user specify some columns without pk
@@ -293,6 +291,7 @@ pub(crate) async fn resolve_source_schema(
 
                 *columns = columns_extracted;
                 *pk_column_ids = pks_extracted;
+                row_id_index.take();
             }
 
             StreamSourceInfo {
@@ -308,10 +307,21 @@ pub(crate) async fn resolve_source_schema(
             row_format: RowFormatType::Json as i32,
             ..Default::default()
         },
-        SourceSchema::UpsertJson => StreamSourceInfo {
-            row_format: RowFormatType::UpsertJson as i32,
-            ..Default::default()
-        },
+
+        SourceSchema::UpsertJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format upsert_json."
+                        .to_string(),
+                )));
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::UpsertJson as i32,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::Maxwell => {
             // return err if user has not specified a pk
@@ -430,12 +440,20 @@ pub(crate) async fn resolve_source_schema(
             }
         }
 
-        SourceSchema::Csv(csv_info) => StreamSourceInfo {
-            row_format: RowFormatType::Csv as i32,
-            csv_delimiter: csv_info.delimiter as i32,
-            csv_has_header: csv_info.has_header,
-            ..Default::default()
-        },
+        SourceSchema::Csv(csv_info) => {
+            if is_kafka && csv_info.has_header {
+                return Err(RwError::from(ProtocolError(
+                    "CSV HEADER is not supported when creating table with Kafka connector"
+                        .to_owned(),
+                )));
+            }
+            StreamSourceInfo {
+                row_format: RowFormatType::Csv as i32,
+                csv_delimiter: csv_info.delimiter as i32,
+                csv_has_header: csv_info.has_header,
+                ..Default::default()
+            }
+        }
 
         SourceSchema::Native => StreamSourceInfo {
             row_format: RowFormatType::Native as i32,
@@ -566,7 +584,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
     || {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                KAFKA_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro,RowFormatType::DebeziumMongoJson, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
                 PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
                 GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
@@ -791,25 +809,10 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    let connection_name = get_connection_name(&with_properties);
-    let is_kafka_connector = is_kafka_connector(&with_properties);
+    // resolve privatelink connection for Kafka source
     let mut with_options = WithOptions::new(with_properties);
-    let connection_id = match connection_name {
-        Some(connection_name) => {
-            let connection = session
-                .get_connection_by_name(schema_name, &connection_name)
-                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
-            if !is_kafka_connector {
-                return Err(RwError::from(ErrorCode::ProtocolError(
-                    "Create source with connection is only supported for kafka connectors."
-                        .to_string(),
-                )));
-            }
-            resolve_private_link_connection(&connection, with_options.inner_mut())?;
-            Some(connection.id)
-        }
-        None => None,
-    };
+    let connection_id =
+        resolve_connection_in_with_option(&mut with_options, &schema_name, &session)?;
     let definition = handler_args.normalized_sql;
 
     let source = PbSource {

@@ -22,6 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
+use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
@@ -708,6 +709,19 @@ impl Parser {
             None
         };
 
+        let within_group = if self.parse_keywords(&[Keyword::WITHIN, Keyword::GROUP]) {
+            self.expect_token(&Token::LParen)?;
+            self.expect_keywords(&[Keyword::ORDER, Keyword::BY])?;
+            let order_by_parsed = self.parse_comma_separated(Parser::parse_order_by_expr)?;
+            let order_by = order_by_parsed.iter().exactly_one().map_err(|_| {
+                ParserError::ParserError("only one arg in order by is expected here".to_string())
+            })?;
+            self.expect_token(&Token::RParen)?;
+            Some(Box::new(order_by.clone()))
+        } else {
+            None
+        };
+
         Ok(Expr::Function(Function {
             name,
             args,
@@ -715,6 +729,7 @@ impl Parser {
             distinct,
             order_by,
             filter,
+            within_group,
         }))
     }
 
@@ -747,10 +762,16 @@ impl Parser {
         } else {
             (self.parse_window_frame_bound()?, None)
         };
+        let exclusion = if self.parse_keyword(Keyword::EXCLUDE) {
+            Some(self.parse_window_frame_exclusion()?)
+        } else {
+            None
+        };
         Ok(WindowFrame {
             units,
             start_bound,
             end_bound,
+            exclusion,
         })
     }
 
@@ -771,6 +792,20 @@ impl Parser {
             } else {
                 self.expected("PRECEDING or FOLLOWING", self.peek_token())
             }
+        }
+    }
+
+    pub fn parse_window_frame_exclusion(&mut self) -> Result<WindowFrameExclusion, ParserError> {
+        if self.parse_keywords(&[Keyword::CURRENT, Keyword::ROW]) {
+            Ok(WindowFrameExclusion::CurrentRow)
+        } else if self.parse_keyword(Keyword::GROUP) {
+            Ok(WindowFrameExclusion::Group)
+        } else if self.parse_keyword(Keyword::TIES) {
+            Ok(WindowFrameExclusion::Ties)
+        } else if self.parse_keywords(&[Keyword::NO, Keyword::OTHERS]) {
+            Ok(WindowFrameExclusion::NoOthers)
+        } else {
+            self.expected("CURRENT ROW, GROUP, TIES, or NO OTHERS", self.peek_token())
         }
     }
 
@@ -1214,6 +1249,7 @@ impl Parser {
             Token::Concat => Some(BinaryOperator::Concat),
             Token::Pipe => Some(BinaryOperator::BitwiseOr),
             Token::Caret => Some(BinaryOperator::BitwiseXor),
+            Token::Prefix => Some(BinaryOperator::Prefix),
             Token::Ampersand => Some(BinaryOperator::BitwiseAnd),
             Token::Div => Some(BinaryOperator::Divide),
             Token::ShiftLeft => Some(BinaryOperator::PGBitwiseShiftLeft),
@@ -1293,6 +1329,10 @@ impl Parser {
                         Ok(Expr::IsFalse(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::FALSE]) {
                         Ok(Expr::IsNotFalse(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::UNKNOWN) {
+                        Ok(Expr::IsUnknown(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::UNKNOWN]) {
+                        Ok(Expr::IsNotUnknown(Box::new(expr)))
                     } else if self.parse_keyword(Keyword::NULL) {
                         Ok(Expr::IsNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
@@ -1512,6 +1552,7 @@ impl Parser {
             | Token::ExclamationMarkTilde
             | Token::ExclamationMarkTildeAsterisk
             | Token::Concat
+            | Token::Prefix
             | Token::Arrow
             | Token::LongArrow
             | Token::HashArrow
@@ -1855,6 +1896,7 @@ impl Parser {
         materialized: bool,
         or_replace: bool,
     ) -> Result<Statement, ParserError> {
+        let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         // Many dialects support `OR ALTER` right after `CREATE`, but we don't (yet).
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
@@ -1869,6 +1911,7 @@ impl Parser {
         let query = Box::new(self.parse_query()?);
         // Optional `WITH [ CASCADED | LOCAL ] CHECK OPTION` is widely supported here.
         Ok(Statement::CreateView {
+            if_not_exists,
             name,
             columns,
             query,
@@ -3561,15 +3604,17 @@ impl Parser {
     pub fn parse_set(&mut self) -> Result<Statement, ParserError> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
         if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
-            let value = if self.parse_keyword(Keyword::DEFAULT) {
-                SetTimeZoneValue::Default
-            } else if self.parse_keyword(Keyword::LOCAL) {
-                SetTimeZoneValue::Local
-            } else if let Ok(ident) = self.parse_identifier() {
-                SetTimeZoneValue::Ident(ident)
-            } else {
-                let value = self.parse_value()?;
-                SetTimeZoneValue::Literal(value)
+            let token = self.peek_token();
+            let value = match (self.parse_value(), token.token) {
+                (Ok(value), _) => SetTimeZoneValue::Literal(value),
+                (Err(_), Token::Word(w)) if w.keyword == Keyword::DEFAULT => {
+                    SetTimeZoneValue::Default
+                }
+                (Err(_), Token::Word(w)) if w.keyword == Keyword::LOCAL => SetTimeZoneValue::Local,
+                (Err(_), Token::Word(w)) => SetTimeZoneValue::Ident(w.to_ident()?),
+                (Err(_), unexpected) => {
+                    self.expected("variable value", unexpected.with_location(token.location))?
+                }
             };
 
             return Ok(Statement::SetTimeZone {
@@ -3684,6 +3729,15 @@ impl Parser {
                     return Ok(Statement::ShowObjects(ShowObject::Function {
                         schema: self.parse_from_and_identifier()?,
                     }));
+                }
+                Keyword::INDEXES => {
+                    if self.parse_keyword(Keyword::FROM) {
+                        return Ok(Statement::ShowObjects(ShowObject::Indexes {
+                            table: self.parse_object_name()?,
+                        }));
+                    } else {
+                        return self.expected("from after indexes", self.peek_token());
+                    }
                 }
                 _ => {}
             }

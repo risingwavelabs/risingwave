@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanWindowFunction};
-use super::utils::TableCatalogBuilder;
+use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -48,9 +47,9 @@ impl StreamEowcOverWindow {
         let input_watermark_cols = logical.input.watermark_columns();
         assert!(input_watermark_cols.contains(order_key_idx));
 
-        // `EowcOverWindowExecutor` only maintains watermark on the order key column.
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.output_len());
-        watermark_columns.insert(order_key_idx);
+        // `EowcOverWindowExecutor` cannot produce any watermark columns, because there may be some
+        // ancient rows in some rarely updated partitions that are emitted at the end of time.
+        let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
         let base = PlanBase::new_stream_with_logical(
             &logical,
@@ -114,11 +113,7 @@ impl StreamEowcOverWindow {
     }
 }
 
-impl fmt::Display for StreamEowcOverWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamEowcOverWindow")
-    }
-}
+impl_distill_by_unit!(StreamEowcOverWindow, logical, "StreamEowcOverWindow");
 
 impl PlanTreeNodeUnary for StreamEowcOverWindow {
     fn input(&self) -> PlanRef {

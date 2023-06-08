@@ -31,7 +31,8 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{
-    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Sink, SinkError, TimestampHandlingMode, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM,
+    SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
 use crate::sink::{datum_to_json_object, record_to_json, Result};
@@ -234,30 +235,50 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     }
 
     async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
+        let source_field = json!({
+            "db": "RisingWave",
+            "table": "RisingWave",
+        });
+
         let mut update_cache: Option<Map<String, Value>> = None;
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
+            let event_key_object = Some(json!({
+                "schema": json!({
+                    "type": "struct",
+                    "fields": fields_pk_to_json(&schema.fields, &self.pk_indices),
+                    "optional": false,
+                    "name": "RisingWave.RisingWave.RisingWave.Key",
+                }),
+                "payload": pk_to_json(row, &schema.fields, &self.pk_indices)?,
+            }));
             let event_object = match op {
                 Op::Insert => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row, &schema.fields)?,
+                        "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                         "op": "c",
                         "ts_ms": ts_ms,
+                        "source": source_field,
                     }
                 })),
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row, &schema.fields)?,
+                        "before": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
+                        "source": source_field,
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields)?);
+                    update_cache = Some(record_to_json(
+                        row,
+                        &schema.fields,
+                        TimestampHandlingMode::Milli,
+                    )?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -266,9 +287,10 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row, &schema.fields)?,
+                                "after": record_to_json(row, &schema.fields, TimestampHandlingMode::Milli)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
+                                "source": source_field,
                             }
                         }))
                     } else {
@@ -280,13 +302,23 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                     }
                 }
             };
-            if let Some(obj) = event_object {
+            if let (Some(key_obj), Some(obj)) = (event_key_object, event_object) {
+                let key_str = key_obj.to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
-                        .key(self.gen_message_key().as_bytes())
+                        .key(key_str.as_bytes())
                         .payload(obj.to_string().as_bytes()),
                 )
                 .await?;
+                // Tomestone event
+                // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-delete-events
+                if op == Op::Delete {
+                    self.send(
+                        BaseRecord::<[u8], [u8]>::to(self.config.common.topic.as_str())
+                            .key(key_str.as_bytes()),
+                    )
+                    .await?;
+                }
             }
         }
         Ok(())
@@ -297,15 +329,27 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         let schema = &self.schema;
         for (op, row) in chunk.rows() {
             let event_object = match op {
-                Op::Insert => Some(Value::Object(record_to_json(row, &schema.fields)?)),
+                Op::Insert => Some(Value::Object(record_to_json(
+                    row,
+                    &schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?)),
                 Op::Delete => Some(Value::Null),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, &schema.fields)?);
+                    update_cache = Some(record_to_json(
+                        row,
+                        &schema.fields,
+                        TimestampHandlingMode::Milli,
+                    )?);
                     continue;
                 }
                 Op::UpdateInsert => {
                     if update_cache.take().is_some() {
-                        Some(Value::Object(record_to_json(row, &schema.fields)?))
+                        Some(Value::Object(record_to_json(
+                            row,
+                            &schema.fields,
+                            TimestampHandlingMode::Milli,
+                        )?))
                     } else {
                         warn!(
                             "not found UpdateDelete in prev row, skipping, row index {:?}",
@@ -316,13 +360,15 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
                 }
             };
             if let Some(obj) = event_object {
-                let event_key = Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?);
-                self.send(
-                    BaseRecord::to(self.config.common.topic.as_str())
-                        .key(event_key.to_string().as_bytes())
-                        .payload(obj.to_string().as_bytes()),
-                )
-                .await?;
+                let event_key =
+                    Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?).to_string();
+                let event_value = obj.to_string();
+                let mut msg: BaseRecord<'_, [u8], [u8]> =
+                    BaseRecord::to(self.config.common.topic.as_str()).key(event_key.as_bytes());
+                if op != Op::Delete {
+                    msg = msg.payload(event_value.as_bytes());
+                }
+                self.send(msg).await?;
             }
         }
         Ok(())
@@ -331,7 +377,12 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
     async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
-                let record = Value::Object(record_to_json(row, &self.schema.fields)?).to_string();
+                let record = Value::Object(record_to_json(
+                    row,
+                    &self.schema.fields,
+                    TimestampHandlingMode::Milli,
+                )?)
+                .to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
@@ -421,7 +472,7 @@ fn pk_to_json(
     for idx in pk_indices {
         let field = &schema[*idx];
         let key = field.name.clone();
-        let value = datum_to_json_object(field, row.datum_at(*idx))
+        let value = datum_to_json_object(field, row.datum_at(*idx), TimestampHandlingMode::Milli)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
@@ -431,52 +482,68 @@ fn pk_to_json(
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(row, &schema.fields)?);
+        let record = Value::Object(record_to_json(
+            row,
+            &schema.fields,
+            TimestampHandlingMode::Milli,
+        )?);
         records.push(record.to_string());
     }
 
     Ok(records)
 }
 
+fn field_to_json(field: &Field) -> Value {
+    // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
+    let r#type = match field.data_type() {
+        risingwave_common::types::DataType::Boolean => "boolean",
+        risingwave_common::types::DataType::Int16 => "int16",
+        risingwave_common::types::DataType::Int32 => "int32",
+        risingwave_common::types::DataType::Int64 => "int64",
+        risingwave_common::types::DataType::Int256 => "string",
+        risingwave_common::types::DataType::Float32 => "float",
+        risingwave_common::types::DataType::Float64 => "double",
+        // currently, we only support handling decimal as string.
+        // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
+        risingwave_common::types::DataType::Decimal => "string",
+
+        risingwave_common::types::DataType::Varchar => "string",
+
+        risingwave_common::types::DataType::Date => "int32",
+        risingwave_common::types::DataType::Time => "int64",
+        risingwave_common::types::DataType::Timestamp => "int64",
+        risingwave_common::types::DataType::Timestamptz => "string",
+        risingwave_common::types::DataType::Interval => "string",
+
+        risingwave_common::types::DataType::Bytea => "bytes",
+        risingwave_common::types::DataType::Jsonb => "string",
+        risingwave_common::types::DataType::Serial => "int32",
+        // since the original debezium pg support HSTORE via encoded as json string by default,
+        // we do the same here
+        risingwave_common::types::DataType::Struct(_) => "string",
+        risingwave_common::types::DataType::List { .. } => "string",
+    };
+    json!({
+        "field": field.name,
+        "optional": true,
+        "type": r#type,
+    })
+}
+
+fn fields_pk_to_json(fields: &[Field], pk_indices: &[usize]) -> Value {
+    let mut res = Vec::new();
+    for idx in pk_indices {
+        res.push(field_to_json(&fields[*idx]));
+    }
+    json!(res)
+}
+
 fn fields_to_json(fields: &[Field]) -> Value {
     let mut res = Vec::new();
 
-    fields.iter().for_each(|field| {
-        // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
-        let r#type = match field.data_type() {
-            risingwave_common::types::DataType::Boolean => "boolean",
-            risingwave_common::types::DataType::Int16 => "int16",
-            risingwave_common::types::DataType::Int32 => "int32",
-            risingwave_common::types::DataType::Int64 => "int64",
-            risingwave_common::types::DataType::Int256 => "string",
-            risingwave_common::types::DataType::Float32 => "float32",
-            risingwave_common::types::DataType::Float64 => "float64",
-            // currently, we only support handling decimal as string.
-            // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
-            risingwave_common::types::DataType::Decimal => "string",
-
-            risingwave_common::types::DataType::Varchar => "string",
-
-            risingwave_common::types::DataType::Date => "int32",
-            risingwave_common::types::DataType::Time => "int64",
-            risingwave_common::types::DataType::Timestamp => "int64",
-            risingwave_common::types::DataType::Timestamptz => "string",
-            risingwave_common::types::DataType::Interval => "string",
-
-            risingwave_common::types::DataType::Bytea => "bytes",
-            risingwave_common::types::DataType::Jsonb => "string",
-            risingwave_common::types::DataType::Serial => "int32",
-            // since the original debezium pg support HSTORE via encoded as json string by default,
-            // we do the same here
-            risingwave_common::types::DataType::Struct(_) => "string",
-            risingwave_common::types::DataType::List { .. } => "string",
-        };
-        res.push(json!({
-            "field": field.name,
-            "optional": true,
-            "type": r#type,
-        }))
-    });
+    fields
+        .iter()
+        .for_each(|field| res.push(field_to_json(field)));
 
     json!(res)
 }
@@ -488,17 +555,49 @@ fn schema_to_json(schema: &Schema) -> Value {
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "before",
+        "name": "RisingWave.RisingWave.RisingWave.Key",
     }));
     schema_fields.push(json!({
         "type": "struct",
         "fields": fields_to_json(&schema.fields),
         "optional": true,
         "field": "after",
+        "name": "RisingWave.RisingWave.RisingWave.Key",
     }));
+
+    schema_fields.push(json!({
+        "type": "struct",
+        "optional": false,
+        "name": "RisingWave.RisingWave.RisingWave.Source",
+        "fields": vec![
+            json!({
+                "type": "string",
+                "optional": false,
+                "field": "db"
+            }),
+            json!({
+                "type": "string",
+                "optional": true,
+                "field": "table"
+            })],
+        "field": "source"
+    }));
+    schema_fields.push(json!({
+        "type": "string",
+        "optional": false,
+        "field": "op"
+    }));
+    schema_fields.push(json!({
+        "type": "int64",
+        "optional": false,
+        "field": "ts_ms"
+    }));
+
     json!({
         "type": "struct",
         "fields": schema_fields,
         "optional": false,
+        "name": "RisingWave.RisingWave.RisingWave.Envelope",
     })
 }
 
@@ -774,7 +873,7 @@ mod test {
 
         let json_chunk = chunk_to_json(chunk, &schema).unwrap();
         let schema_json = schema_to_json(&schema);
-        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float32\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"optional\":true,\"type\":\"struct\"}],\"optional\":false,\"type\":\"struct\"}").unwrap());
+        assert_eq!(schema_json, serde_json::from_str::<Value>("{\"fields\":[{\"field\":\"before\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"after\",\"fields\":[{\"field\":\"v1\",\"optional\":true,\"type\":\"int32\"},{\"field\":\"v2\",\"optional\":true,\"type\":\"float\"},{\"field\":\"v3\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Key\",\"optional\":true,\"type\":\"struct\"},{\"field\":\"source\",\"fields\":[{\"field\":\"db\",\"optional\":false,\"type\":\"string\"},{\"field\":\"table\",\"optional\":true,\"type\":\"string\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Source\",\"optional\":false,\"type\":\"struct\"},{\"field\":\"op\",\"optional\":false,\"type\":\"string\"},{\"field\":\"ts_ms\",\"optional\":false,\"type\":\"int64\"}],\"name\":\"RisingWave.RisingWave.RisingWave.Envelope\",\"optional\":false,\"type\":\"struct\"}").unwrap());
         assert_eq!(
             serde_json::from_str::<Value>(&json_chunk[0]).unwrap(),
             serde_json::from_str::<Value>("{\"v1\":0,\"v2\":0.0,\"v3\":{\"v4\":0,\"v5\":0.0}}")

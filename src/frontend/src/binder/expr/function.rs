@@ -21,14 +21,17 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
-use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
+use risingwave_expr::function::window::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
+};
 use risingwave_sqlparser::ast::{
-    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameUnits, WindowSpec,
+    Function, FunctionArg, FunctionArgExpr, WindowFrameBound, WindowFrameExclusion,
+    WindowFrameUnits, WindowSpec,
 };
 
 use crate::binder::bind_context::Clause;
@@ -104,8 +107,7 @@ impl Binder {
         }
 
         // table function
-        let table_function_type = TableFunctionType::from_str(function_name.as_str());
-        if let Ok(function_type) = table_function_type {
+        if let Ok(function_type) = TableFunctionType::from_str(function_name.as_str()) {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
@@ -139,13 +141,38 @@ impl Binder {
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
+        if matches!(
+            kind,
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        ) {
+            if f.within_group.is_none() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "within group is expected for the {}",
+                    kind
+                ))
+                .into());
+            }
+        } else if f.within_group.is_some() {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "within group is disallowed for the {}",
+                kind
+            ))
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = f
-            .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+            f.within_group
+                .iter()
+                .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
+                .flatten_ok()
+                .try_collect()?
+        } else {
+            f.args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg.clone()))
+                .flatten_ok()
+                .try_collect()?
+        };
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -216,14 +243,61 @@ impl Binder {
             )
             .into());
         }
-        let order_by = OrderBy::new(
-            f.order_by
-                .into_iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
+        let order_by = if f.within_group.is_some() {
+            if !f.order_by.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "order_by clause outside of within group is disallowed in {}",
+                    kind
+                ))
+                .into());
+            }
+            OrderBy::new(
+                f.within_group
+                    .iter()
+                    .map(|x| self.bind_order_by_expr(*x.clone()))
+                    .try_collect()?,
+            )
+        } else {
+            OrderBy::new(
+                f.order_by
+                    .into_iter()
+                    .map(|e| self.bind_order_by_expr(e))
+                    .try_collect()?,
+            )
+        };
+        let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
+            let args =
+                self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
+                    ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
+                })?)?;
+            if args.len() != 1 || args[0].clone().as_literal().is_none() {
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
+                        .into(),
+                )
+            } else if let Ok(casted) = args[0]
+                .clone()
+                .cast_implicit(DataType::Float64)?
+                .fold_const()
+            {
+                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+            } else {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "arg in {} must be double precision",
+                    kind
+                ))
+                .into())
+            }
+        } else {
+            Ok(vec![])
+        }?;
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind, inputs, f.distinct, order_by, filter,
+            kind,
+            inputs,
+            f.distinct,
+            order_by,
+            filter,
+            direct_args,
         )?)))
     }
 
@@ -249,7 +323,25 @@ impl Binder {
                 .collect::<Result<_>>()?,
         );
         let frame = if let Some(frame) = window_frame {
-            let frame = match frame.units {
+            let exclusion = if let Some(exclusion) = frame.exclusion {
+                match exclusion {
+                    WindowFrameExclusion::CurrentRow => FrameExclusion::CurrentRow,
+                    WindowFrameExclusion::Group | WindowFrameExclusion::Ties => {
+                        return Err(ErrorCode::NotImplemented(
+                            format!(
+                                "window frame exclusion `{}` is not supported yet",
+                                exclusion
+                            ),
+                            9124.into(),
+                        )
+                        .into());
+                    }
+                    WindowFrameExclusion::NoOthers => FrameExclusion::NoOthers,
+                }
+            } else {
+                FrameExclusion::NoOthers
+            };
+            let bounds = match frame.units {
                 WindowFrameUnits::Rows => {
                     let convert_bound = |bound| match bound {
                         WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
@@ -268,23 +360,26 @@ impl Binder {
                     } else {
                         FrameBound::CurrentRow
                     };
-                    Frame::Rows(start, end)
+                    FrameBounds::Rows(start, end)
                 }
                 WindowFrameUnits::Range | WindowFrameUnits::Groups => {
                     return Err(ErrorCode::NotImplemented(
-                        format!("window frame in `{}` mode is not supported", frame.units),
+                        format!(
+                            "window frame in `{}` mode is not supported yet",
+                            frame.units
+                        ),
                         9124.into(),
                     )
                     .into());
                 }
             };
-            if !frame.is_valid() {
+            if !bounds.is_valid() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "window frame `{frame}` is not valid",
+                    "window frame bounds `{bounds}` is not valid",
                 ))
                 .into());
             }
-            Some(frame)
+            Some(Frame { bounds, exclusion })
         } else {
             None
         };
@@ -347,12 +442,9 @@ impl Binder {
                 0,
                 raw(move |binder, _inputs| {
                     binder.ensure_now_function_allowed()?;
-                    // `now()` in batch query will be convert to the binder time.
-                    Ok(if binder.is_for_batch() {
-                        Literal::new(Some(binder.epoch.as_scalar()), DataType::Timestamptz).into()
-                    } else {
-                        Now.into()
-                    })
+                    // NOTE: this will be further transformed during optimization. See the
+                    // documentation of `Now`.
+                    Ok(Now.into())
                 }),
             )
         }
@@ -396,8 +488,12 @@ impl Binder {
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("ceiling", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
+                ("trunc", raw_call(ExprType::Trunc)),
                 ("abs", raw_call(ExprType::Abs)),
                 ("exp", raw_call(ExprType::Exp)),
+                ("ln", raw_call(ExprType::Ln)),
+                ("log", raw_call(ExprType::Log10)),
+                ("log10", raw_call(ExprType::Log10)),
                 ("mod", raw_call(ExprType::Modulus)),
                 ("sin", raw_call(ExprType::Sin)),
                 ("cos", raw_call(ExprType::Cos)),
@@ -411,9 +507,18 @@ impl Binder {
                 ("cosd", raw_call(ExprType::Cosd)),
                 ("cotd", raw_call(ExprType::Cotd)),
                 ("tand", raw_call(ExprType::Tand)),
+                ("sinh", raw_call(ExprType::Sinh)),
+                ("cosh", raw_call(ExprType::Cosh)), 
+                ("tanh", raw_call(ExprType::Tanh)), 
+                ("coth", raw_call(ExprType::Coth)), 
+                ("asinh", raw_call(ExprType::Asinh)), 
+                ("acosh", raw_call(ExprType::Acosh)), 
+                ("atanh", raw_call(ExprType::Atanh)), 
+                ("asind", raw_call(ExprType::Asind)),
                 ("degrees", raw_call(ExprType::Degrees)),
                 ("radians", raw_call(ExprType::Radians)),
                 ("sqrt", raw_call(ExprType::Sqrt)),
+                ("cbrt", raw_call(ExprType::Cbrt)),
 
                 (
                     "to_timestamp",
@@ -464,6 +569,11 @@ impl Binder {
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
+                ("sha1", raw_call(ExprType::Sha1)),
+                ("sha224", raw_call(ExprType::Sha224)),
+                ("sha256", raw_call(ExprType::Sha256)),
+                ("sha384", raw_call(ExprType::Sha384)),
+                ("sha512", raw_call(ExprType::Sha512)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -474,6 +584,8 @@ impl Binder {
                 ("array_length", raw_call(ExprType::ArrayLength)),
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
+                ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 // int256
@@ -492,7 +604,7 @@ impl Binder {
                     "pg_typeof",
                     guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
-                        let v = match input.is_unknown() {
+                        let v = match input.is_untyped() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
@@ -613,11 +725,12 @@ impl Binder {
                         // workaround.
                         Ok(ExprImpl::literal_bool(false))
                 }))),
+                ("pg_tablespace_location", guard_by_len(1, raw_literal(ExprImpl::literal_null(DataType::Varchar)))),
                 // internal
                 ("rw_vnode", raw_call(ExprType::Vnode)),
                 // TODO: choose which pg version we should return.
                 ("version", raw_literal(ExprImpl::literal_varchar(format!(
-                    "PostgreSQL 13.9-RisingWave-{} ({})",
+                    "PostgreSQL 8.3-RisingWave-{} ({})",
                     RW_VERSION,
                     GIT_SHA
                 )))),

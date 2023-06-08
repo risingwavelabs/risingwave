@@ -60,6 +60,7 @@ async fn test_merger_sum_aggr() {
                     column_orders: vec![],
                     filter: None,
                     distinct: false,
+                    direct_args: vec![],
                 },
                 AggCall {
                     kind: AggKind::Sum,
@@ -68,6 +69,7 @@ async fn test_merger_sum_aggr() {
                     column_orders: vec![],
                     filter: None,
                     distinct: false,
+                    direct_args: vec![],
                 },
             ],
             vec![],
@@ -157,6 +159,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Sum,
@@ -165,6 +168,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
             AggCall {
                 kind: AggKind::Count, // as row count, index: 2
@@ -173,6 +177,7 @@ async fn test_merger_sum_aggr() {
                 column_orders: vec![],
                 filter: None,
                 distinct: false,
+                direct_args: vec![],
             },
         ],
         2, // row_count_index
@@ -220,7 +225,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![I64Array::from_iter(vec![1; i]).into()],
+                vec![I64Array::from_iter(vec![1; i]).into_ref()],
                 None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
@@ -245,7 +250,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 

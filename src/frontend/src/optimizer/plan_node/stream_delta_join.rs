@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::{self, GenericPlanRef};
+use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -91,7 +92,7 @@ impl StreamDeltaJoin {
 impl fmt::Display for StreamDeltaJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamDeltaJoin");
+        let mut builder = formatter_debug_plan_node!(f, "StreamDeltaJoin");
         builder.field("type", &self.logical.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
@@ -158,13 +159,13 @@ impl StreamNode for StreamDeltaJoin {
         } else {
             unreachable!();
         };
-        let left_table_desc = left_table.table_desc();
+        let left_table_desc = &*left_table.table_desc;
         let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();
         };
-        let right_table_desc = right_table.table_desc();
+        let right_table_desc = &*right_table.table_desc;
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.

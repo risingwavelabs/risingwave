@@ -10,6 +10,7 @@ repository = { workspace = true }
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
+default = ["rw-static-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -19,8 +20,10 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 
 [dependencies]
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
+const-str = "0.5"
+risingwave_cmd = { path = "../cmd" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
@@ -28,6 +31,8 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
+strum = "0.24"
+strum_macros = "0.24"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -42,11 +47,14 @@ tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config" }
 workspace-hack = { path = "../workspace-hack" }
 
+[build-dependencies]
+vergen = { version = "8", default-features = false, features = ["build", "git", "gitcl"] }
+
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 
 [[bin]]
 name = "risingwave"

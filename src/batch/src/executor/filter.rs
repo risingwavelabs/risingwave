@@ -150,7 +150,7 @@ mod tests {
         });
 
         // Use builder to obtain a single (List) column DataChunk
-        let chunk = DataChunk::new(vec![builder.finish().into()], 4);
+        let chunk = DataChunk::new(vec![builder.finish().into_ref()], 4);
 
         // Initialize mock executor
         let mut mock_executor = MockExecutor::new(Schema {
@@ -179,7 +179,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_list();
             assert_eq!(col1.len(), 2);
             // Assert that values 3 and 4 are bigger than 2
@@ -230,7 +230,7 @@ mod tests {
         assert_matches!(res, Ok(_));
         if let Ok(res) = res {
             let col1 = res.column_at(0);
-            let array = col1.array();
+            let array = col1;
             let col1 = array.as_int32();
             assert_eq!(col1.len(), 2);
             assert_eq!(col1.value_at(0), Some(2));

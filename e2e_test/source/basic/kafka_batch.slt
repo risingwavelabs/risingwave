@@ -2,7 +2,7 @@ statement ok
 create source s1 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -10,7 +10,7 @@ statement ok
 create source s2 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_2_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -18,7 +18,7 @@ statement ok
 create source s3 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_3_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -26,7 +26,7 @@ statement ok
 create source s4 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -34,7 +34,7 @@ statement ok
 create table s5 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -42,7 +42,7 @@ statement ok
 create source s6 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_1_partition_mv_topic',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'earliest'
 ) row format json
 
@@ -56,7 +56,7 @@ CREATE SOURCE s7(
 WITH (
     connector = 'kafka',
     topic = 'json_c',
-    properties.bootstrap.server = '127.0.0.1:29092',
+    properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest')
 ROW format JSON;
 
@@ -64,7 +64,7 @@ statement ok
 create table s8 (v1 int, v2 varchar) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
-  properties.bootstrap.server = '127.0.0.1:29092',
+  properties.bootstrap.server = 'message_queue:29092',
   scan.startup.mode = 'latest'
 ) row format json
 

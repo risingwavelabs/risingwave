@@ -22,6 +22,7 @@ use std::fs;
 
 use clap::ValueEnum;
 use educe::Educe;
+pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_default::DefaultFromSerde;
@@ -239,6 +240,13 @@ pub struct MetaConfig {
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Whether config object storage bucket lifecycle to purge stale data.
+    #[serde(default)]
+    pub do_not_config_object_storage_lifecycle: bool,
+
+    #[serde(default = "default::meta::partition_vnode_count")]
+    pub partition_vnode_count: u32,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -247,10 +255,6 @@ pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
     pub heartbeat_interval_ms: u32,
-
-    /// The maximum allowed heartbeat interval for workers.
-    #[serde(default = "default::server::max_heartbeat_interval_secs")]
-    pub max_heartbeat_interval_secs: u32,
 
     #[serde(default = "default::server::connection_pool_size")]
     pub connection_pool_size: u16,
@@ -281,6 +285,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    #[serde(default = "default::batch::enable_barrier_read")]
+    pub enable_barrier_read: bool,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -334,6 +341,11 @@ pub struct StorageConfig {
     #[serde(default)]
     pub shared_buffer_capacity_mb: Option<usize>,
 
+    /// The shared buffer will start flushing data to object when the ratio of memory usage to the
+    /// shared buffer capacity exceed such ratio.
+    #[serde(default = "default::storage::shared_buffer_flush_ratio")]
+    pub shared_buffer_flush_ratio: f32,
+
     /// The threshold for the number of immutable memtables to merge to a new imm.
     #[serde(default = "default::storage::imm_merge_threshold")]
     pub imm_merge_threshold: usize,
@@ -355,13 +367,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
-
-    #[serde(default = "default::storage::enable_local_spill")]
-    pub enable_local_spill: bool,
-
-    /// Local object store root. We should call `get_local_object_store` to get the object store.
-    #[serde(default = "default::storage::local_object_store")]
-    pub local_object_store: String,
 
     /// Number of tasks shared buffer can upload in parallel.
     #[serde(default = "default::storage::share_buffer_upload_concurrency")]
@@ -423,12 +428,27 @@ pub struct FileCacheConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
-#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
+    /// Disabled.
     Off,
-    #[default]
+    /// Enabled with basic instruments.
     On,
-    Verbose,
+    /// Enabled with extra verbose instruments in release build.
+    /// Behaves the same as `on` in debug build due to performance concern.
+    #[default]
+    #[clap(alias = "verbose")]
+    ReleaseVerbose,
+}
+
+impl AsyncStackTraceOption {
+    pub fn is_verbose(self) -> Option<bool> {
+        match self {
+            Self::Off => None,
+            Self::On => Some(false),
+            Self::ReleaseVerbose => Some(!cfg!(debug_assertions)),
+        }
+    }
 }
 
 serde_with::with_prefix!(streaming_prefix "stream_");
@@ -585,7 +605,7 @@ mod default {
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10
+            30
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -605,7 +625,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 5mi
+            180 // 3mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {
@@ -613,11 +633,15 @@ mod default {
         }
 
         pub fn move_table_size_limit() -> u64 {
-            5 * 1024 * 1024 * 1024 // 5GB
+            2 * 1024 * 1024 * 1024 // 2GB
         }
 
         pub fn split_group_size_limit() -> u64 {
             20 * 1024 * 1024 * 1024 // 20GB
+        }
+
+        pub fn partition_vnode_count() -> u32 {
+            64
         }
     }
 
@@ -625,10 +649,6 @@ mod default {
 
         pub fn heartbeat_interval_ms() -> u32 {
             1000
-        }
-
-        pub fn max_heartbeat_interval_secs() -> u32 {
-            600
         }
 
         pub fn connection_pool_size() -> u16 {
@@ -658,6 +678,10 @@ mod default {
             1024
         }
 
+        pub fn shared_buffer_flush_ratio() -> f32 {
+            0.8
+        }
+
         pub fn imm_merge_threshold() -> usize {
             4
         }
@@ -680,14 +704,6 @@ mod default {
 
         pub fn disable_remote_compactor() -> bool {
             false
-        }
-
-        pub fn enable_local_spill() -> bool {
-            true
-        }
-
-        pub fn local_object_store() -> String {
-            "tempdisk".to_string()
         }
 
         pub fn share_buffer_upload_concurrency() -> usize {
@@ -734,7 +750,7 @@ mod default {
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
-            AsyncStackTraceOption::On
+            AsyncStackTraceOption::default()
         }
 
         pub fn unique_user_stream_errors() -> usize {
@@ -849,6 +865,12 @@ mod default {
 
         pub fn telemetry_enabled() -> Option<bool> {
             system_param::default::telemetry_enabled()
+        }
+    }
+
+    pub mod batch {
+        pub fn enable_barrier_read() -> bool {
+            true
         }
     }
 }

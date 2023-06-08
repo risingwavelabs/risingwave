@@ -18,7 +18,6 @@ use std::time::Instant;
 use futures::stream::select;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
-use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -47,6 +46,10 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
     log_reader: F::Reader,
     log_writer: F::Writer,
+}
+
+struct SinkMetrics {
+    sink_commit_duration_metrics: Histogram,
 }
 
 async fn build_sink(
@@ -128,10 +131,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .metrics
             .sink_commit_duration
             .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
-        let sink_throughput_metrics = self
-            .metrics
-            .sink_output_row_count
-            .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
+
+        let sink_metrics = SinkMetrics {
+            sink_commit_duration_metrics,
+        };
 
         let write_log_stream = Self::execute_write_log(
             self.input,
@@ -142,12 +145,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         );
 
         dispatch_sink!(self.sink, sink, {
-            let consume_log_stream = Self::execute_consume_log(
-                sink,
-                self.log_reader,
-                sink_commit_duration_metrics,
-                sink_throughput_metrics,
-            );
+            let consume_log_stream = Self::execute_consume_log(sink, self.log_reader, sink_metrics);
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
     }
@@ -213,8 +211,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn execute_consume_log<S: Sink, R: LogReader>(
         mut sink: S,
         mut log_reader: R,
-        sink_commit_duration_metrics: Histogram,
-        sink_throughput_metrics: GenericCounter<AtomicU64>,
+        sink_metrics: SinkMetrics,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
 
@@ -266,7 +263,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         sink.abort().await?;
                         return Err(e.into());
                     }
-                    sink_throughput_metrics.inc_by(chunk.cardinality() as u64);
                 }
                 LogStoreReadItem::Barrier { is_checkpoint } => {
                     state = match state {
@@ -283,7 +279,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             if is_checkpoint {
                                 let start_time = Instant::now();
                                 sink.commit().await?;
-                                sink_commit_duration_metrics
+                                sink_metrics
+                                    .sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
                                 LogConsumerState::Checkpointed { prev_epoch: epoch }
                             } else {

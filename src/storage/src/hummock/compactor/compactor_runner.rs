@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
-use risingwave_pb::hummock::{CompactTask, LevelType};
+use risingwave_pb::hummock::{CompactTask, LevelType, SstableInfo};
 
 use super::compaction_utils::estimate_task_memory_capacity;
 use super::task_progress::TaskProgress;
@@ -73,6 +73,7 @@ impl CompactorRunner {
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
                 split_by_table: task.split_by_state_table,
+                split_weight_by_vnode: task.split_weight_by_vnode,
             },
         );
 
@@ -101,38 +102,37 @@ impl CompactorRunner {
                 del_agg,
                 filter_key_extractor,
                 Some(task_progress),
+                Some(self.compact_task.task_id),
+                Some(self.split_index),
             )
             .await?;
         Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
-        compact_task: &CompactTask,
+        sstable_infos: &Vec<SstableInfo>,
+        gc_delete_keys: bool,
         sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<CompactionDeleteRanges>> {
         let mut builder = CompactionDeleteRangesBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
-        for level in &compact_task.input_ssts {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-            for table_info in &level.table_infos {
-                let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                let mut range_tombstone_list =
-                    table.value().meta.monotonic_tombstone_events.clone();
-                range_tombstone_list.iter_mut().for_each(|tombstone| {
-                    if filter.should_delete(FullKey::from_user_key(
-                        tombstone.event_key.left_user_key.as_ref(),
-                        tombstone.new_epoch,
-                    )) {
-                        tombstone.new_epoch = HummockEpoch::MAX;
-                    }
-                });
-                builder.add_delete_events(range_tombstone_list);
-            }
+
+        for table_info in sstable_infos {
+            let table = sstable_store.sstable(table_info, &mut local_stats).await?;
+            let mut range_tombstone_list = table.value().meta.monotonic_tombstone_events.clone();
+            range_tombstone_list.iter_mut().for_each(|tombstone| {
+                if filter.should_delete(FullKey::from_user_key(
+                    tombstone.event_key.left_user_key.as_ref(),
+                    tombstone.new_epoch,
+                )) {
+                    tombstone.new_epoch = HummockEpoch::MAX;
+                }
+            });
+            builder.add_delete_events(range_tombstone_list);
         }
-        let aggregator = builder.build_for_compaction(compact_task.gc_delete_keys);
+
+        let aggregator = builder.build_for_compaction(gc_delete_keys);
         Ok(aggregator)
     }
 
@@ -225,20 +225,33 @@ mod tests {
                 1,
             ),
         ];
-        let sstable_info = gen_test_sstable_with_range_tombstone(
+        let mut sstable_info_1 = gen_test_sstable_with_range_tombstone(
             default_builder_opt_for_test(),
             1,
+            kv_pairs.clone().into_iter(),
+            range_tombstones.clone(),
+            sstable_store.clone(),
+        )
+        .await
+        .get_sstable_info();
+        sstable_info_1.table_ids = vec![1];
+
+        let mut sstable_info_2 = gen_test_sstable_with_range_tombstone(
+            default_builder_opt_for_test(),
+            2,
             kv_pairs.into_iter(),
             range_tombstones.clone(),
             sstable_store.clone(),
         )
         .await
         .get_sstable_info();
+        sstable_info_2.table_ids = vec![2];
+
         let compact_task = CompactTask {
             input_ssts: vec![InputLevel {
                 level_idx: 0,
                 level_type: 0,
-                table_infos: vec![sstable_info],
+                table_infos: vec![sstable_info_1, sstable_info_2],
             }],
             existing_table_ids: vec![2],
             ..Default::default()
@@ -246,8 +259,23 @@ mod tests {
         let mut state_clean_up_filter = StateCleanUpCompactionFilter::new(HashSet::from_iter(
             compact_task.existing_table_ids.clone(),
         ));
+
+        let sstable_infos = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .filter(|table_info| {
+                let table_ids = &table_info.table_ids;
+                table_ids
+                    .iter()
+                    .any(|table_id| compact_task.existing_table_ids.contains(table_id))
+            })
+            .cloned()
+            .collect_vec();
+
         let collector = CompactorRunner::build_delete_range_iter(
-            &compact_task,
+            &sstable_infos,
+            compact_task.gc_delete_keys,
             &sstable_store,
             &mut state_clean_up_filter,
         )
@@ -257,6 +285,7 @@ mod tests {
             UserKey::<Bytes>::default().as_ref(),
             UserKey::<Bytes>::default().as_ref(),
         );
+
         assert_eq!(
             ret,
             create_monotonic_events(vec![range_tombstones[1].clone()])

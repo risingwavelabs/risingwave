@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{fmt, vec};
+use std::vec;
 
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchUpdate, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
@@ -37,119 +38,56 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
     pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
-    table_version_id: TableVersionId,
-    input: PlanRef,
-    exprs: Vec<ExprImpl>,
-    returning: bool,
+    core: generic::Update<PlanRef>,
 }
 
-impl LogicalUpdate {
-    /// Create a [`LogicalUpdate`] node. Used internally by optimizer.
-    pub fn new(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        exprs: Vec<ExprImpl>,
-        returning: bool,
-    ) -> Self {
-        let ctx = input.ctx();
-        let schema = if returning {
-            input.schema().clone()
+impl From<generic::Update<PlanRef>> for LogicalUpdate {
+    fn from(core: generic::Update<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
+        let schema = if core.returning {
+            core.input.schema().clone()
         } else {
             Schema::new(vec![Field::unnamed(DataType::Int64)])
         };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
-        Self {
-            base,
-            table_name,
-            table_id,
-            table_version_id,
-            input,
-            exprs,
-            returning,
-        }
+        Self { base, core }
     }
+}
 
-    /// Create a [`LogicalUpdate`] node. Used by planner.
-    pub fn create(
-        input: PlanRef,
-        table_name: String,
-        table_id: TableId,
-        table_version_id: TableVersionId,
-        exprs: Vec<ExprImpl>,
-        returning: bool,
-    ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_name,
-            table_id,
-            table_version_id,
-            exprs,
-            returning,
-        ))
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} {{ table: {}, exprs: {:?}{} }}",
-            name,
-            self.table_name,
-            self.exprs,
-            if self.returning {
-                ", returning: true"
-            } else {
-                ""
-            }
-        )
-    }
-
+impl LogicalUpdate {
     #[must_use]
     pub fn table_id(&self) -> TableId {
-        self.table_id
+        self.core.table_id
     }
 
     pub fn exprs(&self) -> &[ExprImpl] {
-        self.exprs.as_ref()
+        self.core.exprs.as_ref()
     }
 
     pub fn has_returning(&self) -> bool {
-        self.returning
+        self.core.returning
     }
 
     pub fn table_version_id(&self) -> TableVersionId {
-        self.table_version_id
+        self.core.table_version_id
     }
 }
 
 impl PlanTreeNodeUnary for LogicalUpdate {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_name.clone(),
-            self.table_id,
-            self.table_version_id,
-            self.exprs.clone(),
-            self.returning,
-        )
+        let mut core = self.core.clone();
+        core.input = input;
+        core.into()
     }
 }
 
 impl_plan_tree_node_for_unary! { LogicalUpdate }
-
-impl fmt::Display for LogicalUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalUpdate")
-    }
-}
+impl_distill_by_unit!(LogicalUpdate, core, "LogicalUpdate");
 
 impl ExprRewritable for LogicalUpdate {
     fn has_rewritable_expr(&self) -> bool {
@@ -157,17 +95,17 @@ impl ExprRewritable for LogicalUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.clone();
+        let mut new = self.core.clone();
         new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
-        new.base = new.base.clone_with_new_plan_id();
-        new.into()
+        Self::from(new).into()
     }
 }
 
 impl ColPrunable for LogicalUpdate {
     fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
+        let input = self.input();
+        let required_cols: Vec<_> = (0..input.schema().len()).collect();
+        self.clone_with_input(input.prune_col(&required_cols, ctx))
             .into()
     }
 }
@@ -185,8 +123,9 @@ impl PredicatePushdown for LogicalUpdate {
 impl ToBatch for LogicalUpdate {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(BatchUpdate::new(new_logical).into())
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
+        Ok(BatchUpdate::new(new_logical, self.schema().clone()).into())
     }
 }
 

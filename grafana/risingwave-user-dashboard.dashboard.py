@@ -14,11 +14,15 @@ import sys
 p = os.path.dirname(__file__)
 sys.path.append(p)
 from common import *
+from jsonmerge import merge
 
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Fcy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
 datasource = {"type": "prometheus", "uid": f"{source_uid}"}
+datasource_const = "datasource"
+if dynamic_source_enabled:
+    datasource = {"type": "prometheus", "uid": "${datasource}"}
 
 panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
@@ -44,6 +48,8 @@ def section_actor_info(panels):
 
 
 def section_overview(panels):
+    mv_filter = "executor_identity=~\".*MaterializeExecutor.*\""
+    sink_filter = "executor_identity=~\".*SinkExecutor.*\""
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
@@ -71,8 +77,18 @@ def section_overview(panels):
             "The figure shows the number of rows output by each sink per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_sink_output_rows_counts')}[$__rate_interval])) by (source_name)",
-                    "{{source_name}}",
+                    f"sum(rate({metric('stream_executor_row_count', filter=sink_filter)}[$__rate_interval])) by (executor_identity)",
+                    "{{executor_identity}}",
+                ),
+            ],
+        ),
+        panels.timeseries_rowsps(
+            "Aggregated Materialized View Throughput(rows/s)",
+            "The figure shows the number of rows output by each materialized view per second.",
+            [
+                panels.target(
+                    f"sum(rate({metric('stream_executor_row_count', filter=mv_filter)}[$__rate_interval])) by (executor_identity)",
+                    "{{executor_identity}}",
                 ),
             ],
         ),
@@ -240,7 +256,7 @@ def section_memory(outer_panels):
                         panels.target(
                             f"sum({metric('state_store_meta_cache_size')}) by (instance) + "
                             + f"sum({metric('state_store_block_cache_size')}) by (instance) + "
-                            + f"sum({metric('state_store_limit_memory_size')}) by (instance)",
+                            + f"sum({metric('uploading_memory_size')}) by (instance)",
                             "storage @ {{instance}}",
                         ),
                     ],
@@ -262,7 +278,7 @@ def section_memory(outer_panels):
                             "storage block cache - {{job}} @ {{instance}}",
                         ),
                         panels.target(
-                            f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
+                            f"sum({metric('uploading_memory_size')}) by (job,instance)",
                             "storage write buffer - {{job}} @ {{instance}}",
                         ),
                     ],
@@ -283,6 +299,30 @@ def section_memory(outer_panels):
                             f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
                             "Agg - cache miss - table {{table_id}} actor {{actor_id}}",
                         ),
+                        panels.target(
+                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
+                            "Distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
+                            "Group top n cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
+                            "Group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
+                            "Lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
+                        ),
+
+                        panels.target(
+                            f"rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])",
+                            "temporal join cache miss - table_id {{table_id}} actor {{actor_id}}",
+                        ),
+
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "Agg - total lookups - table {{table_id}} actor {{actor_id}}",
@@ -309,6 +349,30 @@ def section_memory(outer_panels):
                             f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "Agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
                         ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Distinct agg cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+                        panels.target(
+                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream group top n cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream group top n appendonly cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream lookup cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+
+                        panels.target(
+                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, actor_id))",
+                            "Stream temporal join cache miss ratio - table {{table_id}} actor {{actor_id}} ",
+                        ),
+                        
                         panels.target(
                             f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, actor_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, actor_id))",
                             "materialize executor cache miss ratio - table {{table_id}} - actor {{actor_id}}  {{instance}}",
@@ -527,7 +591,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_source_output_rows_counts')}[$__rate_interval])",
-                            "source={{source_name}} {{source_id}} @ {{instance}}",
+                            "source={{source_name}} actor={{actor_id}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -651,6 +715,132 @@ def section_batch(outer_panels):
         )
     ]
 
+templating_list = []
+if dynamic_source_enabled:
+    templating_list.append(
+        {
+            "hide": 0,
+            "includeAll": False,
+            "multi": False,
+            "name": f"{datasource_const}",
+            "options": [],
+            "query": "prometheus",
+            "queryValue": "",
+            "refresh": 2,
+            "skipUrlSync": False,
+            "type": "datasource"
+        }
+    )
+
+if namespace_filter_enabled:
+    namespace_json = {
+        "definition": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+        "description": "Kubernetes namespace.",
+        "hide": 0,
+        "includeAll": False,
+        "label": "Namespace",
+        "multi": False,
+        "name": "namespace",
+        "options": [],
+        "query": {
+            "query": "label_values(up{risingwave_name=~\".+\"}, namespace)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 0,
+        "type": "query",
+    }
+
+    name_json = {
+        "current": {
+            "selected": False,
+            "text": "risingwave",
+            "value": "risingwave"
+        },
+        "definition": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+        "hide": 0,
+        "includeAll": False,
+        "label": "RisingWave",
+        "multi": False,
+        "name": "instance",
+        "options": [],
+        "query": {
+            "query": "label_values(up{namespace=\"$namespace\", risingwave_name=~\".+\"}, risingwave_name)",
+            "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": False,
+        "sort": 6,
+        "type": "query",
+    }
+    if dynamic_source_enabled:
+        namespace_json = merge(namespace_json, {"datasource": datasource})
+        name_json = merge(name_json, {"datasource": datasource})
+
+    templating_list.append(namespace_json)
+    templating_list.append(name_json)
+
+
+node_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+    "description": "Reporting instance of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Node",
+    "multi": True,
+    "name": "node",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, instance)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+job_json = {
+    "current": {
+        "selected": False,
+        "text": "All",
+        "value": "__all"
+    },
+    "definition": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+    "description": "Reporting job of the metric",
+    "hide": 0,
+    "includeAll": True,
+    "label": "Job",
+    "multi": True,
+    "name": "job",
+    "options": [],
+    "query": {
+        "query": f"label_values({metric('process_cpu_seconds_total', node_filter_enabled=False)}, job)",
+        "refId": "StandardVariableQuery"
+    },
+    "refresh": 2,
+    "regex": "",
+    "skipUrlSync": False,
+    "sort": 6,
+    "type": "query",
+}
+
+if dynamic_source_enabled:
+    node_json = merge(node_json, {"datasource": datasource})
+    job_json = merge(job_json, {"datasource": datasource})
+
+templating_list.append(node_json)
+templating_list.append(job_json)
+templating = Templating(templating_list)
 
 dashboard = Dashboard(
     title="risingwave_dashboard",

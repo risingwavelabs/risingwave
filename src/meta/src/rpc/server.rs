@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +21,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -72,7 +74,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, MetaResult};
+use crate::{hummock, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -337,6 +339,17 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
 
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
+
+    let data_directory = system_params_reader.data_directory();
+    if !is_correct_data_directory(data_directory) {
+        return Err(MetaError::system_param(format!(
+            "The data directory {:?} is misconfigured. 
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            The string cannot start or end with '/', and consecutive '/' are not allowed.
+            The data directory cannot be empty and its length should not exceed 800 characters.",
+            data_directory
+        )));
+    }
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -633,7 +646,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Persist params before starting services so that invalid params that cause meta node
     // to crash will not be persisted.
     system_params_manager.flush_params().await?;
-    env.cluster_id().put_at_meta_store(&meta_store).await?;
+    env.cluster_id()
+        .put_at_meta_store(meta_store.deref())
+        .await?;
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
@@ -670,4 +685,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await
         .unwrap();
     Ok(())
+}
+
+fn is_correct_data_directory(data_directory: &str) -> bool {
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/-]{1,}$").unwrap();
+    if data_directory.is_empty()
+        || !data_directory_regex.is_match(data_directory)
+        || data_directory.ends_with('/')
+        || data_directory.starts_with('/')
+        || data_directory.contains("//")
+        || data_directory.len() > 800
+    {
+        return false;
+    }
+    true
 }

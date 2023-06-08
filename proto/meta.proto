@@ -112,6 +112,11 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
+message MigrationPlan {
+  // map<parallel_unit_id, parallel_unit>, the plan indicates that the actors will be migrated from old parallel unit to the new one.
+  map<uint32, common.ParallelUnit> parallel_unit_migration_plan = 1;
+}
+
 message FlushRequest {
   bool checkpoint = 1;
 }

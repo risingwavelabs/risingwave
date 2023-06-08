@@ -519,6 +519,10 @@ impl dyn PlanNode {
         self.plan_base().append_only
     }
 
+    pub fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close
+    }
+
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
         &self.plan_base().functional_dependency
     }
@@ -533,7 +537,7 @@ impl dyn PlanNode {
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
-            return stream_table_scan.adhoc_to_stream_prost();
+            return stream_table_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -640,6 +644,7 @@ mod logical_agg;
 mod logical_apply;
 mod logical_dedup;
 mod logical_delete;
+mod logical_except;
 mod logical_expand;
 mod logical_filter;
 mod logical_hop_window;
@@ -721,6 +726,7 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
+pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_filter::LogicalFilter;
 pub use logical_hop_window::LogicalHopWindow;
@@ -817,6 +823,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Now }
             , { Logical, Dedup }
             , { Logical, Intersect }
+            , { Logical, Except }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -903,6 +910,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Now }
             , { Logical, Dedup }
             , { Logical, Intersect }
+            , { Logical, Except }
         }
     };
 }

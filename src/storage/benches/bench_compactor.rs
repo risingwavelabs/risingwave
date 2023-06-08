@@ -19,6 +19,7 @@ use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -38,7 +39,7 @@ use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
-    SstableStore, SstableWriterOptions, TieredCache,
+    SstableStore, SstableWriterOptions, TieredCache, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -67,7 +68,11 @@ pub fn default_writer_opts() -> SstableWriterOptions {
 pub fn test_key_of(idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
     FullKey::for_test(
         TableId::default(),
-        format!("key_test_{:08}", idx * 2).as_bytes().to_vec(),
+        [
+            VirtualNode::ZERO.to_be_bytes().as_slice(),
+            format!("key_test_{:08}", idx * 2).as_bytes(),
+        ]
+        .concat(),
         epoch,
     )
 }
@@ -95,7 +100,8 @@ async fn build_table(
             policy: CachePolicy::Fill(CachePriority::High),
         },
     );
-    let mut builder = SstableBuilder::for_test(sstable_object_id, writer, opt);
+    let mut builder =
+        SstableBuilder::<_, Xor16FilterBuilder>::for_test(sstable_object_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
     let table_key_len = full_key.user_key.table_key.len();
@@ -187,6 +193,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         task_type: compact_task::TaskType::Dynamic,
         is_target_l0_or_lbase: false,
         split_by_table: false,
+        split_weight_by_vnode: 0,
     };
     Compactor::compact_and_build_sst(
         &mut builder,
@@ -194,6 +201,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
+        None,
     )
     .await
     .unwrap();

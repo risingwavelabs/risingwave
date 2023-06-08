@@ -18,8 +18,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::{Client, Credentials, Endpoint};
+use aws_credential_types::Credentials;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
@@ -654,7 +655,7 @@ async fn main() {
                     access_key_secret,
                     None,
                 ))
-                .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+                .endpoint_url(endpoint)
                 .load()
                 .await
         }

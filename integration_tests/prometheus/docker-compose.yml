@@ -50,10 +50,8 @@ services:
     container_name: prometheus-0
     healthcheck:
       test:
-        - CMD
-        - printf
-        - ""
-        - /dev/tcp/127.0.0.1/9500
+        - CMD-SHELL
+        - sh -c 'printf "GET /-/healthy HTTP/1.0\n\n" | nc localhost 9500; exit $?;'
       interval: 1s
       timeout: 5s
       retries: 5

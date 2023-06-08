@@ -94,7 +94,6 @@ fn get_compaction_group_object_ids(
     group_id: CompactionGroupId,
 ) -> Vec<HummockSstableObjectId> {
     get_compaction_group_ssts(version, group_id)
-        .into_iter()
         .map(|(object_id, _)| object_id)
         .collect_vec()
 }
@@ -905,7 +904,7 @@ async fn test_trigger_compaction_deterministic() {
     let _ = add_test_tables(&hummock_manager, context_id).await;
 
     let cur_version = hummock_manager.get_current_version().await;
-    let compaction_groups = get_compaction_group_ids(&cur_version);
+    let compaction_groups = get_compaction_group_ids(&cur_version).collect_vec();
 
     let ret = hummock_manager
         .trigger_compaction_deterministic(cur_version.id, compaction_groups)
@@ -996,6 +995,7 @@ async fn test_hummock_compaction_task_heartbeat() {
             task_id: compact_task.task_id,
             num_ssts_sealed: i + 1,
             num_ssts_uploaded: 0,
+            num_progress_key: 0,
         };
         compactor_manager.update_task_heartbeats(context_id, &vec![req]);
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -1121,6 +1121,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
         task_id: compact_task.task_id,
         num_ssts_sealed: 1,
         num_ssts_uploaded: 1,
+        num_progress_key: 0,
     };
     compactor_manager.update_task_heartbeats(context_id, &vec![req.clone()]);
 
@@ -1949,7 +1950,7 @@ async fn test_move_tables_between_compaction_group() {
     let groups = info.keys().sorted().cloned().collect_vec();
     assert_eq!(groups, vec![2, new_group_id]);
     let ret = hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false)
+        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
         .await;
     // we can not move table-101 since sst-12 has been moved to new-group. If we move sst-12 to
     // new-group, some of its data may be expired and it would return error result.
@@ -1978,7 +1979,7 @@ async fn test_move_tables_between_compaction_group() {
     // there is still left one sst for object-12 in branched-sst.
     assert_eq!(branched_ssts.len(), 2);
     hummock_manager
-        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false)
+        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false, 0)
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;

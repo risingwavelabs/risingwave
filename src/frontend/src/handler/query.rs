@@ -25,7 +25,7 @@ use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
@@ -115,6 +115,7 @@ pub struct BoundResult {
     pub(crate) must_dist: bool,
     pub(crate) bound: BoundStatement,
     pub(crate) param_types: Vec<DataType>,
+    pub(crate) parsed_params: Option<Vec<Datum>>,
     pub(crate) dependent_relations: HashSet<TableId>,
 }
 
@@ -138,6 +139,7 @@ fn gen_bound(
         must_dist,
         bound,
         param_types: binder.export_param_types()?,
+        parsed_params: None,
         dependent_relations: binder.included_relations(),
     })
 }
@@ -257,7 +259,6 @@ struct BatchPlanFragmenterResult {
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
     pub(crate) _dependent_relations: Vec<TableId>,
-    pub(crate) warnings: Vec<String>,
 }
 
 fn gen_batch_plan_fragmenter(
@@ -272,7 +273,6 @@ fn gen_batch_plan_fragmenter(
         dependent_relations,
     } = plan_result;
 
-    let context = plan.plan_base().ctx.clone();
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
         plan.explain_to_string()?,
@@ -280,7 +280,7 @@ fn gen_batch_plan_fragmenter(
     );
     let worker_node_manager_reader = WorkerNodeSelector::new(
         session.env().worker_node_manager_ref(),
-        !session.config().only_checkpoint_visible(),
+        session.is_barrier_read(),
     );
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
@@ -288,7 +288,6 @@ fn gen_batch_plan_fragmenter(
         session.config().get_batch_parallelism(),
         plan,
     )?;
-    let warnings = context.take_warnings();
 
     Ok(BatchPlanFragmenterResult {
         plan_fragmenter,
@@ -296,7 +295,6 @@ fn gen_batch_plan_fragmenter(
         schema,
         stmt_type,
         _dependent_relations: dependent_relations,
-        warnings,
     })
 }
 
@@ -310,11 +308,10 @@ async fn execute(
         query_mode,
         schema,
         stmt_type,
-        warnings,
         ..
     } = plan_fragmenter_result;
 
-    let only_checkpoint_visible = session.config().only_checkpoint_visible();
+    let is_barrier_read = session.is_barrier_read();
     let query_start_time = Instant::now();
     let query = plan_fragmenter.generate_complete_query().await?;
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
@@ -339,7 +336,7 @@ async fn execute(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, is_barrier_read)
         };
         match query_mode {
             QueryMode::Auto => unreachable!(),
@@ -446,7 +443,12 @@ async fn execute(
     };
 
     Ok(PgResponse::new_for_stream_extra(
-        stmt_type, rows_count, row_stream, pg_descs, warnings, callback,
+        stmt_type,
+        rows_count,
+        row_stream,
+        pg_descs,
+        vec![],
+        callback,
     ))
 }
 

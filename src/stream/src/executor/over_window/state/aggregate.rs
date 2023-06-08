@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 
 use futures::FutureExt;
 use risingwave_common::array::{DataChunk, Vis};
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
@@ -24,18 +25,19 @@ use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
 use super::buffer::StreamWindowBuffer;
-use super::{StateEvictHint, StateKey, StateOutput, StatePos, WindowState};
+use super::{StateEvictHint, StateKey, StatePos, WindowState};
 use crate::executor::StreamExecutorResult;
 
 pub(super) struct AggregateState {
     agg_call: AggCall,
     arg_data_types: Vec<DataType>,
     buffer: StreamWindowBuffer<StateKey, SmallVec<[Datum; 2]>>,
+    buffer_heap_size: KvSize,
 }
 
 impl AggregateState {
     pub fn new(call: &WindowFuncCall) -> StreamExecutorResult<Self> {
-        if !call.frame.is_valid() || call.frame.end_is_unbounded() {
+        if !call.frame.bounds.is_valid() || call.frame.bounds.end_is_unbounded() {
             bail!("the window frame must be valid and end-bounded");
         }
         let agg_kind = must_match!(call.kind, WindowFuncKind::Aggregate(agg_kind) => agg_kind);
@@ -54,17 +56,23 @@ impl AggregateState {
             filter: None,
             // TODO(rc): support distinct on window function call? PG doesn't support it either.
             distinct: false,
+            direct_args: vec![],
         };
         Ok(Self {
             agg_call,
             arg_data_types,
             buffer: StreamWindowBuffer::new(call.frame.clone()),
+            buffer_heap_size: KvSize::new(),
         })
     }
 }
 
 impl WindowState for AggregateState {
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>) {
+        args.iter().for_each(|arg| {
+            self.buffer_heap_size.add_val(arg);
+        });
+        self.buffer_heap_size.add_val(&key);
         self.buffer.append(key, args);
     }
 
@@ -76,28 +84,46 @@ impl WindowState for AggregateState {
         }
     }
 
-    fn output(&mut self) -> StreamExecutorResult<StateOutput> {
+    fn curr_output(&self) -> StreamExecutorResult<Datum> {
         assert!(self.curr_window().is_ready);
         let wrapper = BatchAggregatorWrapper {
             agg_call: &self.agg_call,
             arg_data_types: &self.arg_data_types,
         };
-        let return_value =
-            wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))?;
-        let removed_keys: BTreeSet<_> = self.buffer.slide().collect();
-        Ok(StateOutput {
-            return_value,
-            evict_hint: if removed_keys.is_empty() {
-                StateEvictHint::CannotEvict(
-                    self.buffer
-                        .smallest_key()
-                        .expect("sliding without removing, must have some entry in the buffer")
-                        .clone(),
-                )
-            } else {
-                StateEvictHint::CanEvict(removed_keys)
-            },
-        })
+        wrapper.aggregate(self.buffer.curr_window_values().map(SmallVec::as_slice))
+    }
+
+    fn slide_forward(&mut self) -> StateEvictHint {
+        assert!(self.curr_window().is_ready);
+        let removed_keys: BTreeSet<_> = self
+            .buffer
+            .slide()
+            .map(|(k, v)| {
+                v.iter().for_each(|arg| {
+                    self.buffer_heap_size.sub_val(arg);
+                });
+                self.buffer_heap_size.sub_val(&k);
+                k
+            })
+            .collect();
+        if removed_keys.is_empty() {
+            StateEvictHint::CannotEvict(
+                self.buffer
+                    .smallest_key()
+                    .expect("sliding without removing, must have some entry in the buffer")
+                    .clone(),
+            )
+        } else {
+            StateEvictHint::CanEvict(removed_keys)
+        }
+    }
+}
+
+impl EstimateSize for AggregateState {
+    fn estimated_heap_size(&self) -> usize {
+        // estimate `VecDeque` of `StreamWindowBuffer` internal size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.arg_data_types.estimated_heap_size() + self.buffer_heap_size.size()
     }
 }
 
@@ -109,22 +135,23 @@ struct BatchAggregatorWrapper<'a> {
 impl BatchAggregatorWrapper<'_> {
     fn aggregate<'a>(
         &'a self,
-        values: impl ExactSizeIterator<Item = &'a [Datum]>,
+        values: impl Iterator<Item = &'a [Datum]>,
     ) -> StreamExecutorResult<Datum> {
         // TODO(rc): switch to a better general version of aggregator implementation
-
-        let n_values = values.len();
 
         let mut args_builders = self
             .arg_data_types
             .iter()
-            .map(|data_type| data_type.create_array_builder(n_values))
+            .map(|data_type| data_type.create_array_builder(0 /* bad! */))
             .collect::<Vec<_>>();
+        let mut n_values = 0;
         for value in values {
+            n_values += 1;
             for (builder, datum) in args_builders.iter_mut().zip_eq_fast(value.iter()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
+
         let columns = args_builders
             .into_iter()
             .map(|builder| builder.finish().into())

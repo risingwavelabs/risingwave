@@ -71,8 +71,7 @@ where
     S: MetaStore,
 {
     pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
-        let meta_store = env.meta_store_ref();
-        let core = ClusterManagerCore::new(meta_store.clone()).await?;
+        let core = ClusterManagerCore::new(env.meta_store_ref()).await?;
 
         Ok(Self {
             env,
@@ -152,15 +151,14 @@ where
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> MetaResult<()> {
         let mut core = self.core.write().await;
         let mut worker = core.get_worker_by_host_checked(host_address.clone())?;
-        if worker.worker_node.state == State::Running as i32 {
-            return Ok(());
+        if worker.worker_node.state != State::Running as i32 {
+            worker.worker_node.state = State::Running as i32;
+            worker.insert(self.env.meta_store()).await?;
+            core.update_worker_node(worker.clone());
         }
-        worker.worker_node.state = State::Running as i32;
-        worker.insert(self.env.meta_store()).await?;
-
-        core.update_worker_node(worker.clone());
 
         // Notify frontends of new compute node.
+        // Always notify because a running worker's property may have been changed.
         let worker_type = worker.worker_type();
         if worker_type == WorkerType::ComputeNode {
             self.env

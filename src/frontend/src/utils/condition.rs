@@ -22,7 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
@@ -601,7 +601,10 @@ impl Condition {
                     }
                 }
                 // Sort to ensure a deterministic result for planner test.
-                eq_conds = scalars.into_iter().sorted().collect();
+                eq_conds = scalars
+                    .into_iter()
+                    .sorted_by(DefaultOrd::default_cmp)
+                    .collect();
             } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
                 let new_expr = if let Ok(expr) = const_expr
                     .clone()
@@ -692,14 +695,14 @@ impl Condition {
                     (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Less,
                     (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Less,
                     (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
                     // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
                         other => other,
                     },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
                         other => other,
                     },
@@ -718,14 +721,14 @@ impl Condition {
                     (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Greater,
                     (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Greater,
                     (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
                     // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
                         other => other,
                     },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
                         other => other,
                     },
@@ -736,10 +739,10 @@ impl Condition {
 
     fn is_invalid_range(lower_bound: &Bound<ScalarImpl>, upper_bound: &Bound<ScalarImpl>) -> bool {
         match (lower_bound, upper_bound) {
-            (Bound::Included(l), Bound::Included(u)) => l > u,
-            (Bound::Included(l), Bound::Excluded(u)) => l >= u,
-            (Bound::Excluded(l), Bound::Included(u)) => l >= u,
-            (Bound::Excluded(l), Bound::Excluded(u)) => l >= u,
+            (Bound::Included(l), Bound::Included(u)) => l.default_cmp(u).is_gt(), // l > u
+            (Bound::Included(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
+            (Bound::Excluded(l), Bound::Included(u)) => l.default_cmp(u).is_ge(), // l >= u
+            (Bound::Excluded(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
             _ => false,
         }
     }
@@ -763,12 +766,14 @@ impl Condition {
                 if let Some(cond) = cond {
                     match lower_bound {
                         Bound::Included(val) => {
-                            if cond < val {
+                            if cond.default_cmp(val).is_lt() {
+                                // cond < val
                                 return false;
                             }
                         }
                         Bound::Excluded(val) => {
-                            if cond <= val {
+                            if cond.default_cmp(val).is_le() {
+                                // cond <= val
                                 return false;
                             }
                         }
@@ -776,12 +781,14 @@ impl Condition {
                     }
                     match upper_bound {
                         Bound::Included(val) => {
-                            if cond > val {
+                            if cond.default_cmp(val).is_gt() {
+                                // cond > val
                                 return false;
                             }
                         }
                         Bound::Excluded(val) => {
-                            if cond >= val {
+                            if cond.default_cmp(val).is_ge() {
+                                // cond >= val
                                 return false;
                             }
                         }

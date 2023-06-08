@@ -157,6 +157,7 @@ impl CompactStatus {
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
             split_by_state_table: group.compaction_config.split_by_state_table,
+            split_weight_by_vnode: group.compaction_config.split_weight_by_vnode,
         };
         Some(compact_task)
     }
@@ -333,6 +334,12 @@ pub fn create_compaction_task(
 ) -> CompactionTask {
     let target_file_size = if input.target_level == 0 {
         compaction_config.target_file_size_base
+    } else if input.target_level == base_level {
+        // This is just a temporary optimization measure. We hope to reduce the size of SST as much
+        // as possible to reduce the amount of data blocked by a single task during compaction,
+        // but too many files will increase computing overhead.
+        // TODO: remove it after can reduce configuration `target_file_size_base`.
+        compaction_config.target_file_size_base / 4
     } else {
         assert!(input.target_level >= base_level);
         let step = (input.target_level - base_level) / 2;

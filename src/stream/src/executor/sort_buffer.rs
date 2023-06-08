@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
+use anyhow::anyhow;
+use bytes::Bytes;
 use futures::stream;
 use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{
+    DefaultOrd, DefaultOrdered, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+};
+use risingwave_storage::row_serde::row_serde_util::deserialize_pk_with_vnode;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -33,8 +39,8 @@ use crate::common::table::state_table::StateTable;
 type MemcmpEncoded = Box<[u8]>;
 
 type CacheKey = (
-    ScalarImpl,    // sort (watermark) column value
-    MemcmpEncoded, // memcmp-encoded pk
+    DefaultOrdered<ScalarImpl>, // sort (watermark) column value
+    MemcmpEncoded,              // memcmp-encoded pk
 );
 
 fn row_to_cache_key<S: StateStore>(
@@ -50,7 +56,7 @@ fn row_to_cache_key<S: StateStore>(
     buffer_table
         .pk_serde()
         .serialize((&row).project(buffer_table.pk_indices()), &mut pk);
-    (timestamp_val, pk.into_boxed_slice())
+    (timestamp_val.into(), pk.into_boxed_slice())
 }
 
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
@@ -154,9 +160,9 @@ impl<S: StateStore> SortBuffer<S> {
             }
 
             #[for_await]
-            for res in self.consume_from_cache(&watermark) {
+            for res in self.consume_from_cache(watermark.as_scalar_ref_impl()) {
                 let ((timestamp_val, _), row) = res?;
-                last_timestamp = Some(timestamp_val);
+                last_timestamp = Some(timestamp_val.into_inner());
                 yield row;
             }
 
@@ -173,10 +179,10 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     #[try_stream(ok = (CacheKey, OwnedRow), error = StreamExecutorError)]
-    async fn consume_from_cache<'a>(&'a mut self, watermark: &'a ScalarImpl) {
+    async fn consume_from_cache<'a>(&'a mut self, watermark: ScalarRefImpl<'a>) {
         assert!(self.cache.is_synced());
         while let Some(key) = self.cache.first_key_value().map(|(k, _)| k.clone()) {
-            if &key.0 < watermark {
+            if key.0.as_scalar_ref_impl().default_cmp(&watermark).is_lt() {
                 let row = self.cache.delete(&key).unwrap();
                 yield (key, row);
             } else {
@@ -203,7 +209,7 @@ impl<S: StateStore> SortBuffer<S> {
 
         let streams =
             futures::future::try_join_all(buffer_table.vnode_bitmap().iter_vnodes().map(|vnode| {
-                buffer_table.iter_with_pk_range(
+                buffer_table.iter_key_and_val_with_pk_range(
                     &pk_range,
                     vnode,
                     PrefetchOptions::new_for_exhaust_iter(),
@@ -214,9 +220,9 @@ impl<S: StateStore> SortBuffer<S> {
             .map(Box::pin);
 
         #[for_await]
-        for row in stream::select_all(streams) {
+        for kv in stream::select_all(streams) {
             // NOTE: The rows may not appear in order.
-            let row: OwnedRow = row?;
+            let row = key_value_to_full_row(kv?, buffer_table)?;
             let key = row_to_cache_key(self.sort_column_index, &row, buffer_table);
             filler.insert_unchecked(key, row);
         }
@@ -224,4 +230,35 @@ impl<S: StateStore> SortBuffer<S> {
         filler.finish();
         Ok(())
     }
+}
+
+/// Merge the key part and value part of a row into a full row. This is needed for state table with
+/// non-None value indices.
+fn key_value_to_full_row<S: StateStore>(
+    (key, value): (Bytes, OwnedRow),
+    table: &StateTable<S>,
+) -> StreamExecutorResult<OwnedRow> {
+    let Some(val_indices) = table.value_indices() else {
+        return Ok(value);
+    };
+    let pk_indices = table.pk_indices();
+    let indices: BTreeSet<_> = val_indices
+        .iter()
+        .chain(pk_indices.iter())
+        .copied()
+        .collect();
+    let len = indices.iter().max().unwrap() + 1;
+    assert!(indices.iter().copied().eq(0..len));
+
+    let mut row = vec![None; len];
+    let key = deserialize_pk_with_vnode(&key, table.pk_serde())
+        .map_err(|e| anyhow!("failed to deserialize pk: {}", e))?
+        .1;
+    for (i, v) in key.into_iter().enumerate() {
+        row[pk_indices[i]] = v;
+    }
+    for (i, v) in value.into_iter().enumerate() {
+        row[val_indices[i]] = v;
+    }
+    Ok(OwnedRow::new(row))
 }

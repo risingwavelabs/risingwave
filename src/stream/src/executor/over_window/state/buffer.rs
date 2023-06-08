@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use either::Either;
-use risingwave_expr::function::window::Frame;
+use risingwave_expr::function::window::{Frame, FrameBounds, FrameExclusion};
 
 /// Actually with `VecDeque` as internal buffer, we don't need split key and value here. Just in
 /// case we want to switch to `BTreeMap` later, so that the general version of `OverWindow` executor
@@ -49,7 +50,7 @@ pub struct CurrWindow<'a, K> {
 
 impl<K: Ord, V> StreamWindowBuffer<K, V> {
     pub fn new(frame: Frame) -> Self {
-        assert!(frame.is_valid());
+        assert!(frame.bounds.is_valid());
         Self {
             frame,
             buffer: Default::default(),
@@ -61,8 +62,8 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
 
     fn preceding_saturated(&self) -> bool {
         self.curr_key().is_some()
-            && match &self.frame {
-                Frame::Rows(start, _) => {
+            && match &self.frame.bounds {
+                FrameBounds::Rows(start, _) => {
                     let start_off = start.to_offset();
                     if let Some(start_off) = start_off {
                         if start_off >= 0 {
@@ -82,8 +83,8 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
 
     fn following_saturated(&self) -> bool {
         self.curr_key().is_some()
-            && match &self.frame {
-                Frame::Rows(_, end) => {
+            && match &self.frame.bounds {
+                FrameBounds::Rows(_, end) => {
                     let end_off = end.to_offset();
                     if let Some(end_off) = end_off {
                         if end_off <= 0 {
@@ -117,18 +118,27 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
     }
 
     /// Iterate over values in the current window.
-    pub fn curr_window_values(&self) -> impl ExactSizeIterator<Item = &V> {
+    pub fn curr_window_values(&self) -> impl Iterator<Item = &V> {
         assert!(self.left_idx <= self.right_excl_idx);
         assert!(self.right_excl_idx <= self.buffer.len());
-        if self.left_idx == self.right_excl_idx {
-            Either::Left(std::iter::empty())
-        } else {
-            Either::Right(
-                self.buffer
-                    .range(self.left_idx..self.right_excl_idx)
-                    .map(|Entry { value, .. }| value),
-            )
+
+        let selection = self.left_idx..self.right_excl_idx;
+        if selection.is_empty() {
+            return Either::Left(std::iter::empty());
         }
+
+        let exclusion = match self.frame.exclusion {
+            FrameExclusion::CurrentRow => self.curr_idx..self.curr_idx + 1,
+            FrameExclusion::NoOthers => self.curr_idx..self.curr_idx,
+        };
+        let (left, right) = range_except(selection, exclusion);
+
+        Either::Right(
+            self.buffer
+                .range(left)
+                .chain(self.buffer.range(right))
+                .map(|Entry { value, .. }| value),
+        )
     }
 
     fn recalculate_left_right(&mut self) {
@@ -141,8 +151,8 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
             self.right_excl_idx = 0;
         }
 
-        match &self.frame {
-            Frame::Rows(start, end) => {
+        match &self.frame.bounds {
+            FrameBounds::Rows(start, end) => {
                 let start_off = start.to_offset();
                 let end_off = end.to_offset();
                 if let Some(start_off) = start_off {
@@ -186,7 +196,7 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
 
     /// Slide the current window forward.
     /// Returns the keys that are removed from the buffer.
-    pub fn slide(&mut self) -> impl Iterator<Item = K> + '_ {
+    pub fn slide(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
         self.curr_idx += 1;
         self.recalculate_left_right();
         let min_needed_idx = std::cmp::min(self.left_idx, self.curr_idx);
@@ -195,7 +205,38 @@ impl<K: Ord, V> StreamWindowBuffer<K, V> {
         self.right_excl_idx -= min_needed_idx;
         self.buffer
             .drain(0..min_needed_idx)
-            .map(|Entry { key, .. }| key)
+            .map(|Entry { key, value }| (key, value))
+    }
+}
+
+/// Calculate range (A - B), the result might be the union of two ranges when B is totally included
+/// in the A.
+fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
+    if a.end <= b.start || b.end <= a.start {
+        // a: [   )
+        // b:        [   )
+        // or
+        // a:        [   )
+        // b: [   )
+        (a, 0..0)
+    } else if b.start <= a.start && a.end <= b.end {
+        // a:  [   )
+        // b: [       )
+        (0..0, 0..0)
+    } else if a.start < b.start && b.end < a.end {
+        // a: [       )
+        // b:   [   )
+        (a.start..b.start, b.end..a.end)
+    } else if a.end <= b.end {
+        // a: [   )
+        // b:   [   )
+        (a.start..b.start, 0..0)
+    } else if b.start <= a.start {
+        // a:   [   )
+        // b: [   )
+        (b.end..a.end, 0..0)
+    } else {
+        unreachable!()
     }
 }
 
@@ -208,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_unbounded_preceding_to_current_row() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::UnboundedPreceding,
             FrameBound::CurrentRow,
         ));
@@ -234,7 +275,7 @@ mod tests {
             vec!["hello"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty()); // unbouded preceding, nothing can ever be removed
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -245,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_preceding_to_current_row() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::Preceding(1),
             FrameBound::CurrentRow,
         ));
@@ -271,7 +312,7 @@ mod tests {
         assert!(!window.preceding_saturated);
         assert!(window.following_saturated);
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -282,13 +323,13 @@ mod tests {
         buffer.append(3, "!");
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
     }
 
     #[test]
     fn test_rows_frame_preceding_to_preceding() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::Preceding(2),
             FrameBound::Preceding(1),
         ));
@@ -300,7 +341,7 @@ mod tests {
         assert!(window.following_saturated);
         assert!(buffer.curr_window_values().collect_vec().is_empty());
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         assert_eq!(buffer.smallest_key(), Some(&1));
 
@@ -314,7 +355,7 @@ mod tests {
             vec!["RisingWave"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert!(removed_keys.is_empty());
         assert_eq!(buffer.smallest_key(), Some(&1));
 
@@ -328,14 +369,14 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         assert_eq!(buffer.smallest_key(), Some(&2));
     }
 
     #[test]
     fn test_rows_frame_current_row_to_unbounded_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::CurrentRow,
             FrameBound::UnboundedFollowing,
         ));
@@ -360,7 +401,7 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         assert_eq!(buffer.smallest_key(), Some(&2));
         let window = buffer.curr_window();
@@ -375,7 +416,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_current_row_to_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::CurrentRow,
             FrameBound::Following(1),
         ));
@@ -410,7 +451,7 @@ mod tests {
             vec!["RisingWave", "is the best"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -424,7 +465,7 @@ mod tests {
 
     #[test]
     fn test_rows_frame_following_to_following() {
-        let mut buffer = StreamWindowBuffer::new(Frame::Rows(
+        let mut buffer = StreamWindowBuffer::new(Frame::rows(
             FrameBound::Following(1),
             FrameBound::Following(2),
         ));
@@ -456,7 +497,7 @@ mod tests {
             vec!["is the best", "streaming platform"]
         );
 
-        let removed_keys = buffer.slide().collect_vec();
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
         assert_eq!(removed_keys, vec![1]);
         let window = buffer.curr_window();
         assert_eq!(window.key, Some(&2));
@@ -465,6 +506,29 @@ mod tests {
         assert_eq!(
             buffer.curr_window_values().cloned().collect_vec(),
             vec!["streaming platform"]
+        );
+    }
+
+    #[test]
+    fn test_rows_frame_exclude_current_row() {
+        let mut buffer = StreamWindowBuffer::new(Frame::rows_with_exclusion(
+            FrameBound::UnboundedPreceding,
+            FrameBound::CurrentRow,
+            FrameExclusion::CurrentRow,
+        ));
+
+        buffer.append(1, "hello");
+        assert!(buffer
+            .curr_window_values()
+            .cloned()
+            .collect_vec()
+            .is_empty());
+
+        buffer.append(2, "world");
+        let _ = buffer.slide();
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello"]
         );
     }
 }

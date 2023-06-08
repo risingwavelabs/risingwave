@@ -1,0 +1,34 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (a int, b int);
+
+statement ok
+create table t2 (c int, d int);
+
+statement ok
+create table t3 (e int, f int);
+
+statement ok
+insert into t1 values (1, 2);
+
+statement ok
+insert into t2 values (1, 8);
+
+statement ok
+insert into t3 values (9, 2);
+
+query II
+select * from t1 where exists (select * from t2 where t2.c = t1.a union all select * from t3 where t3.f = t1.b);
+----
+1 2
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table t3;
