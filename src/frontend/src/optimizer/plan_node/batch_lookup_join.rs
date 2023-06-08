@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnId, Schema, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -21,6 +22,7 @@ use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
 use super::generic::{self, GenericPlanRef};
 use super::ExprRewritable;
+use super::utils::Distill;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -109,6 +111,47 @@ impl BatchLookupJoin {
 
     pub fn lookup_prefix_len(&self) -> usize {
         self.lookup_prefix_len
+    }
+}
+
+impl Distill for BatchLookupJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+        
+        let mut concat_schema = self.logical.left.schema().fields.clone();
+        concat_schema.extend(self.logical.right.schema().fields.clone());
+        let concat_schema = Schema::new(concat_schema);
+        vec.push((
+            "predicate",
+            Pretty::debug(&EqJoinPredicateDisplay {
+                eq_join_predicate: self.eq_join_predicate(),
+                input_schema: &concat_schema,
+            }),
+        ));
+        
+        if verbose {
+            if self
+                .logical
+                .output_indices
+                .iter()
+                .copied()
+                .eq(0..self.logical.internal_column_num())
+            {
+                vec.push(("output", Pretty::from("all")));
+            } else {
+                vec.push((
+                    "output",
+                    Pretty::display(&IndicesDisplay {
+                        indices: &self.logical.output_indices,
+                        input_schema: &concat_schema,
+                    }),
+                ));
+            }
+        }
+        
+        Pretty::childless_record("BatchLookupJoin", vec)
     }
 }
 
