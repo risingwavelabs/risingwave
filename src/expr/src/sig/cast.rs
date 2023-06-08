@@ -29,10 +29,12 @@ pub struct CastSig {
 /// that allows explicit casts, but not vice versa. See details in
 /// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
 #[derive(Clone, Copy, Debug, Display, Eq, Ord, PartialEq, PartialOrd)]
-#[display(style = "UPPERCASE")]
 pub enum CastContext {
+    #[display("i")]
     Implicit,
+    #[display("a")]
     Assign,
+    #[display("e")]
     Explicit,
 }
 
