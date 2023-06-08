@@ -723,3 +723,23 @@
     select a, count(*) cnt from t group by a order by a desc;
   expected_outputs:
   - batch_plan
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(x) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont('abc') within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0, 0) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(0) within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan

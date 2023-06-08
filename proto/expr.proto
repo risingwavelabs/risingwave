@@ -240,6 +240,11 @@ message InputRef {
   data.DataType type = 2;
 }
 
+message Constant {
+  data.Datum datum = 1;
+  data.DataType type = 2;
+}
+
 // The items which can occur in the select list of `ProjectSet` operator.
 //
 // When there are table functions in the SQL query `SELECT ...`, it will be planned as `ProjectSet`.
@@ -312,6 +317,7 @@ message AggCall {
   bool distinct = 4;
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
+  repeated Constant direct_args = 7;
 }
 
 message WindowFrame {

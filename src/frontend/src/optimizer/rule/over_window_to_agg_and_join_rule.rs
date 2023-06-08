@@ -58,6 +58,7 @@ impl Rule for OverWindowToAggAndJoinRule {
                     false,
                     OrderBy::any(),
                     Condition::true_cond(),
+                    vec![],
                 )
                 .ok()?;
                 select_exprs.push(agg_call.into());
