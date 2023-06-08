@@ -352,7 +352,9 @@ steps:
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
     command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
-    if: build.pull_request.labels includes "breaking-change" || build.pull_request.labels includes "ci/run-backwards-compat-tests'
+    if: |
+      build.pull_request.labels includes "breaking-change" ||
+        build.pull_request.labels includes "ci/run-backwards-compat-tests"
     depends_on:
       - "build"
     plugins:
