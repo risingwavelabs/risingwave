@@ -2475,7 +2475,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=79610aa#79610aabae80914e67e62956991725f07967f9d4"
+source = "git+https://github.com/mrcroxx/foyer?rev=23e2612#23e2612ee80d2ce80b09f0a12b2d6849f391d114"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2500,7 +2500,7 @@ dependencies = [
 [[package]]
 name = "foyer-utils"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=79610aa#79610aabae80914e67e62956991725f07967f9d4"
+source = "git+https://github.com/mrcroxx/foyer?rev=23e2612#23e2612ee80d2ce80b09f0a12b2d6849f391d114"
 dependencies = [
  "async-trait",
  "bytes",

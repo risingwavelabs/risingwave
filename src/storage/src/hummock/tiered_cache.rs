@@ -61,9 +61,10 @@ const FOYER_POOLS: usize = 1 << FOYER_POOL_COUNT_BITS;
 const FOYER_TINYLFU_WINDOW_TO_CACHE_SIZE_RATIO: usize = 10;
 const FOYER_TINYLFU_TINY_LRU_CAPACITY_RATIO: f64 = 0.01;
 const FOYER_TRIGGER_RECLAIM_GARBAGE_RATIO: f64 = 0.5;
-const FOYER_TRIGGER_RECLAIM_CAPACITY_RATION: f64 = 0.8;
-const FOYER_TRIGGER_RANDOM_DROP_RATIO: f64 = 0.9;
-const FOYER_RANDOM_DROP_RATIO: f64 = 0.2;
+const FOYER_TRIGGER_RECLAIM_CAPACITY_RATION: f64 = 0.6;
+const FOYER_TRIGGER_RANDOM_DROP_RATIO: f64 = 0.8;
+const FOYER_RANDOM_DROP_RATIO: f64 = 0.5;
+const FOYER_WRITE_STALL_THRESHOLD_RATIO: f64 = 0.9;
 
 pub struct TieredCacheConfig {
     pub dir: String,
@@ -95,6 +96,7 @@ impl TieredCache {
             trigger_reclaim_capacity_ratio: FOYER_TRIGGER_RECLAIM_CAPACITY_RATION,
             trigger_random_drop_ratio: FOYER_TRIGGER_RANDOM_DROP_RATIO,
             random_drop_ratio: FOYER_RANDOM_DROP_RATIO,
+            write_stall_threshold_ratio: FOYER_WRITE_STALL_THRESHOLD_RATIO,
         };
 
         let cache_config = TinyLfuReadOnlyFileStoreCacheConfig {
