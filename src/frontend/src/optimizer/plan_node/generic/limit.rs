@@ -14,14 +14,14 @@
 use std::fmt;
 use std::hash::Hash;
 
-use educe::Educe;
-use itertools::Itertools;
-use pretty_xmlish::{Pretty, StrAssocArr};
-use risingwave_common::catalog::{Schema, TableVersionId};
+
+
+use pretty_xmlish::{Pretty};
+use risingwave_common::catalog::{Schema};
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
-use crate::catalog::TableId;
-use crate::expr::ExprImpl;
+
+
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
