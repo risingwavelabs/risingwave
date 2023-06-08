@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -45,7 +45,7 @@ impl BatchTopN {
     }
 
     fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
-        let new_limit = Limit::new(
+        let new_limit = TopNLimit::new(
             self.logical.limit_attr.limit() + self.logical.offset,
             self.logical.limit_attr.with_ties(),
         );
