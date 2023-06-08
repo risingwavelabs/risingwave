@@ -36,10 +36,10 @@ risingwave_common::enable_task_local_jemalloc_on_unix!();
 risingwave_common::enable_jemalloc_on_unix!();
 
 const BINARY_NAME: &str = "risingwave";
-const CRATE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
 /// for each commit, so we only use it for the final binary (`risingwave -V`).
 const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+const VERSION: &str = const_str::concat!(env!("CARGO_PKG_VERSION"), " (", VERGEN_GIT_SHA, ")");
 
 /// Component to launch.
 #[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
@@ -110,12 +110,10 @@ impl Component {
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
-    let version: &'static str =
-        Box::leak(format!("{} ({})", CRATE_VERSION, VERGEN_GIT_SHA).into_boxed_str());
     let risingwave = || {
         command!(BINARY_NAME)
             .about("All-in-one executable for components of RisingWave")
-            .version(version)
+            .version(VERSION)
             .propagate_version(true)
     };
     let command = risingwave()
