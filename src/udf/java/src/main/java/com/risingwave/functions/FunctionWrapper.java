@@ -5,6 +5,7 @@ import java.util.Iterator;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.apache.arrow.vector.util.Text;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -46,6 +47,9 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         for (int i = 0; i < batch.getRowCount(); i++) {
             for (int j = 0; j < row.length; j++) {
                 row[j] = batch.getVector(j).getObject(i);
+                if (row[j] instanceof Text) {
+                    row[j] = row[j].toString();
+                }
             }
             try {
                 outputValues[i] = this.method.invoke(this.function, row);
@@ -94,6 +98,9 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
             // prepare input row
             for (int j = 0; j < row.length; j++) {
                 row[j] = batch.getVector(j).getObject(i);
+                if (row[j] instanceof Text) {
+                    row[j] = row[j].toString();
+                }
             }
             // call function
             var size_before = this.function.size();
