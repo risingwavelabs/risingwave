@@ -1,6 +1,8 @@
 package com.risingwave.functions.example;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
 
 import com.risingwave.functions.ScalarFunction;
@@ -15,6 +17,7 @@ public class UdfExample {
             server.addFunction("gcd3", new Gcd());
             server.addFunction("to_string", new ToString());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
+            server.addFunction("hex_to_dec", new HexToDec());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -74,6 +77,15 @@ public class UdfExample {
         static String intToIpAddr(int addr) {
             return String.format("%d.%d.%d.%d", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff,
                     addr & 0xff);
+        }
+    }
+
+    public static class HexToDec extends ScalarFunction {
+        public static BigDecimal eval(String hex) {
+            if (hex == null) {
+                return null;
+            }
+            return new BigDecimal(new BigInteger(hex, 16));
         }
     }
 

@@ -8,6 +8,7 @@ import org.apache.arrow.vector.types.pojo.*;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -71,6 +72,8 @@ class TypeUtils {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE));
         } else if (param == Double.class || param == double.class) {
             return Field.nullable(name, new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE));
+        } else if (param == BigDecimal.class) {
+            return Field.nullable(name, new ArrowType.Decimal(28, 0, 128));
         } else if (param == String.class) {
             return Field.nullable(name, new ArrowType.Utf8());
         } else if (param == byte[].class) {
@@ -148,6 +151,12 @@ class TypeUtils {
             vector.allocateNew(values.length);
             for (int i = 0; i < values.length; i++) {
                 vector.set(i, (double) values[i]);
+            }
+        } else if (fieldVector instanceof DecimalVector) {
+            var vector = (DecimalVector) fieldVector;
+            vector.allocateNew(values.length);
+            for (int i = 0; i < values.length; i++) {
+                vector.set(i, (BigDecimal) values[i]);
             }
         } else if (fieldVector instanceof DateDayVector) {
             var vector = (DateDayVector) fieldVector;
