@@ -23,7 +23,7 @@ use itertools::{multizip, Itertools};
 use paste::paste;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar, ScalarRef};
+use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 use risingwave_common::util::iter_util::ZipEqDebug;
 
 use crate::expr::{BoxedExpression, Expression, ValueImpl, ValueRef};
@@ -374,7 +374,7 @@ gen_expr_nullable!(UnaryNullableExpression, { IA1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 });
 gen_expr_nullable!(TernaryNullableExpression, { IA1, IA2, IA3 });
 
-pub struct WithType<'a, T: ScalarRef<'a>> {
+pub struct WithType<'a, T> {
     pub value: T,
     pub data_type: &'a DataType,
 }
@@ -382,7 +382,7 @@ pub struct WithType<'a, T: ScalarRef<'a>> {
 pub struct UnaryTyExpression<
     IA1: Array,
     OA: Array,
-    F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem>,
+    F: Fn(WithType<'_, IA1::RefItem<'_>>) -> Result<OA::OwnedItem>,
 > {
     expr_ia1: BoxedExpression,
     return_type: DataType,
@@ -392,7 +392,7 @@ pub struct UnaryTyExpression<
 impl<
         IA1: Array,
         OA: Array,
-        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+        F: Fn(WithType<'_, IA1::RefItem<'_>>) -> Result<OA::OwnedItem> + Sync + Send,
     > fmt::Debug for UnaryTyExpression<IA1, OA, F>
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -406,7 +406,7 @@ impl<
 impl<
         IA1: Array,
         OA: Array,
-        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+        F: Fn(WithType<'_, IA1::RefItem<'_>>) -> Result<OA::OwnedItem> + Sync + Send,
     > Expression for UnaryTyExpression<IA1, OA, F>
 where
     for<'a> ValueRef<'a, IA1>: std::convert::From<&'a ValueImpl>,
@@ -542,7 +542,7 @@ where
 impl<
         IA1: Array,
         OA: Array,
-        F: for<'a> Fn(WithType<'a, IA1::RefItem<'a>>) -> Result<OA::OwnedItem> + Sync + Send,
+        F: Fn(WithType<'_, IA1::RefItem<'_>>) -> Result<OA::OwnedItem> + Sync + Send,
     > UnaryTyExpression<IA1, OA, F>
 {
     #[allow(dead_code)]
@@ -563,7 +563,7 @@ mod tests {
 
     use super::*;
 
-    fn array_ndims<'a>(x: WithType<'a, ListRef<'a>>) -> Result<i32> {
+    fn array_ndims(x: WithType<'_, ListRef<'_>>) -> Result<i32> {
         let mut n = 0;
         let mut t = x.data_type;
         while let DataType::List(inner) = t {
