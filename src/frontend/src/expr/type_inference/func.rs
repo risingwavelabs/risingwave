@@ -619,8 +619,7 @@ fn infer_type_for_special(
             }
 
             if let Some(arg1) = inputs.get_mut(1) {
-                let owned = std::mem::replace(arg1, ExprImpl::literal_bool(false));
-                *arg1 = owned.cast_implicit(DataType::Int32)?;
+                arg1.cast_implicit_mut(DataType::Int32)?;
             }
 
             match return_type {
