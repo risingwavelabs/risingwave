@@ -72,10 +72,12 @@
           <descriptorRefs>
             <descriptorRef>jar-with-dependencies</descriptorRef>
           </descriptorRefs>
+          <finalName>risingwave-udf-example</finalName>
+          <appendAssemblyId>false</appendAssemblyId>
         </configuration>
         <executions>
           <execution>
-            <id>make-assembly</id>
+            <id>udf-example</id>
             <phase>package</phase>
             <goals>
               <goal>single</goal>
