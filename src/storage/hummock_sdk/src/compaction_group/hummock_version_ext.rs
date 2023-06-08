@@ -497,6 +497,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     delete_sst_ids_set,
                     insert_sst_level_id,
                     insert_table_infos,
+                    insert_sub_level_id,
                     ..
                 } = summary;
                 assert!(
