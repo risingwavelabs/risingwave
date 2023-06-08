@@ -523,6 +523,18 @@ impl FunctionAttr {
                 .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
+        let build_value_array = if return_types.len() == 1 {
+            quote! { let [value_array] = value_arrays; }
+        } else {
+            quote! {
+                let bitmap = value_arrays[0].null_bitmap().clone();
+                let value_array = StructArray::new(
+                    self.return_type.as_struct().clone(),
+                    value_arrays.to_vec(),
+                    bitmap,
+                ).into_ref();
+            }
+        };
         let const_arg = match &self.prebuild {
             Some(_) => quote! { &self.const_arg },
             None => quote! {},
@@ -608,11 +620,10 @@ impl FunctionAttr {
                                     }
 
                                     if index_builder.len() == self.chunk_size {
-                                        let columns = vec![
-                                            std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref(),
-                                            #(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref(),)*
-                                        ];
-                                        yield DataChunk::new(columns, self.chunk_size);
+                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                        #build_value_array
+                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                     }
                                 }
                             }
@@ -620,11 +631,10 @@ impl FunctionAttr {
 
                         if index_builder.len() > 0 {
                             let len = index_builder.len();
-                            let columns = vec![
-                                index_builder.finish().into_ref(),
-                                #(#builders.finish().into_ref(),)*
-                            ];
-                            yield DataChunk::new(columns, len);
+                            let index_array = index_builder.finish().into_ref();
+                            let value_arrays = [#(#builders.finish().into_ref()),*];
+                            #build_value_array
+                            yield DataChunk::new(vec![index_array, value_array], len);
                         }
                     }
                 }

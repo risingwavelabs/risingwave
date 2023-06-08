@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder, StructArray,
+    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder,
 };
 use risingwave_common::types::{DataType, DataTypeName, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
@@ -51,11 +49,10 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 
     /// # Contract of the output
     ///
-    /// The returned `DataChunk` contains at least two columns:
+    /// The returned `DataChunk` contains exact two columns:
     /// - The first column is an I32Array containing row indexes of input chunk. It should be
     ///   monotonically increasing.
-    /// - The remaining columns are the output values. More than one columns are allowed, which will
-    ///   be transformed into a single `STRUCT` column later.
+    /// - The second column is the output values. The data type of the column is `return_type`.
     ///
     /// i.e., for the `i`-th input row, the output rows are `(i, output_1)`, `(i, output_2)`, ...
     ///
@@ -246,7 +243,7 @@ impl ProjectSetSelectItem {
 /// ```
 pub struct TableFunctionOutputIter<'a> {
     stream: BoxStream<'a, Result<DataChunk>>,
-    chunk: Option<(ArrayRef, ArrayRef)>,
+    chunk: Option<DataChunk>,
     index: usize,
 }
 
@@ -265,9 +262,9 @@ impl<'a> TableFunctionOutputIter<'a> {
 
     /// Gets the current row.
     pub fn peek(&'a self) -> Option<(usize, DatumRef<'a>)> {
-        let (indexes, values) = self.chunk.as_ref()?;
-        let index = indexes.as_int32().value_at(self.index).unwrap() as usize;
-        let value = values.value_at(self.index);
+        let chunk = self.chunk.as_ref()?;
+        let index = chunk.column_at(0).as_int32().value_at(self.index).unwrap() as usize;
+        let value = chunk.column_at(1).value_at(self.index);
         Some((index, value))
     }
 
@@ -275,10 +272,10 @@ impl<'a> TableFunctionOutputIter<'a> {
     ///
     /// This method is cancellation safe.
     pub async fn next(&mut self) -> Result<()> {
-        let Some((indexes, _)) = &self.chunk else {
+        let Some(chunk) = &self.chunk else {
             return Ok(());
         };
-        if self.index + 1 == indexes.len() {
+        if self.index + 1 == chunk.capacity() {
             // note: for cancellation safety, do not mutate self before await.
             self.pop_from_stream().await?;
             self.index = 0;
@@ -290,17 +287,7 @@ impl<'a> TableFunctionOutputIter<'a> {
 
     /// Gets the next chunk from stream.
     async fn pop_from_stream(&mut self) -> Result<()> {
-        let chunk = self.stream.next().await.transpose()?;
-        self.chunk = chunk.map(|c| {
-            let (c1, c2) = c.split_column_at(1);
-            let indexes = c1.column_at(0).clone();
-            let values = if c2.columns().len() > 1 {
-                Arc::new(StructArray::from(c2).into())
-            } else {
-                c2.column_at(0).clone()
-            };
-            (indexes, values)
-        });
+        self.chunk = self.stream.next().await.transpose()?;
         Ok(())
     }
 }
