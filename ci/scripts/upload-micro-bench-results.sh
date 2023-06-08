@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 
 # EXAMPLE USAGE:
-: '
-BUILDKITE_BUILD_NUMBER=511 \
-./ci/scripts/upload-micro-bench-results.sh
-'
+# BUILDKITE_BUILD_NUMBER=511 ./ci/scripts/upload-micro-bench-results.sh
 
 # Exits as soon as any line fails.
 set -euo pipefail
