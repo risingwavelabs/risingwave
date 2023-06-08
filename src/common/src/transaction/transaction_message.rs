@@ -33,10 +33,10 @@ impl TxnMsg {
         }
     }
 
-    pub fn as_stream_chunk(&self) -> Option<StreamChunk> {
+    pub fn as_stream_chunk(&self) -> Option<&StreamChunk> {
         match self {
             Begin(_) | Self::End(_) => None,
-            Data(_, chunk) => Some(chunk.clone()),
+            Data(_, chunk) => Some(chunk),
         }
     }
 }

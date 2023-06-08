@@ -19,7 +19,7 @@ use either::Either;
 use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrategy};
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_connector::source::BoxMStream;
+use risingwave_connector::source::BoxTryStream;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Message;
@@ -50,7 +50,7 @@ pub(super) struct StreamReaderWithPause<const BIASED: bool, M> {
 impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     /// Receive messages from the reader. Hang up on error.
     #[try_stream(ok = M, error = StreamExecutorError)]
-    async fn data_stream(stream: BoxMStream<M>) {
+    async fn data_stream(stream: BoxTryStream<M>) {
         // TODO: support stack trace for Stream
         #[for_await]
         for m in stream {
@@ -65,7 +65,7 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
 
     /// Construct a `StreamReaderWithPause` with one stream receiving barrier messages (and maybe
     /// other types of messages) and the other receiving data only (no barrier).
-    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxMStream<M>) -> Self {
+    pub fn new(message_stream: ExecutorMessageStream, data_stream: BoxTryStream<M>) -> Self {
         let message_stream_arm = message_stream.map_ok(Either::Left).boxed();
         let data_stream_arm = Self::data_stream(data_stream).map_ok(Either::Right).boxed();
         let inner = Self::new_inner(message_stream_arm, data_stream_arm);
@@ -89,7 +89,7 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
-    pub fn replace_data_stream(&mut self, data_stream: BoxMStream<M>) {
+    pub fn replace_data_stream(&mut self, data_stream: BoxTryStream<M>) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
