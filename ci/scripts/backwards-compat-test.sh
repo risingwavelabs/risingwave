@@ -4,6 +4,28 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+while getopts 'p:' opt; do
+    case ${opt} in
+        p )
+            profile=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
+# profile is either ci-dev or ci-release
+if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
+    echo "Invalid option: profile must be either ci-dev or ci-release" 1>&2
+    exit 1
+fi
+
 # TODO(kwannoel): automatically derive this by:
 # 1. Fetching major version.
 # 2. Find the earliest minor version of that major version.
@@ -134,7 +156,7 @@ echo "--- Kill cluster on tag $TAG"
 ./risedev k
 
 echo "--- Setup Risingwave @ $RW_COMMIT"
-download_and_prepare_rw ci-dev common
+download_and_prepare_rw $profile common
 
 echo "--- Start cluster on latest"
 configure_rw
