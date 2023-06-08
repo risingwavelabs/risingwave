@@ -1321,6 +1321,14 @@
       Invalid input syntax: arg in percentile_cont must be constant
 - sql: |
     create table t (x int, y int);
+    select percentile_cont('abc') within group (order by y) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: percentile_cont('abc')
+
+    Caused by:
+      Invalid input syntax: arg in percentile_cont must be double precision
+- sql: |
+    create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
   binder_error: |-
     Bind error: failed to bind expression: percentile_cont(0, 0)
