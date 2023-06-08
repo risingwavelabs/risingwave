@@ -2,7 +2,6 @@
 
 # EXAMPLE USAGE:
 : '
-AWS_PROFILE=rwctest \
 BUILDKITE_BUILD_NUMBER=511 \
 ./ci/scripts/upload-micro-bench-results.sh
 '
@@ -21,7 +20,8 @@ setup() {
 get_branch() {
    curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
-  | jq '.branch'
+  | jq '.branch' \
+  | sed 's/\"//g'
 }
 
 get_date() {
@@ -35,10 +35,11 @@ get_date() {
 get_commit() {
   curl -H "Authorization: Bearer $BUILDKITE_TOKEN" \
    "https://api.buildkite.com/v2/organizations/risingwavelabs/pipelines/main-cron/builds/$BUILDKITE_BUILD_NUMBER" \
-  | jq '.commit'
+  | jq '.commit' \
+  | sed 's/\"//g'
 }
 
-setup
+# setup
 
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
 END_DATE=$(get_date)
@@ -50,6 +51,11 @@ curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-q
 git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/qa-infra.git
 cp -r qa-infra/certs ./certs
 rm -rf qa-infra
+
+echo "--- Uploading results for $BUILDKITE_BUILD_URL"
+echo "Commit: $COMMIT"
+echo "Branch: $BRANCH"
+echo "Date: $END_DATE"
 
 ./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
   --exec-url "${BUILDKITE_BUILD_URL}" \

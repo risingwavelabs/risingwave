@@ -258,7 +258,7 @@ steps:
             - STREAMNATIVE_CLOUD_TEST_CONF
     timeout_in_minutes: 20
 
-  - label: "run micro benchmarks"
+  - label: "micro benchmark"
     command: "ci/scripts/run-micro-benchmarks.sh"
     key: "run-micro-benchmarks"
     plugins:
