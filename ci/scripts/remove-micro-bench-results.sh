@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 # Requirements:
 # - s3 certs,
 # - qa binary
