@@ -22,7 +22,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 anyhow = "1"
 clap = { version = "4", features = ["cargo", "derive"] }
 console = "0.15"
-lazy_static = "1"
+const-str = "0.5"
 risingwave_cmd = { path = "../cmd" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }

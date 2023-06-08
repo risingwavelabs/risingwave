@@ -1566,6 +1566,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "const-str"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b62c6d3ea43cbe0bc5a081f276fd477e4291d168aacc9f9d98073325333c0d4"
+
+[[package]]
 name = "core-foundation"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5719,7 +5725,7 @@ dependencies = [
  "anyhow",
  "clap 4.2.7",
  "console",
- "lazy_static",
+ "const-str",
  "madsim-tokio",
  "risingwave_cmd",
  "risingwave_common",
