@@ -447,7 +447,11 @@ where
 
                     if cfg!(debug_assertions) {
                         let all_capacities = [capacity, cap_ia1];
-                        assert!(all_capacities.into_iter().all_equal(), "capacities mismatched: {:?}", all_capacities);
+                        assert!(
+                            all_capacities.into_iter().all_equal(),
+                            "capacities mismatched: {:?}",
+                            all_capacities
+                        );
                     }
 
                     ValueImpl::Scalar {
@@ -569,6 +573,10 @@ mod tests {
         Ok(n)
     }
 
+    fn array_length(x: ListRef<'_>) -> Result<i32> {
+        Ok(x.len() as _)
+    }
+
     #[tokio::test]
     async fn test_both() {
         let arg_expr = crate::expr::LiteralExpression::new(
@@ -576,8 +584,29 @@ mod tests {
             Some(ListValue::new(vec![None]).into()),
         )
         .boxed();
-        let e =
-            UnaryTyExpression::<ListArray, I32Array, _>::new(arg_expr, DataType::Int32, array_ndims);
+        let e = UnaryTyExpression::<ListArray, I32Array, _>::new(
+            arg_expr,
+            DataType::Int32,
+            array_ndims,
+        );
+        let o = *e
+            .eval_row(&OwnedRow::empty())
+            .await
+            .unwrap()
+            .unwrap()
+            .as_int32();
+        assert_eq!(o, 2);
+
+        let arg_expr = crate::expr::LiteralExpression::new(
+            DataType::List(DataType::List(DataType::Int32.into()).into()),
+            Some(ListValue::new(vec![None]).into()),
+        )
+        .boxed();
+        let e = UnaryTyExpression::<ListArray, I32Array, _>::new(
+            arg_expr,
+            DataType::Int32,
+            |arg_typed| array_length(arg_typed.value),
+        );
         let o = *e
             .eval_row(&OwnedRow::empty())
             .await
