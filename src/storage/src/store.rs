@@ -430,7 +430,7 @@ impl NewLocalOptions {
             table_id,
             is_consistent_op,
             table_option,
-            no_upload: true,
+            no_upload: false,
         }
     }
 
@@ -443,7 +443,7 @@ impl NewLocalOptions {
             table_id,
             is_consistent_op,
             table_option,
-            no_upload: false,
+            no_upload: true,
         }
     }
 
