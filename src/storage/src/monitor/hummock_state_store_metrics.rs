@@ -305,7 +305,7 @@ impl StateStoreCollector {
 
         let block_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_block_cache_usage_ratio",
-            "Percentage of pre-allocated memory in block cache",
+            "the ratio of block cache to it's pre-allocated memory",
         ))
         .unwrap();
         descs.extend(block_cache_usage_ratio.desc().into_iter().cloned());
@@ -319,7 +319,7 @@ impl StateStoreCollector {
 
         let meta_cache_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_meta_cache_usage_ratio",
-            "Percentage of pre-allocated memory in meta cache",
+            "the ratio of meta cache to it's pre-allocated memory",
         ))
         .unwrap();
         descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
@@ -333,7 +333,7 @@ impl StateStoreCollector {
 
         let uploading_memory_usage_ratio = Gauge::with_opts(Opts::new(
             "state_store_uploading_memory_usage_ratio",
-            "Percentage of pre-allocated uploading SSTs memory usage in shared buffer capacity",
+            "the ratio of uploading SSTs memory usage to it's pre-allocated memory",
         ))
         .unwrap();
         descs.extend(meta_cache_usage_ratio.desc().into_iter().cloned());
