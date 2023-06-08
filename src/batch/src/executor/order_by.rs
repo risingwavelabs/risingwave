@@ -143,8 +143,6 @@ impl SortExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures::StreamExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
@@ -572,10 +570,10 @@ mod tests {
         };
         let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            DataType::Struct(Arc::new(StructType::unnamed(vec![
+            DataType::Struct(StructType::unnamed(vec![
                 DataType::Varchar,
                 DataType::Float32,
-            ]))),
+            ])),
         );
         let mut list_builder =
             ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
@@ -634,10 +632,10 @@ mod tests {
         );
         let mut struct_builder = StructArrayBuilder::with_type(
             0,
-            DataType::Struct(Arc::new(StructType::unnamed(vec![
+            DataType::Struct(StructType::unnamed(vec![
                 DataType::Varchar,
                 DataType::Float32,
-            ]))),
+            ])),
         );
         let mut list_builder =
             ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));

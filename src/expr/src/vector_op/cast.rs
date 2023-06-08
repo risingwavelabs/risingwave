@@ -409,14 +409,8 @@ fn build_cast_struct_to_struct(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     let child = children.into_iter().next().unwrap();
-    let source_elem_type = match child.return_type() {
-        DataType::Struct(s) => (*s).clone(),
-        _ => panic!("expected struct type"),
-    };
-    let target_elem_type = match &return_type {
-        DataType::Struct(s) => (**s).clone(),
-        _ => panic!("expected struct type"),
-    };
+    let source_elem_type = child.return_type().as_struct().clone();
+    let target_elem_type = return_type.as_struct().clone();
     Ok(Box::new(
         UnaryExpression::<StructArray, StructArray, _>::new(child, return_type, move |x| {
             struct_cast(x, &source_elem_type, &target_elem_type)
@@ -431,8 +425,8 @@ fn struct_cast(
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
-        .zip_eq_fast(source_elem_type.fields.iter())
-        .zip_eq_fast(target_elem_type.fields.iter())
+        .zip_eq_fast(source_elem_type.types())
+        .zip_eq_fast(target_elem_type.types())
         .map(|((datum_ref, source_field_type), target_field_type)| {
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
@@ -652,14 +646,8 @@ mod tests {
                     Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
-                &StructType::new(vec![
-                    (DataType::Varchar, "a".to_string()),
-                    (DataType::Float32, "b".to_string()),
-                ]),
-                &StructType::new(vec![
-                    (DataType::Int32, "a".to_string()),
-                    (DataType::Int32, "b".to_string()),
-                ])
+                &StructType::new(vec![("a", DataType::Varchar), ("b", DataType::Float32),]),
+                &StructType::new(vec![("a", DataType::Int32), ("b", DataType::Int32),])
             )
             .unwrap(),
             StructValue::new(vec![

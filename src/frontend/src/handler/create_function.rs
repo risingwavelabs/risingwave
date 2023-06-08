@@ -145,9 +145,7 @@ pub async fn handle_create_function(
                 true,
             )];
             match &return_type {
-                DataType::Struct(s) => {
-                    fields.extend(s.fields.iter().map(|t| to_field(t.clone().into())))
-                }
+                DataType::Struct(s) => fields.extend(s.types().map(|t| to_field(t.clone().into()))),
                 _ => fields.push(to_field(return_type.clone().into())),
             }
             fields

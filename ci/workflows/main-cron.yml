@@ -291,3 +291,15 @@ steps:
           username: GHCR_USERNAME
           password-env: GHCR_TOKEN
     timeout_in_minutes: 35
+
+  # Backwards compatibility tests
+  - label: "Backwards compatibility tests"
+    command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 20
