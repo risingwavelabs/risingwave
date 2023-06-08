@@ -19,7 +19,7 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Schema, TableVersionId};
 
-use super::{GenericPlanNode, GenericPlanRef, DistillUnit};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::optimizer::property::FunctionalDependencySet;
@@ -67,12 +67,14 @@ impl<PlanRef> Limit<PlanRef> {
     }
 }
 
-impl<PlanRef> DistillUnit for Limit<PlanRef>
-{
+impl<PlanRef> DistillUnit for Limit<PlanRef> {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
-        Pretty::childless_record(name, vec![
-            ("limit", Pretty::debug(&self.limit)),
-            ("offset", Pretty::debug(&self.offset)),
-        ])
+        Pretty::childless_record(
+            name,
+            vec![
+                ("limit", Pretty::debug(&self.limit)),
+                ("offset", Pretty::debug(&self.offset)),
+            ],
+        )
     }
 }
