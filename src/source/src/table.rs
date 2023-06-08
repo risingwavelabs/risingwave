@@ -200,7 +200,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::transaction::TxnId;
+    use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;

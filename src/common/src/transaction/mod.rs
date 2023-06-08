@@ -12,6 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod transaction_id;
 pub mod transaction_message;
-
-pub type TxnId = u64;

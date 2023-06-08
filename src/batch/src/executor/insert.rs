@@ -24,8 +24,8 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::transaction::transaction_message::{generate_txn_id, TxnMsg};
-use risingwave_common::transaction::TxnId;
+use risingwave_common::transaction::transaction_id::TxnId;
+use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
@@ -72,6 +72,7 @@ impl InsertExecutor {
         returning: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
+        let txn_id = dml_manager.gen_txn_id();
         Self {
             table_id,
             table_version_id,
@@ -90,7 +91,7 @@ impl InsertExecutor {
             sorted_default_columns,
             row_id_index,
             returning,
-            txn_id: generate_txn_id(),
+            txn_id,
         }
     }
 }
@@ -284,6 +285,7 @@ mod tests {
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
@@ -295,7 +297,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let dml_manager = Arc::new(DmlManager::default());
+        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
         let store = MemoryStateStore::new();
 
         // Make struct field

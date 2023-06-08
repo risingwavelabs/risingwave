@@ -22,7 +22,9 @@ use parking_lot::RwLock;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::error::Result;
+use risingwave_common::transaction::transaction_id::{TxnId, TxnIdGenerator};
 use risingwave_common::transaction::transaction_message::TxnMsg;
+use risingwave_common::util::worker_util::WorkerNodeId;
 use tokio::sync::oneshot;
 
 use crate::{TableDmlHandle, TableDmlHandleRef};
@@ -40,15 +42,17 @@ struct TableReader {
 /// NOTE: `TableDmlHandle` is used here as an out-of-the-box solution. We should further optimize
 /// its implementation (e.g. directly expose a channel instead of offering a `write_chunk`
 /// interface).
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct DmlManager {
     table_readers: RwLock<HashMap<TableId, TableReader>>,
+    txn_id_generator: TxnIdGenerator,
 }
 
 impl DmlManager {
-    pub fn new() -> Self {
+    pub fn new(worker_node_id: WorkerNodeId) -> Self {
         Self {
             table_readers: RwLock::new(HashMap::new()),
+            txn_id_generator: TxnIdGenerator::new(worker_node_id),
         }
     }
 
@@ -153,6 +157,10 @@ impl DmlManager {
     pub fn clear(&self) {
         self.table_readers.write().clear()
     }
+
+    pub fn gen_txn_id(&self) -> TxnId {
+        self.txn_id_generator.gen_txn_id()
+    }
 }
 
 #[cfg(test)]
@@ -161,7 +169,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::transaction::TxnId;
+    use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -200,7 +208,7 @@ mod tests {
 
     #[test]
     fn test_register_and_drop() {
-        let dml_manager = DmlManager::new();
+        let dml_manager = DmlManager::new(WorkerNodeId::default());
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
         let column_descs = vec![ColumnDesc::unnamed(100.into(), DataType::Float64)];
@@ -242,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_versioned() {
-        let dml_manager = DmlManager::new();
+        let dml_manager = DmlManager::new(WorkerNodeId::default());
         let table_id = TableId::new(1);
 
         let old_version_id = INITIAL_TABLE_VERSION_ID;
@@ -286,7 +294,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_bad_schema() {
-        let dml_manager = DmlManager::new();
+        let dml_manager = DmlManager::new(WorkerNodeId::default());
         let table_id = TableId::new(1);
         let table_version_id = INITIAL_TABLE_VERSION_ID;
 

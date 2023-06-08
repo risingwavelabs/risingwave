@@ -302,7 +302,7 @@ pub async fn compute_node_serve(
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
-    let dml_mgr = Arc::new(DmlManager::default());
+    let dml_mgr = Arc::new(DmlManager::new(worker_id));
 
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));

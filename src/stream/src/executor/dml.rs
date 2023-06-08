@@ -19,8 +19,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
+use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::transaction::TxnId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_source::dml_manager::DmlManagerRef;
 
@@ -154,12 +154,9 @@ impl DmlExecutor {
                     // Batch data.
                     match txn_msg {
                         TxnMsg::Begin(txn_id) => {
-                            if active_txn_map
-                                .insert(txn_id, (current_epoch, vec![]))
-                                .is_some()
-                            {
-                                tracing::warn!("txn_id={} already exists. Maybe transaction id collision happens.", txn_id);
-                            }
+                            active_txn_map
+                                .try_insert(txn_id, (current_epoch, vec![]))
+                                .expect("Transaction id collision.");
                         }
                         TxnMsg::End(txn_id) => {
                             match active_txn_map.remove(&txn_id) {
@@ -226,13 +223,14 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::transaction::transaction_message::TxnMsg;
-    use risingwave_common::transaction::TxnId;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
+    use crate::task::WorkerNodeId;
 
     #[tokio::test]
     async fn test_dml_executor() {
@@ -246,7 +244,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
         let pk_indices = vec![0];
-        let dml_manager = Arc::new(DmlManager::new());
+        let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
 
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
         let dml_executor = Box::new(DmlExecutor::new(

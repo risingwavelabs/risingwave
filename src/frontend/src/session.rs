@@ -195,6 +195,9 @@ impl FrontendEnv {
         )
         .await?;
 
+        let worker_id = meta_client.worker_id();
+        info!("Assigned worker node id {}", worker_id);
+
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),

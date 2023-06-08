@@ -14,10 +14,8 @@
 
 use std::fmt;
 
-use rand::Rng;
-
-use super::TxnId;
 use crate::array::StreamChunk;
+use crate::transaction::transaction_id::TxnId;
 use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End};
 
 pub enum TxnMsg {
@@ -53,10 +51,4 @@ impl fmt::Debug for TxnMsg {
             End(txn_id) => write!(f, "End {{ txn_id: {} }}", txn_id,),
         }
     }
-}
-
-pub fn generate_txn_id() -> TxnId {
-    // TODO: generate txn id in a better way.
-    let mut rng = rand::thread_rng();
-    rng.gen()
 }
