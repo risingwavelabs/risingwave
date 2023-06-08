@@ -25,7 +25,6 @@ use risingwave_common::cast::{
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time,
 };
-use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
@@ -163,15 +162,9 @@ pub(crate) fn do_parse_simd_json_value(
         }
         (DataType::Struct(struct_type_info), _) => {
             let fields: Vec<Option<ScalarImpl>> = struct_type_info
-                .field_names
                 .iter()
-                .zip_eq_fast(struct_type_info.fields.iter())
-                .map(|field| {
-                    simd_json_parse_value(
-                        format,
-                        field.1,
-                        json_object_smart_get_value(v, field.0.into()),
-                    )
+                .map(|(name, ty)| {
+                    simd_json_parse_value(format, ty, json_object_smart_get_value(v, name.into()))
                 })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))

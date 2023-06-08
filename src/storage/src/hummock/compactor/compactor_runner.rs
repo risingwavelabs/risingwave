@@ -102,6 +102,8 @@ impl CompactorRunner {
                 del_agg,
                 filter_key_extractor,
                 Some(task_progress),
+                Some(self.compact_task.task_id),
+                Some(self.split_index),
             )
             .await?;
         Ok((self.split_index, ssts, compaction_stat))

@@ -448,6 +448,8 @@ where
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         sched_channel: Arc<CompactionRequestChannel>,
     ) -> bool {
+        const NOTIFIED_TIMEOUT: Duration = Duration::from_secs(30);
+
         // Wait for a compactor to become available.
         let compactor = match self.hummock_manager.get_idle_compactor().await {
             Some(compactor) => compactor,

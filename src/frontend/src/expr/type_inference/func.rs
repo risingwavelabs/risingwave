@@ -182,8 +182,7 @@ pub enum NestedType {
 /// Convert struct type to a nested type
 fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
     let fields = ty
-        .fields
-        .iter()
+        .types()
         .map(|f| match f {
             DataType::Struct(s) => extract_struct_nested_type(s),
             _ => Ok(NestedType::Type(f.clone())),
@@ -237,13 +236,9 @@ fn infer_struct_cast_target_type(
                 let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
                 lcasts |= lcast;
                 rcasts |= rcast;
-                tys.push((ty, "".to_string())); // TODO(chi): generate field name
+                tys.push(("".to_string(), ty)); // TODO(chi): generate field name
             }
-            Ok((
-                lcasts,
-                rcasts,
-                DataType::Struct(StructType::new(tys).into()),
-            ))
+            Ok((lcasts, rcasts, DataType::Struct(StructType::new(tys))))
         }
         (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
             // If only one side is nested type, these two types can never be casted.
@@ -543,6 +538,37 @@ fn infer_type_for_special(
                 Ok(casted) => Ok(Some(casted)),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot remove {} from {}",
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
+                ))
+                .into()),
+            }
+        }
+        ExprType::ArrayReplace => {
+            ensure_arity!("array_replace", | inputs | == 3);
+            let common_type = align_array_and_element(0, &[1, 2], inputs);
+            match common_type {
+                Ok(casted) => Ok(Some(casted)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot replace {} with {} in {}",
+                    inputs[1].return_type(),
+                    inputs[2].return_type(),
+                    inputs[0].return_type(),
+                ))
+                .into()),
+            }
+        }
+        ExprType::ArrayPosition => {
+            ensure_arity!("array_position", 2 <= | inputs | <= 3);
+            if let Some(start) = inputs.get_mut(2) {
+                let owned = std::mem::replace(start, ExprImpl::literal_bool(false));
+                *start = owned.cast_implicit(DataType::Int32)?;
+            }
+            let common_type = align_array_and_element(0, &[1], inputs);
+            match common_type {
+                Ok(_) => Ok(Some(DataType::Int32)),
+                Err(_) => Err(ErrorCode::BindError(format!(
+                    "Cannot get position of {} in {}",
                     inputs[1].return_type(),
                     inputs[0].return_type()
                 ))

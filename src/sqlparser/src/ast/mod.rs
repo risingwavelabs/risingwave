@@ -1978,6 +1978,7 @@ pub struct Function {
     // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+    pub within_group: Option<Box<OrderByExpr>>,
 }
 
 impl Function {
@@ -1989,6 +1990,7 @@ impl Function {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }
     }
 }

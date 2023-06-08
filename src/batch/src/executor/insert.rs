@@ -254,7 +254,7 @@ mod tests {
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
     use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::hummock::CachePolicy;
     use risingwave_storage::memory::MemoryStateStore;
@@ -289,14 +289,14 @@ mod tests {
 
         let col1 = Arc::new(I32Array::from_iter([1, 3, 5, 7, 9]).into());
         let col2 = Arc::new(I32Array::from_iter([2, 4, 6, 8, 10]).into());
-        let array = StructArray::from_slices(
-            &[true, false, false, false, false],
+        let array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]),
             vec![
-                I32Array::from_iter([Some(1), None, None, None, None]).into(),
-                I32Array::from_iter([Some(2), None, None, None, None]).into(),
-                I32Array::from_iter([Some(3), None, None, None, None]).into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into_ref(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into_ref(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            [true, false, false, false, false].into_iter().collect(),
         );
         let col3 = Arc::new(array.into());
         let data_chunk: DataChunk = DataChunk::new(vec![col1, col2, col3], 5);
@@ -361,14 +361,14 @@ mod tests {
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
-        let array: ArrayImpl = StructArray::from_slices(
-            &[true, false, false, false, false],
+        let array: ArrayImpl = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]),
             vec![
-                I32Array::from_iter([Some(1), None, None, None, None]).into(),
-                I32Array::from_iter([Some(2), None, None, None, None]).into(),
-                I32Array::from_iter([Some(3), None, None, None, None]).into(),
+                I32Array::from_iter([Some(1), None, None, None, None]).into_ref(),
+                I32Array::from_iter([Some(2), None, None, None, None]).into_ref(),
+                I32Array::from_iter([Some(3), None, None, None, None]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            [true, false, false, false, false].into_iter().collect(),
         )
         .into();
         assert_eq!(*chunk.chunk.columns()[2], array);

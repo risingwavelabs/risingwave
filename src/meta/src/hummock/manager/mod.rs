@@ -61,6 +61,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::metrics_utils::{
     trigger_delta_log_stats, trigger_lsm_stat, trigger_pin_unpin_snapshot_state,
     trigger_pin_unpin_version_state, trigger_sst_stat, trigger_version_stat,
+    trigger_write_stop_stats,
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
@@ -523,6 +524,7 @@ where
             .await?;
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
         tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
@@ -925,7 +927,7 @@ where
                 (count, size)
             };
 
-            let (compact_task_size, compact_task_file_count) =
+            let (compact_task_size, compact_task_file_count, _) =
                 estimate_state_for_compaction(&compact_task);
 
             if compact_task.input_ssts[0].level_idx == 0 {
