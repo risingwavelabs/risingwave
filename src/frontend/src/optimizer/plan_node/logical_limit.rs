@@ -97,7 +97,8 @@ impl PredicatePushdown for LogicalLimit {
 impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let new_logical = self.clone_with_input(new_input);
+        let mut new_logical = self.core.clone();
+        new_logical.input = new_input;
         Ok(BatchLimit::new(new_logical).into())
     }
 }

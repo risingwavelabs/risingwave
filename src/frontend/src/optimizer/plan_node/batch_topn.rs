@@ -22,7 +22,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::batch::BatchPlanRef;
-use crate::optimizer::plan_node::{BatchLimit, LogicalLimit, ToLocalBatch};
+use crate::optimizer::plan_node::{BatchLimit, ToLocalBatch};
 use crate::optimizer::property::{Order, RequiredDist};
 
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
@@ -51,7 +51,7 @@ impl BatchTopN {
         );
         let new_offset = 0;
         let partial_input: PlanRef = if input.order().satisfies(&self.logical.order) {
-            let logical_partial_limit = LogicalLimit::new(input, new_limit.limit(), new_offset);
+            let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
             let batch_partial_limit = BatchLimit::new(logical_partial_limit);
             batch_partial_limit.into()
         } else {

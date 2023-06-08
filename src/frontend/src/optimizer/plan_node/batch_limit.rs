@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
 use super::{
-    ExprRewritable, LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -29,25 +29,23 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
     pub base: PlanBase,
-    logical: LogicalLimit,
+    logical: generic::Limit<PlanRef>,
 }
 
 impl BatchLimit {
-    pub fn new(logical: LogicalLimit) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            logical.input().distribution().clone(),
-            logical.input().order().clone(),
+    pub fn new(logical: generic::Limit<PlanRef>) -> Self {
+        let base = PlanBase::new_batch_from_logical(
+            &logical,
+            logical.input.distribution().clone(),
+            logical.input.order().clone(),
         );
         BatchLimit { base, logical }
     }
 
     fn two_phase_limit(&self, input: PlanRef) -> Result<PlanRef> {
-        let new_limit = self.logical.limit() + self.logical.offset();
+        let new_limit = self.logical.limit + self.logical.offset;
         let new_offset = 0;
-        let logical_partial_limit = LogicalLimit::new(input, new_limit, new_offset);
+        let logical_partial_limit = generic::Limit::new(input, new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
         let any_order = Order::any();
 
@@ -74,22 +72,19 @@ impl BatchLimit {
 
 impl fmt::Display for BatchLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchLimit {{ limit: {limit}, offset: {offset} }}",
-            limit = self.logical.limit,
-            offset = self.logical.offset
-        )
+        self.logical.fmt_with_name(f, "BatchLimit")
     }
 }
 
 impl PlanTreeNodeUnary for BatchLimit {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut core = self.logical.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
@@ -102,8 +97,8 @@ impl ToDistributedBatch for BatchLimit {
 impl ToBatchPb for BatchLimit {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Limit(LimitNode {
-            limit: self.logical.limit(),
-            offset: self.logical.offset(),
+            limit: self.logical.limit,
+            offset: self.logical.offset,
         })
     }
 }
