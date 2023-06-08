@@ -137,6 +137,8 @@ impl DmlExecutor {
 
                         current_epoch = barrier.epoch.curr.into();
 
+                        // FIXME: consider removing this check, because it seems could happen
+                        // frequently.
                         if !active_txn_map.is_empty() {
                             for (txn_id, (_, mut vec)) in active_txn_map
                                 .drain_filter(|_, (epoch, _)| epoch.0 < barrier.epoch.prev)

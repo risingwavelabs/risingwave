@@ -23,6 +23,9 @@ const WORKER_ID_SHIFT_BITS: u8 = 32;
 /// | worker id | sequence |
 /// |-----------|----------|
 /// |  32 bits  | 32 bits  |
+///
+/// Currently, we just need to guarantee the transaction ids are unique at runtime.
+/// It doesn't matter, even if the sequence starts from zero after recovery.
 #[derive(Debug)]
 pub struct TxnIdGenerator {
     worker_id: u32,
