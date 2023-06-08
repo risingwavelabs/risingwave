@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
+use futures::Stream;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
@@ -166,6 +167,9 @@ pub enum SourceFormat {
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+
+pub trait SourceWithStateStream =
+    Stream<Item = Result<StreamChunkWithState, RwError>> + Send + 'static;
 pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
