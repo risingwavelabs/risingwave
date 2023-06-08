@@ -8,7 +8,7 @@ BUILDKITE_BUILD_NUMBER=511 \
 '
 
 # Exits as soon as any line fails.
-set -uo pipefail
+set -euo pipefail
 
 setup() {
   echo "--- Installing utils"
@@ -52,7 +52,7 @@ cp -r qa-infra/certs ./certs
 rm -rf qa-infra
 
 ./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
-  --exec-url ${BUILDKITE_BUILD_URL} \
+  --exec-url "${BUILDKITE_BUILD_URL}" \
   --branch "$BRANCH" \
   --tag latest \
   --commit "$COMMIT" \
