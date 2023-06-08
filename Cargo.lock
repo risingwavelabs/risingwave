@@ -8889,7 +8889,6 @@ version = "1.0.0-alpha"
 dependencies = [
  "ahash 0.8.3",
  "anyhow",
- "arrayvec",
  "auto_enums",
  "aws-credential-types",
  "aws-sdk-s3",
