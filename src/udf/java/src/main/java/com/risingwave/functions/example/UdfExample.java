@@ -18,6 +18,7 @@ public class UdfExample {
             server.addFunction("to_string", new ToString());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
+            server.addFunction("array_access", new ArrayAccess());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -86,6 +87,12 @@ public class UdfExample {
                 return null;
             }
             return new BigDecimal(new BigInteger(hex, 16));
+        }
+    }
+
+    public static class ArrayAccess extends ScalarFunction {
+        public static String eval(String[] array, int index) {
+            return array[index - 1];
         }
     }
 

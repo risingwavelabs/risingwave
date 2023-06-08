@@ -11,6 +11,8 @@ import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 class TypeUtils {
@@ -214,5 +216,24 @@ class TypeUtils {
             throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
         }
         fieldVector.setValueCount(values.length);
+    }
+
+    // Returns a function that converts the object to the correct type.
+    static Function<Object, Object> processFunc(Field field) {
+        if (field.getType() instanceof ArrowType.Utf8) {
+            // object is org.apache.arrow.vector.util.Text
+            return obj -> obj.toString();
+        } else if (field.getType() instanceof ArrowType.LargeUtf8) {
+            // TODO: jsonb
+            throw new IllegalArgumentException("Unsupported type: " + field.getType());
+        } else if (field.getType() instanceof ArrowType.List) {
+            var subfield = field.getChildren().get(0);
+            var subfunc = processFunc(subfield);
+            if (subfield.getType() instanceof ArrowType.Utf8) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+            }
+            throw new IllegalArgumentException("Unsupported type: " + field.getType());
+        }
+        return Function.identity();
     }
 }

@@ -1,16 +1,15 @@
 package com.risingwave.functions;
 
-import java.util.Iterator;
-
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.arrow.vector.util.Text;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
+import java.util.function.Function;
 
 abstract class UserDefinedFunctionBatch {
     protected Schema inputSchema;
@@ -31,13 +30,18 @@ abstract class UserDefinedFunctionBatch {
 class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     ScalarFunction function;
     Method method;
+    Function<Object, Object>[] processInputs;
 
+    @SuppressWarnings("unchecked")
     ScalarFunctionBatch(ScalarFunction function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
         this.method = Reflection.getEvalMethod(function);
         this.inputSchema = TypeUtils.methodToInputSchema(this.method);
         this.outputSchema = TypeUtils.methodToOutputSchema(this.method);
+        this.processInputs = this.inputSchema.getFields().stream()
+                .map(TypeUtils::processFunc)
+                .toArray(Function[]::new);
     }
 
     @Override
@@ -46,10 +50,8 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         var outputValues = new Object[batch.getRowCount()];
         for (int i = 0; i < batch.getRowCount(); i++) {
             for (int j = 0; j < row.length; j++) {
-                row[j] = batch.getVector(j).getObject(i);
-                if (row[j] instanceof Text) {
-                    row[j] = row[j].toString();
-                }
+                var val = batch.getVector(j).getObject(i);
+                row[j] = this.processInputs[j].apply(val);
             }
             try {
                 outputValues[i] = this.method.invoke(this.function, row);
@@ -67,14 +69,19 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
 class TableFunctionBatch extends UserDefinedFunctionBatch {
     TableFunction<?> function;
     Method method;
+    Function<Object, Object>[] processInputs;
     int chunk_size = 1024;
 
+    @SuppressWarnings("unchecked")
     TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
         this.method = Reflection.getEvalMethod(function);
         this.inputSchema = TypeUtils.methodToInputSchema(this.method);
         this.outputSchema = TypeUtils.tableFunctionToOutputSchema(function.getClass());
+        this.processInputs = this.inputSchema.getFields().stream()
+                .map(TypeUtils::processFunc)
+                .toArray(Function[]::new);
     }
 
     @Override
@@ -97,10 +104,8 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         for (int i = 0; i < batch.getRowCount(); i++) {
             // prepare input row
             for (int j = 0; j < row.length; j++) {
-                row[j] = batch.getVector(j).getObject(i);
-                if (row[j] instanceof Text) {
-                    row[j] = row[j].toString();
-                }
+                var val = batch.getVector(j).getObject(i);
+                row[j] = this.processInputs[j].apply(val);
             }
             // call function
             var size_before = this.function.size();
