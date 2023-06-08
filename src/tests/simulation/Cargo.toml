@@ -13,7 +13,7 @@ normal = ["serde"]
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-aws-sdk-s3 = { version = "0.2.17", package = "madsim-aws-sdk-s3" }
+aws-sdk-s3 = { version = "0.2.23", package = "madsim-aws-sdk-s3" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 etcd-client = { version = "0.2.23", package = "madsim-etcd-client" }

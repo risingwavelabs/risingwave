@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
-use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef};
+use crate::optimizer::plan_node::{generic, LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
@@ -28,7 +28,7 @@ impl Planner {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
         let returning = !insert.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalInsert::create(
+        let mut plan: PlanRef = LogicalInsert::new(generic::Insert::new(
             input,
             insert.table_name.clone(),
             insert.table_id,
@@ -37,7 +37,7 @@ impl Planner {
             insert.default_columns,
             insert.row_id_index,
             returning,
-        )?
+        ))
         .into();
         // If containing RETURNING, add one logicalproject node
         if returning {

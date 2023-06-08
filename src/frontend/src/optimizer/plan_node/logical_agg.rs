@@ -884,7 +884,7 @@ impl ColPrunable for LogicalAgg {
         let group_key_required_cols = self.group_key().clone();
 
         let (agg_call_required_cols, agg_calls) = {
-            let input_cnt = self.input().schema().fields().len();
+            let input_cnt = self.input().schema().len();
             let mut tmp = FixedBitSet::with_capacity(input_cnt);
             let group_key_cardinality = self.group_key().count_ones(..);
             let new_agg_calls = required_cols
