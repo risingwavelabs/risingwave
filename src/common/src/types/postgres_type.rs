@@ -52,6 +52,7 @@ impl DataType {
             21 => Ok(DataType::Int16),
             23 => Ok(DataType::Int32),
             20 => Ok(DataType::Int64),
+            25 => Ok(DataType::Varchar), // workaround to support text in extended mode.
             700 => Ok(DataType::Float32),
             701 => Ok(DataType::Float64),
             1700 => Ok(DataType::Decimal),
