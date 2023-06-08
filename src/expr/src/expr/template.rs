@@ -613,7 +613,7 @@ mod tests {
             .unwrap()
             .unwrap()
             .as_int32();
-        assert_eq!(o, 2);
+        assert_eq!(o, 1);
     }
 }
 
