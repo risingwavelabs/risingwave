@@ -27,18 +27,17 @@ pub trait MyScalar = Scalar + Into<f64> + Copy;
 #[build_aggregate("percentile_cont(*) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
-        let arg = literal.as_decimal().clone();
-        if arg.gt(&Decimal::from(1)) || arg.lt(&Decimal::from(0)) {
+        let arg = literal.as_float64().clone().into();
+        if arg > 1.0 || arg < 0.0 {
             return Err(ExprError::InvalidParam {
                 name: "fraction",
                 reason: "must between 0 and 1".to_string(),
             });
         }
-        Some(arg.try_into().unwrap())
+        Some(arg)
     } else {
         None
     };
-    println!("fraction {:?}", fraction);
 
     let aggregator = match agg.args.arg_types()[0] {
         DataType::Int16 => Box::new(PercentileCont::<i16>::new(
