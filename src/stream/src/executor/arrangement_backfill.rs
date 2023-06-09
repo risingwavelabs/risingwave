@@ -26,7 +26,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::epoch::EpochPair;
@@ -431,32 +431,24 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        // // We use uncommitted read here, because we have already scheduled the
-        // // `ArrangementBackfillExecutor` together with the upstream mv.
-        // let iter = upstream_table
-        //     .batch_iter_with_pk_bounds(
-        //         HummockReadEpoch::NoWait(epoch),
-        //         row::empty(),
-        //         range_bounds,
-        //         ordered,
-        //         PrefetchOptions::new_for_exhaust_iter(),
-        //     )
-        //     .await?;
-        //
+        // TODO: iter over all vnodes of this state table.
+        let iter = upstream_table
+            .iter_with_pk_range(&range_bounds, VirtualNode::ZERO, Default::default())
+            .await?;
         // pin_mut!(iter);
-        //
-        //
-        // while let Some(data_chunk) = iter
-        //     .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
-        //     .instrument_await("backfill_snapshot_read")
-        //     .await?
-        // {
-        //     if data_chunk.cardinality() != 0 {
-        //         let ops = vec![Op::Insert; data_chunk.capacity()];
-        //         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-        //         yield Some(stream_chunk);
-        //     }
-        // }
+
+        // TODO: these are rows instead...
+        #[for_await]
+        for data_chunk in iter
+        // .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
+        // .instrument_await("backfill_snapshot_read")
+        {
+            if data_chunk.cardinality() != 0 {
+                let ops = vec![Op::Insert; data_chunk.capacity()];
+                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                yield Some(stream_chunk);
+            }
+        }
 
         yield None;
     }
