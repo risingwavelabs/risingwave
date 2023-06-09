@@ -50,13 +50,13 @@ sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 echo "--- e2e, ci-3streaming-2serving-3fe, python udf"
 python3 e2e_test/udf/test.py &
 sleep 2
-sqllogictest -p 4566 -d dev --label python './e2e_test/udf/python.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
 echo "--- e2e, ci-3streaming-2serving-3fe, java udf"
 java -jar risingwave-udf-example.jar &
 sleep 2
-sqllogictest -p 4566 -d dev --label java './e2e_test/udf/python.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
 
 echo "--- Kill cluster"

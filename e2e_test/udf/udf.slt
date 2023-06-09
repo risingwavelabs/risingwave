@@ -1,5 +1,7 @@
 # Before running this test:
 #   python3 e2e_test/udf/test.py
+# or:
+#   cd src/udf/java && mvn package && java -jar target/risingwave-udf-example.jar
 
 # Create a function.
 statement ok
