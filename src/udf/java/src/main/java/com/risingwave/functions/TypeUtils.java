@@ -2,13 +2,16 @@ package com.risingwave.functions;
 
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.*;
+import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.types.*;
 import org.apache.arrow.vector.types.pojo.*;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -68,11 +71,14 @@ class TypeUtils {
      * Convert a Java class to an Arrow type.
      * 
      * @param param The Java class.
+     * @param hint  An optional DataTypeHint annotation.
      * @param name  The name of the field.
      * @return The Arrow type.
      */
-    static Field classToField(Class<?> param, String name) {
-        if (param == Boolean.class || param == boolean.class) {
+    static Field classToField(Class<?> param, DataTypeHint hint, String name) {
+        if (hint != null) {
+            return stringToField(hint.value(), name);
+        } else if (param == Boolean.class || param == boolean.class) {
             return Field.nullable(name, new ArrowType.Bool());
         } else if (param == Short.class || param == short.class) {
             return Field.nullable(name, new ArrowType.Int(16, true));
@@ -91,13 +97,14 @@ class TypeUtils {
         } else if (param == byte[].class) {
             return Field.nullable(name, new ArrowType.Binary());
         } else if (param.isArray()) {
-            var innerField = classToField(param.getComponentType(), "");
+            var innerField = classToField(param.getComponentType(), null, "");
             return new Field(name, FieldType.nullable(new ArrowType.List()), Arrays.asList(innerField));
         } else {
             // struct type
             var fields = new ArrayList<Field>();
             for (var field : param.getDeclaredFields()) {
-                fields.add(classToField(field.getType(), field.getName()));
+                var subhint = field.getAnnotation(DataTypeHint.class);
+                fields.add(classToField(field.getType(), subhint, field.getName()));
             }
             return new Field("", FieldType.nullable(new ArrowType.Struct()), fields);
             // TODO: more types
@@ -112,11 +119,7 @@ class TypeUtils {
         var fields = new ArrayList<Field>();
         for (var param : method.getParameters()) {
             var hint = param.getAnnotation(DataTypeHint.class);
-            if (hint != null) {
-                fields.add(stringToField(hint.value(), param.getName()));
-            } else {
-                fields.add(classToField(param.getType(), param.getName()));
-            }
+            fields.add(classToField(param.getType(), hint, param.getName()));
         }
         return new Schema(fields);
     }
@@ -127,20 +130,34 @@ class TypeUtils {
     static Schema methodToOutputSchema(Method method) {
         var type = method.getReturnType();
         var hint = method.getAnnotation(DataTypeHint.class);
-        var field = hint != null ? stringToField(hint.value(), "") : classToField(type, "");
-        return new Schema(Arrays.asList(field));
+        return new Schema(Arrays.asList(classToField(type, hint, "")));
     }
 
     /**
      * Get the output schema of a table function from a Java class.
      */
     static Schema tableFunctionToOutputSchema(Class<?> type) {
+        var hint = type.getAnnotation(DataTypeHint.class);
         var parameterizedType = (ParameterizedType) type.getGenericSuperclass();
         var typeArguments = parameterizedType.getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
 
         var row_index = Field.nullable("row_index", new ArrowType.Int(32, true));
-        return new Schema(Arrays.asList(row_index, classToField(type, "")));
+        return new Schema(Arrays.asList(row_index, classToField(type, hint, "")));
+    }
+
+    /**
+     * Return functions to process input values from a Java method.
+     */
+    static Function<Object, Object>[] methodToProcessInputs(Method method) {
+        var schema = methodToInputSchema(method);
+        var params = method.getParameters();
+        @SuppressWarnings("unchecked")
+        Function<Object, Object>[] funcs = new Function[schema.getFields().size()];
+        for (int i = 0; i < schema.getFields().size(); i++) {
+            funcs[i] = processFunc(schema.getFields().get(i), params[i].getType());
+        }
+        return funcs;
     }
 
     /**
@@ -252,6 +269,27 @@ class TypeUtils {
                     vector.set(i, (byte[]) values[i]);
                 }
             }
+        } else if (fieldVector instanceof ListVector) {
+            var vector = (ListVector) fieldVector;
+            vector.allocateNew();
+            // we have to enumerate the inner type again
+            if (vector.getDataVector() instanceof LargeVarCharVector) {
+                var innerVector = (LargeVarCharVector) vector.getDataVector();
+                for (int i = 0; i < values.length; i++) {
+                    var array = (String[]) values[i];
+                    if (array != null) {
+                        vector.startNewValue(i);
+                        for (int j = 0; j < array.length; j++) {
+                            if (array[j] != null) {
+                                innerVector.setSafe(j, array[j].getBytes());
+                            }
+                        }
+                        vector.endValue(i, array.length);
+                    }
+                }
+            } else {
+                throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
+            }
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
@@ -284,22 +322,48 @@ class TypeUtils {
      * Return a function that converts the object get from input array to the
      * correct type.
      */
-    static Function<Object, Object> processFunc(Field field) {
+    static Function<Object, Object> processFunc(Field field, Class<?> targetClass) {
         if (field.getType() instanceof ArrowType.Utf8) {
             // object is org.apache.arrow.vector.util.Text
-            return obj -> obj.toString();
+            return obj -> obj == null ? null : obj.toString();
         } else if (field.getType() instanceof ArrowType.LargeUtf8) {
             // object is org.apache.arrow.vector.util.Text
-            return obj -> obj.toString();
+            return obj -> obj == null ? null : obj.toString();
         } else if (field.getType() instanceof ArrowType.List) {
+            // object is org.apache.arrow.vector.util.JsonStringArrayList
             var subfield = field.getChildren().get(0);
-            var subfunc = processFunc(subfield);
+            var subfunc = processFunc(subfield, null);
             if (subfield.getType() instanceof ArrowType.Utf8) {
-                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+                return obj -> obj == null ? null : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.LargeUtf8) {
-                return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
+                return obj -> obj == null ? null : ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             }
             throw new IllegalArgumentException("Unsupported type: " + field.getType());
+        } else if (field.getType() instanceof ArrowType.Struct) {
+            // object is org.apache.arrow.vector.util.JsonStringHashMap
+            var subfields = field.getChildren();
+            @SuppressWarnings("unchecked")
+            Function<Object, Object>[] subfunc = new Function[subfields.size()];
+            for (int i = 0; i < subfields.size(); i++) {
+                subfunc[i] = processFunc(subfields.get(i), targetClass.getFields()[i].getType());
+            }
+            return obj -> {
+                if (obj == null)
+                    return null;
+                var map = (AbstractMap<?, ?>) obj;
+                try {
+                    var row = targetClass.getDeclaredConstructor().newInstance();
+                    for (int i = 0; i < subfields.size(); i++) {
+                        var field0 = targetClass.getFields()[i];
+                        var val = subfunc[i].apply(map.get(field0.getName()));
+                        field0.set(row, val);
+                    }
+                    return row;
+                } catch (InstantiationException | IllegalAccessException | InvocationTargetException
+                        | NoSuchMethodException e) {
+                    throw new RuntimeException(e);
+                }
+            };
         }
         return Function.identity();
     }

@@ -43,24 +43,19 @@ create function hex_to_dec(varchar) returns decimal language python as hex_to_de
 statement ok
 create function array_access(varchar[], int) returns varchar language python as array_access using link 'http://localhost:8815';
 
-skipif java
 statement ok
 create function jsonb_access(jsonb, int) returns jsonb language python as jsonb_access using link 'http://localhost:8815';
 
-skipif java
 statement ok
 create function jsonb_concat(jsonb[]) returns jsonb language python as jsonb_concat using link 'http://localhost:8815';
 
-skipif java
 statement ok
 create function jsonb_array_identity(jsonb[]) returns jsonb[] language python as jsonb_array_identity using link 'http://localhost:8815';
 
-skipif java
 statement ok
 create function jsonb_array_struct_identity(struct<v jsonb[], len int>) returns struct<v jsonb[], len int>
 language python as jsonb_array_struct_identity using link 'http://localhost:8815';
 
-skipif java
 query TTTTT rowsort
 show functions
 ----
@@ -74,19 +69,6 @@ jsonb_access jsonb, integer jsonb python http://localhost:8815
 jsonb_array_identity jsonb[] jsonb[] python http://localhost:8815
 jsonb_array_struct_identity struct<v jsonb[],len integer> struct<v jsonb[],len integer> python http://localhost:8815
 jsonb_concat jsonb[] jsonb python http://localhost:8815
-series integer integer python http://localhost:8815
-split varchar struct<word varchar,length integer> python http://localhost:8815
-
-onlyif java
-query TTTTT rowsort
-show functions
-----
-array_access varchar[], integer varchar python http://localhost:8815
-extract_tcp_info bytea struct<src_ip varchar,dst_ip varchar,src_port smallint,dst_port smallint> python http://localhost:8815
-gcd integer, integer integer python http://localhost:8815
-gcd integer, integer, integer integer python http://localhost:8815
-hex_to_dec varchar numeric python http://localhost:8815
-int_42 (empty) integer python http://localhost:8815
 series integer integer python http://localhost:8815
 split varchar struct<word varchar,length integer> python http://localhost:8815
 
@@ -115,7 +97,6 @@ select array_access(ARRAY['a', 'b', 'c'], 2);
 ----
 b
 
-skipif java
 query T
 select jsonb_access(a::jsonb, 1) from
 (values ('["a", "b", "c"]'), (null), ('[0, false]')) t(a);
@@ -124,21 +105,18 @@ select jsonb_access(a::jsonb, 1) from
 NULL
 false
 
-skipif java
 query T
 select jsonb_concat(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
 ----
 [null, 1, "str", {}]
 
-skipif java
 query T
-select jsonb_array_identity(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
+select jsonb_array_identity(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb]);
 ----
 {NULL,1,"\"str\"","{}"}
 
-skipif java
 query T
-select jsonb_array_struct_identity(ROW(ARRAY['null'::jsonb, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
+select jsonb_array_struct_identity(ROW(ARRAY[null, '1'::jsonb, '"str"'::jsonb, '{}'::jsonb], 4)::struct<v jsonb[], len int>);
 ----
 ({NULL,1,"\"str\"","{}"},4)
 
@@ -255,18 +233,14 @@ drop function hex_to_dec;
 statement ok
 drop function array_access;
 
-skipif java
 statement ok
 drop function jsonb_access;
 
-skipif java
 statement ok
 drop function jsonb_concat;
 
-skipif java
 statement ok
 drop function jsonb_array_identity;
 
-skipif java
 statement ok
 drop function jsonb_array_struct_identity;

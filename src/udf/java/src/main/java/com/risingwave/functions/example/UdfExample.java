@@ -22,6 +22,9 @@ public class UdfExample {
             server.addFunction("hex_to_dec", new HexToDec());
             server.addFunction("array_access", new ArrayAccess());
             server.addFunction("jsonb_access", new JsonbAccess());
+            server.addFunction("jsonb_concat", new JsonbConcat());
+            server.addFunction("jsonb_array_identity", new JsonbArrayIdentity());
+            server.addFunction("jsonb_array_struct_identity", new JsonbArrayStructIdentity());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -111,6 +114,31 @@ public class UdfExample {
                 return null;
             var obj = array[index];
             return gson.toJson(obj);
+        }
+    }
+
+    public static class JsonbConcat extends ScalarFunction {
+        public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
+            if (jsons == null)
+                return null;
+            return "[" + String.join(",", jsons) + "]";
+        }
+    }
+
+    public static class JsonbArrayIdentity extends ScalarFunction {
+        public static @DataTypeHint("JSONB[]") String[] eval(@DataTypeHint("JSONB[]") String[] jsons) {
+            return jsons;
+        }
+    }
+
+    public static class JsonbArrayStructIdentity extends ScalarFunction {
+        public static class Row {
+            public @DataTypeHint("JSONB[]") String[] v;
+            public int len;
+        }
+
+        public static Row eval(Row s) {
+            return s;
         }
     }
 

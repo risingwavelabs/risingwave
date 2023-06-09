@@ -50,16 +50,13 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     Method method;
     Function<Object, Object>[] processInputs;
 
-    @SuppressWarnings("unchecked")
     ScalarFunctionBatch(ScalarFunction function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
         this.method = Reflection.getEvalMethod(function);
         this.inputSchema = TypeUtils.methodToInputSchema(this.method);
         this.outputSchema = TypeUtils.methodToOutputSchema(this.method);
-        this.processInputs = this.inputSchema.getFields().stream()
-                .map(TypeUtils::processFunc)
-                .toArray(Function[]::new);
+        this.processInputs = TypeUtils.methodToProcessInputs(this.method);
     }
 
     @Override
@@ -69,7 +66,7 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         for (int i = 0; i < batch.getRowCount(); i++) {
             for (int j = 0; j < row.length; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = val == null ? null : this.processInputs[j].apply(val);
+                row[j] = this.processInputs[j].apply(val);
             }
             try {
                 outputValues[i] = this.method.invoke(this.function, row);
@@ -93,16 +90,13 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     Function<Object, Object>[] processInputs;
     int chunk_size = 1024;
 
-    @SuppressWarnings("unchecked")
     TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
         this.method = Reflection.getEvalMethod(function);
         this.inputSchema = TypeUtils.methodToInputSchema(this.method);
         this.outputSchema = TypeUtils.tableFunctionToOutputSchema(function.getClass());
-        this.processInputs = this.inputSchema.getFields().stream()
-                .map(TypeUtils::processFunc)
-                .toArray(Function[]::new);
+        this.processInputs = TypeUtils.methodToProcessInputs(this.method);
     }
 
     @Override
@@ -126,7 +120,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
             // prepare input row
             for (int j = 0; j < row.length; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = val == null ? null : this.processInputs[j].apply(val);
+                row[j] = this.processInputs[j].apply(val);
             }
             // call function
             var size_before = this.function.size();
