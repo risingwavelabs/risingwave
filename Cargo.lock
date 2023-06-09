@@ -6207,6 +6207,7 @@ dependencies = [
  "dyn-clone",
  "easy-ext",
  "either",
+ "expect-test",
  "futures-async-stream",
  "futures-util",
  "hex",
