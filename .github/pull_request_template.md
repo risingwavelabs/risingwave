@@ -21,7 +21,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 - [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
 - [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features #7934).
-- [ ] I have demonstrated that backward compatibility is not broken by breaking changes and created issues to track deprecated features to be removed in the future. (Please refer to the issue)
+- [ ] My PR contains breaking changes (If it deprecates some features, please create a tracking issue to remove them in the future)
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
 ## Checklist For Reviewers

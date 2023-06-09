@@ -31,3 +31,6 @@ labels:
   body: 'My PR contains user-facing changes'
 - label: "user-facing-changes"
   body: '- \[x\] My PR contains user-facing changes'
+
+- label: "breaking-change"
+  body: '- \[x\] My PR contains breaking changes'
