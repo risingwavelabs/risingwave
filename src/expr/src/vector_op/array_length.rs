@@ -56,7 +56,7 @@ use crate::ExprError;
 /// ----
 /// 1
 ///
-/// query error unknown type
+/// query error type unknown
 /// select array_length(null);
 /// ```
 #[function("array_length(list) -> int64")]
