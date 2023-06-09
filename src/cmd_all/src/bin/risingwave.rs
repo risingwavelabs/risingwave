@@ -36,6 +36,10 @@ risingwave_common::enable_task_local_jemalloc_on_unix!();
 risingwave_common::enable_jemalloc_on_unix!();
 
 const BINARY_NAME: &str = "risingwave";
+/// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
+/// for each commit, so we only use it for the final binary (`risingwave -V`).
+const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+const VERSION: &str = const_str::concat!(env!("CARGO_PKG_VERSION"), " (", VERGEN_GIT_SHA, ")");
 
 /// Component to launch.
 #[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
@@ -109,6 +113,7 @@ fn main() -> Result<()> {
     let risingwave = || {
         command!(BINARY_NAME)
             .about("All-in-one executable for components of RisingWave")
+            .version(VERSION)
             .propagate_version(true)
     };
     let command = risingwave()
@@ -143,3 +148,27 @@ fn playground(opts: PlaygroundOpts) {
     risingwave_rt::init_risingwave_logger(settings);
     risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
 }
+
+const _: () = {
+    /// `GIT_SHA` is a normal environment variable. It's [`risingwave_common::GIT_SHA`]
+    /// and is used in logs/version queries.
+    ///
+    /// Usually it's only provided by docker/binary releases (including nightly builds).
+    /// We check it is the same as `VERGEN_GIT_SHA` when it's present.
+    const GIT_SHA: &str = match option_env!("GIT_SHA") {
+        Some(sha) => sha,
+        None => VERGEN_GIT_SHA,
+    };
+    const ERROR_MSG: &str = const_str::concat!(
+        "environment variable GIT_SHA (",
+        GIT_SHA,
+        ") mismatches VERGEN_GIT_SHA (",
+        VERGEN_GIT_SHA,
+        "). Please set the correct value for GIT_SHA or unset it."
+    );
+    assert!(
+        const_str::starts_with!(GIT_SHA, VERGEN_GIT_SHA),
+        "{}",
+        ERROR_MSG
+    );
+};
