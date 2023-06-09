@@ -26,6 +26,13 @@ const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
 const RESCHEDULE_REMOVED_KEY: &str = "removed";
 const RESCHEDULE_ADDED_KEY: &str = "added";
 
+// Mark a compute node as unschedulable
+pub async fn cordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
+    println!("now let's cordon a meta node {}", ip);
+    tracing::info!("some tracing info here!");
+    Ok(())
+}
+
 // For plan `100-[1,2,3]+[4,5];101-[1];102+[3]`, the following reschedule request will be generated
 // {
 //     100: Reschedule {
