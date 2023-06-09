@@ -193,6 +193,32 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
+    private void validateServerId() throws SQLException {
+        int userId = Integer.parseInt(userProps.get(DbzConnectorConfig.MYSQL_SERVER_ID));
+        try (var stmt = jdbcConnection.createStatement()) {
+            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.slave_server_id"));
+            while (res.next()) {
+                int slaveId = res.getInt("Server_id");
+                int masterId = res.getInt("Master_id");
+                if (userId == slaveId || userId == masterId) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "user.id %d duplicated, please specify another one", userId));
+                }
+            }
+        }
+        try (var stmt = jdbcConnection.createStatement()) {
+            var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.server_id"));
+            while (res.next()) {
+                if (res.getInt(2) == userId) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "user.id %d duplicated, please specify another one", userId));
+                }
+            }
+        }
+    }
+
     @Override
     public void close() throws Exception {
         if (null != jdbcConnection) {
