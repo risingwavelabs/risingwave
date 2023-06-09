@@ -65,7 +65,7 @@ where
             self.aws_sdk_retry_counts.inc();
         }
 
-        if event.metadata().target() == "http_timout_retry"
+        if event.metadata().target() == "http_timeout_retry"
             && event.metadata().level() == &tracing::Level::DEBUG
         {
             self.aws_http_timeout_retry_counts.inc();

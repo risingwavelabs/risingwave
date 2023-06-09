@@ -767,7 +767,7 @@ impl S3ObjectStore {
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
-                tracing::debug!(target: "http_timout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
+                tracing::debug!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
                 return true;
             }
         }

@@ -159,7 +159,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
             .with_target("aws_smithy_client", Level::DEBUG)
-            .with_target("http_timout_retry", Level::DEBUG)
+            .with_target("http_timeout_retry", Level::DEBUG)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
