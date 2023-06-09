@@ -15,7 +15,7 @@
 use std::fmt;
 use std::ops::BitAnd;
 
-use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
@@ -95,9 +95,7 @@ impl fmt::Display for StreamDeltaJoin {
         let mut builder = formatter_debug_plan_node!(f, "StreamDeltaJoin");
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -160,22 +158,20 @@ impl StreamNode for StreamDeltaJoin {
 
         // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that we
         // don't need an intermediate representation.
+        let eq_join_predicate = &self.eq_join_predicate;
         NodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
             join_type: self.logical.join_type as i32,
-            left_key: self
-                .eq_join_predicate
+            left_key: eq_join_predicate
                 .left_eq_indexes()
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            right_key: self
-                .eq_join_predicate
+            right_key: eq_join_predicate
                 .right_eq_indexes()
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            condition: self
-                .eq_join_predicate
+            condition: eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),

@@ -14,12 +14,13 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
+use super::utils::Distill;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -50,15 +51,42 @@ impl BatchNestedLoopJoin {
     }
 }
 
+impl Distill for BatchNestedLoopJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+
+        let concat_schema = self.logical.concat_schema();
+        vec.push((
+            "predicate",
+            Pretty::debug(&ConditionDisplay {
+                condition: &self.logical.on,
+                input_schema: &concat_schema,
+            }),
+        ));
+
+        if verbose {
+            let data = IndicesDisplay::from(
+                &self.logical.output_indices,
+                self.logical.internal_column_num(),
+                &concat_schema,
+            )
+            .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        Pretty::childless_record("BatchNestedLoopJoin", vec)
+    }
+}
+
 impl fmt::Display for BatchNestedLoopJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("BatchNestedLoopJoin");
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &ConditionDisplay {
