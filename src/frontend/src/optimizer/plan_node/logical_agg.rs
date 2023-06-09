@@ -1062,6 +1062,27 @@ fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> S
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        for agg_call in self.agg_calls() {
+            if matches!(
+                agg_call.agg_kind,
+                AggKind::BitAnd
+                    | AggKind::BitOr
+                    | AggKind::BoolAnd
+                    | AggKind::BoolOr
+                    | AggKind::PercentileCont
+                    | AggKind::PercentileDisc
+                    | AggKind::Mode
+            ) {
+                return Err(ErrorCode::NotImplemented(
+                    format!(
+                        "{} aggregation in materialized view",
+                        agg_call.agg_kind
+                    ),
+                    None.into(),
+                )
+                .into());
+            }
+        }
         let eowc = ctx.emit_on_window_close();
         let stream_input = self.input().to_stream(ctx)?;
 
