@@ -66,8 +66,16 @@ pub struct LocalHummockStorage {
     /// Read handle.
     read_version: Arc<RwLock<HummockReadVersion>>,
 
-    /// This could be used when `LocalHummockStorage` is used
-    /// solely for local storage, e.g. when replicating data for executors in different CNs.
+    /// This indicates that this `LocalHummockStorage` replicates another `LocalHummockStorage`.
+    /// It's used by executors in different CNs to synchronize states.
+    ///
+    /// Within `LocalHummockStorage` we use this flag to avoid uploading local state to be
+    /// persisted, so we won't have duplicate data.
+    ///
+    /// This also handles a corner case where an executor doing replication
+    /// is scheduled to the same CN as its Upstream executor.
+    /// In that case, we use this flag to avoid reading the same data twice,
+    /// by ignoring the replicated ReadVersion.
     is_replicated: bool,
 
     /// Event sender.
