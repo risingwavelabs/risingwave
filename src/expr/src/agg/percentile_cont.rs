@@ -66,8 +66,8 @@ use crate::{ExprError, Result};
 #[build_aggregate("percentile_cont(float64) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
-        let arg = literal.as_float64().clone().into();
-        if arg > 1.0 || arg < 0.0 {
+        let arg = (*literal.as_float64()).into();
+        if !(0.0..=1.0).contains(&arg) {
             return Err(ExprError::InvalidParam {
                 name: "fraction",
                 reason: "must between 0 and 1".to_string(),
@@ -97,7 +97,7 @@ impl PercentileCont {
 
     fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            self.data.push(datum.as_float64().clone().into());
+            self.data.push((*datum.as_float64()).into());
         }
     }
 }
