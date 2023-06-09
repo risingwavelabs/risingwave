@@ -5,6 +5,7 @@ SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
 20 int8 0 f b
 21 int2 0 f b
 23 int4 0 f b
+25 text 0 f b
 700 float4 0 f b
 701 float8 0 f b
 1043 varchar 0 f b

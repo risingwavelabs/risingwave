@@ -54,5 +54,6 @@ pg_catalog 1700 numeric b f NULL
 pg_catalog 20 int8 b f NULL
 pg_catalog 21 int2 b f NULL
 pg_catalog 23 int4 b f NULL
+pg_catalog 25 text b f NULL
 pg_catalog 700 float4 b f NULL
 pg_catalog 701 float8 b f NULL
