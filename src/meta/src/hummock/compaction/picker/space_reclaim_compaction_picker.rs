@@ -74,12 +74,12 @@ impl SpaceReclaimCompactionPicker {
         }
     }
 
-    fn filter(&self, sst: &SstableInfo) -> bool {
-        let table_id_in_sst = sst.table_ids.iter().cloned().collect::<HashSet<u32>>();
+    fn exist_table_count(&self, sst: &SstableInfo) -> usize {
         // it means all the table exist , so we not need to pick this sst
-        table_id_in_sst
+        sst.table_ids
             .iter()
-            .all(|id| self.all_table_ids.contains(id))
+            .filter(|id| self.all_table_ids.contains(id))
+            .count()
     }
 }
 
@@ -127,27 +127,36 @@ impl SpaceReclaimCompactionPicker {
         }
 
         let mut select_file_size = 0;
+        let mut is_trivial_task = true;
         for sst in &reclaimed_level.table_infos {
             let unmatched_sst = sst
                 .key_range
                 .as_ref()
                 .unwrap()
                 .sstable_overlap(&state.last_select_end_bound);
-            if unmatched_sst || (level_handler.is_pending_compact(&sst.sst_id) || self.filter(sst))
-            {
+            let exist_count = self.exist_table_count(sst);
+            let need_reclaim = exist_count < sst.table_ids.len();
+            let is_trivial = exist_count == 0;
+            if unmatched_sst || (level_handler.is_pending_compact(&sst.sst_id) || !need_reclaim) {
                 if !select_input_ssts.is_empty() {
                     // Our goal is to pick as many complete layers of data as possible and keep the
                     // picked files contiguous to avoid overlapping key_ranges, so the strategy is
                     // to pick as many contiguous files as possible (at least one)
                     break;
                 }
-
                 continue;
+            }
+
+            if !is_trivial {
+                if !select_input_ssts.is_empty() && is_trivial_task {
+                    break;
+                }
+                is_trivial_task = false;
             }
 
             select_input_ssts.push(sst.clone());
             select_file_size += sst.file_size;
-            if select_file_size > self.max_space_reclaim_bytes {
+            if select_file_size > self.max_space_reclaim_bytes && !is_trivial_task {
                 break;
             }
         }

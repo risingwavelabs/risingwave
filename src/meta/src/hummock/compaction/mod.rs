@@ -185,6 +185,16 @@ impl CompactStatus {
         false
     }
 
+    pub fn is_trivial_reclaim(task: &CompactTask, exist_table_ids: &HashSet<u32>) -> bool {
+        task.input_ssts.iter().all(|level| {
+            level.table_infos.iter().all(|sst| {
+                sst.table_ids
+                    .iter()
+                    .all(|table_id| !exist_table_ids.contains(table_id))
+            })
+        })
+    }
+
     /// Declares a task as either succeeded, failed or canceled.
     pub fn report_compact_task(&mut self, compact_task: &CompactTask) {
         for level in &compact_task.input_ssts {
