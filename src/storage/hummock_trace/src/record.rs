@@ -179,7 +179,7 @@ pub enum Operation {
 
     LocalStorageIsDirty,
 
-    Flush(Vec<(TracedBytes, TracedBytes)>),
+    Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
     /// Finish operation of Hummock.
     Finish,
 }

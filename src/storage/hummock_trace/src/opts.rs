@@ -136,6 +136,19 @@ pub struct TracedNewLocalOptions {
     pub table_option: TracedTableOption,
 }
 
+#[cfg(test)]
+impl TracedNewLocalOptions {
+    pub(crate) fn for_test(table_id: u32) -> Self {
+        Self {
+            table_id: TracedTableId { table_id },
+            is_consistent_op: true,
+            table_option: TracedTableOption {
+                retention_seconds: None,
+            },
+        }
+    }
+}
+
 pub type TracedHummockEpoch = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Decode, Encode)]

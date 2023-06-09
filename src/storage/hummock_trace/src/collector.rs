@@ -302,12 +302,12 @@ impl TraceSpan {
     }
 
     pub fn new_flush_span(
-        delete_range: Vec<(Bytes, Bytes)>,
+        delete_range: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         storage_type: StorageType,
     ) -> MayTraceSpan {
         let delete_range = delete_range
             .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
+            .map(|(k, v)| (k.map(Bytes::into), v.map(Bytes::into)))
             .collect();
         Self::new_global_op(Operation::Flush(delete_range), storage_type)
     }
