@@ -1339,6 +1339,7 @@
     create table t (x int, y int);
     select percentile_cont(0) within group (order by y desc) from t;
   batch_plan: |
-    BatchSimpleAgg { aggs: [percentile_cont(t.y order_by(t.y DESC))] }
+    BatchSimpleAgg { aggs: [percentile_cont($expr1 order_by(t.y DESC))] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+      └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
+        └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
