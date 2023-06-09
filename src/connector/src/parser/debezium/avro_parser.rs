@@ -212,10 +212,13 @@ impl DebeziumAvroParser {
             return writer.delete(|column| {
                 let field_schema =
                     extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                from_avro_value(
-                    get_field_from_avro_value(&key, column.name.as_str())?.clone(),
-                    field_schema,
-                )
+                match get_field_from_avro_value(&key, column.name.as_str()) {
+                    Ok(value) => from_avro_value(value.clone(), field_schema),
+                    Err(err) => {
+                        tracing::error!(?err);
+                        Ok(None)
+                    }
+                }
             });
         }
 
