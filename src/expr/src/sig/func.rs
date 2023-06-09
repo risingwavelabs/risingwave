@@ -110,6 +110,8 @@ static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();
 mod tests {
     use std::collections::BTreeMap;
 
+    use itertools::Itertools;
+
     use super::*;
 
     #[test]
@@ -137,10 +139,24 @@ mod tests {
             .filter_map(|(k, funcs_with_same_name)| {
                 let funcs_with_same_name_type: Vec<_> = funcs_with_same_name
                     .into_values()
-                    .filter(|v| v.len() > 1)
+                    .filter_map(|v| {
+                        if v.len() > 1 {
+                            Some(
+                                format!(
+                                    "{:}({:?}) -> {:?}",
+                                    v[0].func.as_str_name(),
+                                    v[0].inputs_type.iter().format(", "),
+                                    v.iter().map(|sig| sig.ret_type).format("/")
+                                )
+                                .to_ascii_lowercase(),
+                            )
+                        } else {
+                            None
+                        }
+                    })
                     .collect();
                 if !funcs_with_same_name_type.is_empty() {
-                    Some((k, funcs_with_same_name_type.into_iter().flatten().collect()))
+                    Some((k, funcs_with_same_name_type))
                 } else {
                     None
                 }
@@ -152,114 +168,30 @@ mod tests {
         let expected = expect_test::expect![[r#"
             {
                 Cast: [
-                    cast(boolean) -> int32,
-                    cast(boolean) -> varchar,
-                    cast(int16) -> int256,
-                    cast(int16) -> decimal,
-                    cast(int16) -> float64,
-                    cast(int16) -> float32,
-                    cast(int16) -> int64,
-                    cast(int16) -> int32,
-                    cast(int16) -> varchar,
-                    cast(int32) -> int256,
-                    cast(int32) -> int16,
-                    cast(int32) -> decimal,
-                    cast(int32) -> float64,
-                    cast(int32) -> float32,
-                    cast(int32) -> int64,
-                    cast(int32) -> boolean,
-                    cast(int32) -> varchar,
-                    cast(int64) -> int256,
-                    cast(int64) -> int32,
-                    cast(int64) -> int16,
-                    cast(int64) -> decimal,
-                    cast(int64) -> float64,
-                    cast(int64) -> float32,
-                    cast(int64) -> varchar,
-                    cast(float32) -> decimal,
-                    cast(float32) -> int64,
-                    cast(float32) -> int32,
-                    cast(float32) -> int16,
-                    cast(float32) -> float64,
-                    cast(float32) -> varchar,
-                    cast(float64) -> decimal,
-                    cast(float64) -> float32,
-                    cast(float64) -> int64,
-                    cast(float64) -> int32,
-                    cast(float64) -> int16,
-                    cast(float64) -> varchar,
-                    cast(decimal) -> float64,
-                    cast(decimal) -> float32,
-                    cast(decimal) -> int64,
-                    cast(decimal) -> int32,
-                    cast(decimal) -> int16,
-                    cast(decimal) -> varchar,
-                    cast(date) -> timestamp,
-                    cast(date) -> varchar,
-                    cast(varchar) -> date,
-                    cast(varchar) -> time,
-                    cast(varchar) -> timestamp,
-                    cast(varchar) -> jsonb,
-                    cast(varchar) -> interval,
-                    cast(varchar) -> int256,
-                    cast(varchar) -> float32,
-                    cast(varchar) -> float64,
-                    cast(varchar) -> decimal,
-                    cast(varchar) -> int16,
-                    cast(varchar) -> int32,
-                    cast(varchar) -> int64,
-                    cast(varchar) -> varchar,
-                    cast(varchar) -> boolean,
-                    cast(varchar) -> bytea,
-                    cast(varchar) -> list,
-                    cast(time) -> interval,
-                    cast(time) -> varchar,
-                    cast(timestamp) -> date,
-                    cast(timestamp) -> time,
-                    cast(timestamp) -> varchar,
-                    cast(interval) -> time,
-                    cast(interval) -> varchar,
-                    cast(list) -> varchar,
-                    cast(list) -> list,
-                    cast(jsonb) -> boolean,
-                    cast(jsonb) -> float64,
-                    cast(jsonb) -> float32,
-                    cast(jsonb) -> decimal,
-                    cast(jsonb) -> int64,
-                    cast(jsonb) -> int32,
-                    cast(jsonb) -> int16,
-                    cast(jsonb) -> varchar,
-                    cast(int256) -> float64,
-                    cast(int256) -> varchar,
+                    "cast(boolean) -> int32/varchar",
+                    "cast(int16) -> int256/decimal/float64/float32/int64/int32/varchar",
+                    "cast(int32) -> int256/int16/decimal/float64/float32/int64/boolean/varchar",
+                    "cast(int64) -> int256/int32/int16/decimal/float64/float32/varchar",
+                    "cast(float32) -> decimal/int64/int32/int16/float64/varchar",
+                    "cast(float64) -> decimal/float32/int64/int32/int16/varchar",
+                    "cast(decimal) -> float64/float32/int64/int32/int16/varchar",
+                    "cast(date) -> timestamp/varchar",
+                    "cast(varchar) -> date/time/timestamp/jsonb/interval/int256/float32/float64/decimal/int16/int32/int64/varchar/boolean/bytea/list",
+                    "cast(time) -> interval/varchar",
+                    "cast(timestamp) -> date/time/varchar",
+                    "cast(interval) -> time/varchar",
+                    "cast(list) -> varchar/list",
+                    "cast(jsonb) -> boolean/float64/float32/decimal/int64/int32/int16/varchar",
+                    "cast(int256) -> float64/varchar",
                 ],
                 ArrayAccess: [
-                    array_access(list, int32) -> boolean,
-                    array_access(list, int32) -> int16,
-                    array_access(list, int32) -> int32,
-                    array_access(list, int32) -> int64,
-                    array_access(list, int32) -> int256,
-                    array_access(list, int32) -> float32,
-                    array_access(list, int32) -> float64,
-                    array_access(list, int32) -> decimal,
-                    array_access(list, int32) -> serial,
-                    array_access(list, int32) -> date,
-                    array_access(list, int32) -> time,
-                    array_access(list, int32) -> timestamp,
-                    array_access(list, int32) -> timestamptz,
-                    array_access(list, int32) -> interval,
-                    array_access(list, int32) -> varchar,
-                    array_access(list, int32) -> bytea,
-                    array_access(list, int32) -> jsonb,
-                    array_access(list, int32) -> list,
-                    array_access(list, int32) -> struct,
+                    "array_access(list, int32) -> boolean/int16/int32/int64/int256/float32/float64/decimal/serial/date/time/timestamp/timestamptz/interval/varchar/bytea/jsonb/list/struct",
                 ],
                 ArrayLength: [
-                    array_length(list) -> int64,
-                    array_length(list) -> int32,
+                    "array_length(list) -> int64/int32",
                 ],
                 Cardinality: [
-                    cardinality(list) -> int64,
-                    cardinality(list) -> int32,
+                    "cardinality(list) -> int64/int32",
                 ],
             }
         "#]];
