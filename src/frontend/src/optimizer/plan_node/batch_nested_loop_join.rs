@@ -67,12 +67,8 @@ impl Distill for BatchNestedLoopJoin {
         ));
 
         if verbose {
-            let data = IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            )
-            .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
             vec.push(("output", data));
         }
 
@@ -96,11 +92,7 @@ impl fmt::Display for BatchNestedLoopJoin {
         );
 
         if verbose {
-            match IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            ) {
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
                 None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };
