@@ -438,7 +438,7 @@ impl HummockReadVersion {
         self.staging.merged_imm.push_front(merged_imm);
     }
 
-    fn is_replicated(&self) -> bool {
+    pub fn is_replicated(&self) -> bool {
         self.is_replicated
     }
 }
