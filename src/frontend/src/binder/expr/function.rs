@@ -21,7 +21,7 @@ use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::DataType;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -141,12 +141,18 @@ impl Binder {
     }
 
     pub(super) fn bind_agg(&mut self, mut f: Function, kind: AggKind) -> Result<ExprImpl> {
-        if f.within_group.is_some()
-            && !matches!(
-                kind,
-                AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
-            )
-        {
+        if matches!(
+            kind,
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
+        ) {
+            if f.within_group.is_none() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "within group is expected for the {}",
+                    kind
+                ))
+                .into());
+            }
+        } else if f.within_group.is_some() {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "within group is disallowed for the {}",
                 kind
@@ -154,12 +160,19 @@ impl Binder {
             .into());
         }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = f
-            .args
-            .into_iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+            f.within_group
+                .iter()
+                .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
+                .flatten_ok()
+                .try_collect()?
+        } else {
+            f.args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg.clone()))
+                .flatten_ok()
+                .try_collect()?
+        };
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -230,14 +243,61 @@ impl Binder {
             )
             .into());
         }
-        let order_by = OrderBy::new(
-            f.order_by
-                .into_iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
+        let order_by = if f.within_group.is_some() {
+            if !f.order_by.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "order_by clause outside of within group is disallowed in {}",
+                    kind
+                ))
+                .into());
+            }
+            OrderBy::new(
+                f.within_group
+                    .iter()
+                    .map(|x| self.bind_order_by_expr(*x.clone()))
+                    .try_collect()?,
+            )
+        } else {
+            OrderBy::new(
+                f.order_by
+                    .into_iter()
+                    .map(|e| self.bind_order_by_expr(e))
+                    .try_collect()?,
+            )
+        };
+        let direct_args = if matches!(kind, AggKind::PercentileCont | AggKind::PercentileDisc) {
+            let args =
+                self.bind_function_arg(f.args.into_iter().exactly_one().map_err(|_| {
+                    ErrorCode::InvalidInputSyntax(format!("only one arg is expected in {}", kind))
+                })?)?;
+            if args.len() != 1 || args[0].clone().as_literal().is_none() {
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be constant", kind))
+                        .into(),
+                )
+            } else if let Ok(casted) = args[0]
+                .clone()
+                .cast_implicit(DataType::Float64)?
+                .fold_const()
+            {
+                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+            } else {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "arg in {} must be double precision",
+                    kind
+                ))
+                .into())
+            }
+        } else {
+            Ok(vec![])
+        }?;
         Ok(ExprImpl::AggCall(Box::new(AggCall::new(
-            kind, inputs, f.distinct, order_by, filter,
+            kind,
+            inputs,
+            f.distinct,
+            order_by,
+            filter,
+            direct_args,
         )?)))
     }
 
@@ -528,6 +588,44 @@ impl Binder {
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
+                (
+                    "array_ndims",
+                    guard_by_len(1, raw(|_binder, inputs| {
+                        let input = &inputs[0];
+                        if input.is_untyped() {
+                            return Err(ErrorCode::BindError("could not determine polymorphic type because input has type unknown".into()).into());
+                        }
+                        match input.return_type().array_ndims() {
+                            0 => Err(ErrorCode::BindError("array_ndims expects an array".into()).into()),
+                            n => Ok(ExprImpl::literal_int(n.try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?))
+                        }
+                    })),
+                ),
+                (
+                    "array_lower",
+                    guard_by_len(2, raw(|binder, inputs| {
+                        let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
+                        // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+
+                        FunctionCall::new(
+                            ExprType::Case,
+                            vec![
+                                FunctionCall::new(
+                                    ExprType::And,
+                                    vec![
+                                        FunctionCall::new(ExprType::LessThan, vec![ExprImpl::literal_int(0), arg1.clone()])?.into(),
+                                        FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
+                                    ],
+                                )?.into(),
+                                ExprImpl::literal_int(1),
+                            ],
+                        ).map(Into::into)
+                    })),
+                ),
+                ("array_upper", raw_call(ExprType::ArrayLength)), // `lower == 1` implies `upper == length`
+                ("array_dims", raw_call(ExprType::ArrayDims)),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb

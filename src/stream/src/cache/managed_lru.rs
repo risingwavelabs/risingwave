@@ -104,11 +104,11 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     pub fn put(&mut self, k: K, v: V) -> Option<V> {
-        let key_size = k.estimated_heap_size();
-        self.kv_heap_size_inc(key_size + v.estimated_heap_size());
+        let key_size = k.estimated_size();
+        self.kv_heap_size_inc(key_size + v.estimated_size());
         let old_val = self.inner.put(k, v);
         if let Some(old_val) = &old_val {
-            self.kv_heap_size_dec(key_size + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(key_size + old_val.estimated_size());
         }
         old_val
     }
@@ -120,7 +120,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
@@ -132,7 +132,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
@@ -152,18 +152,18 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
-                self.memory_usage_metrics.clone(),
+                &mut self.memory_usage_metrics,
             )
         })
     }
 
     pub fn push(&mut self, k: K, v: V) -> Option<(K, V)> {
-        self.kv_heap_size_inc(k.estimated_heap_size() + v.estimated_heap_size());
+        self.kv_heap_size_inc(k.estimated_size() + v.estimated_size());
 
         let old_kv = self.inner.push(k, v);
 
         if let Some((old_key, old_val)) = &old_kv {
-            self.kv_heap_size_dec(old_key.estimated_heap_size() + old_val.estimated_heap_size());
+            self.kv_heap_size_dec(old_key.estimated_size() + old_val.estimated_size());
         }
         old_kv
     }
@@ -263,7 +263,7 @@ pub struct MutGuard<'a, V: EstimateSize> {
     // The total size of a collection
     total_size: &'a mut usize,
     last_reported_size_bytes: &'a mut usize,
-    memory_usage_metrics: Option<IntGauge>,
+    memory_usage_metrics: &'a mut Option<IntGauge>,
 }
 
 impl<'a, V: EstimateSize> MutGuard<'a, V> {
@@ -271,7 +271,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
         inner: &'a mut V,
         total_size: &'a mut usize,
         last_reported_size_bytes: &'a mut usize,
-        memory_usage_metrics: Option<IntGauge>,
+        memory_usage_metrics: &'a mut Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -302,8 +302,8 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     fn drop(&mut self) {
         *self.total_size = self
             .total_size
-            .saturating_add(self.inner.estimated_size())
-            .saturating_sub(self.original_val_size);
+            .saturating_sub(self.original_val_size)
+            .saturating_add(self.inner.estimated_size());
         self.report_memory_usage();
     }
 }
@@ -329,7 +329,7 @@ pub struct UnsafeMutGuard<V: EstimateSize> {
     // The total size of a collection
     total_size: NonNull<usize>,
     last_reported_size_bytes: NonNull<usize>,
-    memory_usage_metrics: Option<IntGauge>,
+    memory_usage_metrics: NonNull<Option<IntGauge>>,
 }
 
 impl<V: EstimateSize> UnsafeMutGuard<V> {
@@ -337,7 +337,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
         inner: &mut V,
         total_size: &mut usize,
         last_reported_size_bytes: &mut usize,
-        memory_usage_metrics: Option<IntGauge>,
+        memory_usage_metrics: &mut Option<IntGauge>,
     ) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
@@ -345,7 +345,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size,
             total_size: total_size.into(),
             last_reported_size_bytes: last_reported_size_bytes.into(),
-            memory_usage_metrics,
+            memory_usage_metrics: memory_usage_metrics.into(),
         }
     }
 
@@ -359,7 +359,7 @@ impl<V: EstimateSize> UnsafeMutGuard<V> {
             original_val_size: self.original_val_size,
             total_size: self.total_size.as_mut(),
             last_reported_size_bytes: self.last_reported_size_bytes.as_mut(),
-            memory_usage_metrics: self.memory_usage_metrics.clone(),
+            memory_usage_metrics: self.memory_usage_metrics.as_mut(),
         }
     }
 }

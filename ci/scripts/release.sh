@@ -4,6 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT=${PWD}
+export GIT_SHA=${BUILDKITE_COMMIT}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -39,9 +40,15 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
-echo "--- Update risingwave release version"
+echo "--- Check risingwave release version"
 if [[ -n "${BUILDKITE_TAG+x}" ]]; then
-  toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
+  if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
+    echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
+    echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
+    echo "CARGO_PKG_VERSION and BUILDKITE_TAG are not equal"
+    exit 1
+  fi
 fi
 
 echo "--- Build risingwave release binary"

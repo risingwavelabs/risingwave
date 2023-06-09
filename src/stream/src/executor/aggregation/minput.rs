@@ -297,6 +297,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }
     }
 
@@ -993,6 +994,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 
@@ -1094,6 +1096,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 
