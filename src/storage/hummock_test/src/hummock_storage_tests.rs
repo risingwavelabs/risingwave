@@ -1534,6 +1534,7 @@ async fn test_hummock_version_reader() {
                         read_version_2.clone(),
                         read_version_3.clone(),
                     ],
+                    Arc::new(test_env.storage.get_pinned_version()),
                 )
                 .unwrap();
 
@@ -1574,6 +1575,7 @@ async fn test_hummock_version_reader() {
                         read_version_2.clone(),
                         read_version_3.clone(),
                     ],
+                    Arc::new(test_env.storage.get_pinned_version()),
                 )
                 .unwrap();
 
@@ -1614,6 +1616,7 @@ async fn test_hummock_version_reader() {
                         read_version_2.clone(),
                         read_version_3.clone(),
                     ],
+                    Arc::new(test_env.storage.get_pinned_version()),
                 )
                 .unwrap();
 
@@ -1654,6 +1657,7 @@ async fn test_hummock_version_reader() {
                         read_version_2.clone(),
                         read_version_3.clone(),
                     ],
+                    Arc::new(test_env.storage.get_pinned_version()),
                 )
                 .unwrap();
 
@@ -1700,6 +1704,7 @@ async fn test_hummock_version_reader() {
                             read_version_2.clone(),
                             read_version_3.clone(),
                         ],
+                        Arc::new(test_env.storage.get_pinned_version()),
                     )
                     .unwrap();
 
@@ -1740,6 +1745,7 @@ async fn test_hummock_version_reader() {
                             read_version_2.clone(),
                             read_version_3.clone(),
                         ],
+                        Arc::new(test_env.storage.get_pinned_version()),
                     )
                     .unwrap();
 

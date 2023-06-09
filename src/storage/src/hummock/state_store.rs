@@ -136,7 +136,13 @@ impl HummockStorage {
                 if read_version_vec.is_empty() {
                     (Vec::default(), Vec::default(), (**pinned_version).clone())
                 } else {
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+                    read_filter_for_batch(
+                        epoch,
+                        table_id,
+                        key_range,
+                        read_version_vec,
+                        self.pinned_version.load().clone(),
+                    )?
                 }
             };
 

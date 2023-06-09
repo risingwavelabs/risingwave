@@ -334,6 +334,7 @@ async fn test_read_filter_basic() {
                 TableId::from(table_id),
                 &key_range,
                 vec![read_version.clone()],
+                Arc::new(read_version.read().committed().clone()),
             )
             .unwrap();
 

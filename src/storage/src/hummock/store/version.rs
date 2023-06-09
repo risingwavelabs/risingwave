@@ -428,34 +428,22 @@ pub fn read_filter_for_batch(
     table_id: TableId,
     key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
+    committed_version: Arc<CommittedVersion>,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     assert!(!read_version_vec.is_empty());
-    let read_version_guard_vec = read_version_vec
-        .iter()
-        .map(|read_version| read_version.read())
-        .collect_vec();
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
-    // to get max_mce with lock_guard to avoid losing committed_data since the read_version
-    // update is asynchronous
-    let (lastst_committed_version, max_mce) = {
-        let committed_version = read_version_guard_vec
-            .iter()
-            .max_by_key(|read_version| read_version.committed().max_committed_epoch())
-            .unwrap()
-            .committed();
-
-        (
-            committed_version.clone(),
-            committed_version.max_committed_epoch(),
-        )
-    };
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
-    let (min_epoch, max_epoch) = (max_mce, epoch);
+    let (min_epoch, max_epoch) = (committed_version.max_committed_epoch(), epoch);
 
     // prune imm and sst with max_mce
-    for read_version_guard in read_version_guard_vec {
+    for read_version in &read_version_vec {
+        let read_version_guard = read_version.read();
+        assert!(
+            read_version_guard.committed().max_committed_epoch()
+                <= committed_version.max_committed_epoch()
+        );
         let (imm_iter, sst_iter) = read_version_guard
             .staging()
             .prune_overlap(min_epoch, max_epoch, table_id, key_range);
@@ -464,9 +452,7 @@ pub fn read_filter_for_batch(
         sst_vec.extend(sst_iter.cloned().collect_vec());
     }
 
-    // TODO: dedup the same `SstableInfo` before introduce new uploader
-
-    Ok((imm_vec, sst_vec, lastst_committed_version))
+    Ok((imm_vec, sst_vec, committed_version.as_ref().clone()))
 }
 
 pub fn read_filter_for_local(
