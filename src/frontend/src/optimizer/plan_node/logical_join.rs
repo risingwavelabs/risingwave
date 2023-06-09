@@ -971,7 +971,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a append-only left input".into(),
+                "Temporal join requires an append-only left input".into(),
                 "Please ensure your left input is append-only".into(),
             )));
         }
