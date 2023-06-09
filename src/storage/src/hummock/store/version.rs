@@ -437,6 +437,10 @@ impl HummockReadVersion {
         // add the newly merged imm into front
         self.staging.merged_imm.push_front(merged_imm);
     }
+
+    fn is_replicated(&self) -> bool {
+        self.is_replicated
+    }
 }
 
 pub fn read_filter_for_batch(
