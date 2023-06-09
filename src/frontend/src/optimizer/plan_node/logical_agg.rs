@@ -1074,10 +1074,7 @@ impl ToStream for LogicalAgg {
                     | AggKind::Mode
             ) {
                 return Err(ErrorCode::NotImplemented(
-                    format!(
-                        "{} aggregation in materialized view",
-                        agg_call.agg_kind
-                    ),
+                    format!("{} aggregation in materialized view", agg_call.agg_kind),
                     None.into(),
                 )
                 .into());
