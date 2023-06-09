@@ -11,22 +11,40 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.function.Function;
 
+/**
+ * Base class for a batch-processing user-defined function.
+ */
 abstract class UserDefinedFunctionBatch {
     protected Schema inputSchema;
     protected Schema outputSchema;
     protected BufferAllocator allocator;
 
-    public Schema getInputSchema() {
+    /**
+     * Get the input schema of the function.
+     */
+    Schema getInputSchema() {
         return inputSchema;
     }
 
-    public Schema getOutputSchema() {
+    /**
+     * Get the output schema of the function.
+     */
+    Schema getOutputSchema() {
         return outputSchema;
     }
 
+    /**
+     * Evaluate the function by processing a batch of input data.
+     *
+     * @param batch the input data batch to process
+     * @return an iterator over the output data batches
+     */
     abstract Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch);
 }
 
+/**
+ * Batch-processing wrapper over a user-defined scalar function.
+ */
 class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     ScalarFunction function;
     Method method;
@@ -66,6 +84,9 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
 
 }
 
+/**
+ * Batch-processing wrapper over a user-defined table function.
+ */
 class TableFunctionBatch extends UserDefinedFunctionBatch {
     TableFunction<?> function;
     Method method;
@@ -131,8 +152,14 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     }
 }
 
+/**
+ * Utility class for reflection.
+ */
 class Reflection {
-    static Method getEvalMethod(Object obj) {
+    /**
+     * Get the method named <code>eval</code>.
+     */
+    static Method getEvalMethod(UserDefinedFunction obj) {
         var methods = new ArrayList<Method>();
         for (Method method : obj.getClass().getDeclaredMethods()) {
             if (method.getName().equals("eval")) {

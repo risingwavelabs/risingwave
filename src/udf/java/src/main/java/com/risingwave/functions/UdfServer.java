@@ -16,6 +16,9 @@ import org.apache.arrow.vector.types.pojo.Schema;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * A server that exposes user-defined functions over Apache Arrow Flight.
+ */
 public class UdfServer implements AutoCloseable {
 
     private FlightServer server;
@@ -32,24 +35,44 @@ public class UdfServer implements AutoCloseable {
                 this.producer).build();
     }
 
+    /**
+     * Add a user-defined function to the server.
+     * 
+     * @param name the name of the function
+     * @param udf  the function to add
+     * @throws IllegalArgumentException if a function with the same name already
+     *                                  exists
+     */
     public void addFunction(String name, UserDefinedFunction udf) throws IllegalArgumentException {
         logger.info("added function: " + name);
         this.producer.addFunction(name, udf);
     }
 
+    /**
+     * Start the server.
+     */
     public void start() throws IOException {
         this.server.start();
         logger.info("listening on " + this.server.getLocation().toSocketAddress());
     }
 
+    /**
+     * Get the port the server is listening on.
+     */
     public int getPort() {
         return this.server.getPort();
     }
 
+    /**
+     * Wait for the server to terminate.
+     */
     public void awaitTermination() throws InterruptedException {
         this.server.awaitTermination();
     }
 
+    /**
+     * Close the server.
+     */
     public void close() throws InterruptedException {
         this.server.close();
     }

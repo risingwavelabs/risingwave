@@ -16,7 +16,10 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 class TypeUtils {
-    public static Field stringToField(String typeStr) {
+    /**
+     * Convert a string to an Arrow type.
+     */
+    static Field stringToField(String typeStr) {
         typeStr = typeStr.toUpperCase();
         if (typeStr.equals("BOOLEAN") || typeStr.equals("BOOL")) {
             return Field.nullable("", new ArrowType.Bool());
@@ -61,7 +64,14 @@ class TypeUtils {
         }
     }
 
-    public static Field classToField(Class<?> param, String name) {
+    /**
+     * Convert a Java class to an Arrow type.
+     * 
+     * @param param The Java class.
+     * @param name  The name of the field.
+     * @return The Arrow type.
+     */
+    static Field classToField(Class<?> param, String name) {
         if (param == Boolean.class || param == boolean.class) {
             return Field.nullable(name, new ArrowType.Bool());
         } else if (param == Short.class || param == short.class) {
@@ -95,7 +105,10 @@ class TypeUtils {
         }
     }
 
-    public static Schema methodToInputSchema(Method method) {
+    /**
+     * Get the input schema from a Java method.
+     */
+    static Schema methodToInputSchema(Method method) {
         var fields = new ArrayList<Field>();
         for (var param : method.getParameters()) {
             fields.add(classToField(param.getType(), param.getName()));
@@ -103,12 +116,18 @@ class TypeUtils {
         return new Schema(fields);
     }
 
-    public static Schema methodToOutputSchema(Method method) {
+    /**
+     * Get the output schema of a scalar function from a Java method.
+     */
+    static Schema methodToOutputSchema(Method method) {
         var type = method.getReturnType();
         return new Schema(Arrays.asList(classToField(type, "")));
     }
 
-    public static Schema tableFunctionToOutputSchema(Class<?> type) {
+    /**
+     * Get the output schema of a table function from a Java class.
+     */
+    static Schema tableFunctionToOutputSchema(Class<?> type) {
         var parameterizedType = (ParameterizedType) type.getGenericSuperclass();
         var typeArguments = parameterizedType.getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
@@ -117,12 +136,18 @@ class TypeUtils {
         return new Schema(Arrays.asList(row_index, classToField(type, "")));
     }
 
-    public static FieldVector createVector(Field field, BufferAllocator allocator, Object[] values) {
+    /**
+     * Create an Arrow vector from an array of values.
+     */
+    static FieldVector createVector(Field field, BufferAllocator allocator, Object[] values) {
         var vector = field.createVector(allocator);
         fillVector(vector, values);
         return vector;
     }
 
+    /**
+     * Fill an Arrow vector with an array of values.
+     */
     static void fillVector(FieldVector fieldVector, Object[] values) {
         if (fieldVector instanceof SmallIntVector) {
             var vector = (SmallIntVector) fieldVector;
@@ -218,7 +243,10 @@ class TypeUtils {
         fieldVector.setValueCount(values.length);
     }
 
-    // Returns a function that converts the object to the correct type.
+    /**
+     * Return a function that converts the object get from input array to the
+     * correct type.
+     */
     static Function<Object, Object> processFunc(Field field) {
         if (field.getType() instanceof ArrowType.Utf8) {
             // object is org.apache.arrow.vector.util.Text
