@@ -126,7 +126,7 @@ impl ReplayWorker {
         WorkerHandler {
             req_tx,
             res_tx,
-            resp_rx,
+            record_end_resp_rx: resp_rx,
             join,
             stacked_replay_reqs: HashMap::new(),
         }
@@ -421,8 +421,12 @@ impl ReplayWorker {
 struct WorkerHandler {
     req_tx: UnboundedSender<ReplayRequest>,
     res_tx: UnboundedSender<OperationResult>,
-    resp_rx: UnboundedReceiver<WorkerResponse>,
+    record_end_resp_rx: UnboundedReceiver<WorkerResponse>,
     join: JoinHandle<()>,
+    // Used for ops like iter, since a iter may have multiple next
+    // Example
+    // Iter begin, Iter next, Iter next...., Iter finish
+    // So replay requests may be stacked
     stacked_replay_reqs: HashMap<u64, u32>,
 }
 
@@ -454,7 +458,7 @@ impl WorkerHandler {
 
         while stacked_replay_reqs > 0 {
             resp = Some(
-                self.resp_rx
+                self.record_end_resp_rx
                     .recv()
                     .await
                     .expect("failed to wait worker resp"),

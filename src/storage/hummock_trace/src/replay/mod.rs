@@ -48,7 +48,9 @@ pub(crate) type ReplayRequest = Option<ReplayGroup>;
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone)]
 pub(crate) enum WorkerId {
+    // local storage worker
     Local(u64, TracedTableId),
+    // for global store
     OneShot(u64),
 }
 

@@ -47,6 +47,7 @@ impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
 
         while let Ok(r) = self.reader.read() {
             match r.operation() {
+                // check results
                 Operation::Result(_) => {
                     worker_scheduler.send_result(r);
                 }
