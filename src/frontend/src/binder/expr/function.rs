@@ -588,6 +588,44 @@ impl Binder {
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
+                (
+                    "array_ndims",
+                    guard_by_len(1, raw(|_binder, inputs| {
+                        let input = &inputs[0];
+                        if input.is_untyped() {
+                            return Err(ErrorCode::BindError("could not determine polymorphic type because input has type unknown".into()).into());
+                        }
+                        match input.return_type().array_ndims() {
+                            0 => Err(ErrorCode::BindError("array_ndims expects an array".into()).into()),
+                            n => Ok(ExprImpl::literal_int(n.try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?))
+                        }
+                    })),
+                ),
+                (
+                    "array_lower",
+                    guard_by_len(2, raw(|binder, inputs| {
+                        let (arg0, arg1) = inputs.into_iter().next_tuple().unwrap();
+                        // rewrite into `CASE WHEN 0 < arg1 AND arg1 <= array_ndims(arg0) THEN 1 END`
+                        let ndims_expr = binder.bind_builtin_scalar_function("array_ndims", vec![arg0])?;
+                        let arg1 = arg1.cast_implicit(DataType::Int32)?;
+
+                        FunctionCall::new(
+                            ExprType::Case,
+                            vec![
+                                FunctionCall::new(
+                                    ExprType::And,
+                                    vec![
+                                        FunctionCall::new(ExprType::LessThan, vec![ExprImpl::literal_int(0), arg1.clone()])?.into(),
+                                        FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
+                                    ],
+                                )?.into(),
+                                ExprImpl::literal_int(1),
+                            ],
+                        ).map(Into::into)
+                    })),
+                ),
+                ("array_upper", raw_call(ExprType::ArrayLength)), // `lower == 1` implies `upper == length`
+                ("array_dims", raw_call(ExprType::ArrayDims)),
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
