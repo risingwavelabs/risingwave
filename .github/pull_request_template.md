@@ -4,7 +4,7 @@ I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Ag
 
 <!--
 
-**This section will be used as the commit message. Please do not leave this empty!**
+**Please do not leave this empty!**
 
 Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
 
@@ -31,13 +31,13 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 ## Documentation
 
-- [ ] My PR **DOES NOT** contain user-facing changes.
+- [ ] My PR contains user-facing changes.
 
 <!-- 
 
-You can ignore or delete the section below if you ticked the checkbox above.
+You can ignore or delete the section below if your PR does not contain user-facing changes.
 
-Otherwise, remove the checkbox above and write a release note below.
+Otherwise, please write a release note below.
 
 -->
 
