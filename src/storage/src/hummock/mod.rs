@@ -234,6 +234,7 @@ impl HummockStorage {
             .send(HummockEvent::RegisterReadVersion {
                 table_id: option.table_id,
                 new_read_version_sender: tx,
+                is_replicated: option.is_replicated,
             })
             .unwrap();
 
