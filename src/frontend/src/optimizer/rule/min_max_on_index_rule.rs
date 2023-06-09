@@ -18,6 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use std::collections::BTreeMap;
+use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -107,7 +108,8 @@ impl MinMaxOnIndexRule {
                     .into(),
                 );
 
-                let topn = LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone());
+                let topn =
+                    LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone(), vec![]);
 
                 let formatting_agg = Agg::new(
                     vec![PlanAggCall {
@@ -122,6 +124,7 @@ impl MinMaxOnIndexRule {
                         filter: Condition {
                             conjunctions: vec![],
                         },
+                        direct_args: vec![],
                     }],
                     FixedBitSet::new(),
                     topn.into(),
@@ -176,7 +179,7 @@ impl MinMaxOnIndexRule {
                 .into(),
             );
 
-            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone());
+            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone(), vec![]);
 
             let formatting_agg = Agg::new(
                 vec![PlanAggCall {
@@ -191,6 +194,7 @@ impl MinMaxOnIndexRule {
                     filter: Condition {
                         conjunctions: vec![],
                     },
+                    direct_args: vec![],
                 }],
                 FixedBitSet::new(),
                 topn.into(),

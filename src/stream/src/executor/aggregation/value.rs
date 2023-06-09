@@ -18,7 +18,6 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::Datum;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::agg::AggCall;
 
 use crate::executor::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
@@ -96,6 +95,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }
     }
 
@@ -138,6 +138,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }
     }
 

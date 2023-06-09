@@ -100,6 +100,7 @@ class Panels:
         "fillOpacity": 10,
         "interval": "1s",
         "maxDataPoints": 1000,
+        "legendDisplayMode": "table",
     }
 
     def __init__(self, datasource):
@@ -499,16 +500,24 @@ class Panels:
         return Panels(self.datasource)
 
 
-def metric(name, filter=None):
+def metric(name, filter=None, node_filter_enabled=True, table_id_filter_enabled=False):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
         filters.append("namespace=~\"$namespace\"")
     if risingwave_name_filter_enabled:
         filters.append("risingwave_name=~\"$instance\"")
+    if table_id_filter_enabled:
+        filters.append("table_id=~\"$table\"")
+    if node_filter_enabled:
+        filters.append("job=~\"$job\"")
+        filters.append("instance=~\"$node\"")
     if filters:
         return f"{name}{{{','.join(filters)}}}"
     else:
         return name
+
+def table_metric(name, filter=None):
+    return metric(name, filter, True, True)
 
 
 def quantile(f, percentiles):

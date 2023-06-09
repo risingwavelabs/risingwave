@@ -16,6 +16,8 @@ use itertools::Itertools;
 use lazy_static::lazy_static;
 use risingwave_common::error::{ErrorCode, Result};
 
+use super::plan_node::RewriteExprsRecursive;
+use crate::expr::InlineNowProcTime;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
@@ -145,12 +147,14 @@ lazy_static! {
     static ref GENERAL_UNNESTING_PUSH_DOWN_APPLY: OptimizationStage = OptimizationStage::new(
         "General Unnesting(Push Down Apply)",
         vec![
+            ApplyEliminateRule::create(),
             ApplyAggTransposeRule::create(),
+            ApplyDedupTransposeRule::create(),
             ApplyFilterTransposeRule::create(),
             ApplyProjectTransposeRule::create(),
             ApplyJoinTransposeRule::create(),
+            ApplyUnionTransposeRule::create(),
             ApplyShareEliminateRule::create(),
-            ApplyEliminateRule::create(),
         ],
         ApplyOrder::TopDown,
     );
@@ -161,13 +165,13 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
-    static ref LEFT_DEEP_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
+    static ref LEFT_DEEP_JOIN_ORDERING: OptimizationStage = OptimizationStage::new(
         "Join Ordering".to_string(),
         vec![LeftDeepTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
 
-    static ref BUSHY_TREE_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
+    static ref BUSHY_TREE_JOIN_ORDERING: OptimizationStage = OptimizationStage::new(
         "Join Ordering".to_string(),
         vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
@@ -228,8 +232,10 @@ lazy_static! {
         vec![
             ProjectMergeRule::create(),
             ProjectEliminateRule::create(),
+            OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
             OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
@@ -351,6 +357,24 @@ impl LogicalOptimizer {
         plan
     }
 
+    pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
+        // FIXME: This may differ from the snapshot we use for actual execution. We should instead
+        // use a pinned snapshot consistently during optimization and execution.
+        let epoch = ctx
+            .session_ctx()
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch();
+
+        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline Now and ProcTime:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+        plan
+    }
+
     pub fn gen_optimized_logical_plan_for_stream(mut plan: PlanRef) -> Result<PlanRef> {
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -396,22 +420,25 @@ impl LogicalOptimizer {
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        // Merge inner joins and intermediate filters into multijoin
-        // This rule assumes that filters have already been pushed down near to
-        // their relevant joins.
-        plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
+        if plan.ctx().session_ctx().config().get_enable_join_ordering() {
+            // Merge inner joins and intermediate filters into multijoin
+            // This rule assumes that filters have already been pushed down near to
+            // their relevant joins.
+            plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
 
-        // Reorder multijoin into join tree.
-        if plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_streaming_enable_bushy_join()
-        {
-            plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_REORDER);
-        } else {
-            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_REORDER);
+            // Reorder multijoin into join tree.
+            if plan
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_streaming_enable_bushy_join()
+            {
+                plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_ORDERING);
+            } else {
+                plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING);
+            }
         }
+
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
@@ -456,6 +483,9 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Inline `NOW()` and `PROCTIME()`, only for batch queries.
+        plan = Self::inline_now_proc_time(plan, &ctx);
+
         // Convert the dag back to the tree, because we don't support DAG plan for batch.
         plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
@@ -469,13 +499,15 @@ impl LogicalOptimizer {
         // Predicate Push-down
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
 
-        // Merge inner joins and intermediate filters into multijoin
-        // This rule assumes that filters have already been pushed down near to
-        // their relevant joins.
-        plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
+        if plan.ctx().session_ctx().config().get_enable_join_ordering() {
+            // Merge inner joins and intermediate filters into multijoin
+            // This rule assumes that filters have already been pushed down near to
+            // their relevant joins.
+            plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
 
-        // Reorder multijoin into left-deep join tree.
-        plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_REORDER);
+            // Reorder multijoin into left-deep join tree.
+            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING);
+        }
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
@@ -504,6 +536,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
+
+        plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

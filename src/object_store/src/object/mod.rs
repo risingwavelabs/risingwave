@@ -28,75 +28,29 @@ pub mod s3;
 use await_tree::InstrumentAwait;
 pub use s3::*;
 
-mod disk;
 pub mod error;
 pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
 
-use crate::object::disk::DiskObjectStore;
-
-pub const LOCAL_OBJECT_STORE_PATH_PREFIX: &str = "@local:";
-
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
 
 type BoxedStreamingUploader = Box<dyn StreamingUploader>;
 
-#[derive(Debug)]
-pub enum ObjectStorePath<'a> {
-    Local(&'a str),
-    Remote(&'a str),
-}
-
-impl ObjectStorePath<'_> {
-    pub fn is_local(&self) -> bool {
-        match self {
-            ObjectStorePath::Local(_) => true,
-            ObjectStorePath::Remote(_) => false,
-        }
-    }
-
-    pub fn is_remote(&self) -> bool {
-        !self.is_local()
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            ObjectStorePath::Local(path) => path,
-            ObjectStorePath::Remote(path) => path,
-        }
-    }
-}
-
-pub fn get_local_path(path: &str) -> String {
-    LOCAL_OBJECT_STORE_PATH_PREFIX.to_string() + path
-}
-
-pub fn parse_object_store_path(path: &str) -> ObjectStorePath<'_> {
-    match path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX) {
-        Some(path) => ObjectStorePath::Local(path),
-        None => ObjectStorePath::Remote(path),
-    }
-}
-
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
-pub fn partition_object_store_paths(paths: &[String]) -> (Vec<String>, Vec<String>) {
+pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
     // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
     //       partition instead?
-    let mut vec_loc = vec![];
     let mut vec_rem = vec![];
 
     for path in paths {
-        match path.strip_prefix(LOCAL_OBJECT_STORE_PATH_PREFIX) {
-            Some(path) => vec_loc.push(path.to_string()),
-            None => vec_rem.push(path.to_string()),
-        };
+        vec_rem.push(path.to_string());
     }
 
-    (vec_loc, vec_rem)
+    vec_rem
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -186,23 +140,9 @@ pub trait ObjectStore: Send + Sync {
 
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
-    Disk(MonitoredObjectStore<DiskObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
     S3Compatible(MonitoredObjectStore<S3ObjectStore>),
-    Hybrid {
-        local: Box<ObjectStoreImpl>,
-        remote: Box<ObjectStoreImpl>,
-    },
-}
-
-impl ObjectStoreImpl {
-    pub fn hybrid(local: ObjectStoreImpl, remote: ObjectStoreImpl) -> Self {
-        ObjectStoreImpl::Hybrid {
-            local: Box::new(local),
-            remote: Box::new(remote),
-        }
-    }
 }
 
 macro_rules! dispatch_async {
@@ -214,57 +154,24 @@ macro_rules! dispatch_async {
 /// This macro routes the object store operation to the real implementation by the `ObjectStoreImpl`
 /// enum type and the `path`.
 ///
-/// For `path`, if the `path` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
-/// operation should be performed on the local object store, and otherwise the operation should be
-/// performed on remote object store.
+/// Except for `InMem`,the operation should be performed on remote object store.
 macro_rules! object_store_impl_method_body {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $path:expr $(, $args:expr)*) => {
         {
-            let path = parse_object_store_path($path);
+            let path = $path;
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
-                    assert!(path.is_remote(), "get local path in pure in-mem object store: {:?}", $path);
-                    $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*)
-                },
-                ObjectStoreImpl::Disk(disk) => {
-                    assert!(path.is_remote(), "get local path in pure disk object store: {:?}", $path);
-                    $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*)
+                    $dispatch_macro!(in_mem, $method_name, path $(, $args)*)
                 },
                 ObjectStoreImpl::Opendal(opendal) => {
-                    assert!(path.is_remote(), "get local path in pure opendal object store engine: {:?}", $path);
-                    $dispatch_macro!(opendal, $method_name, path.as_str() $(, $args)*)
+                    $dispatch_macro!(opendal, $method_name, path $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
-                    assert!(path.is_remote(), "get local path in pure s3 object store: {:?}", $path);
-                    $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
+                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
                 ObjectStoreImpl::S3Compatible(s3) => {
-                    assert!(path.is_remote(), "get local path in pure s3 compatible object store: {:?}", $path);
-                    $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
+                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
-                ObjectStoreImpl::Hybrid {
-                    local: local,
-                    remote: remote,
-                } => {
-                    match path {
-                        ObjectStorePath::Local(_) => match local.as_ref() {
-                            ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Opendal(_) => unreachable!("Opendal object store cannot be used as local object store"),
-                            ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
-                            ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 compatible cannot be used as local object store"),
-                            ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
-                        },
-                        ObjectStorePath::Remote(_) => match remote.as_ref() {
-                            ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Opendal(opendal) => $dispatch_macro!(opendal, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::S3(s3) => $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::S3Compatible(s3_compatible) => $dispatch_macro!(s3_compatible, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
-                        },
-                    }
-                }
             }
         }
     };
@@ -274,57 +181,23 @@ macro_rules! object_store_impl_method_body {
 /// enum type and the `paths`. It is a modification of the macro above to work with a slice of
 /// strings instead of just a single one.
 ///
-/// If an entry in `paths` starts with `LOCAL_OBJECT_STORE_PATH_PREFIX`, it indicates that the
-/// operation should be performed on the local object store, and otherwise the operation should be
-/// performed on remote object store.
+/// Except for `InMem`, the operation should be performed on remote object store.
 macro_rules! object_store_impl_method_body_slice {
     ($object_store:expr, $method_name:ident, $dispatch_macro:ident, $paths:expr $(, $args:expr)*) => {
         {
-            let (paths_loc, paths_rem) = partition_object_store_paths($paths);
+            let paths_rem = partition_object_store_paths($paths);
             match $object_store {
                 ObjectStoreImpl::InMem(in_mem) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure in-mem object store: {:?}", $paths);
                     $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*)
                 },
-                ObjectStoreImpl::Disk(disk) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure disk object store: {:?}", $paths);
-                    $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*)
-                },
                 ObjectStoreImpl::Opendal(opendal) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure opendal object store: {:?}", $paths);
                     $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::S3Compatible(s3) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure s3 compatible object store: {:?}", $paths);
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                },
-                ObjectStoreImpl::Hybrid {
-                    local: local,
-                    remote: remote,
-                } => {
-                    // Process local paths.
-                    match local.as_ref() {
-                        ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_loc $(, $args)*),
-                        ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_loc $(, $args)*),
-                        ObjectStoreImpl::Opendal(_) => unreachable!("Opendal object store cannot be used as local object store"),
-                        ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
-                        ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 cannot be used as local object store"),
-                        ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
-                    }?;
-
-                    // Process remote paths.
-                    match remote.as_ref() {
-                        ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::Opendal(opendal) =>  $dispatch_macro!(opendal, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::S3(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::S3Compatible(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
-                    }
                 }
             }
         }
@@ -384,23 +257,15 @@ impl ObjectStoreImpl {
         object_store_impl_method_body!(self, list, dispatch_async, prefix)
     }
 
-    pub fn get_object_prefix(&self, obj_id: u64, is_remote: bool) -> String {
+    pub fn get_object_prefix(&self, obj_id: u64) -> String {
         // FIXME: ObjectStoreImpl lacks flexibility for adding new interface to ObjectStore
         // trait. Macro object_store_impl_method_body routes to local or remote only depending on
         // the path
         match self {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3Compatible(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Hybrid { local, remote } => {
-                if is_remote {
-                    remote.get_object_prefix(obj_id, true)
-                } else {
-                    local.get_object_prefix(obj_id, false)
-                }
-            }
         }
     }
 }
@@ -593,6 +458,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
     fn media_type(&self) -> &'static str {
         self.inner.store_media_type()
+    }
+
+    pub fn inner(&self) -> &OS {
+        &self.inner
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -887,66 +756,25 @@ pub async fn parse_remote_object_store(
                 .await
                 .monitored(metrics),
         ),
-        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
-            DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
-        ),
         "memory" => {
-            tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            if ident == "Meta Backup" {
+                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in production environment.", ident);
+            } else {
+                tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            }
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
-            tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            if ident == "Meta Backup" {
+                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in production environment.", ident);
+            } else {
+                tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
+            }
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         other => {
             unimplemented!(
                 "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
-                other
-            )
-        }
-    }
-}
-
-pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> ObjectStoreImpl {
-    match url {
-        disk if disk.starts_with("disk://") => ObjectStoreImpl::Disk(
-            DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
-        ),
-        temp_disk if temp_disk.starts_with("tempdisk") => {
-            let path = tempfile::TempDir::new()
-                .expect("should be able to create temp dir")
-                .into_path()
-                .to_str()
-                .expect("should be able to convert to str")
-                .to_owned();
-            ObjectStoreImpl::Disk(DiskObjectStore::new(path.as_str()).monitored(metrics))
-        }
-        "memory" => {
-            tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
-            ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
-        }
-        #[cfg(feature = "hdfs-backend")]
-        hdfs if hdfs.starts_with("hdfs://") => {
-            let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
-            let (namenode, root) = hdfs.split_once('@').unwrap();
-            ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics),
-            )
-        }
-        gcs if gcs.starts_with("gcs://") => {
-            let gcs = gcs.strip_prefix("gcs://").unwrap();
-            let (bucket, root) = gcs.split_once('@').unwrap();
-            ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_gcs_engine(bucket.to_string(), root.to_string())
-                    .unwrap()
-                    .monitored(metrics),
-            )
-        }
-        other => {
-            unimplemented!(
-                "{} Hummock only supports s3, minio, disk, and memory for now.",
                 other
             )
         }

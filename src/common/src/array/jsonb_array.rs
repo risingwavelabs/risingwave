@@ -14,6 +14,7 @@
 
 use std::mem::size_of;
 
+use risingwave_pb::data::{PbArray, PbArrayType};
 use serde_json::Value;
 
 use super::{Array, ArrayBuilder};
@@ -75,6 +76,10 @@ impl ArrayBuilder for JsonbArrayBuilder {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> Self::ArrayType {
         Self::ArrayType {
             bitmap: self.bitmap.finish(),
@@ -103,7 +108,7 @@ impl Array for JsonbArray {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> super::PbArray {
+    fn to_protobuf(&self) -> PbArray {
         // The memory layout contains `serde_json::Value` trees, but in protobuf we transmit this as
         // variable length bytes in value encoding. That is, one buffer of length n+1 containing
         // start and end offsets into the 2nd buffer containing all value bytes concatenated.
@@ -139,10 +144,10 @@ impl Array for JsonbArray {
         ];
 
         let null_bitmap = self.null_bitmap().to_protobuf();
-        super::PbArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values,
-            array_type: super::PbArrayType::Jsonb as i32,
+            array_type: PbArrayType::Jsonb as i32,
             struct_array_data: None,
             list_array_data: None,
         }

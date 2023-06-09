@@ -83,7 +83,7 @@ impl ObjectStoreMetrics {
         .unwrap();
 
         let request_retry_count = register_int_counter_vec_with_registry!(
-            "object_store_request_retry_count",
+            "s3_read_request_retry_count",
             "The number of retry times of object store request",
             &["type"],
             registry

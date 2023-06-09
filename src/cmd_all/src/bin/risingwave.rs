@@ -13,168 +13,162 @@
 // limitations under the License.
 
 #![cfg_attr(coverage, feature(no_coverage))]
-#![feature(let_chains)]
 
-use std::collections::HashMap;
-use std::env;
+use std::str::FromStr;
 
-use anyhow::{bail, Result};
-use clap::Parser;
-use risingwave_cmd_all::playground;
-#[cfg(enable_task_local_alloc)]
-use risingwave_common::enable_task_local_jemalloc_on_unix;
+use anyhow::Result;
+use clap::{command, ArgMatches, Args, Command, FromArgMatches};
+use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
+use risingwave_cmd_all::PlaygroundOpts;
+use risingwave_compactor::CompactorOpts;
+use risingwave_compute::ComputeNodeOpts;
+use risingwave_ctl::CliOpts as CtlOpts;
+use risingwave_frontend::FrontendOpts;
+use risingwave_meta::MetaNodeOpts;
+use strum::IntoEnumIterator;
+use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 use tracing::Level;
 
 #[cfg(enable_task_local_alloc)]
-enable_task_local_jemalloc_on_unix!();
+risingwave_common::enable_task_local_jemalloc_on_unix!();
 
 #[cfg(not(enable_task_local_alloc))]
-use risingwave_common::enable_jemalloc_on_unix;
+risingwave_common::enable_jemalloc_on_unix!();
 
-#[cfg(not(enable_task_local_alloc))]
-enable_jemalloc_on_unix!();
+const BINARY_NAME: &str = "risingwave";
+/// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
+/// for each commit, so we only use it for the final binary (`risingwave -V`).
+const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
+const VERSION: &str = const_str::concat!(env!("CARGO_PKG_VERSION"), " (", VERGEN_GIT_SHA, ")");
 
-type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
+/// Component to launch.
+#[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
+enum Component {
+    Compute,
+    Meta,
+    Frontend,
+    Compactor,
+    Ctl,
+    Playground,
+}
+
+impl Component {
+    /// Start the component from the given `args` without `argv[0]`.
+    fn start(self, matches: &ArgMatches) {
+        eprintln!("launching `{}`", self);
+
+        fn parse_opts<T: FromArgMatches>(matches: &ArgMatches) -> T {
+            T::from_arg_matches(matches).map_err(|e| e.exit()).unwrap()
+        }
+        let registry = prometheus::Registry::new();
+        match self {
+            Self::Compute => compute(parse_opts(matches), registry),
+            Self::Meta => meta(parse_opts(matches), registry),
+            Self::Frontend => frontend(parse_opts(matches), registry),
+            Self::Compactor => compactor(parse_opts(matches), registry),
+            Self::Ctl => ctl(parse_opts(matches), registry),
+            Self::Playground => playground(parse_opts(matches), registry),
+        }
+    }
+
+    /// Aliases that can be used to launch the component.
+    fn aliases(self) -> Vec<&'static str> {
+        match self {
+            Component::Compute => vec!["compute-node", "compute_node"],
+            Component::Meta => vec!["meta-node", "meta_node"],
+            Component::Frontend => vec!["frontend-node", "frontend_node"],
+            Component::Compactor => vec!["compactor-node", "compactor_node"],
+            Component::Ctl => vec!["risectl"],
+            Component::Playground => vec!["play"],
+        }
+    }
+
+    /// Append component-specific arguments to the given `cmd`.
+    fn augment_args(self, cmd: Command) -> Command {
+        match self {
+            Component::Compute => ComputeNodeOpts::augment_args(cmd),
+            Component::Meta => MetaNodeOpts::augment_args(cmd),
+            Component::Frontend => FrontendOpts::augment_args(cmd),
+            Component::Compactor => CompactorOpts::augment_args(cmd),
+            Component::Ctl => CtlOpts::augment_args(cmd),
+            Component::Playground => PlaygroundOpts::augment_args(cmd),
+        }
+    }
+
+    /// `clap` commands for all components.
+    fn commands() -> Vec<Command> {
+        Self::iter()
+            .map(|c| {
+                let name: &'static str = c.into();
+                let command = Command::new(name).visible_aliases(c.aliases());
+                c.augment_args(command)
+            })
+            .collect()
+    }
+}
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
-    let mut fns: RwFns = HashMap::new();
-
-    // compute node configuration
-    for fn_name in ["compute", "compute-node", "compute_node"] {
-        fns.insert(
-            fn_name,
-            Box::new(|args: Vec<String>| {
-                eprintln!("launching compute node");
-
-                let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
-
-                risingwave_rt::init_risingwave_logger(
-                    risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
-                );
-
-                risingwave_rt::main_okk(risingwave_compute::start(opts));
-
-                Ok(())
-            }),
+    let risingwave = || {
+        command!(BINARY_NAME)
+            .about("All-in-one executable for components of RisingWave")
+            .version(VERSION)
+            .propagate_version(true)
+    };
+    let command = risingwave()
+        // `$ ./meta <args>`
+        .multicall(true)
+        .subcommands(Component::commands())
+        // `$ ./risingwave meta <args>`
+        .subcommand(
+            risingwave()
+                .subcommand_value_name("COMPONENT")
+                .subcommand_help_heading("Components")
+                .subcommand_required(true)
+                .subcommands(Component::commands()),
         );
-    }
 
-    // meta node configuration
-    for fn_name in ["meta", "meta-node", "meta_node"] {
-        fns.insert(
-            fn_name,
-            Box::new(move |args: Vec<String>| {
-                eprintln!("launching meta node");
+    let matches = command.get_matches();
 
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
+    let multicall = matches.subcommand().unwrap();
+    let argv_1 = multicall.1.subcommand();
+    let (component_name, matches) = argv_1.unwrap_or(multicall);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-
-                risingwave_rt::main_okk(risingwave_meta::start(opts));
-
-                Ok(())
-            }),
-        );
-    }
-
-    // frontend node configuration
-    for fn_name in ["frontend", "frontend-node", "frontend_node"] {
-        fns.insert(
-            fn_name,
-            Box::new(move |args: Vec<String>| {
-                eprintln!("launching frontend node");
-
-                let opts = risingwave_frontend::FrontendOpts::parse_from(args);
-
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-
-                risingwave_rt::main_okk(risingwave_frontend::start(opts));
-
-                Ok(())
-            }),
-        );
-    }
-
-    // compactor node configuration
-    for fn_name in ["compactor", "compactor-node", "compactor_node"] {
-        fns.insert(
-            fn_name,
-            Box::new(move |args: Vec<String>| {
-                eprintln!("launching compactor node");
-
-                let opts = risingwave_compactor::CompactorOpts::parse_from(args);
-
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-
-                risingwave_rt::main_okk(risingwave_compactor::start(opts));
-
-                Ok(())
-            }),
-        );
-    }
-
-    // risectl
-    for fn_name in ["ctl", "risectl"] {
-        fns.insert(
-            fn_name,
-            Box::new(move |args: Vec<String>| {
-                eprintln!("launching risectl");
-
-                let opts = risingwave_ctl::CliOpts::parse_from(args);
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-
-                risingwave_rt::main_okk(risingwave_ctl::start(opts))
-            }),
-        );
-    }
-
-    // playground
-    for fn_name in ["play", "playground"] {
-        fns.insert(
-            fn_name,
-            Box::new(move |_: Vec<String>| {
-                let settings = risingwave_rt::LoggerSettings::new()
-                    .enable_tokio_console(false)
-                    .with_target("risingwave_storage", Level::WARN);
-                risingwave_rt::init_risingwave_logger(settings);
-
-                risingwave_rt::main_okk(playground())
-            }),
-        );
-    }
-
-    /// Get the launch target of this all-in-one binary
-    fn get_target(cmds: Vec<&str>) -> (String, Vec<String>) {
-        if let Some(cmd) = env::args().nth(1) && cmds.contains(&cmd.as_str()) {
-            // ./risingwave meta <args>
-            return (cmd, env::args().skip(1).collect());
-        }
-
-        if let Ok(target) = env::var("RW_NODE") {
-            // RW_NODE=meta ./risingwave <args>
-            (target, env::args().collect())
-        } else {
-            // ./meta-node <args>
-            let x = env::args().next().expect("cannot find argv[0]");
-            let x = x.rsplit('/').next().expect("cannot find binary name");
-            let target = x.to_string();
-            (target, env::args().collect())
-        }
-    }
-
-    let (target, args) = get_target(fns.keys().copied().collect());
-
-    match fns.remove(target.as_str()) {
-        Some(func) => {
-            func(args)?;
-        }
-        None => {
-            let mut components = fns.keys().collect::<Vec<_>>();
-            components.sort();
-            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, components);
-        }
-    }
+    let component = Component::from_str(component_name)?;
+    component.start(matches);
 
     Ok(())
 }
+
+fn playground(opts: PlaygroundOpts, registry: prometheus::Registry) {
+    let settings = risingwave_rt::LoggerSettings::new()
+        .enable_tokio_console(false)
+        .with_target("risingwave_storage", Level::WARN);
+    risingwave_rt::init_risingwave_logger(settings, registry);
+    risingwave_rt::main_okk(risingwave_cmd_all::playground(opts)).unwrap();
+}
+
+const _: () = {
+    /// `GIT_SHA` is a normal environment variable. It's [`risingwave_common::GIT_SHA`]
+    /// and is used in logs/version queries.
+    ///
+    /// Usually it's only provided by docker/binary releases (including nightly builds).
+    /// We check it is the same as `VERGEN_GIT_SHA` when it's present.
+    const GIT_SHA: &str = match option_env!("GIT_SHA") {
+        Some(sha) => sha,
+        None => VERGEN_GIT_SHA,
+    };
+    const ERROR_MSG: &str = const_str::concat!(
+        "environment variable GIT_SHA (",
+        GIT_SHA,
+        ") mismatches VERGEN_GIT_SHA (",
+        VERGEN_GIT_SHA,
+        "). Please set the correct value for GIT_SHA or unset it."
+    );
+    assert!(
+        const_str::starts_with!(GIT_SHA, VERGEN_GIT_SHA),
+        "{}",
+        ERROR_MSG
+    );
+};

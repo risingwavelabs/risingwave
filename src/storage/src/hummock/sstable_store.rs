@@ -21,6 +21,7 @@ use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
+use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
     BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata, ObjectStoreRef,
     ObjectStreamingUploader,
@@ -113,6 +114,16 @@ pub enum CachePolicy {
 impl Default for CachePolicy {
     fn default() -> Self {
         CachePolicy::Fill(CachePriority::High)
+    }
+}
+
+impl From<TracedCachePolicy> for CachePolicy {
+    fn from(policy: TracedCachePolicy) -> Self {
+        match policy {
+            TracedCachePolicy::Disable => Self::Disable,
+            TracedCachePolicy::Fill(priority) => Self::Fill(priority.into()),
+            TracedCachePolicy::NotFill => Self::NotFill,
+        }
     }
 }
 
@@ -317,7 +328,7 @@ impl SstableStore {
     }
 
     pub fn get_sst_data_path(&self, object_id: HummockSstableObjectId) -> String {
-        let obj_prefix = self.store.get_object_prefix(object_id, true);
+        let obj_prefix = self.store.get_object_prefix(object_id);
         format!(
             "{}/{}{}.{}",
             self.path, obj_prefix, object_id, OBJECT_SUFFIX

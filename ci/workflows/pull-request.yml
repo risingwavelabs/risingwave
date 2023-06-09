@@ -1,19 +1,3 @@
-cargo-cache: &cargo-cache
-  id: cache
-  key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
-  restore-keys:
-    - "v1-cache-{{ id }}-{{ runner.os }}-"
-    - "v1-cache-{{ id }}-"
-  backend: s3
-  s3:
-    bucket: ci-cache-bucket
-    args: '--no-progress'
-  paths:
-    - ".cargo/registry/index"
-    - ".cargo/registry/cache"
-    - ".cargo/git/db"
-    - ".cargo/advisory-db"
-
 steps:
   - label: "check ci image rebuild"
     plugins:
@@ -30,7 +14,6 @@ steps:
     command: "ci/scripts/build.sh -p ci-dev"
     key: "build"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -56,7 +39,6 @@ steps:
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -67,7 +49,6 @@ steps:
     command: "ci/scripts/docslt.sh"
     key: "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -80,13 +61,12 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 12
+    timeout_in_minutes: 15
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -94,7 +74,6 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -108,7 +87,6 @@ steps:
       - "build"
       - "docslt"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -120,7 +98,6 @@ steps:
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
     depends_on: "build"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -134,7 +111,6 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: source-test-env
           config: ci/docker-compose.yml
@@ -148,13 +124,13 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: sink-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 18
+    cancel_on_build_failing: true
 
   - label: "end-to-end iceberg sink test"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-dev"
@@ -162,7 +138,6 @@ steps:
       - "build"
       - "build-other"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -174,7 +149,6 @@ steps:
     command: "ci/scripts/java-binding-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -186,7 +160,6 @@ steps:
     command: "ci/scripts/regress-test.sh -p ci-dev"
     depends_on: "build"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: regress-test-env
           config: ci/docker-compose.yml
@@ -198,7 +171,6 @@ steps:
     command: "ci/scripts/pr-unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
-      - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
@@ -207,7 +179,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 12
+    timeout_in_minutes: 13
 
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
@@ -216,7 +188,6 @@ steps:
       - "build-simulation"
     plugins:
       - ./ci/plugins/swapfile
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -227,7 +198,18 @@ steps:
   - label: "check"
     command: "ci/scripts/check.sh"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
+      - gencer/cache#v2.4.10:
+          id: cache
+          key: "v1-cache-{{ id }}-{{ runner.os }}-{{ checksum 'Cargo.lock' }}"
+          restore-keys:
+            - "v1-cache-{{ id }}-{{ runner.os }}-"
+            - "v1-cache-{{ id }}-"
+          backend: s3
+          s3:
+            bucket: ci-cache-bucket
+            args: "--no-progress"
+          paths:
+            - ".cargo/advisory-db"
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -236,18 +218,17 @@ steps:
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
     timeout_in_minutes: 10
+    cancel_on_build_failing: true
 
   - label: "scaling test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh scale::"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -258,7 +239,6 @@ steps:
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh recovery::"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -272,7 +252,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -281,12 +260,12 @@ steps:
             - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 21
+    cancel_on_build_failing: true
 
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       # - seek-oss/aws-sm#v2.3.1:
       #     env:
       #       BUILDKITE_ANALYTICS_TOKEN: buildkite-build-analytics-deterministic-token
@@ -299,11 +278,11 @@ steps:
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
+    cancel_on_build_failing: true
 
   - label: "misc check"
     command: "ci/scripts/misc-check.sh"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -320,7 +299,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
@@ -340,7 +318,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
@@ -364,7 +341,6 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: ci-flamegraph-env
           config: ci/docker-compose.yml
@@ -376,3 +352,18 @@ steps:
     # - Generate Flamegraph: ~15min (see https://github.com/koute/not-perf/issues/30 on optimizing)
     # - Building RW artifacts: ~8min
     timeout_in_minutes: 60 # ~3-4 queries can run
+
+  # Backwards compatibility tests
+  - label: "Backwards compatibility tests"
+    command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "breaking-change" ||
+        build.pull_request.labels includes "ci/run-backwards-compat-tests"
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: ci-flamegraph-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+    timeout_in_minutes: 20

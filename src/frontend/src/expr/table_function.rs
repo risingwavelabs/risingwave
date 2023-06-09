@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
-use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
-use risingwave_pb::expr::table_function::Type;
+use risingwave_common::types::DataType;
+use risingwave_expr::sig::table_function::FUNC_SIG_MAP;
+pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionPb, UserDefinedTableFunction as UserDefinedTableFunctionPb,
 };
@@ -40,180 +40,30 @@ pub struct TableFunction {
     pub udtf_catalog: Option<Arc<FunctionCatalog>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum TableFunctionType {
-    Generate,
-    Range,
-    Unnest,
-    RegexpMatches,
-    Udtf,
-}
-
-impl TableFunctionType {
-    fn to_protobuf(self) -> Type {
-        match self {
-            TableFunctionType::Generate => Type::Generate,
-            TableFunctionType::Range => Type::Range,
-            TableFunctionType::Unnest => Type::Unnest,
-            TableFunctionType::RegexpMatches => Type::RegexpMatches,
-            TableFunctionType::Udtf => Type::Udtf,
-        }
-    }
-}
-
-impl TableFunction {
-    pub fn name(&self) -> &str {
-        match self.function_type {
-            TableFunctionType::Generate => "generate_series",
-            TableFunctionType::Range => "range",
-            TableFunctionType::Unnest => "unnest",
-            TableFunctionType::RegexpMatches => "regexp_matches",
-            TableFunctionType::Udtf => &self.udtf_catalog.as_ref().unwrap().name,
-        }
-    }
-}
-
-impl FromStr for TableFunctionType {
-    type Err = ();
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("generate_series") {
-            Ok(TableFunctionType::Generate)
-        } else if s.eq_ignore_ascii_case("range") {
-            Ok(TableFunctionType::Range)
-        } else if s.eq_ignore_ascii_case("unnest") {
-            Ok(TableFunctionType::Unnest)
-        } else if s.eq_ignore_ascii_case("regexp_matches") {
-            Ok(TableFunctionType::RegexpMatches)
-        } else {
-            Err(())
-        }
-    }
-}
-
 impl TableFunction {
     /// Create a `TableFunction` expr with the return type inferred from `func_type` and types of
     /// `inputs`.
     pub fn new(func_type: TableFunctionType, args: Vec<ExprImpl>) -> RwResult<Self> {
-        // TODO: refactor into sth like FunctionCall::new.
-        // Current implementation is copied from legacy code.
-
-        match func_type {
-            function_type @ (TableFunctionType::Generate | TableFunctionType::Range) => {
-                // generate_series ( start timestamp, stop timestamp, step interval ) or
-                // generate_series ( start i32, stop i32, step i32 )
-
-                fn type_check(exprs: &[ExprImpl]) -> RwResult<DataType> {
-                    let mut exprs = exprs.iter();
-                    let (start, stop, step) = exprs.next_tuple().unwrap();
-                    match (start.return_type(), stop.return_type(), step.return_type()) {
-                        (DataType::Int32, DataType::Int32, DataType::Int32) => Ok(DataType::Int32),
-                        (DataType::Timestamp, DataType::Timestamp, DataType::Interval) => {
-                            Ok(DataType::Timestamp)
-                        }
-                        _ => Err(ErrorCode::BindError(
-                            "Invalid arguments for Generate series function".to_string(),
-                        )
-                        .into()),
-                    }
-                }
-
-                if args.len() != 3 {
-                    return Err(ErrorCode::BindError(
-                        "the length of args of generate series function should be 3".to_string(),
-                    )
-                    .into());
-                }
-
-                let data_type = type_check(&args)?;
-
-                Ok(TableFunction {
-                    args,
-                    return_type: data_type,
-                    function_type,
-                    udtf_catalog: None,
-                })
-            }
-            TableFunctionType::Unnest => {
-                if args.len() != 1 {
-                    return Err(ErrorCode::BindError(
-                        "the length of args of unnest function should be 1".to_string(),
-                    )
-                    .into());
-                }
-
-                let expr = args.into_iter().next().unwrap();
-                if matches!(expr.return_type(), DataType::List(_)) {
-                    let data_type = unnested_list_type(expr.return_type());
-
-                    Ok(TableFunction {
-                        args: vec![expr],
-                        return_type: data_type,
-                        function_type: TableFunctionType::Unnest,
-                        udtf_catalog: None,
-                    })
-                } else {
-                    Err(ErrorCode::BindError(
-                        "the expr function of unnest function should be array".to_string(),
-                    )
-                    .into())
-                }
-            }
-            TableFunctionType::RegexpMatches => {
-                if args.len() != 2 && args.len() != 3 {
-                    return Err(ErrorCode::BindError(
-                        "the length of args of generate series function should be 2 or 3"
-                            .to_string(),
-                    )
-                    .into());
-                }
-                if let Some(flag) = args.get(2) {
-                    match flag {
-                        ExprImpl::Literal(flag) => {
-                            match flag.get_data() {
-                                Some(flag) => {
-                                    let ScalarImpl::Utf8(flag) = flag else {
-                                        return Err(ErrorCode::BindError(
-                                            "flag in regexp_matches must be a literal string"
-                                                .to_string(),
-                                        )
-                                        .into());
-                                    };
-                                    for c in flag.chars() {
-                                        if !"icg".contains(c) {
-                                            return Err(ErrorCode::NotImplemented(
-                                                format!(
-                                                    "invalid regular expression option: \"{c}\""
-                                                ),
-                                                None.into(),
-                                            )
-                                            .into());
-                                        }
-                                    }
-                                }
-                                None => {
-                                    // flag is NULL. Will return NULL.
-                                }
-                            }
-                        }
-                        _ => {
-                            return Err(ErrorCode::BindError(
-                                "flag in regexp_matches must be a literal string".to_string(),
-                            )
-                            .into())
-                        }
-                    }
-                }
-                Ok(TableFunction {
-                    args,
-                    return_type: DataType::List(Box::new(DataType::Varchar)),
-                    function_type: TableFunctionType::RegexpMatches,
-                    udtf_catalog: None,
-                })
-            }
-            // not in this path
-            TableFunctionType::Udtf => unreachable!(),
-        }
+        let arg_types = args.iter().map(|c| c.return_type()).collect_vec();
+        let signature = FUNC_SIG_MAP
+            .get(
+                func_type,
+                &args.iter().map(|c| c.return_type().into()).collect_vec(),
+            )
+            .ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "table function not found: {:?}({})",
+                    func_type,
+                    arg_types.iter().map(|t| format!("{:?}", t)).join(", "),
+                ))
+            })?;
+        let return_type = (signature.type_infer)(&arg_types)?;
+        Ok(TableFunction {
+            args,
+            return_type,
+            function_type: func_type,
+            udtf_catalog: None,
+        })
     }
 
     /// Create a user-defined `TableFunction`.
@@ -231,7 +81,7 @@ impl TableFunction {
 
     pub fn to_protobuf(&self) -> TableFunctionPb {
         TableFunctionPb {
-            function_type: self.function_type.to_protobuf() as i32,
+            function_type: self.function_type as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
             udtf: self
@@ -243,6 +93,14 @@ impl TableFunction {
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
                 }),
+        }
+    }
+
+    /// Get the name of the table function.
+    pub fn name(&self) -> String {
+        match self.function_type {
+            TableFunctionType::Udtf => self.udtf_catalog.as_ref().unwrap().name.clone(),
+            t => t.as_str_name().to_lowercase(),
         }
     }
 

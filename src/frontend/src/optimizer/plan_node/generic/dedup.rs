@@ -14,9 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use itertools::Itertools;
+use pretty_xmlish::Pretty;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
@@ -30,8 +32,31 @@ pub struct Dedup<PlanRef> {
 impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
-        builder.field("dedup_cols", &self.dedup_cols);
+        builder.field("dedup_cols", &self.dedup_cols_display());
         builder.finish()
+    }
+
+    fn dedup_cols_display(&self) -> Vec<FieldDisplay<'_>> {
+        self.dedup_cols
+            .iter()
+            .map(|i| FieldDisplay(self.input.schema().fields.get(*i).unwrap()))
+            .collect_vec()
+    }
+
+    fn dedup_cols_pretty<'a>(&self) -> Pretty<'a> {
+        Pretty::Array(
+            self.dedup_cols
+                .iter()
+                .map(|i| FieldDisplay(self.input.schema().fields.get(*i).unwrap()))
+                .map(|fd| Pretty::display(&fd))
+                .collect(),
+        )
+    }
+}
+
+impl<PlanRef: GenericPlanRef> DistillUnit for Dedup<PlanRef> {
+    fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
+        Pretty::childless_record(name, vec![("dedup_cols", self.dedup_cols_pretty())])
     }
 }
 

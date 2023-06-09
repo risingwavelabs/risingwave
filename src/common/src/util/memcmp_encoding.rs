@@ -151,8 +151,7 @@ fn calculate_encoded_size_inner(
             // TODO: need some test for this case (e.g. e2e test)
             DataType::List { .. } => deserializer.skip_bytes()?,
             DataType::Struct(t) => t
-                .fields
-                .iter()
+                .types()
                 .map(|field| {
                     // use default null tags inside composite type
                     calculate_encoded_size_inner(
@@ -213,7 +212,7 @@ pub fn encode_chunk(
 ) -> memcomparable::Result<Vec<Vec<u8>>> {
     let encoded_columns: Vec<_> = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), o.order_type))
+        .map(|o| encode_array(chunk.column_at(o.column_index), o.order_type))
         .try_collect()?;
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];

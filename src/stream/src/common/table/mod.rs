@@ -20,4 +20,4 @@ pub mod test_state_table;
 #[cfg(test)]
 pub mod test_storage_table;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;

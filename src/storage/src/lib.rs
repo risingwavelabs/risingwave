@@ -17,7 +17,6 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
-#![feature(build_hasher_simple_hash_one)]
 #![feature(custom_test_frameworks)]
 #![feature(drain_filter)]
 #![feature(generators)]
@@ -45,6 +44,7 @@
 #![feature(associated_type_bounds)]
 #![feature(local_key_cell_methods)]
 #![feature(exclusive_range_pattern)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod hummock;
 pub mod memory;

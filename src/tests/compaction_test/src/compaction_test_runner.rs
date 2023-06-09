@@ -293,12 +293,8 @@ async fn pull_version_deltas(
     tracing::info!("Assigned pull worker id {}", worker_id);
     meta_client.activate(advertise_addr).await.unwrap();
 
-    let (handle, shutdown_tx) = MetaClient::start_heartbeat_loop(
-        meta_client.clone(),
-        Duration::from_millis(1000),
-        Duration::from_secs(600),
-        vec![],
-    );
+    let (handle, shutdown_tx) =
+        MetaClient::start_heartbeat_loop(meta_client.clone(), Duration::from_millis(1000), vec![]);
     let res = meta_client
         .list_version_deltas(0, u32::MAX, u64::MAX)
         .await
@@ -350,7 +346,6 @@ async fn start_replay(
     let sub_tasks = vec![MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(1000),
-        Duration::from_secs(600),
         vec![],
     )];
 

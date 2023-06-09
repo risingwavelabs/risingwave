@@ -267,7 +267,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
     unsafe fn remove(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
         debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
-        let (mut prev, ptr) = self.find_pointer(idx, key);
+        let (prev, ptr) = self.find_pointer(idx, key);
         if ptr.is_null() {
             return null_mut();
         }
@@ -290,7 +290,7 @@ impl<K: LruKey, T: LruValue> LruHandleTable<K, T> {
         (*h).set_in_cache(true);
         debug_assert!(self.list.len().is_power_of_two());
         let idx = (hash as usize) & (self.list.len() - 1);
-        let (mut prev, ptr) = self.find_pointer(idx, (*h).get_key());
+        let (prev, ptr) = self.find_pointer(idx, (*h).get_key());
         if prev.is_null() {
             self.list[idx] = h;
         } else {
@@ -430,7 +430,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
     // insert entry in the end of the linked-list
     unsafe fn lru_insert(&mut self, e: *mut LruHandle<K, T>) {
         debug_assert!(!e.is_null());
-        let mut entry = &mut (*e);
+        let entry = &mut (*e);
         #[cfg(debug_assertions)]
         {
             assert!(!(*e).is_in_lru());

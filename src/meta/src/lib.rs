@@ -21,7 +21,6 @@
 #![feature(lint_reasons)]
 #![feature(map_try_insert)]
 #![feature(hash_drain_filter)]
-#![feature(is_some_and)]
 #![feature(btree_drain_filter)]
 #![feature(result_option_inspect)]
 #![feature(lazy_cell)]
@@ -34,6 +33,7 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(string_leak)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod backup_restore;
 mod barrier;
@@ -52,16 +52,17 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::OverrideConfig;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_common_proc_macro::OverrideConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
+#[command(version, about = "The central metadata management service")]
 pub struct MetaNodeOpts {
     #[clap(long, env = "RW_VPC_ID")]
-    vpd_id: Option<String>,
+    vpc_id: Option<String>,
 
     #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
     security_group_id: Option<String>,
@@ -158,6 +159,11 @@ pub struct OverrideConfigOpts {
     #[override_opts(path = system.data_directory, optional_in_config)]
     data_directory: Option<String>,
 
+    /// Whether config object storage bucket lifecycle to purge stale data.
+    #[clap(long, env = "RW_DO_NOT_CONFIG_BUCKET_LIFECYCLE")]
+    #[override_opts(path = meta.do_not_config_object_storage_lifecycle)]
+    do_not_config_object_storage_lifecycle: Option<bool>,
+
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
     #[override_opts(path = system.backup_storage_url, optional_in_config)]
@@ -243,7 +249,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
-                vpc_id: opts.vpd_id,
+                vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 periodic_space_reclaim_compaction_interval_sec: config
@@ -259,6 +265,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 move_table_size_limit: config.meta.move_table_size_limit,
+                partition_vnode_count: config.meta.partition_vnode_count,
+                do_not_config_object_storage_lifecycle: config
+                    .meta
+                    .do_not_config_object_storage_lifecycle,
             },
             config.system.into_init_system_params(),
         )

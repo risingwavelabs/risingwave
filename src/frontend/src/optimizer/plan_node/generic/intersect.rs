@@ -14,9 +14,10 @@
 
 use std::fmt;
 
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{GenericPlanNode, GenericPlanRef};
+use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -56,4 +57,9 @@ impl<PlanRef: GenericPlanRef> Intersect<PlanRef> {
     pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
         builder.field("all", &self.all);
     }
+
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        vec![("all", Pretty::debug(&self.all))]
+    }
 }
+impl_distill_unit_from_fields!(Intersect, GenericPlanRef);

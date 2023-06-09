@@ -44,3 +44,6 @@
 - input: SHOW CREATE VIEW schema.v
   formatted_sql: SHOW CREATE VIEW schema.v
   formatted_ast: 'ShowCreateObject { create_type: View, name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "v", quote_style: None }]) }'
+- input: SHOW INDEXES FROM t
+  formatted_sql: SHOW INDEXES FROM t
+  formatted_ast: 'ShowObjects(Indexes { table: ObjectName([Ident { value: "t", quote_style: None }]) })'

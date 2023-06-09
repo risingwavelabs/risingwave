@@ -41,7 +41,7 @@ use tokio_stream::StreamExt;
 use tonic::{Status, Streaming};
 
 use super::catalog::SinkCatalog;
-use crate::sink::{record_to_json, Result, Sink, SinkError};
+use crate::sink::{record_to_json, Result, Sink, SinkError, TimestampHandlingMode};
 use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
@@ -139,7 +139,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 .iter()
                 .map(|c| Column {
                     name: c.name.clone(),
-                    data_type: c.data_type().to_protobuf().type_name,
+                    data_type: Some(c.data_type().to_protobuf()),
                 })
                 .collect(),
             pk_indices: pk_indices.iter().map(|i| *i as u32).collect(),
@@ -203,15 +203,22 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                     | DataType::Boolean
                     | DataType::Decimal
                     | DataType::Timestamp
+                    | DataType::Timestamptz
                     | DataType::Varchar
+                    | DataType::Date
+                    | DataType::Time
+                    | DataType::Interval
+                    | DataType::Jsonb
+                    | DataType::Bytea
+                    | DataType::List(_)
             ) {
                 Ok( Column {
                     name: column.column_desc.name.clone(),
-                    data_type: column.column_desc.data_type.to_protobuf().type_name,
+                    data_type: Some(column.column_desc.data_type.to_protobuf()),
                 })
                 } else {
                     Err(SinkError::Remote(format!(
-                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Timestamp and Varchar, got {:?}: {:?}",
+                        "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
                         column.column_desc.name,
                         column.column_desc.data_type
                     )))
@@ -299,7 +306,11 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
             SinkPayloadFormat::Json => {
                 let mut row_ops = vec![];
                 for (op, row_ref) in chunk.rows() {
-                    let map = record_to_json(row_ref, &self.schema.fields)?;
+                    let map = record_to_json(
+                        row_ref,
+                        &self.schema.fields,
+                        TimestampHandlingMode::String,
+                    )?;
                     let row_op = RowOp {
                         op_type: op.to_protobuf() as i32,
                         line: serde_json::to_string(&map)
@@ -371,12 +382,10 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
     use std::time::Duration;
 
-    use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, StreamChunk, Utf8Array};
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_pb::connector_service::sink_response::{
         Response, StartEpochResponse, SyncResponse, WriteResponse,
     };
@@ -395,16 +404,10 @@ mod test {
         let (_, resp_recv) = mpsc::unbounded_channel();
 
         let mut sink = RemoteSink::<true>::for_test(resp_recv, request_sender);
-        let chunk = StreamChunk::new(
-            vec![Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(I32Array, [Some(1)])))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("Ripper")]
-                )))),
-            ],
-            None,
+        let chunk = StreamChunk::from_pretty(
+            " i T
+            + 1 Ripper
+        ",
         );
 
         // test epoch check
@@ -439,34 +442,19 @@ mod test {
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
         let mut sink = RemoteSink::<true>::for_test(response_receiver, request_sender);
 
-        let chunk_a = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("Alice"), Some("Bob"), Some("Clare")]
-                )))),
-            ],
-            None,
+        let chunk_a = StreamChunk::from_pretty(
+            " i T
+            + 1 Alice
+            + 2 Bob
+            + 3 Clare
+        ",
         );
-
-        let chunk_b = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
-            vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(4), Some(5), Some(6)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("David"), Some("Eve"), Some("Frank")]
-                )))),
-            ],
-            None,
+        let chunk_b = StreamChunk::from_pretty(
+            " i T
+            + 4 David
+            + 5 Eve
+            + 6 Frank
+        ",
         );
 
         // test write batch

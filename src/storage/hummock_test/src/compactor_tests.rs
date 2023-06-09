@@ -516,9 +516,7 @@ pub(crate) mod tests {
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             existing_table_id,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         get_compactor_context_with_filter_key_extractor_manager(
@@ -647,16 +645,12 @@ pub(crate) mod tests {
         let filter_key_extractor_manager = global_storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
             1,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         filter_key_extractor_manager.update(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager_impl(
@@ -844,9 +838,7 @@ pub(crate) mod tests {
         );
         filter_key_extractor_manager.update(
             2,
-            Arc::new(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
 
         // 1. add sstables

@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
+use risingwave_common::metrics::CustomLayer;
 use tracing::Level;
 use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
@@ -41,6 +42,10 @@ const ENABLE_QUERY_LOG_FILE: bool = false;
 /// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
 /// Includes line numbers for each log.
 const ENABLE_PRETTY_LOG: bool = false;
+
+const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
+
+const SLOW_QUERY_LOG: &str = "risingwave_frontend_slow_query_log";
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -110,7 +115,8 @@ impl LoggerSettings {
     }
 }
 
-/// Set panic hook to abort the process (without losing debug info and stack trace).
+/// Set panic hook to abort the process if we're not catching unwind, without losing the information
+/// of stack trace and await-tree.
 pub fn set_panic_hook() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
@@ -120,7 +126,9 @@ pub fn set_panic_hook() {
             println!("{}\n", context);
         }
 
-        std::process::abort();
+        if !risingwave_common::util::panic::is_catching_unwind() {
+            std::process::abort();
+        }
     });
 }
 
@@ -132,7 +140,7 @@ pub fn set_panic_hook() {
 ///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
-pub fn init_risingwave_logger(settings: LoggerSettings) {
+pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     let mut layers = vec![];
 
     // fmt layer (formatting and logging to stdout)
@@ -212,57 +220,45 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_thread_names(true)
             .with_thread_ids(true)
             .with_writer(std::sync::Mutex::new(file))
-            .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
+            .with_filter(filter::Targets::new().with_target(PGWIRE_QUERY_LOG, Level::TRACE));
         layers.push(layer.boxed());
     }
 
-    let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
-    let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
-    let slow_query_log_path = PathBuf::from(slow_query_log_path);
     // slow query log is always enabled
-    // also dump slow query log
-    std::fs::create_dir_all(slow_query_log_path.clone()).unwrap_or_else(|e| {
-        panic!(
-            "failed to create directory '{}' for slow query log: {e}",
-            slow_query_log_path.display()
-        )
-    });
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(slow_query_log_path.join("slow_query.log"))
-        .unwrap_or_else(|e| {
+    {
+        let slow_query_log_path = std::env::var("RW_QUERY_LOG_PATH");
+        let slow_query_log_path = slow_query_log_path.unwrap_or(default_query_log_path);
+        let slow_query_log_path = PathBuf::from(slow_query_log_path);
+
+        std::fs::create_dir_all(slow_query_log_path.clone()).unwrap_or_else(|e| {
             panic!(
-                "failed to create '{}/slow_query.log': {e}",
+                "failed to create directory '{}' for slow query log: {e}",
                 slow_query_log_path.display()
             )
         });
-    let layer = tracing_subscriber::fmt::layer()
-        .with_ansi(false)
-        .with_level(false)
-        .with_file(false)
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_thread_names(true)
-        .with_thread_ids(true)
-        .with_writer(std::sync::Mutex::new(file))
-        .with_filter(
-            filter::Targets::new().with_target("risingwave_frontend_slow_query_log", Level::TRACE),
-        );
-    layers.push(layer.boxed());
-
-    // s3 sdk retry
-    let layer = tracing_subscriber::fmt::layer()
-        .with_ansi(false)
-        .with_level(false)
-        .with_file(false)
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_thread_names(true)
-        .with_thread_ids(true)
-        .with_filter(filter::Targets::new().with_target("aws_smithy_client", Level::DEBUG));
-    layers.push(layer.boxed());
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(slow_query_log_path.join("slow_query.log"))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to create '{}/slow_query.log': {e}",
+                    slow_query_log_path.display()
+                )
+            });
+        let layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_level(false)
+            .with_file(false)
+            .with_target(false)
+            .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
+            .with_thread_names(true)
+            .with_thread_ids(true)
+            .with_writer(std::sync::Mutex::new(file))
+            .with_filter(filter::Targets::new().with_target(SLOW_QUERY_LOG, Level::TRACE));
+        layers.push(layer.boxed());
+    }
 
     // s3 sdk retry
     let layer = tracing_subscriber::fmt::layer()
@@ -297,13 +293,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 });
         });
     };
-
+    layers.push(Box::new(CustomLayer::new(registry)));
     tracing_subscriber::registry().with(layers).init();
-    let collector = tracing_subscriber::fmt()
-    // filter spans/events with level TRACE or higher.
-    .with_max_level(Level::DEBUG)
-    // build but do not install the subscriber.
-    .finish();
+
     // TODO: add file-appender tracing subscriber in the future
 }
 

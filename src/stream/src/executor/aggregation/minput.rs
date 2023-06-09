@@ -26,7 +26,6 @@ use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common_proc_macro::EstimateSize;
 use risingwave_expr::agg::{AggCall, AggKind};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
@@ -35,6 +34,7 @@ use super::agg_state_cache::{AggStateCache, GenericAggStateCache, StateCacheInpu
 use super::minput_agg_impl::array_agg::ArrayAgg;
 use super::minput_agg_impl::extreme::ExtremeAgg;
 use super::minput_agg_impl::string_agg::StringAgg;
+use super::GroupKey;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -178,14 +178,14 @@ impl<S: StateStore> MaterializedInputState<S> {
     pub async fn get_output(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&OwnedRow>,
+        group_key: Option<&GroupKey>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
             let mut cache_filler = self.cache.begin_syncing();
 
             let all_data_iter = state_table
                 .iter_with_pk_prefix(
-                    &group_key,
+                    group_key.map(GroupKey::table_pk),
                     PrefetchOptions {
                         exhaust_iter: cache_filler.capacity().is_none(),
                     },
@@ -242,6 +242,7 @@ mod tests {
     use super::MaterializedInputState;
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
+    use crate::executor::aggregation::GroupKey;
     use crate::executor::StreamExecutorResult;
 
     fn create_chunk<S: StateStore>(
@@ -296,6 +297,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }
     }
 
@@ -347,7 +349,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -372,7 +374,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -456,7 +458,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -481,7 +483,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -602,7 +604,7 @@ mod tests {
                 .zip_eq_fast([&mut state_1, &mut state_2])
                 .try_for_each(|(chunk, state)| {
                     let (ops, columns, visibility) = chunk.into_inner();
-                    let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+                    let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
                     state.apply_chunk(&ops, visibility.as_ref(), &columns)
                 })?;
 
@@ -640,7 +642,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = create_extreme_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
-        let group_key = Some(OwnedRow::new(vec![Some(8.into())]));
+        let group_key = Some(GroupKey::new(OwnedRow::new(vec![Some(8.into())]), None));
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,
@@ -675,7 +677,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -700,7 +702,7 @@ mod tests {
             );
 
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -798,7 +800,7 @@ mod tests {
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -832,7 +834,7 @@ mod tests {
 
             let chunk = create_chunk(&pretty_lines.join("\n"), &mut table, &mapping);
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -894,7 +896,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -921,7 +923,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -950,7 +952,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -992,6 +994,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 
@@ -1028,7 +1031,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -1052,7 +1055,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -1093,6 +1096,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 
@@ -1128,7 +1132,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();
@@ -1157,7 +1161,7 @@ mod tests {
                 &mapping,
             );
             let (ops, columns, visibility) = chunk.into_inner();
-            let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
+            let columns: Vec<_> = columns.iter().map(|col| col.as_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
             epoch.inc();

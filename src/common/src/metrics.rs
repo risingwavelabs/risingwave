@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use hytra::TrAdder;
-use prometheus::core::{Atomic, GenericGauge};
+use prometheus::core::{Atomic, AtomicU64, GenericCounter, GenericGauge};
+use prometheus::{register_int_counter_with_registry, Registry};
 
 pub struct TrAdderAtomic(TrAdder<i64>);
 
@@ -44,3 +45,37 @@ impl Atomic for TrAdderAtomic {
 }
 
 pub type TrAdderGauge = GenericGauge<TrAdderAtomic>;
+
+use tracing::Subscriber;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
+
+pub struct CustomLayer {
+    pub aws_retry_counts: GenericCounter<AtomicU64>,
+}
+
+impl<S> Layer<S> for CustomLayer
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        if event.metadata().target() == "aws_smithy_client::retry"
+            && event.metadata().level() == &tracing::Level::DEBUG
+        {
+            self.aws_retry_counts.inc();
+        }
+    }
+}
+
+impl CustomLayer {
+    pub fn new(registry: Registry) -> Self {
+        let aws_retry_counts = register_int_counter_with_registry!(
+            "aws_retry_counts",
+            "Total number of aws sdk retry happens",
+            registry
+        )
+        .unwrap();
+        Self { aws_retry_counts }
+    }
+}

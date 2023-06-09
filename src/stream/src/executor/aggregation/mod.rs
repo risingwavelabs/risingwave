@@ -15,9 +15,8 @@
 pub use agg_group::*;
 pub use agg_state::*;
 pub use distinct::*;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
@@ -68,7 +67,7 @@ pub async fn agg_call_filter_res(
     ctx: &ActorContextRef,
     identity: &str,
     agg_call: &AggCall,
-    columns: &[Column],
+    columns: &[ArrayRef],
     base_visibility: Option<&Bitmap>,
     capacity: usize,
 ) -> StreamExecutorResult<Option<Bitmap>> {
@@ -78,7 +77,7 @@ pub async fn agg_call_filter_res(
     ) {
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
-        let agg_col_bitmap = columns[agg_col_idx].array_ref().null_bitmap();
+        let agg_col_bitmap = columns[agg_col_idx].null_bitmap();
         Some(agg_col_bitmap)
     } else {
         None

@@ -48,6 +48,13 @@ select * from generate_series(timestamp '2021-01-01 03:04:05', timestamp '2020-0
 2020-01-13 03:04:05
 
 query I
+SELECT * FROM generate_series('1'::INT,'3'::INT)
+----
+1
+2
+3
+
+query I
 SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
 ----
 2
@@ -81,7 +88,7 @@ SELECT * FROM generate_series('10'::INT,'2'::INT,'-2'::INT);
 4
 2
 
-statement error
+statement error step size cannot equal zero
 SELECT * FROM generate_series('2'::INT,'10'::INT,'0'::INT);
 
 query I
@@ -91,3 +98,32 @@ SELECT * FROM generate_series('2'::INT,'10'::INT,'-2'::INT);
 query I
 SELECT * FROM generate_series(1, 100000000, 1) where 1=0;
 ----
+
+query I
+SELECT * FROM generate_series('10000000000'::BIGINT,'10000000002'::BIGINT)
+----
+10000000000
+10000000001
+10000000002
+
+query I
+SELECT * FROM generate_series('10000000000'::BIGINT,'10000000002'::BIGINT, 2::BIGINT)
+----
+10000000000
+10000000002
+
+query R
+SELECT * FROM generate_series(0.1::numeric, 2.1::numeric)
+----
+0.1
+1.1
+2.1
+
+query R
+SELECT * FROM generate_series(0.1::numeric, 2.1::numeric, 0.5::numeric)
+----
+0.1
+0.6
+1.1
+1.6
+2.1

@@ -12,32 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use anyhow::anyhow;
-use futures_async_stream::try_stream;
-use risingwave_common::cast::{
-    str_to_date, str_to_time, str_to_timestamp, str_with_time_zone_to_timestamptz,
-};
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use crate::parser::canal::operators::*;
-use crate::parser::common::json_object_smart_get_value;
+use crate::parser::common::{do_parse_simd_json_value, json_object_smart_get_value};
 use crate::parser::util::at_least_one_ok;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
-use crate::{ensure_rust_type, ensure_str, impl_common_parser_logic};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
 const IS_DDL: &str = "isDdl";
 
-impl_common_parser_logic!(CanalJsonParser);
 #[derive(Debug)]
 pub struct CanalJsonParser {
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
@@ -104,7 +96,6 @@ impl CanalJsonParser {
                         })
                     })
                     .collect::<Vec<Result<_>>>();
-
                 at_least_one_ok(results)
             }
             CANAL_UPDATE_EVENT => {
@@ -152,7 +143,6 @@ impl CanalJsonParser {
                         })
                     })
                     .collect::<Vec<Result<_>>>();
-
                 at_least_one_ok(results)
             }
             CANAL_DELETE_EVENT => {
@@ -195,55 +185,42 @@ fn cannal_simd_json_parse_value(
 ) -> Result<Datum> {
     match value {
         None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
-        Some(v) => Ok(Some(cannal_do_parse_simd_json_value(dtype, v).map_err(
-            |e| {
+        Some(v) => Ok(Some(
+            do_parse_simd_json_value(&SourceFormat::CanalJson, dtype, v).map_err(|e| {
                 tracing::warn!("failed to parse type '{}' from json: {}", dtype, e);
                 anyhow!("failed to parse type '{}' from json: {}", dtype, e)
-            },
-        )?)),
+            })?,
+        )),
     }
 }
 
-#[inline]
-fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
-    let v = match dtype {
-        // mysql use tinyint to represent boolean
-        DataType::Boolean => ScalarImpl::Bool(ensure_rust_type!(v, i16) != 0),
-        DataType::Int16 => ScalarImpl::Int16(ensure_rust_type!(v, i16)),
-        DataType::Int32 => ScalarImpl::Int32(ensure_rust_type!(v, i32)),
-        DataType::Int64 => ScalarImpl::Int64(ensure_rust_type!(v, i64)),
-        DataType::Float32 => ScalarImpl::Float32(ensure_rust_type!(v, f32).into()),
-        DataType::Float64 => ScalarImpl::Float64(ensure_rust_type!(v, f64).into()),
-        // FIXME: decimal should have more precision than f64
-        DataType::Decimal => Decimal::from_str(ensure_str!(v, "string"))
-            .map_err(|_| anyhow!("parse decimal from string err {}", v))?
-            .into(),
-        DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
-        DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
-        DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestamptz => {
-            str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
-        }
-        _ => {
-            return Err(RwError::from(InternalError(format!(
-                "cannal data source not support type {}",
-                dtype
-            ))))
-        }
-    };
-    Ok(v)
+impl ByteStreamSourceParser for CanalJsonParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
     use risingwave_common::cast::str_to_timestamp;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, Decimal, JsonbVal, ScalarImpl, ToOwnedDatum};
+    use serde_json::Value;
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
@@ -251,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_data_types() {
-        let payload = br#"{"id":0,"database":"test","table":"data_type","pkNames":["id"],"isDdl":false,"type":"INSERT","es":1682057341424,"ts":1682057382913,"sql":"","sqlType":{"id":4,"tinyint":-6,"smallint":5,"mediumint":4,"int":4,"bigint":-5,"float":7,"double":8,"decimal":3,"date":91,"datetime":93,"time":92,"timestamp":93,"char":1,"varchar":12,"binary":2004,"varbinary":2004,"blob":2004,"text":2005,"enum":4,"set":-7},"mysqlType":{"binary":"binary","varbinary":"varbinary","enum":"enum","set":"set","bigint":"bigint","float":"float","datetime":"datetime","varchar":"varchar","smallint":"smallint","mediumint":"mediumint","double":"double","date":"date","char":"char","id":"int","tinyint":"tinyint","decimal":"decimal","blob":"blob","text":"text","int":"int","time":"time","timestamp":"timestamp"},"old":null,"data":[{"id":"1","tinyint":"5","smallint":"136","mediumint":"172113","int":"1801160058","bigint":"3916589616287113937","float":"0","double":"0.15652","decimal":"1.20364700","date":"2023-04-20","datetime":"2023-02-15 13:01:36","time":"20:23:41","timestamp":"2022-10-13 12:12:54","char":"Kathleen","varchar":"atque esse fugiat et quibusdam qui.","binary":"Joseph\u0000\u0000\u0000\u0000","varbinary":"Douglas","blob":"ducimus ut in commodi necessitatibus error magni repellat exercitationem!","text":"rerum sunt nulla quo quibusdam velit doloremque.","enum":"1","set":"1"}]}"#;
+        let payload = br#"{"id":0,"database":"test","table":"data_type","pkNames":["id"],"isDdl":false,"type":"INSERT","es":1682057341424,"ts":1682057382913,"sql":"","sqlType":{"id":4,"tinyint":-6,"smallint":5,"mediumint":4,"int":4,"bigint":-5,"float":7,"double":8,"decimal":3,"date":91,"datetime":93,"time":92,"timestamp":93,"char":1,"varchar":12,"binary":2004,"varbinary":2004,"blob":2004,"text":2005,"enum":4,"set":-7,"json":12},"mysqlType":{"binary":"binary","varbinary":"varbinary","enum":"enum","set":"set","bigint":"bigint","float":"float","datetime":"datetime","varchar":"varchar","smallint":"smallint","mediumint":"mediumint","double":"double","date":"date","char":"char","id":"int","tinyint":"tinyint","decimal":"decimal","blob":"blob","text":"text","int":"int","time":"time","timestamp":"timestamp","json":"json"},"old":null,"data":[{"id":"1","tinyint":"5","smallint":"136","mediumint":"172113","int":"1801160058","bigint":"3916589616287113937","float":"0","double":"0.15652","decimal":"1.20364700","date":"2023-04-20","datetime":"2023-02-15 13:01:36","time":"20:23:41","timestamp":"2022-10-13 12:12:54","char":"Kathleen","varchar":"atque esse fugiat et quibusdam qui.","binary":"Joseph\u0000\u0000\u0000\u0000","varbinary":"Douglas","blob":"ducimus ut in commodi necessitatibus error magni repellat exercitationem!","text":"rerum sunt nulla quo quibusdam velit doloremque.","enum":"1","set":"1","json":"{\"a\": 1, \"b\": 2}"}]}"#;
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("date", DataType::Date, 1.into()),
@@ -259,6 +236,8 @@ mod tests {
             SourceColumnDesc::simple("time", DataType::Time, 3.into()),
             SourceColumnDesc::simple("timestamp", DataType::Timestamp, 4.into()),
             SourceColumnDesc::simple("char", DataType::Varchar, 5.into()),
+            SourceColumnDesc::simple("binary", DataType::Bytea, 6.into()),
+            SourceColumnDesc::simple("json", DataType::Jsonb, 7.into()),
         ];
         let parser = CanalJsonParser::new(descs.clone(), Default::default()).unwrap();
 
@@ -298,6 +277,18 @@ mod tests {
         assert_eq!(
             row.datum_at(5).to_owned_datum(),
             Some(ScalarImpl::Utf8(Box::from("Kathleen".to_string())))
+        );
+        assert_eq!(
+            row.datum_at(6).to_owned_datum(),
+            Some(ScalarImpl::Bytea(Box::from(
+                "Joseph\u{0}\u{0}\u{0}\u{0}".as_bytes()
+            )))
+        );
+        assert_eq!(
+            row.datum_at(7).to_owned_datum(),
+            Some(ScalarImpl::Jsonb(JsonbVal::from(Value::from(
+                "{\"a\": 1, \"b\": 2}".to_string()
+            ))))
         );
     }
 

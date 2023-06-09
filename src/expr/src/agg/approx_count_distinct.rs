@@ -17,6 +17,7 @@ use std::hash::{Hash, Hasher};
 
 use risingwave_common::array::*;
 use risingwave_common::bail;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::*;
 use risingwave_expr_macro::build_aggregate;
 
@@ -40,7 +41,7 @@ fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
 /// `ApproxCountDistinct` approximates the count of non-null rows using `HyperLogLog`. The
 /// estimation error for `HyperLogLog` is 1.04/sqrt(num of registers). With 2^14 registers this
 /// is ~1/128.
-#[derive(Clone)]
+#[derive(Clone, EstimateSize)]
 pub struct ApproxCountDistinct {
     return_type: DataType,
     registers: [u8; NUM_OF_REGISTERS],
@@ -135,7 +136,7 @@ impl Aggregator for ApproxCountDistinct {
         start_row_id: usize,
         end_row_id: usize,
     ) -> Result<()> {
-        let array = input.column_at(0).array_ref();
+        let array = input.column_at(0);
         for row_id in start_row_id..end_row_id {
             self.add_datum(array.value_at(row_id));
         }
@@ -152,6 +153,10 @@ impl Aggregator for ApproxCountDistinct {
             }
             _ => bail!("Unexpected builder for count(*)."),
         }
+    }
+
+    fn estimated_size(&self) -> usize {
+        EstimateSize::estimated_size(self)
     }
 }
 
@@ -171,7 +176,7 @@ mod tests {
             lhs.push(Some(i));
         }
 
-        let col1 = I32Array::from_iter(&lhs).into();
+        let col1 = I32Array::from_iter(&lhs).into_ref();
         DataChunk::new(vec![col1], size)
     }
 

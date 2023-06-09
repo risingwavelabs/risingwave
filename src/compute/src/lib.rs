@@ -19,6 +19,7 @@
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -31,14 +32,17 @@ pub mod server;
 pub mod telemetry;
 
 use clap::{Parser, ValueEnum};
-use risingwave_common::config::AsyncStackTraceOption;
+use risingwave_common::config::{AsyncStackTraceOption, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
-use risingwave_common_proc_macro::OverrideConfig;
 use serde::{Deserialize, Serialize};
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug)]
+#[command(
+    version,
+    about = "The worker node that executes query plans and handles data ingestion and output"
+)]
 pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
@@ -174,7 +178,10 @@ use std::pin::Pin;
 use crate::server::compute_node_serve;
 
 /// Start compute node
-pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(
+    opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
@@ -196,7 +203,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
         tracing::info!("advertise addr is {}", advertise_addr);
 
         let (join_handle_vec, _shutdown_send) =
-            compute_node_serve(listen_addr, advertise_addr, opts).await;
+            compute_node_serve(listen_addr, advertise_addr, opts, registry).await;
 
         for join_handle in join_handle_vec {
             join_handle.await.unwrap();

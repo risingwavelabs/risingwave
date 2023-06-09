@@ -50,3 +50,24 @@ select to_timestamp('2001-04-17 00:00:00.9', 'YYYY-MM-DD HH24:MI:SS.MS');
 
 statement error
 select to_timestamp('2001-04-17 00:00:00.9999', 'YYYY-MM-DD HH24:MI:SS.US');
+
+# Timezone
+# FIXME: We should return timestamptz here.
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +03:30', 'YYYY/MM/DD HH24:MI:SS TZH:TZM');
+----
+2021-12-30 11:22:49
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +0330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
+----
+2021-12-30 11:22:49
+
+statement error
+SELECT to_timestamp('2021/12/30 14:52:49 +330', 'YYYY/MM/DD HH24:MI:SS TZHTZM');
+
+query T
+SELECT to_timestamp('2021/12/30 14:52:49 +03', 'YYYY/MM/DD HH24:MI:SS TZH');
+----
+2021-12-30 11:52:49

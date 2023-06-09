@@ -22,7 +22,8 @@ use risingwave_common::array::{
     ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
 };
 use risingwave_common::cast::{
-    parse_naive_date, parse_naive_datetime, parse_naive_time, str_with_time_zone_to_timestamptz,
+    parse_naive_date, parse_naive_datetime, parse_naive_time, str_to_bytea as str_to_bytea_common,
+    str_with_time_zone_to_timestamptz,
 };
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
@@ -34,7 +35,7 @@ use risingwave_expr_macro::{build_function, function};
 use risingwave_pb::expr::expr_node::PbType;
 
 use crate::expr::template::UnaryExpression;
-use crate::expr::{build, BoxedExpression, Expression, InputRefExpression};
+use crate::expr::{build_func, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
 
 /// String literals for bool type.
@@ -44,8 +45,6 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-
-const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[function("cast(varchar) -> date")]
 pub fn str_to_date(elem: &str) -> Result<Date> {
@@ -66,72 +65,6 @@ pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
     Ok(Timestamp::new(
         parse_naive_datetime(elem).map_err(|err| ExprError::Parse(err.into()))?,
     ))
-}
-
-#[function("cast(varchar) -> bytea")]
-pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    // Padded with whitespace str is not allowed.
-    if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
-        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into()))
-    } else if let Some(remainder) = elem.strip_prefix(r"\x") {
-        Ok(parse_bytes_hex(remainder)?.into())
-    } else {
-        Ok(parse_bytes_traditional(elem)?.into())
-    }
-}
-
-// Refer to Materialize: https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L623
-pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
-    // Can't use `hex::decode` here, as it doesn't tolerate whitespace
-    // between encoded bytes.
-
-    let decode_nibble = |b| match b {
-        b'a'..=b'f' => Ok(b - b'a' + 10),
-        b'A'..=b'F' => Ok(b - b'A' + 10),
-        b'0'..=b'9' => Ok(b - b'0'),
-        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
-    };
-
-    let mut buf = vec![];
-    let mut nibbles = s.as_bytes().iter().copied();
-    while let Some(n) = nibbles.next() {
-        if let b' ' | b'\n' | b'\t' | b'\r' = n {
-            continue;
-        }
-        let n = decode_nibble(n)?;
-        let n2 = match nibbles.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
-            Some(n2) => decode_nibble(n2)?,
-        };
-        buf.push((n << 4) | n2);
-    }
-    Ok(buf)
-}
-
-// Refer to https://github.com/MaterializeInc/materialize/blob/1766ab3978bc90abf75eb9b1fbadfcc95eca1993/src/repr/src/strconv.rs#L650
-pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
-    // Bytes are interpreted literally, save for the special escape sequences
-    // "\\", which represents a single backslash, and "\NNN", where each N
-    // is an octal digit, which represents the byte whose octal value is NNN.
-    let mut out = Vec::new();
-    let mut bytes = s.as_bytes().iter().fuse();
-    while let Some(&b) = bytes.next() {
-        if b != b'\\' {
-            out.push(b);
-            continue;
-        }
-        match bytes.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
-            Some(b'\\') => out.push(b'\\'),
-            b => match (b, bytes.next(), bytes.next()) {
-                (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
-                    out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
-                }
-                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
-            },
-        }
-    }
-    Ok(out)
 }
 
 #[function("cast(varchar) -> *int")]
@@ -306,6 +239,11 @@ pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+#[function("cast(varchar) -> bytea")]
+pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
+    str_to_bytea_common(elem).map_err(|err| ExprError::Parse(err.into()))
+}
+
 /// A lite version of casting from string to target type. Used by frontend to handle types that have
 /// to be created by casting.
 ///
@@ -325,7 +263,7 @@ pub fn literal_parsing(
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<F32>(s)?.into(),
         DataType::Float64 => str_parse::<F64>(s)?.into(),
-        DataType::Varchar => return Err(None),
+        DataType::Varchar => s.into(),
         DataType::Date => str_to_date(s)?.into(),
         DataType::Timestamp => str_to_timestamp(s)?.into(),
         // We only handle the case with timezone here, and leave the implicit session timezone case
@@ -403,7 +341,7 @@ fn build_cast_str_to_list(
 }
 
 fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
@@ -447,13 +385,13 @@ fn list_cast(
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
-    let cast = build(
+    let cast = build_func(
         PbType::Cast,
         target_elem_type.clone(),
         vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
     )
     .unwrap();
-    let elements = input.iter_elems_ref();
+    let elements = input.iter();
     let mut values = Vec::with_capacity(elements.len());
     for item in elements {
         let v = cast
@@ -471,14 +409,8 @@ fn build_cast_struct_to_struct(
     children: Vec<BoxedExpression>,
 ) -> Result<BoxedExpression> {
     let child = children.into_iter().next().unwrap();
-    let source_elem_type = match child.return_type() {
-        DataType::Struct(s) => (*s).clone(),
-        _ => panic!("expected struct type"),
-    };
-    let target_elem_type = match &return_type {
-        DataType::Struct(s) => (**s).clone(),
-        _ => panic!("expected struct type"),
-    };
+    let source_elem_type = child.return_type().as_struct().clone();
+    let target_elem_type = return_type.as_struct().clone();
     Ok(Box::new(
         UnaryExpression::<StructArray, StructArray, _>::new(child, return_type, move |x| {
             struct_cast(x, &source_elem_type, &target_elem_type)
@@ -493,13 +425,13 @@ fn struct_cast(
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
     let fields = (input.iter_fields_ref())
-        .zip_eq_fast(source_elem_type.fields.iter())
-        .zip_eq_fast(target_elem_type.fields.iter())
+        .zip_eq_fast(source_elem_type.types())
+        .zip_eq_fast(target_elem_type.types())
         .map(|((datum_ref, source_field_type), target_field_type)| {
             if source_field_type == target_field_type {
                 return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
             }
-            let cast = build(
+            let cast = build_func(
                 PbType::Cast,
                 target_field_type.clone(),
                 vec![InputRefExpression::new(source_field_type.clone(), 0).boxed()],
@@ -706,47 +638,6 @@ mod tests {
     }
 
     #[test]
-    fn test_bytea() {
-        assert_eq!(str_to_bytea("fgo").unwrap().as_ref().to_text(), r"\x66676f");
-        assert_eq!(
-            str_to_bytea(r"\xDeadBeef").unwrap().as_ref().to_text(),
-            r"\xdeadbeef"
-        );
-        assert_eq!(
-            str_to_bytea("12CD").unwrap().as_ref().to_text(),
-            r"\x31324344"
-        );
-        assert_eq!(
-            str_to_bytea("1234").unwrap().as_ref().to_text(),
-            r"\x31323334"
-        );
-        assert_eq!(
-            str_to_bytea(r"\x12CD").unwrap().as_ref().to_text(),
-            r"\x12cd"
-        );
-        assert_eq!(
-            str_to_bytea(r"\x De Ad Be Ef ").unwrap().as_ref().to_text(),
-            r"\xdeadbeef"
-        );
-        assert_eq!(
-            str_to_bytea("x De Ad Be Ef ").unwrap().as_ref().to_text(),
-            r"\x7820446520416420426520456620"
-        );
-        assert_eq!(
-            str_to_bytea(r"De\\123dBeEf").unwrap().as_ref().to_text(),
-            r"\x44655c3132336442654566"
-        );
-        assert_eq!(
-            str_to_bytea(r"De\123dBeEf").unwrap().as_ref().to_text(),
-            r"\x4465536442654566"
-        );
-        assert_eq!(
-            str_to_bytea(r"De\\000dBeEf").unwrap().as_ref().to_text(),
-            r"\x44655c3030306442654566"
-        );
-    }
-
-    #[test]
     fn test_struct_cast() {
         assert_eq!(
             struct_cast(
@@ -755,14 +646,8 @@ mod tests {
                     Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
-                &StructType::new(vec![
-                    (DataType::Varchar, "a".to_string()),
-                    (DataType::Float32, "b".to_string()),
-                ]),
-                &StructType::new(vec![
-                    (DataType::Int32, "a".to_string()),
-                    (DataType::Int32, "b".to_string()),
-                ])
+                &StructType::new(vec![("a", DataType::Varchar), ("b", DataType::Float32),]),
+                &StructType::new(vec![("a", DataType::Int32), ("b", DataType::Int32),])
             )
             .unwrap(),
             StructValue::new(vec![

@@ -21,7 +21,7 @@ import static org.junit.Assert.assertEquals;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
 import com.risingwave.connector.IcebergSink;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.ArraySinkRow;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -110,7 +110,7 @@ public class IcebergSinkLocalTest {
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
         IcebergSink sink =
                 new IcebergSink(
-                        TableSchema.getMockTableSchema(),
+                        TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),
                         FileFormat.PARQUET);
@@ -153,7 +153,7 @@ public class IcebergSinkLocalTest {
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
         IcebergSink sink =
                 new IcebergSink(
-                        TableSchema.getMockTableSchema(),
+                        TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),
                         FileFormat.PARQUET);
@@ -189,7 +189,7 @@ public class IcebergSinkLocalTest {
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
         IcebergSink sink =
                 new IcebergSink(
-                        TableSchema.getMockTableSchema(),
+                        TestUtils.getMockTableSchema(),
                         hadoopCatalog,
                         hadoopCatalog.loadTable(tableIdentifier),
                         FileFormat.PARQUET);

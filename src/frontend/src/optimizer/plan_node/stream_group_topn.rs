@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -53,22 +53,12 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
-        // We can use the group key as the stream key when there is at most one record for each
-        // value of the group key.
-        let logical_pk = if logical.limit_attr.max_one_row() {
-            logical.group_key.clone()
-        } else {
-            input.logical_pk().to_vec()
-        };
-
-        let base = PlanBase::new_stream(
-            input.ctx(),
-            schema,
-            logical_pk,
-            input.functional_dependency().clone(),
+        let base = PlanBase::new_stream_with_logical(
+            &logical,
             input.distribution().clone(),
             false,
-            false, // TODO(rc): group top-n EOWC support?
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
+            false,
             watermark_columns,
         );
         StreamGroupTopN {
@@ -78,7 +68,7 @@ impl StreamGroupTopN {
         }
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.logical.limit_attr
     }
 

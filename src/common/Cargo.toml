@@ -39,14 +39,14 @@ enum-as-inner = "0.5"
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hex = "0.4.3"
 humantime = "2.1"
 hytra = { workspace = true }
 itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
-memcomparable = { version = "0.1", features = ["decimal"] }
+memcomparable = { version = "0.2", features = ["decimal"] }
 num-traits = "0.2"
 number_prefix = "0.4.0"
 parking_lot = "0.12"
@@ -89,6 +89,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+tracing-subscriber = "0.3.16"
 twox-hash = "1"
 url = "2"
 uuid = "1.2.2"
@@ -97,7 +98,7 @@ uuid = "1.2.2"
 workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.12", default-features = false }
+procfs = { version = "0.14", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -110,6 +111,7 @@ criterion = "0.4"
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
+rusty-fork = "0.3"
 tempfile = "3"
 
 [[bench]]

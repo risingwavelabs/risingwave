@@ -12,14 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::ListValue;
+use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{Datum, ScalarRef};
 use risingwave_expr_macro::aggregate;
 
-#[aggregate("array_agg(*) -> list", state = "Vec<Datum>")]
-fn array_agg<'a, T: ScalarRef<'a>>(state: Option<Vec<Datum>>, value: Option<T>) -> Vec<Datum> {
+#[aggregate("array_agg(*) -> list", state = "State")]
+fn array_agg<'a, T: ScalarRef<'a>>(state: Option<State>, value: Option<T>) -> State {
     let mut state = state.unwrap_or_default();
-    state.push(value.map(|v| v.to_owned_scalar().into()));
+    state.0.push(value.map(|v| v.to_owned_scalar().into()));
     state
+}
+
+#[derive(Default, Clone)]
+struct State(Vec<Datum>);
+
+impl EstimateSize for State {
+    fn estimated_heap_size(&self) -> usize {
+        std::mem::size_of::<Datum>() * self.0.capacity()
+    }
+}
+
+impl From<State> for ListValue {
+    fn from(state: State) -> Self {
+        ListValue::new(state.0)
+    }
 }
 
 #[cfg(test)]
@@ -49,6 +66,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
@@ -80,6 +98,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.output(&mut builder)?;
@@ -130,6 +149,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;

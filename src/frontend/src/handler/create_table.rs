@@ -22,7 +22,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_TABLE_VERSION_ID,
     USER_COLUMN_ID_OFFSET,
 };
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -119,6 +119,24 @@ impl ColumnIdGenerator {
     }
 }
 
+fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
+    for option_def in &c.options {
+        match option_def.option {
+            ColumnOption::GeneratedColumns(_) => {}
+            ColumnOption::DefaultColumns(_) => {}
+            ColumnOption::Unique { is_primary: true } => {}
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("column constraints \"{}\"", option_def),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
@@ -129,6 +147,7 @@ pub fn bind_sql_columns(
     let mut column_descs = Vec::with_capacity(columns.len());
 
     for column in columns {
+        ensure_column_options_supported(&column)?;
         let column_id = col_id_gen.generate(&column.name.real_value());
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
@@ -258,7 +277,9 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::DefaultColumns(expr) => {
                     let idx = binder
                         .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_impl = binder.bind_expr(expr)?;
+                    let expr_impl = binder
+                        .bind_expr(expr)?
+                        .cast_assign(column_catalogs[idx].data_type().clone())?;
 
                     check_default_column_constraints(&expr_impl, column_catalogs)?;
 
@@ -267,20 +288,68 @@ pub fn bind_sql_column_constraints(
                             expr: Some(expr_impl.to_expr_proto()),
                         }));
                 }
-                ColumnOption::Unique { is_primary: true } => {
-                    // Bind primary key in `bind_sql_table_column_constraints`
-                }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("column constraints \"{}\"", option_def),
-                        None.into(),
-                    )
-                    .into())
-                }
+                _ => {}
             }
         }
     }
     Ok(())
+}
+
+fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+    for constraint in table_constraints {
+        match constraint {
+            TableConstraint::Unique {
+                name: _,
+                columns: _,
+                is_primary: true,
+            } => {}
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("table constraint \"{}\"", constraint),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn bind_pk_names(
+    columns_defs: &[ColumnDef],
+    table_constraints: &[TableConstraint],
+) -> Result<Vec<String>> {
+    let mut pk_column_names = vec![];
+
+    for column in columns_defs {
+        for option_def in &column.options {
+            if let ColumnOption::Unique { is_primary: true } = option_def.option {
+                if !pk_column_names.is_empty() {
+                    return Err(multiple_pk_definition_err());
+                }
+                pk_column_names.push(column.name.real_value());
+            };
+        }
+    }
+
+    for constraint in table_constraints {
+        if let TableConstraint::Unique {
+            name: _,
+            columns,
+            is_primary: true,
+        } = constraint
+        {
+            if !pk_column_names.is_empty() {
+                return Err(multiple_pk_definition_err());
+            }
+            pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
+        }
+    }
+    Ok(pk_column_names)
+}
+
+fn multiple_pk_definition_err() -> RwError {
+    ErrorCode::BindError("multiple primary keys are not allowed".into()).into()
 }
 
 /// Binds constraints that can be specified in both column definitions and table definition.
@@ -292,65 +361,14 @@ pub fn bind_sql_table_column_constraints(
     columns_defs: Vec<ColumnDef>,
     table_constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-    let mut pk_column_names = vec![];
+    ensure_table_constraints_supported(&table_constraints)?;
     // Mapping from column name to column id.
     let name_to_id = columns_descs
         .iter()
         .map(|c| (c.name.as_str(), c.column_id))
         .collect::<HashMap<_, _>>();
 
-    // Bind column constraints
-    for column in columns_defs {
-        for option_def in column.options {
-            match option_def.option {
-                ColumnOption::Unique { is_primary: true } => {
-                    if !pk_column_names.is_empty() {
-                        return Err(ErrorCode::BindError(
-                            "multiple primary keys are not allowed".into(),
-                        )
-                        .into());
-                    }
-                    pk_column_names.push(column.name.real_value());
-                }
-                ColumnOption::GeneratedColumns(_) | ColumnOption::DefaultColumns(_) => {
-                    // Bind generated columns in `bind_sql_column_constraints`
-                }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("column constraints \"{}\"", option_def),
-                        None.into(),
-                    )
-                    .into())
-                }
-            }
-        }
-    }
-
-    // Bind table constraints.
-    for constraint in table_constraints {
-        match constraint {
-            TableConstraint::Unique {
-                name: _,
-                columns,
-                is_primary: true,
-            } => {
-                if !pk_column_names.is_empty() {
-                    return Err(ErrorCode::BindError(
-                        "multiple primary keys are not allowed".into(),
-                    )
-                    .into());
-                }
-                pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
-            }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("table constraint \"{}\"", constraint),
-                    None.into(),
-                )
-                .into())
-            }
-        }
-    }
+    let pk_column_names = bind_pk_names(&columns_defs, &table_constraints)?;
 
     let mut pk_column_ids: Vec<_> = pk_column_names
         .iter()
@@ -405,7 +423,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
-    let column_descs = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
+    let column_descs: Vec<ColumnDesc> = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
     let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
@@ -589,7 +607,7 @@ fn gen_table_plan_inner(
         false,
         true,
         context.clone(),
-    )
+    )?
     .into();
 
     let required_cols = FixedBitSet::with_capacity(columns.len());

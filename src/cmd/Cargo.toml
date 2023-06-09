@@ -10,6 +10,7 @@ repository = { workspace = true }
 [features]
 rw-static-link = ["workspace-config/rw-static-link"]
 rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
+default = ["rw-static-link"]
 
 [package.metadata.cargo-machete]
 ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
@@ -20,6 +21,7 @@ normal = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+prometheus = { version = "0.13" }
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
@@ -45,7 +47,7 @@ workspace-hack = { path = "../workspace-hack" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 
 [target.'cfg(unix)'.dependencies]
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats", "unprefixed_malloc_on_supported_platforms"] }
 
 [[bin]]
 name = "frontend"

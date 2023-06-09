@@ -18,14 +18,13 @@ use std::mem::size_of;
 use itertools::Itertools;
 use risingwave_pb::data::{PbOp, PbStreamChunk};
 
-use super::{ArrayResult, DataChunkTestExt};
-use crate::array::column::Column;
+use super::{ArrayImpl, ArrayRef, ArrayResult, DataChunkTestExt};
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
 use crate::estimate_size::EstimateSize;
 use crate::field_generator::VarcharProperty;
 use crate::row::{OwnedRow, Row};
-use crate::types::{DataType, ToText};
+use crate::types::{DataType, DefaultOrdered, ToText};
 use crate::util::iter_util::ZipEqFast;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -89,9 +88,9 @@ impl Default for StreamChunk {
 }
 
 impl StreamChunk {
-    pub fn new(ops: Vec<Op>, columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+    pub fn new(ops: Vec<Op>, columns: Vec<ArrayRef>, visibility: Option<Bitmap>) -> Self {
         for col in &columns {
-            assert_eq!(col.array_ref().len(), ops.len());
+            assert_eq!(col.len(), ops.len());
         }
 
         let vis = match visibility {
@@ -114,7 +113,7 @@ impl StreamChunk {
         for (op, row) in rows {
             ops.push(*op);
             for (datum, builder) in row.iter().zip_eq_fast(array_builders.iter_mut()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
 
@@ -144,11 +143,11 @@ impl StreamChunk {
         &self.data
     }
 
-    pub fn columns(&self) -> &[Column] {
+    pub fn columns(&self) -> &[ArrayRef] {
         self.data.columns()
     }
 
-    pub fn column_at(&self, index: usize) -> &Column {
+    pub fn column_at(&self, index: usize) -> &ArrayRef {
         self.data.column_at(index)
     }
 
@@ -166,10 +165,7 @@ impl StreamChunk {
             .fold(0, |vis_cnt, vis| vis_cnt + vis as usize);
         let columns: Vec<_> = columns
             .into_iter()
-            .map(|col| {
-                let array = col.array();
-                array.compact(&visibility, cardinality).into()
-            })
+            .map(|col| col.compact(&visibility, cardinality).into())
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
         for idx in visibility.iter_ones() {
@@ -187,7 +183,7 @@ impl StreamChunk {
         Self::new(ops, columns, vis.into_visibility())
     }
 
-    pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
+    pub fn into_inner(self) -> (Vec<Op>, Vec<ArrayRef>, Option<Bitmap>) {
         let (columns, vis) = self.data.into_parts();
         let visibility = vis.into_visibility();
         (self.ops, columns, visibility)
@@ -209,7 +205,7 @@ impl StreamChunk {
         }
         let mut columns = vec![];
         for column in prost.get_columns() {
-            columns.push(Column::from_protobuf(column, cardinality)?);
+            columns.push(ArrayImpl::from_protobuf(column, cardinality)?.into());
         }
         Ok(StreamChunk::new(ops, columns, None))
     }
@@ -225,6 +221,10 @@ impl StreamChunk {
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
         use comfy_table::{Cell, CellAlignment, Table};
+
+        if self.cardinality() == 0 {
+            return "(empty)".to_owned();
+        }
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
@@ -405,11 +405,7 @@ impl StreamChunkTestExt for StreamChunk {
     fn valid(&self) -> bool {
         let len = self.ops.len();
         let data = &self.data;
-        data.vis().len() == len
-            && data
-                .columns()
-                .iter()
-                .all(|col| col.array_ref().len() == len)
+        data.vis().len() == len && data.columns().iter().all(|col| col.len() == len)
     }
 
     fn concat(chunks: Vec<StreamChunk>) -> StreamChunk {
@@ -436,7 +432,10 @@ impl StreamChunkTestExt for StreamChunk {
         }
         let rows = self.rows().collect_vec();
         let mut idx = (0..self.capacity()).collect_vec();
-        idx.sort_by_key(|&i| &rows[i]);
+        idx.sort_by_key(|&i| {
+            let (op, row_ref) = rows[i];
+            (op, DefaultOrdered(row_ref))
+        });
         StreamChunk {
             ops: idx.iter().map(|&i| self.ops[i]).collect(),
             data: self.data.reorder_rows(&idx),

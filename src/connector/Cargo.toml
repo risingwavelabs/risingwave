@@ -22,12 +22,15 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto
     "xz",
 ] }
 async-trait = "0.1"
+auto_enums = { version = "0.8", features = ["futures03"] }
 aws-config = { workspace = true }
+aws-credential-types = { workspace = true }
 aws-sdk-ec2 = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
+base64 = "0.21"
 bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
@@ -39,8 +42,8 @@ csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
-globset = "0.4.8"
+futures-async-stream = { workspace = true }
+glob = "0.3"
 google-cloud-pubsub = "0.14"
 hex = "0.4"
 http = "0.2"
@@ -64,7 +67,10 @@ pulsar = { version = "4.2", default-features = false, features = [
 ] }
 rdkafka = { workspace = true, features = [
     "cmake-build",
-    "ssl",
+    # "ssl",
+    # FIXME: temporary workaround before we find an ideal solution.
+    # See why it's needed and why it's not ideal in https://github.com/risingwavelabs/risingwave/issues/9852
+    "ssl-vendored",
     "gssapi",
     "zstd",
 ] }

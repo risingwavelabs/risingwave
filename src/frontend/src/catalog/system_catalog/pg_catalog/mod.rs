@@ -18,20 +18,25 @@ pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
+pub mod pg_constraint;
 pub mod pg_conversion;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_enum;
 pub mod pg_index;
+pub mod pg_indexes;
+pub mod pg_inherits;
 pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
 pub mod pg_stat_activity;
+pub mod pg_tables;
 pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
@@ -46,25 +51,31 @@ pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
+pub use pg_constraint::*;
 pub use pg_conversion::*;
 pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_enum::*;
 pub use pg_index::*;
+pub use pg_indexes::*;
+pub use pg_inherits::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
 pub use pg_stat_activity::*;
+pub use pg_tables::*;
 pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
@@ -75,6 +86,7 @@ use risingwave_pb::user::UserInfo;
 use serde_json::json;
 
 use super::SysCatalogReaderImpl;
+use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::UserId;
 
@@ -147,7 +159,12 @@ fn get_acl_items(
 
 impl SysCatalogReaderImpl {
     pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
-        Ok(PG_TYPE_DATA_ROWS.clone())
+        let schema_id = self
+            .catalog_reader
+            .read_guard()
+            .get_schema_by_name(&self.auth_context.database, PG_CATALOG_SCHEMA_NAME)?
+            .id();
+        Ok(get_pg_type_data(schema_id))
     }
 
     pub(super) fn read_cast(&self) -> Result<Vec<OwnedRow>> {
@@ -523,6 +540,25 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
+    pub(super) fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {
+        let catalog_reader = self.catalog_reader.read_guard();
+        let schemas = catalog_reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema: &SchemaCatalog| {
+                schema.iter_index().map(|index| {
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(schema.name().into())),
+                        Some(ScalarImpl::Utf8(index.primary_table.name.clone().into())),
+                        Some(ScalarImpl::Utf8(index.index_table.name.clone().into())),
+                        None,
+                        Some(ScalarImpl::Utf8(index.index_table.create_sql().into())),
+                    ])
+                })
+            })
+            .collect_vec())
+    }
+
     pub(super) fn read_pg_attribute(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
@@ -539,6 +575,10 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
                             Some(ScalarImpl::Bool(false)),
+                            // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
+                            // The value will generally be -1 for types that do not need
+                            // `atttypmod`.
+                            Some(ScalarImpl::Int32(-1)),
                         ])
                     })
                 });
@@ -560,6 +600,10 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Int16(index as i16 + 1)),
                                     Some(ScalarImpl::Bool(false)),
                                     Some(ScalarImpl::Bool(false)),
+                                    // From https://www.postgresql.org/docs/current/catalog-pg-attribute.html
+                                    // The value will generally be -1 for types that do not need
+                                    // `atttypmod`.
+                                    Some(ScalarImpl::Int32(-1)),
                                 ])
                             })
                     })
@@ -643,6 +687,58 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
+    }
+
+    pub(super) fn read_inherits_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_INHERITS_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_constraint_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_CONSTRAINT_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_pg_proc_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(PG_PROC_DATA_ROWS.clone())
+    }
+
+    pub(crate) fn read_pg_tables_info(&self) -> Result<Vec<OwnedRow>> {
+        // TODO: avoid acquire two read locks here. The order is the same as in `read_views_info`.
+        let reader = self.catalog_reader.read_guard();
+        let user_info_reader = self.user_info_reader.read_guard();
+        let schemas = reader.iter_schemas(&self.auth_context.database)?;
+
+        Ok(schemas
+            .flat_map(|schema| {
+                schema
+                    .iter_table()
+                    .map(|table| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(schema.name().into())),
+                            Some(ScalarImpl::Utf8(table.name().into())),
+                            Some(ScalarImpl::Utf8(
+                                user_info_reader
+                                    .get_user_name_by_id(table.owner)
+                                    .unwrap()
+                                    .into(),
+                            )),
+                            None,
+                        ])
+                    })
+                    .chain(schema.iter_system_tables().map(|table| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(schema.name().into())),
+                            Some(ScalarImpl::Utf8(table.name().into())),
+                            Some(ScalarImpl::Utf8(
+                                user_info_reader
+                                    .get_user_name_by_id(table.owner)
+                                    .unwrap()
+                                    .into(),
+                            )),
+                            None,
+                        ])
+                    }))
+            })
+            .collect_vec())
     }
 
     pub(super) async fn read_relation_info(&self) -> Result<Vec<OwnedRow>> {

@@ -31,11 +31,12 @@ use super::{
     SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
+use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, DeleteRangeTombstone, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter,
+    CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder,
+    SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -55,8 +56,6 @@ pub fn default_opts_for_test() -> StorageOpts {
         meta_cache_capacity_mb: 64,
         high_priority_ratio: 0,
         disable_remote_compactor: false,
-        enable_local_spill: false,
-        local_object_store: "memory".to_string(),
         share_buffer_upload_concurrency: 1,
         compactor_memory_limit_mb: 64,
         sstable_id_remote_fetch_number: 1,
@@ -198,7 +197,7 @@ pub async fn put_sst(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
+pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: FilterBuilder>(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
@@ -214,7 +213,13 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]> + Clone + Default + Eq>(
     let writer = sstable_store
         .clone()
         .create_sst_writer(object_id, writer_opts);
-    let mut b = SstableBuilder::for_test(object_id, writer, opts);
+    let mut b = SstableBuilder::<_, F>::new(
+        object_id,
+        writer,
+        F::create(opts.bloom_false_positive, opts.capacity / 16),
+        opts,
+        Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+    );
 
     let mut last_key = FullKey::<B>::default();
     let mut user_key_last_delete = HummockEpoch::MAX;
@@ -279,7 +284,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
@@ -298,7 +303,7 @@ pub async fn gen_test_sstable_and_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> (Sstable, SstableInfo) {
-    gen_test_sstable_inner(
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
@@ -317,7 +322,7 @@ pub async fn gen_test_sstable_with_range_tombstone(
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_test_sstable_inner(
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
