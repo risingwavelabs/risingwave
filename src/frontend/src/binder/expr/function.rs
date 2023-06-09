@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{
@@ -616,7 +616,7 @@ impl Binder {
                                         FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
                                     ],
                                 )?.into(),
-                                ExprImpl::literal_int(1),
+                                ExprImpl::literal_i64(1),
                             ],
                         ).map(Into::into)
                     })),
@@ -743,6 +743,25 @@ impl Binder {
                         .into())
                     }
                 })),
+                ("current_setting", guard_by_len(1, raw(|binder, inputs| {
+                    let input = &inputs[0];
+                    let ExprImpl::Literal(literal) = input else {
+                        return Err(ErrorCode::ExprError(
+                            "Only literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    let Some(ScalarImpl::Utf8(input)) = literal.get_data() else {
+                        return Err(ErrorCode::ExprError(
+                            "Only string literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    match binder.session_config.get(&input.to_string()) {
+                        Some(setting) => Ok(ExprImpl::literal_varchar(setting.into())),
+                        None => Err(ErrorCode::UnrecognizedConfigurationParameter(input.to_string()).into()),
+                    }
+                }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),

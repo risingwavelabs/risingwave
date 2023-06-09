@@ -46,10 +46,20 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Utf8(schema.name().into())),
                             Some(ScalarImpl::Utf8(view.name().into())),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
+                            None,
+                            None,
                             Some(ScalarImpl::Int32(index as i32 + 1)),
                             // TODO: refactor when we support "NOT NULL".
                             Some(ScalarImpl::Utf8("YES".into())),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                            Some(ScalarImpl::Utf8(
+                                column
+                                    .data_type()
+                                    .prost_type_name()
+                                    .as_str_name()
+                                    .to_lowercase()
+                                    .into(),
+                            )),
                         ])
                     })
                 });
@@ -70,10 +80,20 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Utf8(schema.name().into())),
                                     Some(ScalarImpl::Utf8(table_name.into())),
                                     Some(ScalarImpl::Utf8(column.name().into())),
+                                    None,
+                                    None,
                                     Some(ScalarImpl::Int32(index as i32 + 1)),
                                     // TODO: refactor when we support "NOT NULL".
                                     Some(ScalarImpl::Utf8("YES".into())),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                                    Some(ScalarImpl::Utf8(
+                                        column
+                                            .data_type()
+                                            .prost_type_name()
+                                            .as_str_name()
+                                            .to_lowercase()
+                                            .into(),
+                                    )),
                                 ])
                             })
                     })

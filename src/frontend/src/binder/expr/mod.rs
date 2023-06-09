@@ -565,13 +565,8 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
-        AstDataType::Char(..) => {
-            return Err(ErrorCode::NotImplemented(
-                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
-                None.into(),
-            )
-            .into())
-        }
+        // workaround to bind char type to varchar.
+        AstDataType::Char(..) => DataType::Varchar,
         AstDataType::Struct(types) => DataType::new_struct(
             types
                 .iter()
