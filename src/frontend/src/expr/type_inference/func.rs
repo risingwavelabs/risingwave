@@ -593,8 +593,22 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::ArrayDims => {
+            ensure_arity!("array_dims", | inputs | == 1);
+            if inputs[0].is_untyped() {
+                return Ok(None);
+            }
+            match inputs[0].return_type() {
+                DataType::List(box DataType::List(_)) => Err(ErrorCode::BindError(
+                    "array_dims for dimensions greater than 1 not supported".into(),
+                )
+                .into()),
+                DataType::List(_) => Ok(Some(DataType::Varchar)),
+                _ => Ok(None),
+            }
+        }
         ExprType::ArrayLength => {
-            ensure_arity!("array_length", | inputs | == 1);
+            ensure_arity!("array_length", 1 <= | inputs | <= 2);
             let return_type = inputs[0].return_type();
 
             if inputs[0].is_untyped() {
@@ -602,6 +616,10 @@ fn infer_type_for_special(
                     "Cannot find length for unknown type".to_string(),
                 )
                 .into());
+            }
+
+            if let Some(arg1) = inputs.get_mut(1) {
+                arg1.cast_implicit_mut(DataType::Int32)?;
             }
 
             match return_type {

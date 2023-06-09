@@ -181,6 +181,7 @@ message ExprNode {
     STRING_TO_ARRAY = 541;
     ARRAY_POSITION = 542;
     ARRAY_REPLACE = 543;
+    ARRAY_DIMS = 544;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
