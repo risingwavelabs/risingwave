@@ -20,6 +20,7 @@ use anyhow::Result;
 use clap::{command, ArgMatches, Args, Command, FromArgMatches};
 use risingwave_cmd::{compactor, compute, ctl, frontend, meta};
 use risingwave_cmd_all::PlaygroundOpts;
+use risingwave_common::git_sha;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
@@ -38,8 +39,8 @@ risingwave_common::enable_jemalloc_on_unix!();
 const BINARY_NAME: &str = "risingwave";
 /// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
 /// for each commit, so we only use it for the final binary (`risingwave -V`).
-const VERGEN_GIT_SHA: &str = env!("VERGEN_GIT_SHA");
-const VERSION: &str = const_str::concat!(env!("CARGO_PKG_VERSION"), " (", VERGEN_GIT_SHA, ")");
+const VERGEN_GIT_SHA: &str = git_sha!("VERGEN_GIT_SHA");
+const VERSION: &str = const_str::concat!(clap::crate_version!(), " (", VERGEN_GIT_SHA, ")");
 
 /// Component to launch.
 #[derive(Clone, Copy, EnumIter, EnumString, Display, IntoStaticStr)]
@@ -150,25 +151,25 @@ fn playground(opts: PlaygroundOpts) {
 }
 
 const _: () = {
-    /// `GIT_SHA` is a normal environment variable. It's [`risingwave_common::GIT_SHA`]
-    /// and is used in logs/version queries.
+    /// `GIT_SHA` is a normal environment variable provided by ourselves. It's
+    /// [`risingwave_common::GIT_SHA`] and is used in logs/version queries.
     ///
     /// Usually it's only provided by docker/binary releases (including nightly builds).
     /// We check it is the same as `VERGEN_GIT_SHA` when it's present.
-    const GIT_SHA: &str = match option_env!("GIT_SHA") {
-        Some(sha) => sha,
-        None => VERGEN_GIT_SHA,
-    };
-    const ERROR_MSG: &str = const_str::concat!(
-        "environment variable GIT_SHA (",
-        GIT_SHA,
-        ") mismatches VERGEN_GIT_SHA (",
-        VERGEN_GIT_SHA,
-        "). Please set the correct value for GIT_SHA or unset it."
-    );
-    assert!(
-        const_str::starts_with!(GIT_SHA, VERGEN_GIT_SHA),
-        "{}",
-        ERROR_MSG
-    );
+    const GIT_SHA: &str = risingwave_common::GIT_SHA;
+
+    if !const_str::equal!(GIT_SHA, risingwave_common::UNKNOWN_GIT_SHA) {
+        const ERROR_MSG: &str = const_str::concat!(
+            "environment variable GIT_SHA (",
+            GIT_SHA,
+            ") mismatches VERGEN_GIT_SHA (",
+            VERGEN_GIT_SHA,
+            "). Please set the correct value for GIT_SHA or unset it."
+        );
+        assert!(
+            const_str::starts_with!(GIT_SHA, VERGEN_GIT_SHA),
+            "{}",
+            ERROR_MSG
+        );
+    }
 };
