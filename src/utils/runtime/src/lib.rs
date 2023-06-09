@@ -159,6 +159,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
             .with_target("aws_smithy_client", Level::DEBUG)
+            .with_target("http_timout_retry", Level::DEBUG)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
@@ -259,18 +260,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_filter(filter::Targets::new().with_target(SLOW_QUERY_LOG, Level::TRACE));
         layers.push(layer.boxed());
     }
-
-    // s3 sdk retry
-    let layer = tracing_subscriber::fmt::layer()
-        .with_ansi(false)
-        .with_level(false)
-        .with_file(false)
-        .with_target(false)
-        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
-        .with_thread_names(true)
-        .with_thread_ids(true)
-        .with_filter(filter::Targets::new().with_target("http_timout_retry", Level::DEBUG));
-    layers.push(layer.boxed());
 
     if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()

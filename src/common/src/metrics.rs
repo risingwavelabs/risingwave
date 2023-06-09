@@ -15,7 +15,10 @@
 use hytra::TrAdder;
 use prometheus::core::{Atomic, AtomicU64, GenericCounter, GenericGauge};
 use prometheus::{register_int_counter_with_registry, Registry};
-
+use tracing::Subscriber;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
 pub struct TrAdderAtomic(TrAdder<i64>);
 
 impl Atomic for TrAdderAtomic {
@@ -46,13 +49,9 @@ impl Atomic for TrAdderAtomic {
 
 pub type TrAdderGauge = GenericGauge<TrAdderAtomic>;
 
-use tracing::Subscriber;
-use tracing_subscriber::layer::Context;
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
-
 pub struct CustomLayer {
-    pub aws_retry_counts: GenericCounter<AtomicU64>,
+    pub aws_sdk_retry_counts: GenericCounter<AtomicU64>,
+    pub aws_http_timeout_retry_counts: GenericCounter<AtomicU64>,
 }
 
 impl<S> Layer<S> for CustomLayer
@@ -63,19 +62,35 @@ where
         if event.metadata().target() == "aws_smithy_client::retry"
             && event.metadata().level() == &tracing::Level::DEBUG
         {
-            self.aws_retry_counts.inc();
+            self.aws_sdk_retry_counts.inc();
+        }
+
+        if event.metadata().target() == "http_timout_retry"
+            && event.metadata().level() == &tracing::Level::DEBUG
+        {
+            self.aws_http_timeout_retry_counts.inc();
         }
     }
 }
 
 impl CustomLayer {
     pub fn new(registry: Registry) -> Self {
-        let aws_retry_counts = register_int_counter_with_registry!(
-            "aws_retry_counts",
+        let aws_sdk_retry_counts = register_int_counter_with_registry!(
+            "aws_sdk_retry_counts",
             "Total number of aws sdk retry happens",
             registry
         )
         .unwrap();
-        Self { aws_retry_counts }
+
+        let aws_http_timeout_retry_counts = register_int_counter_with_registry!(
+            "aws_http_timeout_retry_counts",
+            "Total number of s3 http timeout retry happens",
+            registry
+        )
+        .unwrap();
+        Self {
+            aws_sdk_retry_counts,
+            aws_http_timeout_retry_counts,
+        }
     }
 }

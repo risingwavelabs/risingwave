@@ -560,10 +560,10 @@ def section_object_storage(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({metric('aws_retry_count')}[$__rate_interval])) by (instance, job, type)",
+                            f"sum(irate({metric('aws_sdk_retry_counts')}[$__rate_interval])) by (instance, job, type)",
                             "{{type}} - {{job}} @ {{instance}}",
                         ),
-                        
+
                         panels.target(
                             f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by (instance, job, type)",
                             "{{type}} - {{job}} @ {{instance}}",
