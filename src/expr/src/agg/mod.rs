@@ -28,8 +28,8 @@ mod array_agg;
 mod count_star;
 mod general;
 mod jsonb_agg;
-mod string_agg;
 mod percentile_cont;
+mod string_agg;
 
 // wrappers
 // XXX(wrj): should frontend plan these as operators?
