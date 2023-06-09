@@ -69,7 +69,7 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         for (int i = 0; i < batch.getRowCount(); i++) {
             for (int j = 0; j < row.length; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = this.processInputs[j].apply(val);
+                row[j] = val == null ? null : this.processInputs[j].apply(val);
             }
             try {
                 outputValues[i] = this.method.invoke(this.function, row);
@@ -126,7 +126,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
             // prepare input row
             for (int j = 0; j < row.length; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = this.processInputs[j].apply(val);
+                row[j] = val == null ? null : this.processInputs[j].apply(val);
             }
             // call function
             var size_before = this.function.size();

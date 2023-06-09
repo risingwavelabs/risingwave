@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import com.google.gson.Gson;
 
+import com.risingwave.functions.DataTypeHint;
 import com.risingwave.functions.ScalarFunction;
 import com.risingwave.functions.TableFunction;
 import com.risingwave.functions.UdfServer;
@@ -19,6 +21,7 @@ public class UdfExample {
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
             server.addFunction("hex_to_dec", new HexToDec());
             server.addFunction("array_access", new ArrayAccess());
+            server.addFunction("jsonb_access", new JsonbAccess());
             server.addFunction("series", new Series());
             server.addFunction("split", new Split());
 
@@ -94,6 +97,20 @@ public class UdfExample {
     public static class ArrayAccess extends ScalarFunction {
         public static String eval(String[] array, int index) {
             return array[index - 1];
+        }
+    }
+
+    public static class JsonbAccess extends ScalarFunction {
+        static Gson gson = new Gson();
+
+        public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
+            if (json == null)
+                return null;
+            var array = gson.fromJson(json, Object[].class);
+            if (index >= array.length || index < 0)
+                return null;
+            var obj = array[index];
+            return gson.toJson(obj);
         }
     }
 
