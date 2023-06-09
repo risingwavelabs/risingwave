@@ -73,22 +73,14 @@ impl fmt::Display for LogicalJoin {
         );
 
         if verbose {
-            if self
-                .output_indices()
-                .iter()
-                .copied()
-                .eq(0..self.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: self.output_indices(),
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from(
+                self.output_indices(),
+                self.internal_column_num(),
+                &concat_schema,
+            ) {
+                None => builder.field("output", &format_args!("all")),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
