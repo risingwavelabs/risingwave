@@ -2602,8 +2602,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__interval])",
-                            "{{source_type}} @ {{source_id}}",
+                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            "source={{source_type}} @ {{source_id}}",
                         ),
                     ],
                 ),
@@ -2612,8 +2612,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_sink_rows_received')}[$__interval])",
-                            "{{connector_type}} @ {{sink_id}}",
+                            f"rate({metric('connector_sink_rows_received')}[$__rate_interval])",
+                            "sink={{connector_type}} @ {{sink_id}}",
                         ),
                     ],
                 ),
