@@ -77,7 +77,8 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::Duration => DataType::Interval,
         Schema::Bytes => DataType::Bytea,
         Schema::Enum { .. } => DataType::Varchar,
-        Schema::Record { fields, .. } => {
+        Schema::Record { fields, name, .. } => {
+            tracing::info!("avro record: {}", name);
             let struct_fields = fields
                 .iter()
                 .map(|f| avro_type_mapping(&f.schema))
