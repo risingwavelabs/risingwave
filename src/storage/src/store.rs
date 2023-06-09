@@ -411,7 +411,7 @@ pub struct NewLocalOptions {
     pub table_option: TableOption,
 
     /// Used to indicate that we should not upload the data.
-    pub no_upload: bool,
+    pub is_replicated: bool,
 }
 
 impl From<TracedNewLocalOptions> for NewLocalOptions {
@@ -430,11 +430,11 @@ impl NewLocalOptions {
             table_id,
             is_consistent_op,
             table_option,
-            no_upload: false,
+            is_replicated: false,
         }
     }
 
-    pub fn new_temporary(
+    pub fn new_replicated(
         table_id: TableId,
         is_consistent_op: bool,
         table_option: TableOption,
@@ -443,7 +443,7 @@ impl NewLocalOptions {
             table_id,
             is_consistent_op,
             table_option,
-            no_upload: true,
+            is_replicated: true,
         }
     }
 
@@ -454,7 +454,7 @@ impl NewLocalOptions {
             table_option: TableOption {
                 retention_seconds: None,
             },
-            no_upload: false,
+            is_replicated: false,
         }
     }
 }

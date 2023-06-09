@@ -68,7 +68,7 @@ pub struct LocalHummockStorage {
 
     /// This could be used when `LocalHummockStorage` is used
     /// solely for local storage, e.g. when replicating data for executors in different CNs.
-    no_upload: bool,
+    is_replicated: bool,
 
     /// Event sender.
     event_sender: mpsc::UnboundedSender<HummockEvent>,
@@ -408,7 +408,7 @@ impl LocalHummockStorage {
         self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
         // insert imm to uploader
-        if !self.no_upload {
+        if !self.is_replicated {
             self.event_sender
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
@@ -443,7 +443,7 @@ impl LocalHummockStorage {
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
             table_option: option.table_option,
-            no_upload: option.no_upload,
+            is_replicated: option.is_replicated,
             instance_guard,
             read_version,
             event_sender,
