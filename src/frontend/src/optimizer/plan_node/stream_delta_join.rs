@@ -112,7 +112,7 @@ impl fmt::Display for StreamDeltaJoin {
                 self.logical.internal_column_num(),
                 &concat_schema,
             ) {
-                None => builder.field("output", &"all"),
+                None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };
         }
