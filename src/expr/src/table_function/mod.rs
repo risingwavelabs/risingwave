@@ -17,9 +17,7 @@ use futures_async_stream::try_stream;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I64ArrayBuilder,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::types::{DataType, DataTypeName, DatumRef};
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::table_function::PbType;
@@ -217,12 +215,12 @@ impl ProjectSetSelectItem {
 /// let mut iter = TableFunctionOutputIter::new(
 ///     futures_util::stream::iter([
 ///         DataChunk::from_pretty(
-///             "I I
+///             "i I
 ///              0 0
 ///              1 1",
 ///         ),
 ///         DataChunk::from_pretty(
-///             "I I
+///             "i I
 ///              2 2
 ///              3 3",
 ///         ),
