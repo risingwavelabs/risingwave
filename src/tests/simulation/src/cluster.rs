@@ -128,12 +128,6 @@ pub struct Cluster {
     handle: Handle,
     pub(crate) client: NodeHandle,
     pub(crate) ctl: NodeHandle,
-    pub(crate) context: ClusterRunningContext,
-}
-
-#[derive(Debug, Default)]
-pub struct ClusterRunningContext {
-    pub(crate) reschedule_revision: u64,
 }
 
 impl Cluster {
@@ -331,14 +325,11 @@ impl Cluster {
             .ip([192, 168, 101, 1].into())
             .build();
 
-        let context = ClusterRunningContext::default();
-
         Ok(Self {
             config: conf,
             handle,
             client,
             ctl,
-            context,
         })
     }
 

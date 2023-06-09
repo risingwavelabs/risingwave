@@ -39,9 +39,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{
-    build_actor_connector_splits, RescheduleRevision, SourceManagerRef, SplitAssignment,
-};
+use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -120,7 +118,6 @@ pub enum Command {
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment {
         reschedules: HashMap<FragmentId, Reschedule>,
-        revision: RescheduleRevision,
     },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
@@ -618,10 +615,7 @@ where
                     .await;
             }
 
-            Command::RescheduleFragment {
-                reschedules,
-                revision,
-            } => {
+            Command::RescheduleFragment { reschedules } => {
                 let mut node_dropped_actors = HashMap::new();
                 for table_fragments in self.fragment_manager.list_table_fragments().await? {
                     for fragment_id in table_fragments.fragments.keys() {
@@ -647,7 +641,7 @@ where
 
                 // Update fragment info after rescheduling in meta store.
                 self.fragment_manager
-                    .post_apply_reschedules(reschedules.clone(), *revision)
+                    .post_apply_reschedules(reschedules.clone())
                     .await?;
 
                 let mut stream_source_actor_splits = HashMap::new();

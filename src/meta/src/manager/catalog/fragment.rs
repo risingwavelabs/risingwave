@@ -42,11 +42,12 @@ use crate::model::{
     ValTransaction,
 };
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::{RescheduleRevision, SplitAssignment};
+use crate::stream::{SplitAssignment, TableRevision};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
     table_fragments: BTreeMap<TableId, TableFragments>,
+    table_revision: TableRevision,
 }
 
 impl FragmentManagerCore {
@@ -102,9 +103,14 @@ where
             .map(|tf| (tf.table_id(), tf))
             .collect();
 
+        let table_revision = TableRevision::get(env.meta_store()).await?;
+
         Ok(Self {
             env,
-            core: RwLock::new(FragmentManagerCore { table_fragments }),
+            core: RwLock::new(FragmentManagerCore {
+                table_fragments,
+                table_revision,
+            }),
         })
     }
 
@@ -116,6 +122,10 @@ where
         let map = &self.core.read().await.table_fragments;
 
         Ok(map.values().cloned().collect())
+    }
+
+    pub async fn get_revision(&self) -> TableRevision {
+        self.core.read().await.table_revision
     }
 
     pub async fn has_any_table_fragments(&self) -> bool {
@@ -246,7 +256,9 @@ where
         dummy_table_id: TableId,
         merge_updates: &[MergeUpdate],
     ) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_revision = guard.table_revision;
+        let map = &mut guard.table_fragments;
 
         let mut table_fragments = BTreeMapTransaction::new(map);
 
@@ -317,7 +329,17 @@ where
         assert!(merge_updates.is_empty());
 
         // Commit changes and notify about the changes.
-        commit_meta!(self, table_fragments)?;
+        let mut trx = Transaction::default();
+
+        // save next revision
+        let next_revision = current_revision.next();
+        next_revision.store(&mut trx);
+
+        // commit
+        commit_meta_with_trx!(self, trx, table_fragments)?;
+
+        // update revision in memory
+        guard.table_revision = next_revision;
 
         // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
         // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
@@ -347,7 +369,10 @@ where
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
     pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_revision = guard.table_revision;
+
+        let map = &mut guard.table_fragments;
         let to_delete_table_fragments = table_ids
             .iter()
             .filter_map(|table_id| map.get(table_id).cloned())
@@ -385,7 +410,16 @@ where
                     });
             }
         }
-        commit_meta!(self, table_fragments)?;
+
+        if table_ids.is_empty() {
+            commit_meta!(self, table_fragments)?;
+        } else {
+            let mut trx = Transaction::default();
+            let next_revision = current_revision.next();
+            next_revision.store(&mut trx);
+            commit_meta_with_trx!(self, trx, table_fragments)?;
+            guard.table_revision = next_revision;
+        }
 
         for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {
@@ -452,11 +486,19 @@ where
             }
             if updated {
                 table_fragment.update_vnode_mapping(&migration_plan.parallel_unit_plan);
-                let map = &mut self.core.write().await.table_fragments;
+                let mut guard = self.core.write().await;
+                let current_revision = guard.table_revision;
+                let map = &mut guard.table_fragments;
                 if map.contains_key(&table_fragment.table_id()) {
-                    let mut txn = BTreeMapTransaction::new(map);
-                    txn.insert(table_fragment.table_id(), table_fragment.clone());
-                    commit_meta!(self, txn)?;
+                    let mut table_trx = BTreeMapTransaction::new(map);
+                    table_trx.insert(table_fragment.table_id(), table_fragment.clone());
+
+                    let next_revision = current_revision.next();
+                    let mut trx = Transaction::default();
+                    next_revision.store(&mut trx);
+                    commit_meta_with_trx!(self, trx, table_trx)?;
+                    guard.table_revision = next_revision;
+
                     self.notify_fragment_mapping(&table_fragment, Operation::Update)
                         .await;
                 }
@@ -605,9 +647,11 @@ where
     pub async fn post_apply_reschedules(
         &self,
         mut reschedules: HashMap<FragmentId, Reschedule>,
-        revision: RescheduleRevision,
     ) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
+        let mut guard = self.core.write().await;
+        let current_version = guard.table_revision;
+
+        let map = &mut guard.table_fragments;
 
         fn update_actors(
             actors: &mut Vec<ActorId>,
@@ -822,9 +866,19 @@ where
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
+
+        // new empty transaction
         let mut trx = Transaction::default();
-        revision.store(&mut trx);
+
+        // save next revision
+        let next_revision = current_version.next();
+        next_revision.store(&mut trx);
+
+        // commit
         commit_meta_with_trx!(self, trx, table_fragments)?;
+
+        // update revision in memory
+        guard.table_revision = next_revision;
 
         for mapping in fragment_mapping_to_notify {
             self.env

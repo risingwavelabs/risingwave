@@ -85,7 +85,7 @@ where
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
-        let _reschedule_lock = self.stream_manager.reschedule_revision_lock.lock().await;
+        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
 
         let table_fragments = self
             .fragment_manager
@@ -119,7 +119,7 @@ where
 
         let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
-        let revision = self.stream_manager.reschedule_revision().await?.into();
+        let revision = self.fragment_manager.get_revision().await.inner();
 
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
@@ -137,19 +137,18 @@ where
     ) -> Result<Response<RescheduleResponse>, Status> {
         let req = request.into_inner();
 
-        let _guard = self.stream_manager.reschedule_revision_lock.lock().await;
+        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
 
-        let current_revision = self.stream_manager.reschedule_revision().await?;
+        let current_revision = self.fragment_manager.get_revision().await;
 
         if req.revision != current_revision.inner() {
             return Ok(Response::new(RescheduleResponse {
                 success: false,
-                revision: current_revision.into(),
+                revision: current_revision.inner(),
             }));
         }
 
-        let next_revision = self
-            .stream_manager
+        self.stream_manager
             .reschedule_actors(
                 req.reschedules
                     .into_iter()
@@ -176,9 +175,10 @@ where
                         )
                     })
                     .collect(),
-                current_revision,
             )
             .await?;
+
+        let next_revision = self.fragment_manager.get_revision().await;
 
         Ok(Response::new(RescheduleResponse {
             success: true,
