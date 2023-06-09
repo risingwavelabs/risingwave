@@ -74,10 +74,20 @@ pub mod test_prelude {
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Placeholder for unknown git sha.
+pub const UNKNOWN_GIT_SHA: &str = "unknown";
+
+#[macro_export]
+macro_rules! git_sha {
+    ($env:literal) => {
+        match option_env!($env) {
+            Some(v) if !v.is_empty() => v,
+            _ => $crate::UNKNOWN_GIT_SHA,
+        }
+    };
+}
+
 // FIXME: We expand `unwrap_or` since it's unavailable in const context now.
 // `const_option_ext` was broken by https://github.com/rust-lang/rust/pull/110393
 // Tracking issue: https://github.com/rust-lang/rust/issues/91930
-pub const GIT_SHA: &str = match option_env!("GIT_SHA") {
-    Some(v) => v,
-    None => "unknown",
-};
+pub const GIT_SHA: &str = git_sha!("GIT_SHA");
