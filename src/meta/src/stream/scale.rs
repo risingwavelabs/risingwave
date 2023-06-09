@@ -25,7 +25,6 @@ use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -323,7 +322,12 @@ where
         // Check if we are trying to move a fragment to a cordoned node
         let cordoned_nodes = worker_nodes
             .iter()
-            .filter(|(_, w)| w.state() == State::Cordoned)
+            .filter(|(_, w)| {
+                !w.property
+                    .as_ref()
+                    .expect("expected that worker had property") // TODO: handle gracefully
+                    .is_schedulable
+            })
             .map(|(_, w)| w)
             .collect_vec();
         let cordoned_pu_ids: HashSet<u32> = cordoned_nodes

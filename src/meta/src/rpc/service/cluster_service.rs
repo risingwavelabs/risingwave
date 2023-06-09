@@ -106,15 +106,16 @@ where
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type()?;
+        let list_unschedulable = req.get_include_cordoned_nodes();
         let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(vec![State::Running, State::Cordoned])
+            Some(vec![State::Running])
         };
 
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_states)
+            .list_worker_node(worker_type, worker_states, list_unschedulable)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

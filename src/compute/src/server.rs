@@ -106,6 +106,7 @@ pub async fn compute_node_serve(
             worker_node_parallelism: opts.parallelism as u64,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
+            is_schedulable: true, // TODO: do this via opts.role?
         },
         &config.meta,
     )

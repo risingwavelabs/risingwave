@@ -21,7 +21,6 @@ use anyhow::Result;
 use itertools::Itertools;
 use madsim::time::sleep;
 use rand::seq::SliceRandom;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{Actor, Fragment, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
@@ -32,7 +31,12 @@ use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
 fn pu_ids_on_cordoned_nodes(all_workers: &Vec<WorkerNode>) -> HashSet<u32> {
     let cordoned_nodes_ids = all_workers
         .iter()
-        .filter(|w| w.state() == State::Cordoned)
+        .filter(|w| {
+            !w.property
+                .as_ref()
+                .expect("expected worker to have state")
+                .is_schedulable
+        })
         .map(|n| n.id)
         .collect_vec();
     let mut cordoned_pu_ids: Vec<Vec<ParallelUnit>> = vec![];
@@ -226,7 +230,12 @@ async fn cordon_is_idempotent(
         let (_, workers) = get_schedule(cluster.get_cluster_info().await?);
         let new_ids: HashSet<u32> = workers
             .iter()
-            .filter(|w| w.state() == State::Cordoned)
+            .filter(|w| {
+                !w.property
+                    .as_ref()
+                    .expect("expected node to have property")
+                    .is_schedulable
+            })
             .map(|w| w.id)
             .collect();
         assert_eq!(new_ids, old_ids);

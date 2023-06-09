@@ -158,7 +158,7 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        if worker.worker_node.state == State::Cordoned as i32 {
+        if !worker.worker_node.get_property()?.is_schedulable {
             tracing::warn!("activating cordoned worker. Ignoring request");
             return Ok(());
         }
@@ -198,11 +198,24 @@ where
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
-        if worker.worker_node.state == State::Cordoned as i32 {
+        if !worker.worker_node.get_property()?.is_schedulable {
             return Ok(worker_type);
         }
 
-        worker.worker_node.state = State::Cordoned as i32;
+        let old_property = match worker.worker_node.property.as_ref() {
+            Some(p) => Ok(p),
+            None => {
+                let msg = "Did not find property in worker node. Will NOT mark node as cordoned";
+                Err(anyhow!(msg))
+            }
+        }?;
+        let new_property = Property {
+            is_schedulable: false,
+            is_serving: old_property.is_serving,
+            is_streaming: old_property.is_streaming,
+        };
+
+        worker.worker_node.property = Some(new_property);
         Worker::insert(worker, self.env.meta_store()).await?;
 
         Ok(worker_type)
@@ -347,16 +360,17 @@ where
         &self,
         worker_type: WorkerType,
         worker_states: Option<Vec<State>>,
+        list_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_worker_node(worker_type, worker_states)
+        core.list_worker_node(worker_type, worker_states, list_unschedulable)
     }
 
     /// A convenient method to get all running compute nodes that may have running actors on them
     /// i.e. CNs which are running or cordoned
     pub async fn list_active_streaming_compute_nodes(&self) -> Vec<WorkerNode> {
         let core = self.core.read().await;
-        core.list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
+        core.list_streaming_worker_node(Some(vec![State::Running]), true)
     }
 
     pub async fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
@@ -380,6 +394,7 @@ where
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
+                is_schedulable: worker_property.is_schedulable,
             })
         } else {
             None
@@ -496,11 +511,13 @@ impl ClusterManagerCore {
     pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
-        worker_states: Option<Vec<State>>,
+        worker_states: Option<Vec<State>>, // TODO: This should be a state, not a vec<state>
+        include_unschedulable: bool,
     ) -> Vec<WorkerNode> {
         let worker_states =
             worker_states.map(|state| state.iter().map(|s| *s as i32).collect_vec());
-        self.workers
+        let x = self
+            .workers
             .values()
             .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
@@ -508,20 +525,49 @@ impl ClusterManagerCore {
                 None => true,
                 Some(state) => state.contains(&w.state),
             })
-            .collect_vec()
+            .collect_vec();
+
+        let y = x
+            .clone()
+            .into_iter()
+            .filter(|w| {
+                if include_unschedulable {
+                    true
+                } else {
+                    w.property
+                        .as_ref()
+                        .expect("expected that node has property")
+                        .is_schedulable // TODO: do not use unwrap
+                }
+            })
+            .collect_vec();
+
+        if x.len() != y.len() {
+            print!("changed"); // TODO: remove. debugging only
+        }
+
+        y // TODO: remove x. debugging only
     }
 
-    pub fn list_streaming_worker_node(&self, worker_state: Option<Vec<State>>) -> Vec<WorkerNode> {
-        self.list_worker_node(WorkerType::ComputeNode, worker_state)
-            .into_iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
-            .collect()
+    pub fn list_streaming_worker_node(
+        &self,
+        worker_states: Option<Vec<State>>,
+        include_unschedulable: bool,
+    ) -> Vec<WorkerNode> {
+        self.list_worker_node(
+            WorkerType::ComputeNode,
+            worker_states,
+            include_unschedulable,
+        )
+        .into_iter()
+        .filter(|w| w.property.as_ref().map_or(false, |p| p.is_streaming))
+        .collect()
     }
 
     // List all parallel units on running or cordoned nodes
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
-            .list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
+            .list_streaming_worker_node(Some(vec![State::Running]), true)
             .into_iter()
             .map(|w| w.id)
             .collect();
@@ -536,7 +582,7 @@ impl ClusterManagerCore {
     // Lists active worker nodes
     fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let active_workers: HashMap<_, _> = self
-            .list_streaming_worker_node(Some(vec![State::Running]))
+            .list_streaming_worker_node(Some(vec![State::Running]), false)
             .into_iter()
             .map(|w| (w.id, w))
             .collect();
@@ -609,6 +655,7 @@ mod tests {
                         worker_node_parallelism: fake_parallelism as _,
                         is_streaming: true,
                         is_serving: true,
+                        is_schedulable: true,
                     },
                 )
                 .await
@@ -679,6 +726,7 @@ mod tests {
                     worker_node_parallelism: fake_parallelism as _,
                     is_streaming: true,
                     is_serving: true,
+                    is_schedulable: true,
                 },
             )
             .await
@@ -686,7 +734,7 @@ mod tests {
         // Two live nodes
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, true)
                 .await
                 .len(),
             2
@@ -713,7 +761,7 @@ mod tests {
         // started.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, true)
                 .await
                 .len(),
             2
@@ -726,7 +774,7 @@ mod tests {
         // One live node left.
         assert_eq!(
             cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, true)
                 .await
                 .len(),
             1

@@ -377,6 +377,7 @@ mod tests {
                 property: Some(Property {
                     is_streaming: true,
                     is_serving: true,
+                    is_schedulable: true,
                 }),
             },
             WorkerNode {
@@ -388,6 +389,7 @@ mod tests {
                 property: Some(Property {
                     is_streaming: false,
                     is_serving: true,
+                    is_schedulable: true,
                 }),
             },
         ];

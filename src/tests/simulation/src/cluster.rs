@@ -404,7 +404,10 @@ impl Cluster {
             .iter()
             .choose_multiple(&mut rand::thread_rng(), n)
             .to_vec();
-        Ok(rand_nodes.iter().map(|n| n.clone().clone()).collect_vec())
+        Ok(rand_nodes // TODO: use into_iter?
+            .iter()
+            .map(|n: &&WorkerNode| n.clone().clone())
+            .collect_vec())
     }
 
     /// cordon n random nodes in this cluster.

@@ -623,7 +623,7 @@ pub async fn start_fragment_info_monitor<S: MetaStore>(
                 }
             };
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(WorkerType::ComputeNode, None, true)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {

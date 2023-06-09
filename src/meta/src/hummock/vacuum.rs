@@ -20,7 +20,7 @@ use std::time::Duration;
 use futures::{stream, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::HummockSstableObjectId;
-use risingwave_pb::common::worker_node::State::{Cordoned, Running};
+use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
@@ -287,7 +287,7 @@ where
     let workers = vec![
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::Compactor, Some(vec![Running, Cordoned]))
+            .list_worker_node(WorkerType::Compactor, Some(vec![Running]), true)
             .await,
     ]
     .concat();
