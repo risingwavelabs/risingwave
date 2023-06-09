@@ -51,6 +51,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         try {
             // TODO: check database server version
             validateBinlogConfig();
+            validateServerId();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e);
         }
