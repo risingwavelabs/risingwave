@@ -21,7 +21,6 @@
 #![feature(lazy_cell)]
 #![feature(round_ties_even)]
 #![feature(generators)]
-#![feature(trait_alias)]
 
 pub mod agg;
 mod error;

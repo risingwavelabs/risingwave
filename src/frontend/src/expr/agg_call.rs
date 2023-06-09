@@ -93,7 +93,10 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
-            (AggKind::PercentileCont, _) => Float64,
+            (AggKind::PercentileCont, [input]) => match input {
+                Float64 => Float64,
+                _ => return Err(err()),
+            },
 
             // other functions are handled by signature map
             _ => {

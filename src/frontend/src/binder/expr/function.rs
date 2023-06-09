@@ -160,7 +160,7 @@ impl Binder {
             .into());
         }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+        let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
             f.within_group
                 .iter()
                 .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
@@ -173,6 +173,15 @@ impl Binder {
                 .flatten_ok()
                 .try_collect()?
         };
+        if kind == AggKind::PercentileCont {
+            inputs[0] = inputs
+                .iter()
+                .exactly_one()
+                .unwrap()
+                .clone()
+                .cast_implicit(DataType::Float64)?;
+        }
+
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {

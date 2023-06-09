@@ -21,7 +21,7 @@ use super::Aggregator;
 use crate::agg::AggCall;
 use crate::{ExprError, Result};
 
-#[build_aggregate("percentile_cont(*) -> float64")]
+#[build_aggregate("percentile_cont(float64) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
         let arg = literal.as_float64().clone().into();

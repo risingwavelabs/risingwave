@@ -451,15 +451,7 @@ impl LogicalAggBuilder {
         let inputs: Vec<_> = inputs
             .iter()
             .map(|expr| {
-                let index = if agg_kind == AggKind::PercentileCont {
-                    let casted = expr
-                        .clone()
-                        .cast_implicit(DataType::Float64)
-                        .map_err(|_| "unsupported column type")?;
-                    self.input_proj_builder.add_expr(&casted)?
-                } else {
-                    self.input_proj_builder.add_expr(expr)?
-                };
+                let index = self.input_proj_builder.add_expr(expr)?;
                 Ok(InputRef::new(index, expr.return_type()))
             })
             .try_collect()
