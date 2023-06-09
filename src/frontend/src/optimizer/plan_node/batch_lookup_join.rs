@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
 use super::utils::Distill;
 use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};

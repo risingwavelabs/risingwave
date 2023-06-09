@@ -15,12 +15,12 @@
 use std::fmt;
 use std::ops::BitAnd;
 
-use risingwave_common::catalog::{ColumnDesc};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
 use super::utils::formatter_debug_plan_node;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
