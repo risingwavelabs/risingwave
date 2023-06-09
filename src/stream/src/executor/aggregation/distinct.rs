@@ -335,6 +335,7 @@ mod tests {
 
             column_orders: vec![],
             filter: None,
+            direct_args: vec![],
         }
     }
 
