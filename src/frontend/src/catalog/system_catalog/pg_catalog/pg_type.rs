@@ -56,6 +56,9 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (20, "int8"),
     (21, "int2"),
     (23, "int4"),
+    // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
+    // with PostgreSQL.
+    (25, "text"),
     (700, "float4"),
     (701, "float8"),
     (1043, "varchar"),

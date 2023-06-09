@@ -191,6 +191,24 @@ pub struct IndicesDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
+impl<'a> IndicesDisplay<'a> {
+    /// Returns `None` means all
+    pub fn from(
+        indices: &'a [usize],
+        internal_column_num: usize,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        if indices.iter().copied().eq(0..internal_column_num) {
+            None
+        } else {
+            Some(Self {
+                indices,
+                input_schema,
+            })
+        }
+    }
+}
+
 impl fmt::Display for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{self:?}")

@@ -61,6 +61,8 @@ mod delete;
 pub use delete::*;
 mod insert;
 pub use insert::*;
+mod limit;
+pub use limit::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a>;

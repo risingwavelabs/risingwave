@@ -1,0 +1,103 @@
+# First of all, some PostgreSQL compatible behavior.
+
+query I
+select array_ndims(array[2,3,4]);
+----
+1
+
+query I
+select array_ndims(array[array[2,3], array[4,5]]);
+----
+2
+
+statement error
+select array_ndims(7);
+
+statement error
+select array_ndims(null);
+
+statement error
+select array_ndims('{2,3}');
+
+query I
+select array_ndims('{2,3}'::int[]);
+----
+1
+
+query I
+select array_ndims('{2,3}'::varchar[]);
+----
+1
+
+query I
+select array_ndims('{{2,3},{4,5}}'::int[][]);
+----
+2
+
+# Then some "strange" PostgreSQL behavior we intentionally do not follow.
+# Because PostgreSQL treats `int[][]` the same type as `int[]`.
+
+statement error
+select array_ndims(array[array[2,3],array[4,5]]::int[]);
+
+statement error
+select array_ndims(array[2,3,4]::int[][]);
+
+query I
+select array_ndims(array[]::int[]);
+----
+1
+
+query I
+select array_ndims(array[]::int[][]);
+----
+2
+
+query I
+select array_ndims(null::int[]);
+----
+1
+
+query I
+select array_ndims(null::int[][]);
+----
+2
+
+# `array_lower` is always `1` as long as within range
+
+query I
+select array_lower(array[2, 3, 4], 1);
+----
+1
+
+query I
+select array_lower(array[array[2,3], array[4,5]], '2');
+----
+1
+
+query I
+select array_lower(array[array[2,3], array[4,5]], generate_series(-1, 3));
+----
+NULL
+NULL
+1
+1
+NULL
+
+query I
+select array_lower(array[array[2,3], array[4,5]], null);
+----
+NULL
+
+statement error
+select array_lower(array[array[2,3], array[4,5]], true);
+
+# `array_upper` is same as `array_length`
+
+query I
+select array_upper(array[array[2, 3, 4], array[3, 4, 5]], 1);
+----
+2
+
+statement error dimensions greater than 1 not supported
+select array_upper(array[array[2, 3, 4], array[3, 4, 5]], 2);
