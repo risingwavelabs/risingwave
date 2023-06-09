@@ -122,11 +122,7 @@ impl fmt::Display for StreamTemporalJoin {
         };
 
         if verbose {
-            match IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            ) {
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
                 None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };
