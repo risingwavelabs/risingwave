@@ -55,6 +55,7 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+mod arrangement_backfill;
 mod barrier_recv;
 mod batch_query;
 mod chain;
