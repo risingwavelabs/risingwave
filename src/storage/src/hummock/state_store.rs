@@ -136,12 +136,25 @@ impl HummockStorage {
                 if read_version_vec.is_empty() {
                     (Vec::default(), Vec::default(), (**pinned_version).clone())
                 } else {
+                    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                    let mut max_mce = 0;
+                    for read_version in &read_version_vec {
+                        let read_version_guard = read_version.read();
+                        staging_vec.push(read_version_guard.staging().clone());
+                        max_mce = std::cmp::max(
+                            max_mce,
+                            read_version_guard.committed().max_committed_epoch(),
+                        );
+                    }
+
+                    let committed_version = (**pinned_version).clone();
                     read_filter_for_batch(
                         epoch,
                         table_id,
                         key_range,
-                        read_version_vec,
-                        self.pinned_version.load().clone(),
+                        staging_vec,
+                        max_mce,
+                        committed_version,
                     )?
                 }
             };

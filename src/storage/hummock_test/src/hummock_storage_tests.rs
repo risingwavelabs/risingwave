@@ -1525,16 +1525,28 @@ async fn test_hummock_version_reader() {
                 Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             {
+                let read_version_vec = vec![
+                    basic_read_version.clone(),
+                    read_version_2.clone(),
+                    read_version_3.clone(),
+                ];
+                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                let mut max_mce = 0;
+                for read_version in &read_version_vec {
+                    let read_version_guard = read_version.read();
+                    staging_vec.push(read_version_guard.staging().clone());
+                    max_mce = std::cmp::max(
+                        max_mce,
+                        read_version_guard.committed().max_committed_epoch(),
+                    );
+                }
                 let read_snapshot = read_filter_for_batch(
                     epoch1,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
-                    Arc::new(test_env.storage.get_pinned_version()),
+                    staging_vec,
+                    max_mce,
+                    test_env.storage.get_pinned_version(),
                 )
                 .unwrap();
 
@@ -1566,16 +1578,30 @@ async fn test_hummock_version_reader() {
             }
 
             {
+                let read_version_vec = vec![
+                    basic_read_version.clone(),
+                    read_version_2.clone(),
+                    read_version_3.clone(),
+                ];
+
+                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                let mut max_mce = 0;
+                for read_version in &read_version_vec {
+                    let read_version_guard = read_version.read();
+                    staging_vec.push(read_version_guard.staging().clone());
+                    max_mce = std::cmp::max(
+                        max_mce,
+                        read_version_guard.committed().max_committed_epoch(),
+                    );
+                }
+
                 let read_snapshot = read_filter_for_batch(
                     epoch2,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
-                    Arc::new(test_env.storage.get_pinned_version()),
+                    staging_vec,
+                    max_mce,
+                    test_env.storage.get_pinned_version(),
                 )
                 .unwrap();
 
@@ -1607,16 +1633,28 @@ async fn test_hummock_version_reader() {
             }
 
             {
+                let read_version_vec = vec![
+                    basic_read_version.clone(),
+                    read_version_2.clone(),
+                    read_version_3.clone(),
+                ];
+                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                let mut max_mce = 0;
+                for read_version in &read_version_vec {
+                    let read_version_guard = read_version.read();
+                    staging_vec.push(read_version_guard.staging().clone());
+                    max_mce = std::cmp::max(
+                        max_mce,
+                        read_version_guard.committed().max_committed_epoch(),
+                    );
+                }
                 let read_snapshot = read_filter_for_batch(
                     epoch2,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
-                    Arc::new(test_env.storage.get_pinned_version()),
+                    staging_vec,
+                    max_mce,
+                    test_env.storage.get_pinned_version(),
                 )
                 .unwrap();
 
@@ -1648,16 +1686,28 @@ async fn test_hummock_version_reader() {
             }
 
             {
+                let read_version_vec = vec![
+                    basic_read_version.clone(),
+                    read_version_2.clone(),
+                    read_version_3.clone(),
+                ];
+                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                let mut max_mce = 0;
+                for read_version in &read_version_vec {
+                    let read_version_guard = read_version.read();
+                    staging_vec.push(read_version_guard.staging().clone());
+                    max_mce = std::cmp::max(
+                        max_mce,
+                        read_version_guard.committed().max_committed_epoch(),
+                    );
+                }
                 let read_snapshot = read_filter_for_batch(
                     epoch3,
                     TEST_TABLE_ID,
                     &(Unbounded, Unbounded),
-                    vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ],
-                    Arc::new(test_env.storage.get_pinned_version()),
+                    staging_vec,
+                    max_mce,
+                    test_env.storage.get_pinned_version(),
                 )
                 .unwrap();
 
@@ -1695,16 +1745,28 @@ async fn test_hummock_version_reader() {
                 let key_range = map_table_key_range((Included(start_key), Excluded(end_key)));
 
                 {
+                    let read_version_vec = vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ];
+                    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                    let mut max_mce = 0;
+                    for read_version in &read_version_vec {
+                        let read_version_guard = read_version.read();
+                        staging_vec.push(read_version_guard.staging().clone());
+                        max_mce = std::cmp::max(
+                            max_mce,
+                            read_version_guard.committed().max_committed_epoch(),
+                        );
+                    }
                     let read_snapshot = read_filter_for_batch(
                         epoch2,
                         TEST_TABLE_ID,
                         &key_range,
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                        Arc::new(test_env.storage.get_pinned_version()),
+                        staging_vec,
+                        max_mce,
+                        test_env.storage.get_pinned_version(),
                     )
                     .unwrap();
 
@@ -1736,16 +1798,28 @@ async fn test_hummock_version_reader() {
                 }
 
                 {
+                    let read_version_vec = vec![
+                        basic_read_version.clone(),
+                        read_version_2.clone(),
+                        read_version_3.clone(),
+                    ];
+                    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+                    let mut max_mce = 0;
+                    for read_version in &read_version_vec {
+                        let read_version_guard = read_version.read();
+                        staging_vec.push(read_version_guard.staging().clone());
+                        max_mce = std::cmp::max(
+                            max_mce,
+                            read_version_guard.committed().max_committed_epoch(),
+                        );
+                    }
                     let read_snapshot = read_filter_for_batch(
                         epoch3,
                         TEST_TABLE_ID,
                         &key_range,
-                        vec![
-                            basic_read_version.clone(),
-                            read_version_2.clone(),
-                            read_version_3.clone(),
-                        ],
-                        Arc::new(test_env.storage.get_pinned_version()),
+                        staging_vec,
+                        max_mce,
+                        test_env.storage.get_pinned_version(),
                     )
                     .unwrap();
 

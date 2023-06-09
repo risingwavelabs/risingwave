@@ -329,12 +329,25 @@ async fn test_read_filter_basic() {
 
         // build for batch
         {
+            let read_version_vec = vec![read_version.clone()];
+            let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+            let mut max_mce = 0;
+            for read_version in &read_version_vec {
+                let read_version_guard = read_version.read();
+                staging_vec.push(read_version_guard.staging().clone());
+                max_mce = std::cmp::max(
+                    max_mce,
+                    read_version_guard.committed().max_committed_epoch(),
+                );
+            }
+
             let hummock_read_snapshot = read_filter_for_batch(
                 epoch,
                 TableId::from(table_id),
                 &key_range,
-                vec![read_version.clone()],
-                Arc::new(read_version.read().committed().clone()),
+                staging_vec,
+                max_mce,
+                read_version.read().committed().clone(),
             )
             .unwrap();
 

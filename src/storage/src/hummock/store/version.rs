@@ -427,32 +427,25 @@ pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
     key_range: &TableKeyRange,
-    read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-    committed_version: Arc<CommittedVersion>,
+    staging_vec: Vec<StagingVersion>,
+    staging_prune_mce: u64,
+    committed_version: CommittedVersion,
 ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
-    assert!(!read_version_vec.is_empty());
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
-    let (min_epoch, max_epoch) = (committed_version.max_committed_epoch(), epoch);
-
+    let (min_epoch, max_epoch) = (staging_prune_mce, epoch);
     // prune imm and sst with max_mce
-    for read_version in &read_version_vec {
-        let read_version_guard = read_version.read();
-        assert!(
-            read_version_guard.committed().max_committed_epoch()
-                <= committed_version.max_committed_epoch()
-        );
-        let (imm_iter, sst_iter) = read_version_guard
-            .staging()
-            .prune_overlap(min_epoch, max_epoch, table_id, key_range);
+    for staging_version in staging_vec {
+        let (imm_iter, sst_iter) =
+            staging_version.prune_overlap(min_epoch, max_epoch, table_id, key_range);
 
         imm_vec.extend(imm_iter.cloned().collect_vec());
         sst_vec.extend(sst_iter.cloned().collect_vec());
     }
 
-    Ok((imm_vec, sst_vec, committed_version.as_ref().clone()))
+    Ok((imm_vec, sst_vec, committed_version))
 }
 
 pub fn read_filter_for_local(
