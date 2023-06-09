@@ -307,19 +307,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                         let mut flag = 0;
                         // `sst_info.table_ids` will never be empty.
                         for table_id in sst_info.get_table_ids() {
-                            flag |= if member_table_ids.contains(table_id) {
-                                2
-                            } else {
-                                1
-                            };
-                            if flag == 3 {
+                            if member_table_ids.contains(table_id) {
+                                flag = 2;
                                 break;
                             }
                         }
                         // We need to replace the SST id of the divided part in parent group with a
                         // new SST id when it's not a trivial adjust. View function
                         // `init_with_parent_group` for details.
-                        flag - 1
+                        flag
                     })
                     .sum()
             })

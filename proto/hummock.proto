@@ -64,6 +64,7 @@ message GroupConstruct {
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
   uint64 new_sst_start_id = 5;
+  bool no_trivial_split = 6;
 }
 
 message GroupMetaChange {
@@ -76,6 +77,7 @@ message GroupTableChange {
   uint64 target_group_id = 2;
   uint64 origin_group_id = 3;
   uint64 new_sst_start_id = 4;
+  bool no_trivial_split = 5;
 }
 
 message GroupDestroy {}

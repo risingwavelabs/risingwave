@@ -888,7 +888,7 @@ where
                 compact_task.target_level,
                 start_time.elapsed()
             );
-        } else if CompactStatus::is_trivial_reclaim(task, &exist_table_ids) {
+        } else if CompactStatus::is_trivial_reclaim(&compact_task, &exist_table_ids) {
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
