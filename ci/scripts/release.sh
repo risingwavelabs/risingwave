@@ -4,7 +4,6 @@
 set -euo pipefail
 
 REPO_ROOT=${PWD}
-export GIT_SHA=${BUILDKITE_COMMIT}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
