@@ -74,7 +74,7 @@ wait_for_connector_node_start() {
 
 echo "--- starting risingwave cluster with connector node"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-1cn-1fe-with-recovery
+cargo make --allow-private ci-start ci-1cn-1fe-with-recovery
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
 echo "waiting for connector node to start"
@@ -115,12 +115,12 @@ echo "check mviews after cluster recovery"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cargo make --allow-private ci-kill
 pkill -f connector-node
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-pubsub
+cargo make --allow-private ci-start ci-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/*.slt'

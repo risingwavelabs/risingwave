@@ -71,7 +71,7 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.6"
+min_version = "0.36.10"
 
 [tasks.clean-full]
 category = "Misc"
@@ -101,9 +101,11 @@ category = "Misc"
 description = "Open logs with VSCode or dump in console"
 script = '''
 #!/usr/bin/env bash
-set -e
 
-code "${PREFIX_LOG}" 2> /dev/null || true
+code "${PREFIX_LOG}" 2> /dev/null
+if [[ $? -eq 0 ]]; then
+  exit 0
+fi
 
 for out_file in ${PREFIX_LOG}/*.log
 do
@@ -170,7 +172,7 @@ tmux kill-window -t $1
 alias = "follow"
 
 [tasks.follow]
-category = "misc"
+category = "Misc"
 description = "Follows the end of the logs of a specific component"
 script = '''
 #!/usr/bin/env bash
@@ -194,6 +196,7 @@ tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
 [tasks.check-logs]
+private = true
 category = "RiseDev - CI"
 description = "Check if there is panic in log or significant log size issue"
 script = '''
@@ -230,6 +233,7 @@ python -mwebbrowser file://$(pwd)/target/doc/index.html
 '''
 
 [tasks.link-standalone-binaries]
+private = true
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
 condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
@@ -265,6 +269,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 '''
 
 [tasks.link-user-bin]
+private = true
 category = "RiseDev - Build"
 description = "Link all binaries to .bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
@@ -298,6 +303,7 @@ alias = "build-risingwave"
 alias = "build-risingwave"
 
 [tasks.extract-dashboard-artifact]
+private = true
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
 condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
@@ -314,6 +320,7 @@ git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
 
 [tasks.export-dashboard-v2]
+private = true
 category = "RiseDev - Build"
 description = "Build dashboard v2"
 condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
@@ -369,6 +376,7 @@ cargo doc --workspace --no-deps --document-private-items
 '''
 
 [tasks.prepare-config]
+private = true
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
@@ -382,7 +390,7 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.download-all]
-category = "RiseDev - Components"
+category = "Misc"
 description = "Download all available components at once"
 dependencies = [
   "download-maven",
@@ -398,9 +406,12 @@ dependencies = [
 ]
 
 [tasks.create-user-profiles-file]
+private = true
 category = "RiseDev - Prepare"
 description = "Create user profiles file if not exists"
-condition = { files_not_exist = ["${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"] }
+condition = { files_not_exist = [
+  "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml",
+] }
 script = '''
 #!/usr/bin/env bash
 
@@ -454,8 +465,8 @@ dependencies = [
 alias = "playground"
 
 [tasks.playground]
-category = "RiseDev - Start"
-description = "Start a lite RisingWave playground using risingwave all-in-one binary"
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a lite RisingWave playground using risingwave all-in-one binary"
 dependencies = ["build-connector-node"]
 script = '''
 #!/usr/bin/env bash
@@ -470,7 +481,7 @@ cargo run --bin risingwave \
 '''
 
 [tasks.ctl]
-category = "RiseDev - Start"
+category = "RiseDev - Start/Stop"
 description = "Start RiseCtl"
 script = '''
 #!/usr/bin/env bash
@@ -492,19 +503,13 @@ test $? -eq 0 || exit 1
 alias = "dev"
 
 [tasks.dev]
-category = "RiseDev - Start"
+category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
 script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
-description = "Start a full RisingWave dev cluster using risedev-dev"
-
-[tasks.kafka]
-category = "RiseDev - Start"
-description = "Start a RisingWave dev cluster alongside with a Kafka instance"
-command = "./risedev"
-args = ["dev", "ci-kafka"]
+description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.kill-risedev]
-category = "RiseDev - Stop"
+category = "RiseDev - Start/Stop"
 description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
@@ -521,17 +526,25 @@ alias = "kill-risedev"
 alias = "kill-risedev"
 
 [tasks.down]
-category = "RiseDev - Stop"
+category = "RiseDev - Start/Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
 [tasks.install-nextest]
+private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = ["nextest", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
+  "nextest",
+  "--help",
+], install_command = "binstall" }
 
 [tasks.install-llvm-cov]
+private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = ["llvm-cov", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = [
+  "llvm-cov",
+  "--help",
+], install_command = "binstall" }
 
 [tasks.install-tools]
 category = "RiseDev - Check"
@@ -606,12 +619,14 @@ set -e
 
 cargo nextest run "$@"
 """
-description = "Run unit tests"
+description = "🌟 Run unit tests"
 
 [tasks.build-connector-node]
-category = "RiseDev - Components"
+category = "RiseDev - Build"
 dependencies = ["prepare"]
-condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"], files_modified = { input = [
+condition = { env_set = [
+  "ENABLE_BUILD_RW_CONNECTOR",
+], files_modified = { input = [
   "./java/connector-node/**/*.java",
 ], output = [
   "./java/connector-node/assembly/target/*",
@@ -640,7 +655,7 @@ tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
 
 [tasks.sbuild]
-category = "RiseDev - Build in simulation mode"
+category = "RiseDev - Build"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -665,7 +680,7 @@ cargo build \
 """
 
 [tasks.stest]
-category = "RiseDev - Deterministic Simulation Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -689,13 +704,8 @@ cargo nextest run \
   "$@"
 """
 
-[tasks.sscale-test]
-category = "RiseDev - Simulation integration tests"
-description = "Run scaling tests in deterministic simulation mode"
-deprecated = "Please use `risedev sit-test scale::` instead."
-
 [tasks.sit-test]
-category = "RiseDev - Simulation integration tests"
+category = "RiseDev - Deterministic Simulation"
 description = "Run integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -710,7 +720,7 @@ cargo nextest run \
 """
 
 [tasks.sarchive-it-test]
-category = "RiseDev - Simulation integration tests"
+category = "RiseDev - Deterministic Simulation"
 description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -726,7 +736,7 @@ cargo nextest archive \
 """
 
 [tasks.scheck]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -740,7 +750,7 @@ cargo check \
 """
 
 [tasks.sslt]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -754,7 +764,7 @@ cargo run \
 """
 
 [tasks.sslt-build-all]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -769,7 +779,7 @@ cargo build \
 """
 
 [tasks.sslt-cov]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
@@ -824,7 +834,10 @@ cd "${JAVA_DIR}"
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
-install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = ["hakari", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = [
+  "hakari",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -838,7 +851,10 @@ test $? -eq 0 || exit 1
 [tasks.check-dep-sort]
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = ["sort", "--help"], install_command = "binstall" }
+install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
+  "sort",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -894,7 +910,9 @@ fi
 [tasks.check-typos]
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = ["--help"], install_command = "binstall" }
+install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = [
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -907,7 +925,10 @@ fi
 category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
-install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = ["udeps", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = [
+  "udeps",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -937,7 +958,7 @@ script = """
 echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
-description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
+description = "🌟 Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
 
 [tasks.c]
 alias = "check"
@@ -966,8 +987,8 @@ alias = "check-fix"
 
 
 [tasks.install]
-category = "RiseDev - Prepare"
-description = "Install RiseDev to user local"
+category = "Misc"
+description = "🌟 Install RiseDev so you can run it from anywhere"
 script = """
 #!/usr/bin/env bash
 set -e
@@ -997,6 +1018,7 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 """
 
 [tasks.ci-start]
+private = true
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
 command = "target/${BUILD_MODE_DIR}/risedev-dev"
@@ -1004,16 +1026,19 @@ args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
+private = true
 category = "RiseDev - CI"
 dependencies = ["k", "l", "check-logs"]
 description = "Kill cluster, dump logs and check logs"
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = ["--help"] }
+install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+  "--help",
+] }
 command = "sqllogictest"
 args = ["${@}"]
-description = "Run SQLLogicTest"
+description = "🌟 Run SQLLogicTest"
 
 [tasks.slt-streaming]
 category = "RiseDev - SQLLogicTest"
@@ -1098,7 +1123,8 @@ cp -a .risingwave/rw-docker/* docker
 '''
 
 [tasks.generate-example-config]
-category = "misc"
+private = true
+category = "Misc"
 description = "Generate default config and write to src/config/example.toml"
 script = '''
 cat << EOF > src/config/example.toml

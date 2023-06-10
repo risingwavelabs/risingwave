@@ -35,7 +35,7 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 echo "--- starting risingwave cluster with connector node"
 mkdir -p .risingwave/log
 ./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
-cargo make ci-start ci-iceberg-test
+cargo make --allow-private ci-start ci-iceberg-test
 sleep 1
 
 # prepare minio iceberg sink
@@ -84,5 +84,5 @@ else
 fi
 
 echo "--- Kill cluster"
-cargo make ci-kill
+cargo make --allow-private ci-kill
 pkill -f connector-node
