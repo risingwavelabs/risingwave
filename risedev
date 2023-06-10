@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 if [ -z "$(which cargo-binstall)" ]; then
-    cargo install cargo-quickinstall --locked
-    cargo quickinstall cargo-binstall
+    echo "Installing cargo-binstall..."
+    curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 fi
 
 if [ -z "$(which cargo-make)" ]; then
