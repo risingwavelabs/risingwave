@@ -54,7 +54,6 @@ use self::plan_visitor::InputRefValidator;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::InputRef;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
@@ -519,24 +518,7 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let mut stream_plan = self.gen_optimized_stream_plan(false)?;
-
-        // Add a project node if there is hidden column(s).
-        let input_fields = stream_plan.schema().fields();
-        if input_fields.len() != self.out_fields.count_ones(..) {
-            let exprs = input_fields
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, field)| {
-                    if self.out_fields.contains(idx) {
-                        Some(InputRef::new(idx, field.data_type.clone()).into())
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec();
-            stream_plan = StreamProject::new(generic::Project::new(exprs, stream_plan)).into();
-        }
+        let stream_plan = self.gen_optimized_stream_plan(false)?;
 
         StreamSink::create(
             stream_plan,
