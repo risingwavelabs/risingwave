@@ -41,7 +41,7 @@ const VERSION: &str = {
     const GIT_SHA: &str = {
         /// `VERGEN_GIT_SHA` is provided by the build script. It will trigger rebuild
         /// for each commit, so we only use it for the final binary (`risingwave -V`).
-        const VERGEN_GIT_SHA: &str = git_sha!(env!("VERGEN_GIT_SHA"));
+        const VERGEN_GIT_SHA: &str = git_sha!("VERGEN_GIT_SHA");
         /// `GIT_SHA` is a normal environment variable provided by ourselves. It's
         /// [`risingwave_common::GIT_SHA`] and is used in logs/version queries.
         ///
