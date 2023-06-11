@@ -193,7 +193,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
 
   - label: "check"
     command: "ci/scripts/check.sh"
