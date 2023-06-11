@@ -16,10 +16,12 @@ use std::sync::Arc;
 use std::{fmt, vec};
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::utils::Distill;
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
     StreamValues, ToBatch, ToStream,
@@ -95,6 +97,21 @@ impl fmt::Display for LogicalValues {
             .field("rows", &self.rows)
             .field("schema", &self.schema())
             .finish()
+    }
+}
+impl Distill for LogicalValues {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let data = Pretty::Array(
+            self.rows()
+                .iter()
+                .map(|row| {
+                    let collect = row.into_iter().map(|x| Pretty::debug(x)).collect();
+                    Pretty::Array(collect)
+                })
+                .collect(),
+        );
+        let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
+        Pretty::childless_record("BatchValues", fields)
     }
 }
 
