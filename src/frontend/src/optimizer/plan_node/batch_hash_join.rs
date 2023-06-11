@@ -15,7 +15,6 @@
 use std::fmt;
 
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
@@ -105,10 +104,8 @@ impl Distill for BatchHashJoin {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.logical.join_type)));
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
 
+        let concat_schema = self.logical.concat_schema();
         vec.push((
             "predicate",
             Pretty::debug(&EqJoinPredicateDisplay {
@@ -117,12 +114,8 @@ impl Distill for BatchHashJoin {
             }),
         ));
         if verbose {
-            let data = IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            )
-            .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
             vec.push(("output", data));
         }
         Pretty::childless_record("BatchHashJoin", vec)
@@ -135,9 +128,7 @@ impl fmt::Display for BatchHashJoin {
         let mut builder = f.debug_struct("BatchHashJoin");
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -147,11 +138,7 @@ impl fmt::Display for BatchHashJoin {
         );
 
         if verbose {
-            match IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            ) {
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
                 None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };

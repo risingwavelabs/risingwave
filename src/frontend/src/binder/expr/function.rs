@@ -600,14 +600,11 @@ impl Binder {
                 (
                     "array_ndims",
                     guard_by_len(1, raw(|_binder, inputs| {
-                        let input = &inputs[0];
-                        if input.is_untyped() {
-                            return Err(ErrorCode::BindError("could not determine polymorphic type because input has type unknown".into()).into());
-                        }
-                        match input.return_type().array_ndims() {
-                            0 => Err(ErrorCode::BindError("array_ndims expects an array".into()).into()),
-                            n => Ok(ExprImpl::literal_int(n.try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?))
-                        }
+                        inputs[0].ensure_array_type()?;
+
+                        let n = inputs[0].return_type().array_ndims()
+                                .try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?;
+                        Ok(ExprImpl::literal_int(n))
                     })),
                 ),
                 (
