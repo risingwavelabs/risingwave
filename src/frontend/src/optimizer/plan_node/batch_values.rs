@@ -75,7 +75,7 @@ impl Distill for BatchValues {
                 .rows()
                 .iter()
                 .map(|row| {
-                    let collect = row.into_iter().map(|x| Pretty::debug(x)).collect();
+                    let collect = row.iter().map(Pretty::debug).collect();
                     Pretty::Array(collect)
                 })
                 .collect(),
