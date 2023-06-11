@@ -26,8 +26,6 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 mod buffer;
 
 mod aggregate;
-mod lag;
-mod lead;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -124,8 +122,7 @@ pub(super) fn create_window_state(
                 None,
             ))
         }
-        Lag => Box::new(lag::LagState::new(&call.frame)),
-        Lead => Box::new(lead::LeadState::new(&call.frame)),
+        Lag | Lead => unreachable!("should be rewritten to `first_value` in optimizer"),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
     })
 }
