@@ -93,7 +93,10 @@ impl Distill for BatchSource {
             .map(|s| Pretty::from(s.to_owned()))
             .collect();
         let fields = vec![
-            ("source", Pretty::from(self.source_catalog().unwrap().name.clone())),
+            (
+                "source",
+                Pretty::from(self.source_catalog().unwrap().name.clone()),
+            ),
             ("columns", Pretty::Array(columns)),
             ("filter", Pretty::debug(&self.kafka_timestamp_range_value())),
         ];
