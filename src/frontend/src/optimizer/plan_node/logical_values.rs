@@ -101,15 +101,15 @@ impl fmt::Display for LogicalValues {
 }
 impl Distill for LogicalValues {
     fn distill<'a>(&self) -> Pretty<'a> {
-        let data = Pretty::Array(
-            self.rows()
-                .iter()
-                .map(|row| {
-                    let collect = row.into_iter().map(|x| Pretty::debug(x)).collect();
-                    Pretty::Array(collect)
-                })
-                .collect(),
-        );
+        let data = self
+            .rows()
+            .iter()
+            .map(|row| {
+                let collect = row.iter().map(Pretty::debug).collect();
+                Pretty::Array(collect)
+            })
+            .collect();
+        let data = Pretty::Array(data);
         let fields = vec![("rows", data), ("schema", Pretty::debug(&self.schema()))];
         Pretty::childless_record("BatchValues", fields)
     }
