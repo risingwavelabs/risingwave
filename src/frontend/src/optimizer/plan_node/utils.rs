@@ -193,6 +193,18 @@ pub struct IndicesDisplay<'a> {
 
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
+    pub fn from_join<PlanRef: GenericPlanRef>(
+        join: &'a generic::Join<PlanRef>,
+        input_schema: &'a Schema,
+    ) -> Option<Self> {
+        Self::from(
+            &join.output_indices,
+            join.internal_column_num(),
+            input_schema,
+        )
+    }
+
+    /// Returns `None` means all
     pub fn from(
         indices: &'a [usize],
         internal_column_num: usize,
@@ -246,3 +258,5 @@ macro_rules! formatter_debug_plan_node {
     };
 }
 pub(crate) use formatter_debug_plan_node;
+
+use super::generic::{self, GenericPlanRef};

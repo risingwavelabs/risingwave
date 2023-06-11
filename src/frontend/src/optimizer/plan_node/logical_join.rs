@@ -18,7 +18,6 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -61,9 +60,7 @@ impl fmt::Display for LogicalJoin {
         let mut builder = f.debug_struct("LogicalJoin");
         builder.field("type", &self.join_type());
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.core.concat_schema();
         builder.field(
             "on",
             &ConditionDisplay {
@@ -1395,7 +1392,7 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 
