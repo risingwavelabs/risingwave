@@ -368,9 +368,6 @@ message WindowFunction {
     // NTILE = 6;
     LAG = 7;
     LEAD = 8;
-    // FIRST_VALUE = 9;
-    // LAST_VALUE = 10;
-    // NTH_VALUE = 11;
   }
 
   oneof type {
