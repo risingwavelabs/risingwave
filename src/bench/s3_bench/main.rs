@@ -630,12 +630,10 @@ async fn main() {
     // Retry 3 times if we get server-side errors or throttling errors
     let sdk_config_loader =
         aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
-    let endpoint = std::env::var("OBJECT_STORAGE_ENDPOINT").unwrap_or("".to_string());
-    let sdk_config = match endpoint.is_empty() {
-        false => sdk_config_loader.endpoint_url(endpoint).load().await,
-        true => sdk_config_loader.load().await,
+    let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
+        Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
+        Err(_) => sdk_config_loader.load().await,
     };
-
     let client = Arc::new(Client::new(&sdk_config));
     let objs = Arc::new(RwLock::new(ObjPool::default()));
 
