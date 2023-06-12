@@ -83,10 +83,7 @@ fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
         None
     };
 
-    Ok(Box::new(PercentileDisc::new(
-        fraction,
-        agg.return_type.clone(),
-    )))
+    Ok(Box::new(PercentileDisc::new(fraction, agg.return_type)))
 }
 
 #[derive(Clone)]
