@@ -40,8 +40,24 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     kv_heap_size: usize,
     /// The metrics of memory usage
     memory_usage_metrics: Option<IntGauge>,
+    // Metrics info
+    metrics_info: Option<MetricsInfo>,
     /// The size reported last time
     last_reported_size_bytes: usize,
+}
+
+impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
+    fn drop(&mut self) {
+        if let Some(metrics) = &self.memory_usage_metrics {
+            metrics.set(0.into());
+        }
+        if let Some(info) = &self.metrics_info {
+            info.metrics
+                .stream_memory_usage
+                .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
+                .unwrap();
+        }
+    }
 }
 
 impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Allocator>
@@ -52,7 +68,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         watermark_epoch: Arc<AtomicU64>,
         metrics_info: Option<MetricsInfo>,
     ) -> Self {
-        let memory_usage_metrics = metrics_info.map(|info| {
+        let memory_usage_metrics = metrics_info.as_ref().map(|info| {
             info.metrics.stream_memory_usage.with_label_values(&[
                 &info.table_id,
                 &info.actor_id,
@@ -65,6 +81,7 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
+            metrics_info,
             last_reported_size_bytes: 0,
         }
     }
