@@ -35,6 +35,5 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 
-
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
