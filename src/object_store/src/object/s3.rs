@@ -587,7 +587,8 @@ impl S3ObjectStore {
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
         let builder =
-            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
+                .force_path_style(true);
 
         let config = builder
             .region(Region::new("custom"))
