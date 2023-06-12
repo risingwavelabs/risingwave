@@ -191,7 +191,7 @@ services:
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
       - "--state-store"
-      - "hummock+s3-compatible://bucket-name"
+      - "hummock+gcs://<bucket-name>@<data_path>"
       - "--data-directory"
       - "hummock_001"
       - "--config-path"

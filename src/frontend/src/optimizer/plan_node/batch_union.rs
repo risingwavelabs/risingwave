@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -46,11 +45,7 @@ impl BatchUnion {
     }
 }
 
-impl fmt::Display for BatchUnion {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchUnion")
-    }
-}
+impl_distill_by_unit!(BatchUnion, logical, "BatchUnion");
 
 impl PlanTreeNode for BatchUnion {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
