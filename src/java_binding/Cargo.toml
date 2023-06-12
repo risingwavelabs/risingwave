@@ -21,6 +21,8 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -32,8 +34,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tracing = "0.1"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 
 [lib]
 crate_type = ["cdylib"]
@@ -42,7 +42,6 @@ crate_type = ["cdylib"]
 name = "data-chunk-payload-generator"
 test = false
 bench = false
-
 
 [[bin]]
 name = "data-chunk-payload-convert-generator"
