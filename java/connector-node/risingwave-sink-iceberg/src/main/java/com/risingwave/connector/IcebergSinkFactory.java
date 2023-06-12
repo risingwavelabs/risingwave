@@ -24,11 +24,9 @@ import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
-import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.Status;
 
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
