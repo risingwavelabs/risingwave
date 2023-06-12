@@ -77,8 +77,8 @@ jobs:
           cd python-client && bash gen-stub.sh
 
           echo "--- generate integration tests stream chunk data"
-          cargo run --bin data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
-          cargo run --bin data-chunk-payload-generator unit-test > ./data/stream_chunk_data
+          # cargo run --bin data-chunk-payload-convert-generator data/sink_input_new.json > ./data/sink_input
+          # cargo run --bin data-chunk-payload-generator unit-test > ./data/stream_chunk_data
 
           echo "--- running streamchunk integration tests"
           if python integration_tests.py --stream_chunk_sink --input_binary_file ./data/stream_chunk_data; then

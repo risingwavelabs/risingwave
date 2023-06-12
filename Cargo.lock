@@ -6220,6 +6220,8 @@ dependencies = [
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_storage",
+ "serde",
+ "serde_json",
  "thiserror",
  "tracing",
 ]
