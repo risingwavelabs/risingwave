@@ -370,18 +370,20 @@ macro_rules! test {
 
             // cordon all nodes
             #[madsim::test]
-            #[should_panic]
             async fn [< cordon_all_nodes_error_ $query >]() {
                 use risingwave_simulation::nexmark::queries::$query::*;
-                cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
-                    .await.unwrap()
+                let result = cordoned_nodes_do_not_get_actors(CREATE, SELECT, DROP, 3)
+                    .await;
+                assert!(result.is_err());
+                assert_eq!(result.err().unwrap().to_string(), "db error: ERROR: QueryError: internal error: Service unavailable: No available parallel units to schedule");
             }
             #[madsim::test]
-            #[should_panic]
             async fn [< cordon_all_nodes_error_2_ $query >]() {
                 use risingwave_simulation::nexmark::queries::q3::*;
-                cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
-                    .await.unwrap()
+                let result = cordoned_nodes_do_not_get_new_actors(CREATE, SELECT, DROP, 3)
+                    .await;
+                assert!(result.is_err());
+                assert_eq!(result.err().unwrap().to_string(), "db error: ERROR: QueryError: internal error: Service unavailable: No available parallel units to schedule");
             }
 
             // invalid scheduling request
