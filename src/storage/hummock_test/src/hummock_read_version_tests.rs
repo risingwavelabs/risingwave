@@ -73,7 +73,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(0, epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
 
@@ -113,7 +113,7 @@ async fn test_read_version_basic() {
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
                     .staging()
-                    .prune_overlap(0, epoch, TableId::default(), &key_range);
+                    .prune_overlap(epoch, TableId::default(), &key_range);
 
             let staging_imm = staging_imm_iter.cloned().collect_vec();
 
@@ -220,7 +220,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(0, epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -244,7 +244,7 @@ async fn test_read_version_basic() {
         let (staging_imm_iter, staging_sst_iter) =
             read_version
                 .staging()
-                .prune_overlap(0, epoch, TableId::default(), &key_range);
+                .prune_overlap(epoch, TableId::default(), &key_range);
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
@@ -296,7 +296,7 @@ async fn test_read_filter_basic() {
             let (staging_imm_iter, staging_sst_iter) = {
                 read_guard
                     .staging()
-                    .prune_overlap(0, epoch, TableId::default(), &key_range)
+                    .prune_overlap(epoch, TableId::default(), &key_range)
             };
 
             (
@@ -329,34 +329,14 @@ async fn test_read_filter_basic() {
 
         // build for batch
         {
-            let read_version_vec = vec![read_version.clone()];
-            let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-            let mut max_mce = 0;
-            for read_version in &read_version_vec {
-                let read_version_guard = read_version.read();
-                staging_vec.push(read_version_guard.staging().clone());
-                max_mce = std::cmp::max(
-                    max_mce,
-                    read_version_guard.committed().max_committed_epoch(),
-                );
-            }
+            let read_version_vec = vec![read_version];
 
-            let hummock_read_snapshot = read_filter_for_batch(
-                epoch,
-                TableId::from(table_id),
-                &key_range,
-                staging_vec,
-                max_mce,
-                read_version.read().committed().clone(),
-            )
-            .unwrap();
+            let hummock_read_snapshot =
+                read_filter_for_batch(epoch, TableId::from(table_id), &key_range, read_version_vec)
+                    .unwrap();
 
             assert_eq!(1, hummock_read_snapshot.0.len());
             assert_eq!(0, hummock_read_snapshot.1.len());
-            assert_eq!(
-                read_version.read().committed().max_committed_epoch(),
-                hummock_read_snapshot.2.max_committed_epoch()
-            );
         }
     }
 }

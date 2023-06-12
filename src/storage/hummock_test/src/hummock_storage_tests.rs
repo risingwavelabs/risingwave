@@ -1055,16 +1055,18 @@ async fn test_multiple_epoch_sync() {
         }
     };
     test_get().await;
+
     test_env.storage.seal_epoch(epoch1, false);
     let sync_result2 = test_env.storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = test_env.storage.seal_and_sync_epoch(epoch3).await.unwrap();
-
     test_get().await;
+
     test_env
         .meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
         .await
         .unwrap();
+
     test_env
         .meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
@@ -1525,35 +1527,21 @@ async fn test_hummock_version_reader() {
                 Arc::new(RwLock::new(hummock_storage.read_version().read().clone()));
 
             {
-                let read_version_vec = vec![
-                    basic_read_version.clone(),
-                    read_version_2.clone(),
-                    read_version_3.clone(),
-                ];
-                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                let mut max_mce = 0;
-                for read_version in &read_version_vec {
-                    let read_version_guard = read_version.read();
-                    staging_vec.push(read_version_guard.staging().clone());
-                    max_mce = std::cmp::max(
-                        max_mce,
-                        read_version_guard.committed().max_committed_epoch(),
-                    );
-                }
-                let read_snapshot = read_filter_for_batch(
-                    epoch1,
-                    TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
-                    staging_vec,
-                    max_mce,
-                    test_env.storage.get_pinned_version(),
-                )
-                .unwrap();
+                let read_snapshot = {
+                    let (imms, ssts) = read_filter_for_batch(
+                        epoch1,
+                        TEST_TABLE_ID,
+                        &(Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
-                assert_eq!(
-                    read_version_3.read().committed().max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
-                );
+                    (imms, ssts, test_env.storage.get_pinned_version())
+                };
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1578,32 +1566,21 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_version_vec = vec![
-                    basic_read_version.clone(),
-                    read_version_2.clone(),
-                    read_version_3.clone(),
-                ];
+                let read_snapshot = {
+                    let (imms, ssts) = read_filter_for_batch(
+                        epoch2,
+                        TEST_TABLE_ID,
+                        &(Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
-                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                let mut max_mce = 0;
-                for read_version in &read_version_vec {
-                    let read_version_guard = read_version.read();
-                    staging_vec.push(read_version_guard.staging().clone());
-                    max_mce = std::cmp::max(
-                        max_mce,
-                        read_version_guard.committed().max_committed_epoch(),
-                    );
-                }
-
-                let read_snapshot = read_filter_for_batch(
-                    epoch2,
-                    TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
-                    staging_vec,
-                    max_mce,
-                    test_env.storage.get_pinned_version(),
-                )
-                .unwrap();
+                    (imms, ssts, test_env.storage.get_pinned_version())
+                };
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1633,35 +1610,21 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_version_vec = vec![
-                    basic_read_version.clone(),
-                    read_version_2.clone(),
-                    read_version_3.clone(),
-                ];
-                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                let mut max_mce = 0;
-                for read_version in &read_version_vec {
-                    let read_version_guard = read_version.read();
-                    staging_vec.push(read_version_guard.staging().clone());
-                    max_mce = std::cmp::max(
-                        max_mce,
-                        read_version_guard.committed().max_committed_epoch(),
-                    );
-                }
-                let read_snapshot = read_filter_for_batch(
-                    epoch2,
-                    TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
-                    staging_vec,
-                    max_mce,
-                    test_env.storage.get_pinned_version(),
-                )
-                .unwrap();
+                let read_snapshot = {
+                    let (imms, ssts) = read_filter_for_batch(
+                        epoch2,
+                        TEST_TABLE_ID,
+                        &(Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
-                assert_eq!(
-                    read_version_3.read().committed().max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
-                );
+                    (imms, ssts, test_env.storage.get_pinned_version())
+                };
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1686,35 +1649,21 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let read_version_vec = vec![
-                    basic_read_version.clone(),
-                    read_version_2.clone(),
-                    read_version_3.clone(),
-                ];
-                let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                let mut max_mce = 0;
-                for read_version in &read_version_vec {
-                    let read_version_guard = read_version.read();
-                    staging_vec.push(read_version_guard.staging().clone());
-                    max_mce = std::cmp::max(
-                        max_mce,
-                        read_version_guard.committed().max_committed_epoch(),
-                    );
-                }
-                let read_snapshot = read_filter_for_batch(
-                    epoch3,
-                    TEST_TABLE_ID,
-                    &(Unbounded, Unbounded),
-                    staging_vec,
-                    max_mce,
-                    test_env.storage.get_pinned_version(),
-                )
-                .unwrap();
+                let read_snapshot = {
+                    let (imms, ssts) = read_filter_for_batch(
+                        epoch3,
+                        TEST_TABLE_ID,
+                        &(Unbounded, Unbounded),
+                        vec![
+                            basic_read_version.clone(),
+                            read_version_2.clone(),
+                            read_version_3.clone(),
+                        ],
+                    )
+                    .unwrap();
 
-                assert_eq!(
-                    read_version_3.read().committed().max_committed_epoch(),
-                    read_snapshot.2.max_committed_epoch()
-                );
+                    (imms, ssts, test_env.storage.get_pinned_version())
+                };
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1745,35 +1694,21 @@ async fn test_hummock_version_reader() {
                 let key_range = map_table_key_range((Included(start_key), Excluded(end_key)));
 
                 {
-                    let read_version_vec = vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ];
-                    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                    let mut max_mce = 0;
-                    for read_version in &read_version_vec {
-                        let read_version_guard = read_version.read();
-                        staging_vec.push(read_version_guard.staging().clone());
-                        max_mce = std::cmp::max(
-                            max_mce,
-                            read_version_guard.committed().max_committed_epoch(),
-                        );
-                    }
-                    let read_snapshot = read_filter_for_batch(
-                        epoch2,
-                        TEST_TABLE_ID,
-                        &key_range,
-                        staging_vec,
-                        max_mce,
-                        test_env.storage.get_pinned_version(),
-                    )
-                    .unwrap();
+                    let read_snapshot = {
+                        let (imms, ssts) = read_filter_for_batch(
+                            epoch2,
+                            TEST_TABLE_ID,
+                            &(Unbounded, Unbounded),
+                            vec![
+                                basic_read_version.clone(),
+                                read_version_2.clone(),
+                                read_version_3.clone(),
+                            ],
+                        )
+                        .unwrap();
 
-                    assert_eq!(
-                        read_version_3.read().committed().max_committed_epoch(),
-                        read_snapshot.2.max_committed_epoch()
-                    );
+                        (imms, ssts, test_env.storage.get_pinned_version())
+                    };
 
                     let iter = hummock_version_reader
                         .iter(
@@ -1798,35 +1733,21 @@ async fn test_hummock_version_reader() {
                 }
 
                 {
-                    let read_version_vec = vec![
-                        basic_read_version.clone(),
-                        read_version_2.clone(),
-                        read_version_3.clone(),
-                    ];
-                    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
-                    let mut max_mce = 0;
-                    for read_version in &read_version_vec {
-                        let read_version_guard = read_version.read();
-                        staging_vec.push(read_version_guard.staging().clone());
-                        max_mce = std::cmp::max(
-                            max_mce,
-                            read_version_guard.committed().max_committed_epoch(),
-                        );
-                    }
-                    let read_snapshot = read_filter_for_batch(
-                        epoch3,
-                        TEST_TABLE_ID,
-                        &key_range,
-                        staging_vec,
-                        max_mce,
-                        test_env.storage.get_pinned_version(),
-                    )
-                    .unwrap();
+                    let read_snapshot = {
+                        let (imms, ssts) = read_filter_for_batch(
+                            epoch3,
+                            TEST_TABLE_ID,
+                            &(Unbounded, Unbounded),
+                            vec![
+                                basic_read_version.clone(),
+                                read_version_2.clone(),
+                                read_version_3.clone(),
+                            ],
+                        )
+                        .unwrap();
 
-                    assert_eq!(
-                        read_version_3.read().committed().max_committed_epoch(),
-                        read_snapshot.2.max_committed_epoch()
-                    );
+                        (imms, ssts, test_env.storage.get_pinned_version())
+                    };
 
                     let iter = hummock_version_reader
                         .iter(

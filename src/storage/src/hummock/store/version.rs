@@ -146,7 +146,6 @@ impl StagingVersion {
     /// the user key range derived from `table_id`, `epoch` and `table_key_range`.
     pub fn prune_overlap<'a>(
         &'a self,
-        min_epoch_exclusive: HummockEpoch,
         max_epoch_inclusive: HummockEpoch,
         table_id: TableId,
         table_key_range: &'a TableKeyRange,
@@ -165,7 +164,6 @@ impl StagingVersion {
                 // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
                 imm.min_epoch() <= max_epoch_inclusive
                     && imm.table_id == table_id
-                    && imm.min_epoch() > min_epoch_exclusive
                     && range_overlap(
                         &(left, right),
                         &imm.start_table_key(),
@@ -178,12 +176,8 @@ impl StagingVersion {
             .sst
             .iter()
             .filter(move |staging_sst| {
-                let sst_min_epoch = *staging_sst.epochs.first().expect("epochs not empty");
                 let sst_max_epoch = *staging_sst.epochs.last().expect("epochs not empty");
-                assert!(
-                    sst_max_epoch <= min_epoch_exclusive || sst_min_epoch > min_epoch_exclusive
-                );
-                sst_max_epoch <= max_epoch_inclusive && sst_min_epoch > min_epoch_exclusive
+                sst_max_epoch <= max_epoch_inclusive
             })
             .flat_map(move |staging_sst| {
                 // TODO: sstable info should be concat-able after each streaming table owns a read
@@ -192,7 +186,9 @@ impl StagingVersion {
                     .sstable_infos
                     .iter()
                     .map(|sstable| &sstable.sst_info)
-                    .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
+                    .filter(move |sstable: &&SstableInfo| {
+                        filter_single_sst(sstable, table_id, table_key_range)
+                    })
             });
         (overlapped_imms, overlapped_ssts)
     }
@@ -427,25 +423,52 @@ pub fn read_filter_for_batch(
     epoch: HummockEpoch, // for check
     table_id: TableId,
     key_range: &TableKeyRange,
-    staging_vec: Vec<StagingVersion>,
-    staging_prune_mce: u64,
-    committed_version: CommittedVersion,
-) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
+) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>)> {
+    let mut staging_vec = Vec::with_capacity(read_version_vec.len());
+    let mut max_mce = 0;
+    for read_version in &read_version_vec {
+        let read_version_guard = read_version.read();
+
+        let (imms, ssts) = {
+            let (imm_iter, sst_iter) = read_version_guard
+                .staging()
+                .prune_overlap(epoch, table_id, key_range);
+
+            (
+                imm_iter.cloned().collect_vec(),
+                sst_iter.cloned().collect_vec(),
+            )
+        };
+
+        staging_vec.push((imms, ssts));
+        max_mce = std::cmp::max(
+            max_mce,
+            read_version_guard.committed().max_committed_epoch(),
+        );
+    }
+
     let mut imm_vec = Vec::default();
     let mut sst_vec = Vec::default();
 
     // only filter the staging data that epoch greater than max_mce to avoid data duplication
-    let (min_epoch, max_epoch) = (staging_prune_mce, epoch);
+    let (min_epoch, max_epoch) = (max_mce, epoch);
     // prune imm and sst with max_mce
-    for staging_version in staging_vec {
-        let (imm_iter, sst_iter) =
-            staging_version.prune_overlap(min_epoch, max_epoch, table_id, key_range);
+    for (staging_imms, staging_ssts) in staging_vec {
+        imm_vec.extend(
+            staging_imms
+                .into_iter()
+                .filter(|imm| imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch),
+        );
 
-        imm_vec.extend(imm_iter.cloned().collect_vec());
-        sst_vec.extend(sst_iter.cloned().collect_vec());
+        sst_vec.extend(
+            staging_ssts
+                .into_iter()
+                .filter(|staging_sst| staging_sst.min_epoch > min_epoch),
+        );
     }
 
-    Ok((imm_vec, sst_vec, committed_version))
+    Ok((imm_vec, sst_vec))
 }
 
 pub fn read_filter_for_local(
@@ -458,7 +481,7 @@ pub fn read_filter_for_local(
     let (imm_iter, sst_iter) =
         read_version_guard
             .staging()
-            .prune_overlap(0, epoch, table_id, table_key_range);
+            .prune_overlap(epoch, table_id, table_key_range);
 
     Ok((
         imm_iter.cloned().collect_vec(),
