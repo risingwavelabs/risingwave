@@ -16,6 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -23,7 +24,7 @@ use risingwave_pb::stream_plan::NowNode;
 
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
-use super::utils::{formatter_debug_plan_node, IndicesDisplay, TableCatalogBuilder};
+use super::utils::{formatter_debug_plan_node, IndicesDisplay, TableCatalogBuilder, Distill};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -58,6 +59,21 @@ impl StreamNow {
     }
 }
 
+impl Distill for StreamNow {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let vec = if self.base.ctx.is_explain_verbose() {
+            let disp = Pretty::debug(&IndicesDisplay {
+                indices: &(0..self.schema().fields.len()).collect_vec(),
+                input_schema: self.schema(),
+            });
+            vec![("output", disp)]
+        } else {
+            vec![]
+        };
+
+        Pretty::childless_record("StreamNow", vec)
+    }
+}
 impl fmt::Display for StreamNow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
