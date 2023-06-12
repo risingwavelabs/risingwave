@@ -1,17 +1,16 @@
 package com.risingwave.connector;
 
+import static io.grpc.Status.INVALID_ARGUMENT;
+import static io.grpc.Status.UNIMPLEMENTED;
+
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.proto.Data;
+import io.grpc.Status;
+import java.util.List;
+import java.util.Map;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
-import io.grpc.Status;
-
-import java.util.List;
-import java.util.Map;
-
-import static io.grpc.Status.INVALID_ARGUMENT;
-import static io.grpc.Status.UNIMPLEMENTED;
 
 public class IcebergSinkUtil {
     private static Type convertType(Data.DataType.TypeName typeName) {
@@ -63,23 +62,25 @@ public class IcebergSinkUtil {
         }
         Map<String, Data.DataType.TypeName> tableColumnTypes = tableSchema.getColumnTypes();
         List<Types.NestedField> icebergNestedFields = icebergSchema.columns();
-        // Check that all columns in tableSchema exist in the iceberg table and that existing column types match.
-        for (Map.Entry<String, Data.DataType.TypeName> tableColumnEntry : tableColumnTypes.entrySet()) {
+        // Check that all columns in tableSchema exist in the iceberg table and that existing column
+        // types match.
+        for (Map.Entry<String, Data.DataType.TypeName> tableColumnEntry :
+                tableColumnTypes.entrySet()) {
             Types.NestedField field = icebergSchema.findField(tableColumnEntry.getKey());
             if (field == null) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "The name of table schema does not match. Column name: %s."
-                                        , tableColumnEntry.getKey()))
+                                        "The name of table schema does not match. Column name: %s.",
+                                        tableColumnEntry.getKey()))
                         .asRuntimeException();
             }
             if (!convertType(tableColumnEntry.getValue()).equals(field.type())) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription(
                                 String.format(
-                                        "The type of table schema does not match. Column name: %s."
-                                        , tableColumnEntry.getKey()))
+                                        "The type of table schema does not match. Column name: %s.",
+                                        tableColumnEntry.getKey()))
                         .asRuntimeException();
             }
         }
@@ -87,8 +88,7 @@ public class IcebergSinkUtil {
         for (Types.NestedField field : icebergNestedFields) {
             if (tableColumnTypes.get(field.name()) == null) {
                 throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format("missing a required field %s", field.name()))
+                        .withDescription(String.format("missing a required field %s", field.name()))
                         .asRuntimeException();
             }
         }

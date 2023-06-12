@@ -25,15 +25,12 @@ import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
-
 import java.util.Map;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hadoop.HadoopCatalog;
-import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -61,7 +58,7 @@ public class IcebergSinkFactory implements SinkFactory {
         Configuration hadoopConf = createHadoopConf(scheme, config);
         SinkBase sink = null;
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);) {
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
             String sinkType = config.getSinkType();
             if (sinkType.equals("append-only")) {
@@ -101,7 +98,7 @@ public class IcebergSinkFactory implements SinkFactory {
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
         Configuration hadoopConf = createHadoopConf(scheme, config);
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);) {
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
             IcebergSinkUtil.checkSchema(tableSchema, icebergTable.schema());
         } catch (Exception e) {
