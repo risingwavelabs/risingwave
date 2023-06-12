@@ -15,6 +15,8 @@
 use risingwave_common::array::ListRef;
 use risingwave_expr_macro::function;
 
+use crate::ExprError;
+
 /// Returns the total number of elements in the array.
 ///
 /// ```sql
@@ -57,7 +59,12 @@ use risingwave_expr_macro::function;
 /// query error type unknown
 /// select cardinality(null);
 /// ```
-#[function("cardinality(list) -> int64")]
-fn cardinality(array: ListRef<'_>) -> i64 {
-    array.flatten().len() as _
+#[function("cardinality(list) -> int32")]
+#[function("cardinality(list) -> int64")] // for compatibility with plans from old version
+fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
+    array
+        .flatten()
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOverflow)
 }

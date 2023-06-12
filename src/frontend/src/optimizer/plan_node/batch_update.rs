@@ -40,8 +40,6 @@ impl BatchUpdate {
     }
 }
 
-impl_distill_by_unit!(BatchUpdate, logical, "BatchUpdate");
-
 impl PlanTreeNodeUnary for BatchUpdate {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -55,6 +53,7 @@ impl PlanTreeNodeUnary for BatchUpdate {
 }
 
 impl_plan_tree_node_for_unary! { BatchUpdate }
+impl_distill_by_unit!(BatchUpdate, logical, "BatchUpdate");
 
 impl ToDistributedBatch for BatchUpdate {
     fn to_distributed(&self) -> Result<PlanRef> {
