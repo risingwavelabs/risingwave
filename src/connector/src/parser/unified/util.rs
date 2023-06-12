@@ -8,12 +8,21 @@ pub fn apply_row_operation_on_stream_chunk_writer(
     writer: &mut SourceStreamChunkRowWriter<'_>,
 ) -> std::result::Result<WriteGuard, RwError> {
     match row_op.op()? {
-        super::ChangeEventOperation::Upsert => {
-            writer.insert(|column| Ok(row_op.access_field(&column.name, &column.data_type)?))
-        }
-        super::ChangeEventOperation::Delete => {
-            writer.delete(|column| Ok(row_op.access_field(&column.name, &column.data_type)?))
-        }
+        super::ChangeEventOperation::Upsert => writer.insert(|column| {
+            let res = row_op.access_field(&column.name, &column.data_type);
+            tracing::info!(
+                "insert {:?} {:?} {:?}",
+                &column.name,
+                &column.data_type,
+                res
+            );
+            Ok(res?)
+        }),
+        super::ChangeEventOperation::Delete => writer.delete(|column| {
+            let res = row_op.access_field(&column.name, &column.data_type);
+            tracing::info!("del {:?} {:?} {:?}", &column.name, &column.data_type, res);
+            Ok(res?)
+        }),
     }
 }
 

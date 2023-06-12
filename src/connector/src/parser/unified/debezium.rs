@@ -144,7 +144,7 @@ where
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
         match path {
             ["after" | "before", "_id"] => {
-                let payload = self.access(&[path[0], "payload"], Some(&DataType::Jsonb))?;
+                let payload = self.access(&[path[0]], Some(&DataType::Jsonb))?;
                 if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
                     Ok(extract_bson_id(
                         type_expected.unwrap_or(&DataType::Jsonb),
@@ -154,6 +154,7 @@ where
                     unreachable!("the result of access must match the type_expected")
                 }
             }
+            ["after" | "before", "payload"] => self.access(&[path[0]], Some(&DataType::Jsonb)),
             _ => self.accessor.access(path, type_expected),
         }
     }

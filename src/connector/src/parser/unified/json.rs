@@ -51,6 +51,7 @@ pub enum BooleanHandling {
         string_integer_parsing: bool,
     },
 }
+
 #[derive(Clone, Debug)]
 pub struct JsonParseOptions {
     pub bytea_handling: ByteaHandling,
@@ -58,6 +59,7 @@ pub struct JsonParseOptions {
     pub json_value_handling: JsonValueHandling,
     pub numeric_handling: NumericHandling,
     pub boolean_handing: BooleanHandling,
+    pub ignoring_keycase: bool,
 }
 
 impl Default for JsonParseOptions {
@@ -70,7 +72,7 @@ impl JsonParseOptions {
     pub const CANAL: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
         time_handling: TimeHandling::Micro,
-        json_value_handling: JsonValueHandling::AsString,
+        json_value_handling: JsonValueHandling::AsValue,
         numeric_handling: NumericHandling::Relax {
             string_parsing: true,
         },
@@ -78,6 +80,7 @@ impl JsonParseOptions {
             string_parsing: true,
             string_integer_parsing: true,
         },
+        ignoring_keycase: true,
     };
     pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Base64,
@@ -90,6 +93,7 @@ impl JsonParseOptions {
             string_parsing: false,
             string_integer_parsing: false,
         },
+        ignoring_keycase: false,
     };
     pub const DEFAULT: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Standard,
@@ -99,6 +103,7 @@ impl JsonParseOptions {
             string_parsing: false,
         },
         boolean_handing: BooleanHandling::Strict,
+        ignoring_keycase: false,
     };
 
     pub fn parse(
@@ -137,15 +142,20 @@ impl JsonParseOptions {
                 match value.as_str().unwrap().to_lowercase().as_str() {
                     "true" => true.into(),
                     "false" => false.into(),
-                    "1" if matches!(
-                        self.boolean_handing,
-                        BooleanHandling::Relax {
-                            string_parsing: true,
-                            string_integer_parsing: true
-                        }
-                    ) =>
+                    c @ ("1" | "0")
+                        if matches!(
+                            self.boolean_handing,
+                            BooleanHandling::Relax {
+                                string_parsing: true,
+                                string_integer_parsing: true
+                            }
+                        ) =>
                     {
-                        true.into()
+                        if c == "1" {
+                            true.into()
+                        } else {
+                            false.into()
+                        }
                     }
                     _ => Err(create_error())?,
                 }
@@ -445,7 +455,11 @@ where
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
         let mut value = &self.value;
         for (idx, key) in path.iter().enumerate() {
-            if let Some(sub_value) = value.get(*key) {
+            if let Some(sub_value) = if self.options.ignoring_keycase {
+                json_object_smart_get_value(value, (*key).into())
+            } else {
+                value.get(*key)
+            } {
                 value = sub_value;
             } else {
                 Err(AccessError::Undefined {
