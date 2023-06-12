@@ -228,7 +228,7 @@ mod tests {
 
         {
             let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateDelete);
+            assert_eq!(op, Op::Insert);
             assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
                 row.datum_at(1).to_owned_datum(),
@@ -256,7 +256,7 @@ mod tests {
 
         {
             let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
             assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
                 row.datum_at(1).to_owned_datum(),

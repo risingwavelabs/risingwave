@@ -48,12 +48,17 @@ where
         type_expected: &risingwave_common::types::DataType,
     ) -> super::AccessResult {
         match self.op()? {
-            ChangeEventOperation::Delete => self
-                .value_accessor
-                .as_ref()
-                .or(self.key_accessor.as_ref())
-                .unwrap()
-                .access(&[BEFORE, name], Some(type_expected)),
+            ChangeEventOperation::Delete => {
+                if let Some(va) = self.value_accessor.as_ref() {
+                    va.access(&[BEFORE, name], Some(type_expected))
+                } else {
+                    self.key_accessor
+                        .as_ref()
+                        .unwrap()
+                        .access(&[name], Some(type_expected))
+                }
+            }
+
             // value should not be None.
             ChangeEventOperation::Upsert => self
                 .value_accessor

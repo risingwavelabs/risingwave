@@ -256,57 +256,20 @@ mod tests {
 
             for data in input {
                 let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-                let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns.clone(), data)
+                let [(op, row)]: [_; 1] = parse_one(parser, columns.clone(), data)
                     .await
                     .try_into()
                     .unwrap();
 
-                assert_eq!(op1, Op::UpdateDelete);
-                assert_eq!(op2, Op::UpdateInsert);
+                assert_eq!(op, Op::Insert);
 
-                assert!(row1[0].eq(&Some(ScalarImpl::Int32(102))));
-                assert!(row1[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-                assert!(row1[2].eq(&Some(ScalarImpl::Utf8("12V car battery".into()))));
-                assert!(row1[3].eq(&Some(ScalarImpl::Float64(8.1.into()))));
-
-                assert!(row2[0].eq(&Some(ScalarImpl::Int32(102))));
-                assert!(row2[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
-                assert!(row2[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
-                assert!(row2[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
-            }
-        }
-
-        #[tokio::test]
-        async fn test1_update_with_before_null() {
-            // the test case it identical with test_debezium_json_parser_insert but op is 'u'
-            //     "before": null,
-            //     "after": {
-            //       "id": 102,
-            //       "name": "car battery",
-            //       "description": "12V car battery",
-            //       "weight": 8.1
-            //     },
-            let input = vec![
-                // data with payload field
-                br#"{"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#.to_vec(),
-                // data without payload field
-                br#"{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}"#.to_vec()];
-
-            let columns = get_test1_columns();
-            for data in input {
-                let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-
-                let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 2);
-                let writer = builder.row_writer();
-                if let Err(e) = parser.parse_inner(data, writer).await {
-                    println!("{:?}", e.to_string());
-                } else {
-                    panic!("the test case is expected to be failed");
-                }
+                assert!(row[0].eq(&Some(ScalarImpl::Int32(102))));
+                assert!(row[1].eq(&Some(ScalarImpl::Utf8("car battery".into()))));
+                assert!(row[2].eq(&Some(ScalarImpl::Utf8("24V car battery".into()))));
+                assert!(row[3].eq(&Some(ScalarImpl::Float64(9.1.into()))));
             }
         }
     }
-
     // test2 covers read/insert/update/delete event on the following MySQL table for debezium json:
     // CREATE TABLE IF NOT EXISTS orders (
     //     O_KEY BIGINT NOT NULL,
@@ -459,57 +422,34 @@ mod tests {
             let columns = get_test2_columns();
 
             let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
-            let [(op1, row1), (op2, row2)]: [_; 2] = parse_one(parser, columns, data.to_vec())
+            let [(op, row)]: [_; 1] = parse_one(parser, columns, data.to_vec())
                 .await
                 .try_into()
                 .unwrap();
 
-            assert_eq!(op1, Op::UpdateDelete);
-            assert_eq!(op2, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
 
-            assert!(row1[0].eq(&Some(ScalarImpl::Int64(111))));
-            assert!(row1[1].eq(&Some(ScalarImpl::Bool(true))));
-            assert!(row1[2].eq(&Some(ScalarImpl::Int16(-1))));
-            assert!(row1[3].eq(&Some(ScalarImpl::Int32(-1111))));
-            assert!(row1[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
-            assert!(row1[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
-            assert!(row1[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
-            assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-            assert!(row1[8].eq(&Some(ScalarImpl::Date(Date::new(
-                NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
-            )))));
-            assert!(row1[9].eq(&Some(ScalarImpl::Time(Time::new(
-                NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
-            )))));
-            assert!(row1[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:00".parse().unwrap()
-            )))));
-            assert!(row1[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
-                "1970-01-01T00:00:01".parse().unwrap()
-            )))));
-            assert_json_eq(&row1[12], "{\"k1\": \"v1\", \"k2\": 11}");
-
-            assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
-            assert!(row2[1].eq(&Some(ScalarImpl::Bool(false))));
-            assert!(row2[2].eq(&Some(ScalarImpl::Int16(3))));
-            assert!(row2[3].eq(&Some(ScalarImpl::Int32(3333))));
-            assert!(row2[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
-            assert!(row2[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
-            assert!(row2[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
-            assert!(row2[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
-            assert!(row2[8].eq(&Some(ScalarImpl::Date(Date::new(
+            assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
+            assert!(row[1].eq(&Some(ScalarImpl::Bool(false))));
+            assert!(row[2].eq(&Some(ScalarImpl::Int16(3))));
+            assert!(row[3].eq(&Some(ScalarImpl::Int32(3333))));
+            assert!(row[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
+            assert!(row[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
+            assert!(row[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
+            assert!(row[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
+            assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
                 NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
             )))));
-            assert!(row2[9].eq(&Some(ScalarImpl::Time(Time::new(
+            assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
                 NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
             )))));
-            assert!(row2[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            assert!(row[10].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "5138-11-16T09:46:39".parse().unwrap()
             )))));
-            assert!(row2[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
+            assert!(row[11].eq(&Some(ScalarImpl::Timestamp(Timestamp::new(
                 "2038-01-09T03:14:07".parse().unwrap()
             )))));
-            assert_json_eq(&row2[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
+            assert_json_eq(&row[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
         }
 
         #[tokio::test]

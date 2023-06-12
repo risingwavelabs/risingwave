@@ -103,7 +103,7 @@ impl JsonParseOptions {
             string_parsing: false,
         },
         boolean_handing: BooleanHandling::Strict,
-        ignoring_keycase: false,
+        ignoring_keycase: true,
     };
 
     pub fn parse(
