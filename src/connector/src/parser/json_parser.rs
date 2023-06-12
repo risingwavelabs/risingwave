@@ -14,16 +14,14 @@
 
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use simd_json::BorrowedValue;
 
 use super::ByteStreamSourceParser;
 use crate::common::UpsertMessage;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
 use crate::parser::unified::json::JsonAccess;
 use crate::parser::unified::upsert::UpsertChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -58,24 +56,6 @@ impl JsonParser {
             rw_columns,
             source_ctx,
             enable_upsert: true,
-        })
-    }
-
-    #[inline(always)]
-    fn parse_single_value(
-        value: &BorrowedValue<'_>,
-        writer: &mut SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        writer.insert(|desc| {
-            simd_json_parse_value(
-                &SourceFormat::Json,
-                &desc.data_type,
-                json_object_smart_get_value(value, desc.name.as_str().into()),
-            )
-            .map_err(|e| {
-                tracing::error!("failed to process value ({}): {}", value, e);
-                e.into()
-            })
         })
     }
 

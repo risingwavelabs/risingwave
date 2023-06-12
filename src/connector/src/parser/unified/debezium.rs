@@ -1,4 +1,4 @@
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::{Access, ChangeEvent, ChangeEventOperation};
 
@@ -80,6 +80,81 @@ where
             })
         } else {
             Ok(ChangeEventOperation::Delete)
+        }
+    }
+}
+
+pub struct MongoProjeciton<A> {
+    accessor: A,
+}
+
+pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> anyhow::Result<Datum> {
+    let id_field = bson_doc
+        .get("_id")
+        .ok_or_else(|| anyhow::format_err!("Debezuim Mongo requires document has a `_id` field"))?;
+    let id: Datum = match id_type {
+    DataType::Jsonb => ScalarImpl::Jsonb(id_field.clone().into()).into(),
+    DataType::Varchar => match id_field {
+        serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
+        serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
+            obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+        )),
+        _ =>  anyhow::bail!(
+            "Can not convert bson {:?} to {:?}",
+            id_field, id_type
+        ),
+    },
+    DataType::Int32 => {
+        if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberInt") {
+            let int_str = obj["$numberInt"].as_str().unwrap_or_default();
+            Some(ScalarImpl::Int32(int_str.parse().unwrap_or_default()))
+        } else {
+            anyhow::bail!(
+                "Can not convert bson {:?} to {:?}",
+                id_field, id_type
+            )
+        }
+    }
+    DataType::Int64 => {
+        if let serde_json::Value::Object(ref obj) = id_field && obj.contains_key("$numberLong")
+        {
+            let int_str = obj["$numberLong"].as_str().unwrap_or_default();
+            Some(ScalarImpl::Int64(int_str.parse().unwrap_or_default()))
+        } else {
+            anyhow::bail!(
+                "Can not convert bson {:?} to {:?}",
+                id_field, id_type
+            )
+        }
+    }
+    _ => unreachable!("DebeziumMongoJsonParser::new must ensure _id column datatypes."),
+};
+    Ok(id)
+}
+impl<A> MongoProjeciton<A> {
+    pub fn new(accessor: A) -> Self {
+        Self { accessor }
+    }
+}
+
+impl<A> Access for MongoProjeciton<A>
+where
+    A: Access,
+{
+    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> super::AccessResult {
+        match path {
+            ["after" | "before", "_id"] => {
+                let payload = self.access(&[path[0], "payload"], Some(&DataType::Jsonb))?;
+                if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
+                    Ok(extract_bson_id(
+                        type_expected.unwrap_or(&DataType::Jsonb),
+                        &bson_doc.take(),
+                    )?)
+                } else {
+                    unreachable!("the result of access must match the type_expected")
+                }
+            }
+            _ => self.accessor.access(path, type_expected),
         }
     }
 }

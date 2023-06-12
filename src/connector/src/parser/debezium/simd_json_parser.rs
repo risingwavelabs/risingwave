@@ -16,26 +16,13 @@ use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, Mutable, StaticNode};
+use simd_json::{BorrowedValue, Mutable};
 
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
-
-const BEFORE: &str = "before";
-const AFTER: &str = "after";
-const OP: &str = "op";
-
-#[inline]
-fn ensure_not_null<'a, 'b: 'a>(value: &'a BorrowedValue<'b>) -> Option<&'a BorrowedValue<'b>> {
-    if let BorrowedValue::Static(StaticNode::Null) = value {
-        None
-    } else {
-        Some(value)
-    }
-}
 
 #[derive(Debug)]
 pub struct DebeziumJsonParser {

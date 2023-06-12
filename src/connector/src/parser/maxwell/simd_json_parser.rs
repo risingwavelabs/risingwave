@@ -16,12 +16,13 @@ use std::fmt::Debug;
 
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, ValueAccess};
+use simd_json::BorrowedValue;
 
-use super::operators::*;
-use crate::parser::common::{json_object_smart_get_value, simd_json_parse_value};
+use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
+use crate::parser::unified::maxwell::MaxwellChangeEvent;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef, SourceFormat};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
@@ -50,73 +51,11 @@ impl MaxwellParser {
         let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        let op = event.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
-            RwError::from(ProtocolError(
-                "op field not found in maxwell json".to_owned(),
-            ))
-        })?;
+        let accessor = JsonAccess::new_with_options(event, &JsonParseOptions::DEFAULT);
 
-        let format = SourceFormat::Maxwell;
-        match op {
-            MAXWELL_INSERT_OP => {
-                let after = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for creating event".to_string(),
-                    ))
-                })?;
-                writer.insert(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, column.name.as_str().into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            MAXWELL_UPDATE_OP => {
-                let after = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "data is missing for updating event".to_string(),
-                    ))
-                })?;
-                let before = event.get(BEFORE).ok_or_else(|| {
-                    RwError::from(ProtocolError(
-                        "old is missing for updating event".to_string(),
-                    ))
-                })?;
+        let row_op = MaxwellChangeEvent::new(accessor);
 
-                writer.update(|column| {
-                    // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name.as_str();
-                    let before_value = json_object_smart_get_value(before, col_name_lc.into())
-                        .or_else(|| json_object_smart_get_value(after, col_name_lc.into()));
-                    let before = simd_json_parse_value(&format, &column.data_type, before_value)?;
-                    let after = simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(after, col_name_lc.into()),
-                    )?;
-                    Ok((before, after))
-                })
-            }
-            MAXWELL_DELETE_OP => {
-                let before = event.get(AFTER).ok_or_else(|| {
-                    RwError::from(ProtocolError("old is missing for delete event".to_string()))
-                })?;
-                writer.delete(|column| {
-                    simd_json_parse_value(
-                        &format,
-                        &column.data_type,
-                        json_object_smart_get_value(before, column.name.as_str().into()),
-                    )
-                    .map_err(Into::into)
-                })
-            }
-            other => Err(RwError::from(ProtocolError(format!(
-                "unknown Maxwell op: {}",
-                other
-            )))),
-        }
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
     }
 }
 

@@ -6,6 +6,7 @@ use thiserror::Error;
 pub mod avro;
 pub mod debezium;
 pub mod json;
+pub mod maxwell;
 pub mod upsert;
 pub mod util;
 
@@ -16,7 +17,7 @@ pub trait Access {
     fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ChangeEventOperation {
     Upsert, // Insert or Update
     Delete,
@@ -30,6 +31,19 @@ pub trait ChangeEvent {
     fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult;
 }
 
+impl<A> ChangeEvent for (ChangeEventOperation, A)
+where
+    A: Access,
+{
+    fn op(&self) -> std::result::Result<ChangeEventOperation, AccessError> {
+        Ok(self.0)
+    }
+
+    fn access_field(&self, name: &str, type_expected: &DataType) -> AccessResult {
+        self.1.access(&[name], Some(type_expected))
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum AccessError {
     #[error("Undefined {name} at {path}")]
@@ -40,4 +54,6 @@ pub enum AccessError {
         got: String,
         value: String,
     },
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }

@@ -67,6 +67,18 @@ impl Default for JsonParseOptions {
 }
 
 impl JsonParseOptions {
+    pub const CANAL: JsonParseOptions = JsonParseOptions {
+        bytea_handling: ByteaHandling::Standard,
+        time_handling: TimeHandling::Micro,
+        json_value_handling: JsonValueHandling::AsString,
+        numeric_handling: NumericHandling::Relax {
+            string_parsing: true,
+        },
+        boolean_handing: BooleanHandling::Relax {
+            string_parsing: true,
+            string_integer_parsing: true,
+        },
+    };
     pub const DEBEZIUM: JsonParseOptions = JsonParseOptions {
         bytea_handling: ByteaHandling::Base64,
         time_handling: TimeHandling::Micro,

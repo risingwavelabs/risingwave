@@ -45,7 +45,6 @@ mod common;
 mod csv_parser;
 mod debezium;
 mod json_parser;
-mod macros;
 mod maxwell;
 mod protobuf;
 mod schema_registry;

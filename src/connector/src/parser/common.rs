@@ -14,13 +14,8 @@
 
 use std::borrow::Cow;
 
-use anyhow::{anyhow, Result};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
-use super::unified::json::JsonParseOptions;
-use crate::source::SourceFormat;
 pub(crate) fn json_object_smart_get_value<'a, 'b>(
     v: &'b simd_json::BorrowedValue<'a>,
     key: Cow<'b, str>,
@@ -35,31 +30,4 @@ pub(crate) fn json_object_smart_get_value<'a, 'b>(
         }
     }
     None
-}
-
-pub(crate) fn do_parse_simd_json_value(
-    format: &SourceFormat,
-    dtype: &DataType,
-    v: &BorrowedValue<'_>,
-) -> Result<ScalarImpl> {
-    let options = match format {
-        SourceFormat::DebeziumJson => JsonParseOptions::DEBEZIUM,
-        _ => Default::default(),
-    };
-    Ok(options.parse(v, Some(dtype))?.unwrap())
-}
-
-#[inline]
-pub(crate) fn simd_json_parse_value(
-    // column: &ColumnDesc,
-    format: &SourceFormat,
-    dtype: &DataType,
-    value: Option<&BorrowedValue<'_>>,
-) -> Result<Datum> {
-    match value {
-        None | Some(BorrowedValue::Static(StaticNode::Null)) => Ok(None),
-        Some(v) => Ok(Some(do_parse_simd_json_value(format, dtype, v).map_err(
-            |e| anyhow!("failed to parse type '{}' from json: {}", dtype, e),
-        )?)),
-    }
 }
