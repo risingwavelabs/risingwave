@@ -243,6 +243,7 @@ pub async fn compute_node_serve(
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
             memory_limiter,
+            storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
@@ -263,7 +264,7 @@ pub async fn compute_node_serve(
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
-            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .verbose(c.is_verbose().unwrap())
             .build()
             .ok(),
     };

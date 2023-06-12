@@ -235,6 +235,7 @@ lazy_static! {
             OverWindowSplitByWindowRule::create(),
             TrivialProjectToValuesRule::create(),
             UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
             OverWindowToTopNRule::create(),
         ],
         ApplyOrder::TopDown,
@@ -535,6 +536,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN);
+
+        plan = plan.optimize_by_rules(&DAG_TO_TREE);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

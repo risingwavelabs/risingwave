@@ -27,6 +27,10 @@ max_compactor_task_multiplier = 2
 move_table_size_limit = 2147483648
 split_group_size_limit = 21474836480
 do_not_config_object_storage_lifecycle = false
+partition_vnode_count = 64
+
+[batch]
+enable_barrier_read = true
 
 [batch.developer]
 batch_connector_message_buffer_size = 16
@@ -36,7 +40,7 @@ batch_chunk_size = 1024
 [streaming]
 in_flight_barrier_nums = 10000
 enable_jaeger_tracing = false
-async_stack_trace = "On"
+async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 
 [streaming.developer]
@@ -51,6 +55,7 @@ stream_exchange_concurrent_barriers = 2
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
+shared_buffer_flush_ratio = 0.800000011920929
 imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false

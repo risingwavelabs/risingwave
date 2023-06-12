@@ -1,0 +1,16 @@
+[tasks.do-apply-stream-integration-test]
+description = "Apply stream integration test output snapshots."
+category = "RiseDev - Test"
+dependencies = ["install-nextest"]
+script = '''
+#!/usr/bin/env bash
+set -e
+
+UPDATE_EXPECT=1 cargo nextest run -p risingwave_stream --test integration_tests --retries 0
+
+echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
+echo "Tip: use the alias $(tput setaf 4)./risedev dasit$(tput sgr0)."
+'''
+
+[tasks.dasit]
+alias = "do-apply-stream-integration-test"

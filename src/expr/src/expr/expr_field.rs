@@ -42,7 +42,7 @@ impl Expression for FieldExpression {
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let array = self.input.eval_checked(input).await?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
-            Ok(struct_array.field_at(self.index))
+            Ok(struct_array.field_at(self.index).clone())
         } else {
             Err(anyhow!("expects a struct array ref").into())
         }
@@ -74,7 +74,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Field);
+        ensure!(prost.get_function_type().unwrap() == Type::Field);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -103,7 +103,7 @@ impl<'a> TryFrom<&'a ExprNode> for FieldExpression {
 mod tests {
 
     use risingwave_common::array::{Array, DataChunk, F32Array, I32Array, StructArray};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType};
     use risingwave_pb::data::data_type::TypeName;
 
     use crate::expr::expr_field::FieldExpression;
@@ -119,13 +119,13 @@ mod tests {
             TypeName::Int32,
         ))
         .unwrap();
-        let array = StructArray::from_slices(
-            &[true],
+        let array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                I32Array::from_iter([1, 2, 3, 4, 5]).into(),
-                F32Array::from_iter([2.0]).into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
+                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
 
         let data_chunk = DataChunk::new(vec![array.into_ref()], 1);
@@ -149,21 +149,21 @@ mod tests {
         ))
         .unwrap();
 
-        let struct_array = StructArray::from_slices(
-            &[true],
+        let struct_array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                I32Array::from_iter([1, 2, 3, 4, 5]).into(),
-                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into(),
+                I32Array::from_iter([1, 2, 3, 4, 5]).into_ref(),
+                F32Array::from_iter([1.0, 2.0, 3.0, 4.0, 5.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
-        let array = StructArray::from_slices(
-            &[true],
+        let array = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                struct_array.into(),
-                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into(),
+                struct_array.into_ref(),
+                F32Array::from_iter([2.0, 2.0, 2.0, 2.0, 2.0]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [true].into_iter().collect(),
         );
 
         let data_chunk = DataChunk::new(vec![array.into_ref()], 1);

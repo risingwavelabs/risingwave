@@ -15,49 +15,56 @@
 use risingwave_common::array::ListRef;
 use risingwave_expr_macro::function;
 
-/// Returns the length of an array.
+use crate::ExprError;
+
+/// Returns the total number of elements in the array.
 ///
 /// ```sql
-/// array_length ( array anyarray) → int64
+/// cardinality ( array anyarray) → int64
 /// ```
 ///
 /// Examples:
 ///
 /// ```slt
 /// query T
-/// select array_length(null::int[]);
+/// select cardinality(null::int[]);
 /// ----
 /// NULL
 ///
 /// query T
-/// select array_length(array[1,2,3]);
+/// select cardinality(array[1,2,3]);
 /// ----
 /// 3
 ///
 /// query T
-/// select array_length(array[1,2,3,4,1]);
+/// select cardinality(array[1,2,3,4,1]);
 /// ----
 /// 5
 ///
 /// query T
-/// select array_length(null::int[]);
+/// select cardinality(array[array[1, 2, 3]]);
 /// ----
-/// NULL
+/// 3
 ///
 /// query T
-/// select array_length(array[array[1, 2, 3]]);
+/// select cardinality(array[array[array[3,4,5],array[2,2,2]],array[array[6,7,8],array[0,0,0]]]);
+/// ----
+/// 12
+///
+/// query T
+/// select cardinality(array[NULL]);
 /// ----
 /// 1
 ///
-/// query T
-/// select array_length(array[NULL]);
-/// ----
-/// 1
-///
-/// query error unknown type
-/// select array_length(null);
+/// query error type unknown
+/// select cardinality(null);
 /// ```
-#[function("array_length(list) -> int64")]
-fn array_length(array: ListRef<'_>) -> i64 {
-    array.iter().len() as _
+#[function("cardinality(list) -> int32")]
+#[function("cardinality(list) -> int64")] // for compatibility with plans from old version
+fn cardinality<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
+    array
+        .flatten()
+        .len()
+        .try_into()
+        .map_err(|_| ExprError::NumericOverflow)
 }

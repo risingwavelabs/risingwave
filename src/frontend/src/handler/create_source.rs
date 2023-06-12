@@ -487,6 +487,7 @@ pub(crate) async fn resolve_source_schema(
 
                 *columns = columns_extracted;
                 *pk_column_ids = pks_extracted;
+                row_id_index.take();
             }
 
             StreamSourceInfo {

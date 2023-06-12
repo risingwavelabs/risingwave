@@ -344,6 +344,15 @@ impl<S: MetaStore> HummockManager<S> {
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
+        for group_id in &groups_to_remove {
+            let max_level = versioning
+                .current_version
+                .get_compaction_group_levels(*group_id)
+                .get_levels()
+                .len();
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
+        }
+
         let sst_split_info = versioning
             .current_version
             .apply_version_delta(&new_version_delta);
@@ -351,9 +360,6 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
-        for group_id in &groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, *group_id);
-        }
         self.notify_last_version_delta(versioning);
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
@@ -428,7 +434,7 @@ impl<S: MetaStore> HummockManager<S> {
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
     ) -> Result<CompactionGroupId> {
-        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false)
+        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false, 0)
             .await
     }
 
@@ -441,6 +447,7 @@ impl<S: MetaStore> HummockManager<S> {
         table_ids: &[StateTableId],
         target_group_id: Option<CompactionGroupId>,
         allow_split_by_table: bool,
+        weight_split_by_vnode: u32,
     ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
             return Ok(parent_group_id);
@@ -546,6 +553,11 @@ impl<S: MetaStore> HummockManager<S> {
                     .await
                     .default_compaction_config();
                 config.split_by_state_table = allow_split_by_table;
+                if !allow_split_by_table {
+                    // TODO: remove it after we increase `max_bytes_for_level_base` for all group.
+                    config.max_bytes_for_level_base *= 4;
+                    config.split_weight_by_vnode = weight_split_by_vnode;
+                }
 
                 new_version_delta.group_deltas.insert(
                     new_compaction_group_id,

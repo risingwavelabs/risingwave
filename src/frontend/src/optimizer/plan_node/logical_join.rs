@@ -18,7 +18,6 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -61,9 +60,7 @@ impl fmt::Display for LogicalJoin {
         let mut builder = f.debug_struct("LogicalJoin");
         builder.field("type", &self.join_type());
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.core.concat_schema();
         builder.field(
             "on",
             &ConditionDisplay {
@@ -73,22 +70,14 @@ impl fmt::Display for LogicalJoin {
         );
 
         if verbose {
-            if self
-                .output_indices()
-                .iter()
-                .copied()
-                .eq(0..self.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: self.output_indices(),
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from(
+                self.output_indices(),
+                self.internal_column_num(),
+                &concat_schema,
+            ) {
+                None => builder.field("output", &format_args!("all")),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
@@ -267,7 +256,7 @@ impl LogicalJoin {
 
         for expr in &predicate.conjunctions {
             if let ExprImpl::FunctionCall(func) = expr {
-                match func.get_expr_type() {
+                match func.func_type() {
                     ExprType::Equal
                     | ExprType::NotEqual
                     | ExprType::LessThan
@@ -979,7 +968,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a append-only left input".into(),
+                "Temporal join requires an append-only left input".into(),
                 "Please ensure your left input is append-only".into(),
             )));
         }
@@ -1403,7 +1392,7 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 

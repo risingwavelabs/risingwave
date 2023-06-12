@@ -12,15 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::CtlContext;
+#![feature(lazy_cell)]
+#![feature(cursor_remaining)]
+#![feature(bound_map)]
+#![feature(trait_alias)]
+#![feature(generators)]
 
-pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.meta_client().await?;
-    let version = meta_client.disable_commit_epoch().await?;
-    println!(
-        "Disabled.\
-        Current version: id {}, max_committed_epoch {}",
-        version.id, version.max_committed_epoch
-    );
-    Ok(())
+mod collector;
+mod error;
+mod opts;
+mod read;
+mod record;
+mod write;
+use std::future::Future;
+
+pub use collector::*;
+pub use error::*;
+pub use opts::*;
+pub use read::*;
+pub use record::*;
+pub(crate) use write::*;
+
+pub fn hummock_trace_scope<F: Future>(f: F) -> impl Future<Output = F::Output> {
+    let id = CONCURRENT_ID.next();
+    LOCAL_ID.scope(id, f)
 }
