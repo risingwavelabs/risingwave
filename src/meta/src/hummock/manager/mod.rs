@@ -1095,7 +1095,17 @@ where
             if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
-            assert!(CompactStatus::is_trivial_move_task(&task));
+            #[cfg(debug_assertions)]
+            {
+                if !CompactStatus::is_trivial_move_task(&task) {
+                    let existing_table_ids =
+                        HashSet::<u32>::from_iter(task.existing_table_ids.clone());
+                    assert!(CompactStatus::is_trivial_reclaim(
+                        &task,
+                        &existing_table_ids
+                    ));
+                }
+            }
         }
 
         Ok(None)
