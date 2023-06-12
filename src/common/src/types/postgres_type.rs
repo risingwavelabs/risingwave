@@ -127,10 +127,10 @@ impl DataType {
         }
     }
 
-    pub fn type_name(&self) -> &'static str {
+    pub fn pg_name(&self) -> &'static str {
         match self {
-            DataType::Boolean => "boolean",
-            DataType::Int16 => "int",
+            DataType::Boolean => "bool",
+            DataType::Int16 => "int2",
             DataType::Int32 => "int4",
             DataType::Int64 => "int8",
             DataType::Float32 => "float4",
