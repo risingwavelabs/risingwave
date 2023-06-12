@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
+use super::utils::Distill;
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown, ToBatch,
     ToStream,
@@ -65,6 +67,12 @@ impl_plan_tree_node_for_leaf! { LogicalTableFunction }
 impl fmt::Display for LogicalTableFunction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalTableFunction {{ {:?} }}", self.table_function)
+    }
+}
+impl Distill for LogicalTableFunction {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let data = Pretty::debug(&self.table_function);
+        Pretty::childless_record("LogicalTableFunction", vec![("table_function", data)])
     }
 }
 

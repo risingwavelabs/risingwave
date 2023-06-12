@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::error::Error;
-
 use vergen::EmitBuilder;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    EmitBuilder::builder().git_sha(true).emit()?;
-    Ok(())
+fn main() {
+    if let Err(e) = EmitBuilder::builder().git_sha(true).fail_on_error().emit() {
+        // Leave the environment variable unset if error occurs.
+        println!("cargo:warning={}", e)
+    }
 }

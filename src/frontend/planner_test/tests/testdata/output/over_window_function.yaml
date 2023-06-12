@@ -3,8 +3,8 @@
     create table t(x int);
     select lag(x) over() from t;
   logical_plan: |
-    LogicalProject { exprs: [lag] }
-    └─LogicalOverWindow { window_functions: [lag(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    LogicalProject { exprs: [first_value] }
+    └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─LogicalProject { exprs: [t.x, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
@@ -25,8 +25,8 @@
     create table t(x int);
     select lead(x, 2) over() from t;
   logical_plan: |
-    LogicalProject { exprs: [lead] }
-    └─LogicalOverWindow { window_functions: [lead(t.x) OVER(ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)] }
+    LogicalProject { exprs: [first_value] }
+    └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(ROWS BETWEEN 2 FOLLOWING AND 2 FOLLOWING)] }
       └─LogicalProject { exprs: [t.x, t._row_id, 2:Int32] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   batch_error: |-
@@ -104,8 +104,8 @@
     create table t(x int, y int);
     select x, y, lag(x) over(PARTITION BY y ORDER BY x) from t;
   logical_plan: |
-    LogicalProject { exprs: [t.x, t.y, lag] }
-    └─LogicalOverWindow { window_functions: [lag(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
+    LogicalProject { exprs: [t.x, t.y, first_value] }
+    └─LogicalOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING)] }
       └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   batch_error: |-

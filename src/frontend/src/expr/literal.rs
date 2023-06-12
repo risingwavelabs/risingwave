@@ -120,7 +120,7 @@ impl Expr for Literal {
 }
 
 /// Convert a literal value (datum) into protobuf.
-fn literal_to_value_encoding(d: &Datum) -> RexNode {
+pub fn literal_to_value_encoding(d: &Datum) -> RexNode {
     let body = serialize_datum(d.as_ref());
     RexNode::Constant(PbDatum { body })
 }
