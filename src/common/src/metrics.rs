@@ -51,7 +51,6 @@ pub type TrAdderGauge = GenericGauge<TrAdderAtomic>;
 
 pub struct CustomLayer {
     pub aws_sdk_retry_counts: GenericCounter<AtomicU64>,
-    pub aws_http_timeout_retry_counts: GenericCounter<AtomicU64>,
 }
 
 impl<S> Layer<S> for CustomLayer
@@ -63,12 +62,6 @@ where
             && event.metadata().level() == &tracing::Level::DEBUG
         {
             self.aws_sdk_retry_counts.inc();
-        }
-
-        if event.metadata().target() == "http_timeout_retry"
-            && event.metadata().level() == &tracing::Level::DEBUG
-        {
-            self.aws_http_timeout_retry_counts.inc();
         }
     }
 }
@@ -82,15 +75,8 @@ impl CustomLayer {
         )
         .unwrap();
 
-        let aws_http_timeout_retry_counts = register_int_counter_with_registry!(
-            "aws_http_timeout_retry_counts",
-            "Total number of s3 http timeout retry happens",
-            registry
-        )
-        .unwrap();
         Self {
             aws_sdk_retry_counts,
-            aws_http_timeout_retry_counts,
         }
     }
 }
