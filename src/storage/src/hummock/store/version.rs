@@ -207,7 +207,7 @@ pub struct HummockReadVersion {
     /// Remote version for committed data.
     committed: CommittedVersion,
 
-    /// Check if this is replicated. If it is, we should ignore it during
+    /// Indicate if this is replicated. If it is, we should ignore it during
     /// global state store read, to avoid duplicated results.
     /// Otherwise for local state store, it is fine, see we will see the
     /// ReadVersion just for that local state store.

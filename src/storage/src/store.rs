@@ -410,7 +410,8 @@ pub struct NewLocalOptions {
     pub is_consistent_op: bool,
     pub table_option: TableOption,
 
-    /// Used to indicate that we should not upload the data.
+    /// Indicate if this is replicated. If it is, we should not
+    /// upload its ReadVersions.
     pub is_replicated: bool,
 }
 
