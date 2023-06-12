@@ -52,11 +52,10 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
             metrics.set(0.into());
         }
         if let Some(info) = &self.metrics_info {
-            info.metrics.stream_memory_usage.remove_label_values(&[
-                &info.table_id,
-                &info.actor_id,
-                &info.desc,
-            ]).unwrap();
+            info.metrics
+                .stream_memory_usage
+                .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
+                .unwrap();
         }
     }
 }
