@@ -21,9 +21,9 @@ use super::Aggregator;
 use crate::agg::AggCall;
 use crate::{ExprError, Result};
 
-/// Computes the continuous percentile, a value corresponding to the specified fraction within the
-/// ordered set of aggregated argument values. This will interpolate between adjacent input items if
-/// needed.
+/// Computes the discrete percentile, the first value within the ordered set of aggregated argument
+/// values whose position in the ordering equals or exceeds the specified fraction. The aggregated
+/// argument must be of a sortable type.
 ///
 /// ```slt
 /// statement ok
@@ -33,40 +33,42 @@ use crate::{ExprError, Result};
 /// insert into t values(1,10,100,1000,'10000'),(2,20,200,2000,'20000'),(3,30,300,3000,'30000');
 ///
 /// query R
-/// select percentile_cont(0.45) within group (order by x desc) from t;
+/// select percentile_disc(0) within group (order by x) from t;
 /// ----
-/// 2.1
+/// 1
 ///
 /// query R
-/// select percentile_cont(0.45) within group (order by y desc) from t;
+/// select percentile_disc(0.33) within group (order by y) from t;
 /// ----
-/// 21
+/// 10
 ///
 /// query R
-/// select percentile_cont(0.45) within group (order by z desc) from t;
+/// select percentile_disc(0.34) within group (order by z) from t;
 /// ----
-/// 210
+/// 200
 ///
 /// query R
-/// select percentile_cont(0.45) within group (order by w desc) from t;
+/// select percentile_disc(0.67) within group (order by w) from t
 /// ----
-/// 2100
+/// 3000
 ///
 /// query R
-/// select percentile_cont(NULL) within group (order by w desc) from t;
+/// select percentile_disc(1) within group (order by v) from t;
+/// ----
+/// 30000
+///
+/// query R
+/// select percentile_disc(NULL) within group (order by w) from t;
 /// ----
 /// NULL
 ///
 /// statement error
-/// select percentile_cont(1.3) within group (order by v desc) from t;
-///
-/// statement error
-/// select percentile_cont(0.45) within group (order by v desc) from t;
+/// select percentile_disc(1.3) within group (order by v) from t;
 ///
 /// statement ok
 /// drop table t;
 /// ```
-#[build_aggregate("percentile_cont(float64) -> float64")]
+#[build_aggregate("percentile_disc(*) -> *")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
     let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
         let arg = (*literal.as_float64()).into();
@@ -81,34 +83,47 @@ fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
         None
     };
 
-    Ok(Box::new(PercentileCont::new(fraction)))
+    Ok(Box::new(PercentileDisc::new(
+        fraction,
+        agg.return_type.clone(),
+    )))
 }
 
-#[derive(Clone, EstimateSize)]
-pub struct PercentileCont {
+#[derive(Clone)]
+pub struct PercentileDisc {
     fractions: Option<f64>,
-    data: Vec<f64>,
+    return_type: DataType,
+    data: Vec<ScalarImpl>,
 }
 
-impl PercentileCont {
-    pub fn new(fractions: Option<f64>) -> Self {
+impl EstimateSize for PercentileDisc {
+    fn estimated_heap_size(&self) -> usize {
+        self.data
+            .iter()
+            .fold(0, |acc, x| acc + x.estimated_heap_size())
+    }
+}
+
+impl PercentileDisc {
+    pub fn new(fractions: Option<f64>, return_type: DataType) -> Self {
         Self {
             fractions,
+            return_type,
             data: vec![],
         }
     }
 
     fn add_datum(&mut self, datum_ref: DatumRef<'_>) {
         if let Some(datum) = datum_ref.to_owned_datum() {
-            self.data.push((*datum.as_float64()).into());
+            self.data.push(datum);
         }
     }
 }
 
 #[async_trait::async_trait]
-impl Aggregator for PercentileCont {
+impl Aggregator for PercentileDisc {
     fn return_type(&self) -> DataType {
-        DataType::Float64
+        self.return_type.clone()
     }
 
     async fn update_multi(
@@ -126,16 +141,12 @@ impl Aggregator for PercentileCont {
 
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let Some(fractions) = self.fractions && !self.data.is_empty() {
-            let rn = fractions * (self.data.len() - 1) as f64;
-            let crn = f64::ceil(rn);
-            let frn = f64::floor(rn);
-            let result = if crn == frn {
-                self.data[crn as usize]
+            let rn = fractions * self.data.len() as f64;
+            if fractions == 1.0 {
+                builder.append(Some(self.data[self.data.len() - 1].clone()));
             } else {
-                (crn - rn) * self.data[frn as usize]
-                    + (rn - frn) * self.data[crn as usize]
-            };
-            builder.append(Some(ScalarImpl::Float64(result.into())));
+                builder.append(Some(self.data[f64::floor(rn) as usize].clone()));
+            }
         } else {
             builder.append(Datum::None);
         }

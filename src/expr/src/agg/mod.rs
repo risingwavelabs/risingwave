@@ -29,6 +29,7 @@ mod count_star;
 mod general;
 mod jsonb_agg;
 mod percentile_cont;
+mod percentile_disc;
 mod string_agg;
 
 // wrappers
