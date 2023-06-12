@@ -12,59 +12,123 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use itertools::Itertools;
 
 use super::DataType;
-use crate::util::iter_util::ZipEqFast;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 
-/// Details about a struct type. There are 2 cases for a struct:
-/// 1. `field_names.len() == fields.len()`: it represents a struct with named fields, e.g.
-///    `STRUCT<i INT, j VARCHAR>`.
-/// 2. `field_names.len() == 0`: it represents a struct with unnamed fields, e.g.
-///    `ROW(1, 2)`.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StructType {
-    pub fields: Vec<DataType>,
-    pub field_names: Vec<String>,
+/// A cheaply cloneable struct type.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StructType(Arc<StructTypeInner>);
+
+impl Debug for StructType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StructType")
+            .field("field_names", &self.0.field_names)
+            .field("field_types", &self.0.field_types)
+            .finish()
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct StructTypeInner {
+    // Details about a struct type. There are 2 cases for a struct:
+    // 1. `field_names.len() == field_types.len()`: it represents a struct with named fields,
+    //     e.g. `STRUCT<i INT, j VARCHAR>`.
+    // 2. `field_names.len() == 0`: it represents a struct with unnamed fields,
+    //     e.g. `ROW(1, 2)`.
+    field_names: Box<[String]>,
+    field_types: Box<[DataType]>,
 }
 
 impl StructType {
     /// Creates a struct type with named fields.
-    pub fn new(named_fields: Vec<(DataType, String)>) -> Self {
-        let mut fields = Vec::with_capacity(named_fields.len());
+    pub fn new(named_fields: Vec<(impl Into<String>, DataType)>) -> Self {
+        let mut field_types = Vec::with_capacity(named_fields.len());
         let mut field_names = Vec::with_capacity(named_fields.len());
-        for (d, s) in named_fields {
-            fields.push(d);
-            field_names.push(s);
+        for (name, ty) in named_fields {
+            field_names.push(name.into());
+            field_types.push(ty);
         }
-        Self {
-            fields,
-            field_names,
-        }
+        Self(Arc::new(StructTypeInner {
+            field_types: field_types.into(),
+            field_names: field_names.into(),
+        }))
+    }
+
+    /// Creates a struct type with no fields.
+    #[cfg(test)]
+    pub fn empty() -> Self {
+        Self(Arc::new(StructTypeInner {
+            field_types: Box::new([]),
+            field_names: Box::new([]),
+        }))
+    }
+
+    pub(super) fn from_parts(field_names: Vec<String>, field_types: Vec<DataType>) -> Self {
+        Self(Arc::new(StructTypeInner {
+            field_types: field_types.into(),
+            field_names: field_names.into(),
+        }))
     }
 
     /// Creates a struct type with unnamed fields.
     pub fn unnamed(fields: Vec<DataType>) -> Self {
-        Self {
-            fields,
-            field_names: Vec::new(),
-        }
+        Self(Arc::new(StructTypeInner {
+            field_types: fields.into(),
+            field_names: Box::new([]),
+        }))
+    }
+
+    /// Returns the number of fields.
+    pub fn len(&self) -> usize {
+        self.0.field_types.len()
+    }
+
+    /// Returns `true` if there are no fields.
+    pub fn is_empty(&self) -> bool {
+        self.0.field_types.is_empty()
+    }
+
+    /// Gets an iterator over the names of the fields.
+    ///
+    /// If the struct field is unnamed, the iterator returns **no names**.
+    pub fn names(&self) -> impl ExactSizeIterator<Item = &str> {
+        self.0.field_names.iter().map(|s| s.as_str())
+    }
+
+    /// Gets an iterator over the types of the fields.
+    pub fn types(&self) -> impl ExactSizeIterator<Item = &DataType> {
+        self.0.field_types.iter()
+    }
+
+    /// Gets an iterator over the fields.
+    ///
+    /// If the struct field is unnamed, the iterator returns **empty strings**.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &DataType)> {
+        self.0
+            .field_names
+            .iter()
+            .map(|s| s.as_str())
+            .chain(std::iter::repeat("").take(self.0.field_types.len() - self.0.field_names.len()))
+            .zip_eq_debug(self.0.field_types.iter())
     }
 }
 
 impl Display for StructType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.field_names.is_empty() {
+        if self.0.field_names.is_empty() {
             write!(f, "record")
         } else {
             write!(
                 f,
                 "struct<{}>",
-                (self.fields.iter())
-                    .zip_eq_fast(self.field_names.iter())
+                (self.0.field_types.iter())
+                    .zip_eq_fast(self.0.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
                     .join(",")
             )
@@ -80,7 +144,7 @@ impl FromStr for StructType {
             return Ok(StructType::unnamed(Vec::new()));
         }
         let s = s.trim_start_matches("struct<").trim_end_matches('>');
-        let mut fields = Vec::new();
+        let mut field_types = Vec::new();
         let mut field_names = Vec::new();
         for field in s.split(',') {
             let field = field.trim();
@@ -88,11 +152,11 @@ impl FromStr for StructType {
             let field_name = iter.next().unwrap();
             let field_type = iter.next().unwrap();
             field_names.push(field_name.to_string());
-            fields.push(DataType::from_str(field_type)?);
+            field_types.push(DataType::from_str(field_type)?);
         }
-        Ok(StructType {
-            fields,
-            field_names,
-        })
+        Ok(Self(Arc::new(StructTypeInner {
+            field_types: field_types.into(),
+            field_names: field_names.into(),
+        })))
     }
 }

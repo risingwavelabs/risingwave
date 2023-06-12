@@ -21,6 +21,7 @@ console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
+risingwave_common = { path = "../../common" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

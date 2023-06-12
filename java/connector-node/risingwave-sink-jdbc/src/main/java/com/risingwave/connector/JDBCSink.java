@@ -19,13 +19,13 @@ import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.io.InputStream;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import org.apache.commons.lang3.StringUtils;
 import org.postgresql.util.PGInterval;
 import org.postgresql.util.PGobject;
 import org.slf4j.Logger;
@@ -93,7 +93,7 @@ public class JDBCSink extends SinkBase {
                             String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
                     .asRuntimeException();
         }
-        LOG.info("detected pk {}", pkColumnNames);
+        LOG.info("detected pk column {}", pkColumnNames);
         return pkColumnNames;
     }
 
@@ -109,6 +109,7 @@ public class JDBCSink extends SinkBase {
                 String insertStmt =
                         String.format(
                                 INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
+
                 try {
                     return generatePreparedStatement(insertStmt, row, null);
                 } catch (SQLException e) {
@@ -219,10 +220,14 @@ public class JDBCSink extends SinkBase {
     private PreparedStatement generatePreparedStatement(
             String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
         PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);
-        var columnNames = getTableSchema().getColumnNames();
+        var columnDescs = getTableSchema().getColumnDescs();
         int placeholderIdx = 1;
         for (int i = 0; i < row.size(); i++) {
-            switch (getTableSchema().getColumnType(columnNames[i])) {
+            var column = columnDescs.get(i);
+            switch (column.getDataType().getTypeName()) {
+                case DECIMAL:
+                    stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
+                    break;
                 case INTERVAL:
                     if (targetDbType == DatabaseType.POSTGRES) {
                         stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
@@ -242,7 +247,25 @@ public class JDBCSink extends SinkBase {
                     }
                     break;
                 case BYTEA:
-                    stmt.setBinaryStream(placeholderIdx++, (InputStream) row.get(i));
+                    stmt.setBytes(placeholderIdx++, (byte[]) row.get(i));
+                    break;
+                case LIST:
+                    var val = row.get(i);
+                    assert (val instanceof Object[]);
+                    Object[] objArray = (Object[]) val;
+                    if (targetDbType == DatabaseType.POSTGRES) {
+                        var fieldType = column.getDataType().getFieldType(0);
+                        var sqlType =
+                                JdbcUtils.getDbSqlType(
+                                        targetDbType, fieldType.getTypeName(), fieldType);
+                        stmt.setArray(i + 1, conn.createArrayOf(sqlType, objArray));
+                    } else {
+                        // convert Array type to a string for other database
+                        // reference:
+                        // https://dev.mysql.com/doc/workbench/en/wb-migration-database-postgresql-typemapping.html
+                        var arrayString = StringUtils.join(objArray, ",");
+                        stmt.setString(placeholderIdx++, arrayString);
+                    }
                     break;
                 default:
                     stmt.setObject(placeholderIdx++, row.get(i));
@@ -266,7 +289,7 @@ public class JDBCSink extends SinkBase {
                     continue;
                 }
                 if (stmt != null) {
-                    try {
+                    try (stmt) {
                         LOG.debug("Executing statement: {}", stmt);
                         stmt.executeUpdate();
                     } catch (SQLException e) {

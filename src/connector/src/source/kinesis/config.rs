@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
-use aws_types::credentials::SharedCredentialsProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use maplit::hashmap;
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ impl AwsConfigInfo {
                 access_key_id,
                 secret_access_key,
                 session_token,
-            }) => SharedCredentialsProvider::new(aws_types::Credentials::from_keys(
+            }) => SharedCredentialsProvider::new(aws_credential_types::Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
                 session_token.clone(),
