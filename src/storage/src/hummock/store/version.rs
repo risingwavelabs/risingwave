@@ -461,11 +461,12 @@ pub fn read_filter_for_batch(
                 .filter(|imm| imm.min_epoch() > min_epoch && imm.min_epoch() <= max_epoch),
         );
 
-        sst_vec.extend(
-            staging_ssts
-                .into_iter()
-                .filter(|staging_sst| staging_sst.min_epoch > min_epoch),
-        );
+        sst_vec.extend(staging_ssts.into_iter().filter(|staging_sst| {
+            assert!(
+                staging_sst.get_max_epoch() <= min_epoch || staging_sst.get_min_epoch() > min_epoch
+            );
+            staging_sst.min_epoch > min_epoch
+        }));
     }
 
     Ok((imm_vec, sst_vec))
