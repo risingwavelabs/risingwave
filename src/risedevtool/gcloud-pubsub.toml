@@ -8,6 +8,7 @@ GCLOUD_DOWNLOAD_TGZ = "https://dl.google.com/dl/cloudsdk/channels/rapid/download
 GCLOUD_SDK_DIR = "google-cloud-sdk"
 
 [tasks.download-pubsub]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_PUBSUB" ] }

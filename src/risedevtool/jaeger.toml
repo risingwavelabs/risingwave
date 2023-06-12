@@ -8,6 +8,7 @@ JAEGER_RELEASE = "jaeger-${JAEGER_VERSION}-${JAEGER_SYSTEM}"
 JAEGER_DOWNLOAD_TAR_GZ = "https://github.com/jaegertracing/jaeger/releases/download/v${JAEGER_VERSION}/${JAEGER_RELEASE}.tar.gz"
 
 [tasks.download-jaeger]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_COMPUTE_TRACING" ] }
