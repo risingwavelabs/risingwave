@@ -33,7 +33,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...
 #
 # [target.'cfg(not(madsim))'.dependencies]

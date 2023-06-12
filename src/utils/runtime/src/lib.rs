@@ -174,7 +174,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         // Enable DEBUG level for all other crates
         #[cfg(debug_assertions)]
-        let filter = filter.with_default(Level::INFO);
+        let filter = filter.with_default(Level::DEBUG);
 
         #[cfg(not(debug_assertions))]
         let filter = filter.with_default(Level::INFO);
