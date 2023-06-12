@@ -616,7 +616,7 @@ impl Binder {
                                         FunctionCall::new(ExprType::LessThanOrEqual, vec![arg1, ndims_expr])?.into(),
                                     ],
                                 )?.into(),
-                                ExprImpl::literal_i64(1),
+                                ExprImpl::literal_int(1),
                             ],
                         ).map(Into::into)
                     })),
@@ -757,7 +757,7 @@ impl Binder {
                         )
                         .into());
                     };
-                    match binder.session_config.get(&input.to_string()) {
+                    match binder.session_config.get(input.as_ref()) {
                         Some(setting) => Ok(ExprImpl::literal_varchar(setting.into())),
                         None => Err(ErrorCode::UnrecognizedConfigurationParameter(input.to_string()).into()),
                     }

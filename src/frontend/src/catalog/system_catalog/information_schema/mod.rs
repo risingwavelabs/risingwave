@@ -52,14 +52,7 @@ impl SysCatalogReaderImpl {
                             // TODO: refactor when we support "NOT NULL".
                             Some(ScalarImpl::Utf8("YES".into())),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
-                            Some(ScalarImpl::Utf8(
-                                column
-                                    .data_type()
-                                    .prost_type_name()
-                                    .as_str_name()
-                                    .to_lowercase()
-                                    .into(),
-                            )),
+                            Some(ScalarImpl::Utf8(column.data_type().type_name().into())),
                         ])
                     })
                 });
@@ -86,14 +79,7 @@ impl SysCatalogReaderImpl {
                                     // TODO: refactor when we support "NOT NULL".
                                     Some(ScalarImpl::Utf8("YES".into())),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
-                                    Some(ScalarImpl::Utf8(
-                                        column
-                                            .data_type()
-                                            .prost_type_name()
-                                            .as_str_name()
-                                            .to_lowercase()
-                                            .into(),
-                                    )),
+                                    Some(ScalarImpl::Utf8(column.data_type().type_name().into())),
                                 ])
                             })
                     })

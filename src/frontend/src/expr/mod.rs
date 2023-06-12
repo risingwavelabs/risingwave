@@ -133,11 +133,6 @@ impl ExprImpl {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
     }
 
-    #[inline(always)]
-    pub fn literal_i64(v: i64) -> Self {
-        Literal::new(Some(v.to_scalar_value()), DataType::Int64).into()
-    }
-
     /// A literal float64 value.
     #[inline(always)]
     pub fn literal_f64(v: f64) -> Self {
