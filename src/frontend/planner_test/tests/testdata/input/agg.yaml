@@ -735,11 +735,26 @@
   - binder_error
 - sql: |
     create table t (x int, y int);
+    select percentile_cont(1.3) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
+  expected_outputs:
+  - binder_error
+- sql: |
+    create table t (x int, y varchar);
+    select percentile_cont(0) within group (order by y) from t;
   expected_outputs:
   - binder_error
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0) within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select percentile_disc(1) within group (order by y desc) from t;
   expected_outputs:
   - batch_plan

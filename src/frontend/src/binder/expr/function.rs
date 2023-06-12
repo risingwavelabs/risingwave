@@ -289,13 +289,23 @@ impl Binder {
                 .cast_implicit(DataType::Float64)?
                 .fold_const()
             {
-                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                if casted
+                    .clone()
+                    .is_some_and(|x| !(0.0..=1.0).contains(&Into::<f64>::into(*x.as_float64())))
+                {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "arg in {} must between 0 and 1",
+                        kind
+                    ))
+                    .into())
+                } else {
+                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                }
             } else {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "arg in {} must be double precision",
-                    kind
-                ))
-                .into())
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be float64", kind))
+                        .into(),
+                )
             }
         } else {
             Ok(vec![])

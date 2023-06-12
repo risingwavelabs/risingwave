@@ -19,7 +19,7 @@ use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
 use crate::agg::AggCall;
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Computes the discrete percentile, the first value within the ordered set of aggregated argument
 /// values whose position in the ordering equals or exceeds the specified fraction. The aggregated
@@ -62,27 +62,14 @@ use crate::{ExprError, Result};
 /// ----
 /// NULL
 ///
-/// statement error
-/// select percentile_disc(1.3) within group (order by v) from t;
-///
 /// statement ok
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_disc(*) -> *")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
-        let arg = (*literal.as_float64()).into();
-        if !(0.0..=1.0).contains(&arg) {
-            return Err(ExprError::InvalidParam {
-                name: "fraction",
-                reason: "must between 0 and 1".to_string(),
-            });
-        }
-        Some(arg)
-    } else {
-        None
-    };
-
+    let fraction: Option<f64> = agg.direct_args[0]
+        .literal()
+        .map(|x| (*x.as_float64()).into());
     Ok(Box::new(PercentileDisc::new(fraction, agg.return_type)))
 }
 

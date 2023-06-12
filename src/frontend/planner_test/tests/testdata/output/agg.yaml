@@ -1326,7 +1326,15 @@
     Bind error: failed to bind expression: percentile_cont('abc')
 
     Caused by:
-      Invalid input syntax: arg in percentile_cont must be double precision
+      Invalid input syntax: arg in percentile_cont must be float64
+- sql: |
+    create table t (x int, y int);
+    select percentile_cont(1.3) within group (order by y) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: percentile_cont(1.3)
+
+    Caused by:
+      Invalid input syntax: arg in percentile_cont must between 0 and 1
 - sql: |
     create table t (x int, y int);
     select percentile_cont(0, 0) within group (order by y) from t;
@@ -1336,6 +1344,14 @@
     Caused by:
       Invalid input syntax: only one arg is expected in percentile_cont
 - sql: |
+    create table t (x int, y varchar);
+    select percentile_cont(0) within group (order by y) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: percentile_cont(0)
+
+    Caused by:
+      Bind error: cannot cast type "varchar" to "double precision" in Implicit context
+- sql: |
     create table t (x int, y int);
     select percentile_cont(0) within group (order by y desc) from t;
   batch_plan: |
@@ -1343,3 +1359,10 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.y::Float64 as $expr1, t.y] }
         └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y varchar);
+    select percentile_disc(1) within group (order by y desc) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [percentile_disc(t.y order_by(t.y DESC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }

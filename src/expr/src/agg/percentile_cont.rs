@@ -19,7 +19,7 @@ use risingwave_expr_macro::build_aggregate;
 
 use super::Aggregator;
 use crate::agg::AggCall;
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// Computes the continuous percentile, a value corresponding to the specified fraction within the
 /// ordered set of aggregated argument values. This will interpolate between adjacent input items if
@@ -57,30 +57,14 @@ use crate::{ExprError, Result};
 /// ----
 /// NULL
 ///
-/// statement error
-/// select percentile_cont(1.3) within group (order by v desc) from t;
-///
-/// statement error
-/// select percentile_cont(0.45) within group (order by v desc) from t;
-///
 /// statement ok
 /// drop table t;
 /// ```
 #[build_aggregate("percentile_cont(float64) -> float64")]
 fn build(agg: AggCall) -> Result<Box<dyn Aggregator>> {
-    let fraction: Option<f64> = if let Some(literal) = agg.direct_args[0].literal() {
-        let arg = (*literal.as_float64()).into();
-        if !(0.0..=1.0).contains(&arg) {
-            return Err(ExprError::InvalidParam {
-                name: "fraction",
-                reason: "must between 0 and 1".to_string(),
-            });
-        }
-        Some(arg)
-    } else {
-        None
-    };
-
+    let fraction: Option<f64> = agg.direct_args[0]
+        .literal()
+        .map(|x| (*x.as_float64()).into());
     Ok(Box::new(PercentileCont::new(fraction)))
 }
 
