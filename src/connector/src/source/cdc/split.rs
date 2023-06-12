@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,8 @@ pub struct CdcSplit {
     // the hostname and port of a node that holding shard tables
     pub server_addr: Option<String>,
     pub start_offset: Option<String>,
+
+    pub snapshot_done: bool,
 }
 
 impl SplitMetaData for CdcSplit {
@@ -42,20 +46,55 @@ impl SplitMetaData for CdcSplit {
     }
 }
 
+// {
+//     "sourcePartition":
+//     {
+//         "server": "RW_CDC_public.te"
+//     },
+//     "sourceOffset":
+//     {
+//         "last_snapshot_record": false,
+//         "lsn": 29973552,
+//         "txId": 1046,
+//         "ts_usec": 1670826189008456,
+//         "snapshot": true
+//     }
+// }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DebeziumOffset {
+    #[serde(rename = "sourceOffset")]
+    source_offset: DebeziumSourceOffset,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DebeziumSourceOffset {
+    last_snapshot_record: bool,
+    lsn: u64,
+    tx_id: u64,
+    ts_usec: u64,
+    snapshot: bool,
+}
+
 impl CdcSplit {
     pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
         Self {
             split_id,
             server_addr: None,
             start_offset: Some(start_offset),
+            snapshot_done: false,
         }
     }
 
     pub fn copy_with_offset(&self, start_offset: String) -> Self {
+        // deserialize the start_offset
+        let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
+            .expect(&format!("invalid cdc offset: {}", start_offset));
+
         Self {
             split_id: self.split_id,
             server_addr: self.server_addr.clone(),
             start_offset: Some(start_offset),
+            snapshot_done: !dbz_offset.source_offset.snapshot,
         }
     }
 }
