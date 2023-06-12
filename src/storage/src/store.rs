@@ -420,6 +420,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
             table_id: value.table_id.into(),
             is_consistent_op: value.is_consistent_op,
             table_option: value.table_option.into(),
+            is_replicated: value.is_replicated,
         }
     }
 }
