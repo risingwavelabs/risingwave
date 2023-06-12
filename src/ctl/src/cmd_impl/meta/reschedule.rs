@@ -27,24 +27,35 @@ const RESCHEDULE_MATCH_REGEXP: &str =
 const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
 const RESCHEDULE_REMOVED_KEY: &str = "removed";
 const RESCHEDULE_ADDED_KEY: &str = "added";
-const IP_ADDR_REGEXP: &str =
-    r"(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}";
+
+fn str_to_addr(ip: &str) -> anyhow::Result<HostAddress> {
+    let ip_addr_regex = r"(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}:\d+";
+    let re = Regex::new(ip_addr_regex).unwrap();
+    if !re.is_match(&ip) {
+        return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
+    }
+    let splits = ip.split(":").map(|s| s.to_owned()).collect_vec();
+    let host = splits[0].clone();
+    let port = (&splits[1]).parse::<i32>()?;
+    Ok(HostAddress { host, port })
+}
 
 // Mark a compute node as unschedulable
 pub async fn cordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
-    let splits = ip.clone().split(":").map(|s| s.to_owned()).collect_vec();
-    let re = Regex::new(IP_ADDR_REGEXP).unwrap();
-
-    if splits.len() != 2 as usize || !re.is_match(ip.as_str()) {
-        return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
-    }
-    let host = splits[0].clone();
-    let port = (&splits[1]).parse::<i32>()?;
-    let addr = HostAddress { host, port };
-
+    let addr = str_to_addr(ip.as_str())?;
     let meta_client = context.meta_client().await?;
     tracing::info!("trying to cordon {:?}", addr);
     //  meta_client.cordon(addr).await?; // TODO
+
+    Ok(())
+}
+
+// Mark a compute node as schedulable
+pub async fn uncordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
+    let addr = str_to_addr(ip.as_str())?;
+    let meta_client = context.meta_client().await?;
+    tracing::info!("trying to uncordon {:?}", addr);
+    //  meta_client.uncordon(addr).await?; // TODO
 
     Ok(())
 }
