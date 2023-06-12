@@ -77,7 +77,6 @@ impl BatchSortAgg {
         &self.logical.group_key
     }
 }
-impl_distill_by_unit!(BatchSortAgg, logical, "BatchSortAgg");
 
 impl PlanTreeNodeUnary for BatchSortAgg {
     fn input(&self) -> PlanRef {
@@ -91,6 +90,7 @@ impl PlanTreeNodeUnary for BatchSortAgg {
     }
 }
 impl_plan_tree_node_for_unary! { BatchSortAgg }
+impl_distill_by_unit!(BatchSortAgg, logical, "BatchSortAgg");
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {

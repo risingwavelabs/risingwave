@@ -99,6 +99,8 @@ pub struct Binder {
     /// and so on.
     next_share_id: ShareId,
 
+    session_config: HashMap<String, String>,
+
     search_path: SearchPath,
     /// The type of binding statement.
     bind_for: BindFor,
@@ -207,6 +209,12 @@ impl Binder {
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
+            session_config: session
+                .config()
+                .get_all()
+                .into_iter()
+                .map(|var| (var.name, var.setting))
+                .collect(),
             search_path: session.config().get_search_path(),
             bind_for,
             shared_views: HashMap::new(),

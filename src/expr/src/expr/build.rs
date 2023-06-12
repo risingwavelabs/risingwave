@@ -47,6 +47,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         RexNode::Constant(_) => return LiteralExpression::try_from_boxed(prost),
         RexNode::Udf(_) => return UdfExpression::try_from_boxed(prost),
         RexNode::FuncCall(func_call) => func_call,
+        RexNode::Now(_) => unreachable!("now should not be built at backend"),
     };
 
     let func_type = prost.function_type();

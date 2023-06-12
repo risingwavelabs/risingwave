@@ -1,4 +1,5 @@
 [tasks.configure-if-not-configured]
+private = true
 condition = { env_not_set = [ "RISEDEV_CONFIGURED" ] }
 script = '''
 #!/usr/bin/env bash
@@ -8,6 +9,8 @@ cargo run --bin risedev-config -- -f "${ENV_PATH}" default
 '''
 
 [tasks.configure]
+category = "RiseDev - Build"
+description = "Configure what components to download/build"
 script = '''
 #!/usr/bin/env bash
 set -e
