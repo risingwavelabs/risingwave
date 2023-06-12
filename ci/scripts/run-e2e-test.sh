@@ -31,16 +31,16 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 # Please make sure the regression is expected before increasing the timeout.
 sqllogictest -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
@@ -53,26 +53,26 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/python.slt'
 pkill python3
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3streaming-2serving-3fe, extended query"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
   -p 4566 \
   -u root
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
@@ -97,7 +97,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     echo "--- e2e, ci-delete-range-test"
     cargo make clean-data
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make --allow-private ci-start ci-delete-range-test
+    cargo make ci-start ci-delete-range-test
     download-and-decompress-artifact delete-range-test-"$profile" target/debug/
     mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
     chmod +x ./target/debug/delete-range-test
@@ -106,13 +106,13 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make --allow-private ci-kill
+    cargo make ci-kill
 fi
 
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    cargo make --allow-private ci-start ci-compaction-test
+    cargo make ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
 
@@ -145,5 +145,5 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
-    cargo make --allow-private ci-kill
+    cargo make ci-kill
 fi

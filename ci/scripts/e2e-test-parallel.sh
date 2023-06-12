@@ -30,25 +30,25 @@ host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
 echo "--- e2e, ci-3streaming-2serving-3fe, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3streaming-2serving-3fe, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
 sqllogictest ${host_args} -d dev './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-batch-${profile}"
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill
 
 echo "--- e2e, ci-3streaming-2serving-3fe, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make --allow-private ci-start ci-3streaming-2serving-3fe
+cargo make ci-start ci-3streaming-2serving-3fe
 sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill

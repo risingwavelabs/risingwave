@@ -40,7 +40,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     chmod +x ./target/debug/sqlsmith
 
     echo "--- e2e, ci-3cn-1fe, build"
-    cargo make --allow-private ci-start ci-3cn-1fe
+    cargo make ci-start ci-3cn-1fe
 
     echo "--- e2e, ci-3cn-1fe, run fuzzing"
     timeout 20m ./target/debug/sqlsmith test \

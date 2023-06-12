@@ -10,8 +10,7 @@ export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
 export CARGO_INCREMENTAL=0
 export CARGO_MAKE_PRINT_TIME_SUMMARY=true
-
-
+export LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
 fi

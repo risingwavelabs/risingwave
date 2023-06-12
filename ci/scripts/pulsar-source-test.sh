@@ -42,7 +42,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
-cargo make --allow-private ci-start ci-1cn-1fe
+cargo make ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install psycopg2-binary
@@ -50,4 +50,4 @@ python3 e2e_test/source/pulsar/astra-streaming.py
 python3 e2e_test/source/pulsar/streamnative-cloud.py
 
 echo "--- Kill cluster"
-cargo make --allow-private ci-kill
+cargo make ci-kill

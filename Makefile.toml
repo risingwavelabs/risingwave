@@ -1018,7 +1018,6 @@ echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(
 """
 
 [tasks.ci-start]
-private = true
 category = "RiseDev - CI"
 dependencies = ["clean-data", "pre-start-dev"]
 command = "target/${BUILD_MODE_DIR}/risedev-dev"
@@ -1026,7 +1025,6 @@ args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
 [tasks.ci-kill]
-private = true
 category = "RiseDev - CI"
 dependencies = ["k", "l", "check-logs"]
 description = "Kill cluster, dump logs and check logs"
