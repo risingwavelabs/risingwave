@@ -153,8 +153,6 @@ mod tests {
             )
         }
 
-      
-
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);

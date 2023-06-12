@@ -226,7 +226,6 @@ mod tests {
 
         let mut rows = chunk.rows();
 
-
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);

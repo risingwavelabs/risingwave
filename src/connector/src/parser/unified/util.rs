@@ -27,7 +27,6 @@ pub fn apply_row_operation_on_stream_chunk_writer(
                     Ok(None)
                 }
             }
-           
         }),
     }
 }
