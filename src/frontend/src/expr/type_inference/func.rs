@@ -93,7 +93,7 @@ pub fn infer_some_all(
             )
             .into());
         }
-        inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
+        inputs[0].cast_implicit_mut(sig.inputs_type[0].into())?;
     }
     if element_type != Some(sig.inputs_type[1]) {
         if matches!(
@@ -104,9 +104,7 @@ pub fn infer_some_all(
                 ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
             );
         }
-        inputs[1] = inputs[1]
-            .clone()
-            .cast_implicit(DataType::List(Box::new(sig.inputs_type[1].into())))?;
+        inputs[1].cast_implicit_mut(DataType::List(Box::new(sig.inputs_type[1].into())))?;
     }
 
     let inputs_owned = std::mem::take(inputs);
@@ -373,13 +371,13 @@ fn infer_type_for_special(
                 // `null = array[1]` where null should have same type as right side
                 // `null = 1` can use the general rule, but return `Ok(None)` here is less readable
                 (true, false) => {
-                    let owned = std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
-                    inputs[0] = owned.cast_implicit(inputs[1].return_type())?;
+                    let t = inputs[1].return_type();
+                    inputs[0].cast_implicit_mut(t)?;
                     return Ok(Some(DataType::Boolean));
                 }
                 (false, true) => {
-                    let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                    inputs[1] = owned.cast_implicit(inputs[0].return_type())?;
+                    let t = inputs[0].return_type();
+                    inputs[1].cast_implicit_mut(t)?;
                     return Ok(Some(DataType::Boolean));
                 }
                 // Types of both sides are known. Continue.
@@ -394,17 +392,10 @@ fn infer_type_for_special(
                         extract_expr_nested_type(&inputs[1])?,
                     )?;
                     if lcast {
-                        let owned0 =
-                            std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
-                        inputs[0] =
-                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
-                                .into();
+                        inputs[0].cast_implicit_mut(ret.clone())?;
                     }
                     if rcast {
-                        let owned1 =
-                            std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-                        inputs[1] =
-                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
+                        inputs[1].cast_implicit_mut(ret)?;
                     }
                     true
                 }
@@ -512,8 +503,8 @@ fn infer_type_for_special(
                 Ok(casted) => Ok(Some(casted)),
                 Err(_) => Err(ErrorCode::BindError(format!(
                     "Cannot append {} to {}",
-                    inputs[0].return_type(),
-                    inputs[1].return_type()
+                    inputs[1].return_type(),
+                    inputs[0].return_type()
                 ))
                 .into()),
             }
@@ -561,8 +552,7 @@ fn infer_type_for_special(
         ExprType::ArrayPosition => {
             ensure_arity!("array_position", 2 <= | inputs | <= 3);
             if let Some(start) = inputs.get_mut(2) {
-                let owned = std::mem::replace(start, ExprImpl::literal_bool(false));
-                *start = owned.cast_implicit(DataType::Int32)?;
+                start.cast_implicit_mut(DataType::Int32)?;
             }
             let common_type = align_array_and_element(0, &[1], inputs);
             match common_type {
@@ -590,62 +580,54 @@ fn infer_type_for_special(
         }
         ExprType::ArrayDistinct => {
             ensure_arity!("array_distinct", | inputs | == 1);
-            let ret_type = inputs[0].return_type();
-            if inputs[0].is_untyped() {
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type()))
+        }
+        ExprType::ArrayDims => {
+            ensure_arity!("array_dims", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            if let DataType::List(box DataType::List(_)) = inputs[0].return_type() {
                 return Err(ErrorCode::BindError(
-                    "could not determine polymorphic type because input has type unknown"
-                        .to_string(),
+                    "array_dims for dimensions greater than 1 not supported".into(),
                 )
                 .into());
             }
-            match ret_type {
-                DataType::List(list_elem_type) => Ok(Some(DataType::List(list_elem_type))),
-                _ => Ok(None),
-            }
+            Ok(Some(DataType::Varchar))
         }
         ExprType::ArrayLength => {
-            ensure_arity!("array_length", | inputs | == 1);
-            let return_type = inputs[0].return_type();
+            ensure_arity!("array_length", 1 <= | inputs | <= 2);
+            inputs[0].ensure_array_type()?;
 
-            if inputs[0].is_untyped() {
-                return Err(ErrorCode::BindError(
-                    "Cannot find length for unknown type".to_string(),
-                )
-                .into());
+            if let Some(arg1) = inputs.get_mut(1) {
+                arg1.cast_implicit_mut(DataType::Int32)?;
             }
 
-            match return_type {
-                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
-                _ => Ok(None),
-            }
+            Ok(Some(DataType::Int64))
         }
-        ExprType::StringToArray => Ok(Some(DataType::List(Box::new(DataType::Varchar)))),
+        ExprType::StringToArray => {
+            ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
+
+            if !inputs.iter().all(|e| e.return_type() == DataType::Varchar) {
+                return Ok(None);
+            }
+
+            Ok(Some(DataType::List(Box::new(DataType::Varchar))))
+        }
         ExprType::Cardinality => {
             ensure_arity!("cardinality", | inputs | == 1);
-            let return_type = inputs[0].return_type();
+            inputs[0].ensure_array_type()?;
 
-            if inputs[0].is_untyped() {
-                return Err(ErrorCode::BindError(
-                    "Cannot get cardinality of unknown type".to_string(),
-                )
-                .into());
-            }
-
-            match return_type {
-                DataType::List(_list_elem_type) => Ok(Some(DataType::Int64)),
-                _ => Ok(None),
-            }
+            Ok(Some(DataType::Int64))
         }
         ExprType::TrimArray => {
             ensure_arity!("trim_array", | inputs | == 2);
+            inputs[0].ensure_array_type()?;
 
-            let owned = std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
-            inputs[1] = owned.cast_implicit(DataType::Int32)?;
+            inputs[1].cast_implicit_mut(DataType::Int32)?;
 
-            match inputs[0].return_type() {
-                DataType::List(typ) => Ok(Some(DataType::List(typ))),
-                _ => Ok(None),
-            }
+            Ok(Some(inputs[0].return_type()))
         }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);

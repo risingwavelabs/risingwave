@@ -456,6 +456,18 @@ impl DataType {
             _ => self.clone(),
         }
     }
+
+    /// Return the number of dimensions of this array/list type. Return `0` when this type is not an
+    /// array/list.
+    pub fn array_ndims(&self) -> usize {
+        let mut d = 0;
+        let mut t = self;
+        while let Self::List(inner) = t {
+            d += 1;
+            t = inner;
+        }
+        d
+    }
 }
 
 impl From<DataType> for PbDataType {

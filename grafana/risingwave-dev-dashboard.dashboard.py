@@ -843,7 +843,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "rate(stream_memory_usage[$__rate_interval])",
+                            "stream_memory_usage",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
@@ -1944,12 +1944,12 @@ def section_hummock(panels):
                     "data cache - {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum({metric('state_store_limit_memory_size')}) by (job,instance)",
-                    "Memory limiter usage - {{job}} @ {{instance}}",
+                    f"sum({metric('uploading_memory_size')}) by (job,instance)",
+                    "uploading memory - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum({metric('state_store_uploader_uploading_task_size')}) by (job,instance)",
-                    "uploading memory - {{job}} @ {{instance}}",
+                    "uploading task size - {{job}} @ {{instance}}",
                 ),
             ],
         ),

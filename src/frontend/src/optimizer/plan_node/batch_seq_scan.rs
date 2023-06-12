@@ -119,35 +119,35 @@ impl BatchSeqScan {
 
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
+fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match lb {
+        Bound::Included(v) => (">=", v),
+        Bound::Excluded(v) => (">", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match ub {
+        Bound::Included(v) => ("<=", v),
+        Bound::Excluded(v) => ("<", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => ub_to_string(name, ub),
+        (lb, Bound::Unbounded) => lb_to_string(name, lb),
+        (lb, ub) => {
+            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
+        }
+    }
+}
+
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match lb {
-                Bound::Included(v) => (">=", v),
-                Bound::Excluded(v) => (">", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
-        }
-        fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match ub {
-                Bound::Included(v) => ("<=", v),
-                Bound::Excluded(v) => ("<", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
-        }
-        fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-            match (&range.0, &range.1) {
-                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                (Bound::Unbounded, ub) => ub_to_string(name, ub),
-                (lb, Bound::Unbounded) => lb_to_string(name, lb),
-                (lb, ub) => {
-                    format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
-                }
-            }
-        }
-
         let verbose = self.base.ctx.is_explain_verbose();
 
         write!(

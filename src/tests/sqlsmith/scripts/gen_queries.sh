@@ -14,12 +14,10 @@ set -u
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
-export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
 export TESTDATA="$TESTS_DIR/testdata"
-export MADSIM_BIN="target/sim/ci-sim/risingwave_simulation"
 export CRASH_MESSAGE="note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error"
 
 set +u
@@ -128,6 +126,16 @@ extract_fail_info_from_logs() {
 
 ################# Generate
 
+# Generate $TEST_NUM number of seeds.
+# if `ENABLE_RANDOM_SEED=1`, we will generate random seeds.
+gen_seed() {
+  if [[ $ENABLE_RANDOM_SEED -eq 1 ]]; then
+    seq 1 32768 | shuf | tail -n "$TEST_NUM"
+  else
+    seq 1 32678 | tail -n "$TEST_NUM"
+  fi
+}
+
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
@@ -136,19 +144,19 @@ generate_deterministic() {
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
   echo "" > $LOGDIR/generate_deterministic.stdout.log
-  seq "$TEST_NUM" | env_parallel "
-    mkdir -p $OUTDIR/{}
+  gen_seed | env_parallel "
+    mkdir -p $OUTDIR/{%}
     echo '[INFO] Generating For Seed {}'
-    MADSIM_TEST_SEED={} ./$MADSIM_BIN \
+    MADSIM_TEST_SEED={} $MADSIM_BIN \
       --sqlsmith 100 \
-      --generate-sqlsmith-queries $OUTDIR/{} \
+      --generate-sqlsmith-queries $OUTDIR/{%} \
       $TESTDATA \
       1>>$LOGDIR/generate_deterministic.stdout.log \
-      2>$LOGDIR/generate-{}.log
-    echo '[INFO] Finished Generating For Seed {}'
-    echo '[INFO] Extracting Queries For Seed {}'
-    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql
-    echo '[INFO] Extracted Queries For Seed {}'
+      2>$LOGDIR/generate-{%}.log
+    echo '[INFO] Finished Generating For Seed {}, Query set {%}'
+    echo '[INFO] Extracting Queries For Seed {}, Query set {%}'
+    extract_queries $LOGDIR/generate-{%}.log $OUTDIR/{%}/queries.sql
+    echo '[INFO] Extracted Queries For Seed {}, Query set {%}.'
     "
   set -e
 }
@@ -172,6 +180,23 @@ check_different_queries() {
   fi
 }
 
+# Check that no queries are empty
+check_queries_have_at_least_create_table() {
+  for QUERY_FILE in "$OUTDIR"/*/queries.sql
+  do
+    set +e
+    N_CREATE_TABLE="$(grep -c "CREATE TABLE" "$QUERY_FILE")"
+    set -e
+    if [[ $N_CREATE_TABLE -ge 1 ]]; then
+      continue;
+    else
+      echo_err "[ERROR] Empty Query for $QUERY_FILE"
+      cat "$QUERY_FILE"
+      exit 1
+    fi
+  done
+}
+
 # Check if any query generation step failed, and any query file not generated.
 check_failed_to_generate_queries() {
   if [[ "$(ls "$OUTDIR"/* | grep -c queries.sql)" -lt "$TEST_NUM" ]]; then
@@ -186,7 +211,7 @@ check_failed_to_generate_queries() {
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
   seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
-    ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+    $MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
       && rm $LOGDIR/fuzzing-{}.log"
@@ -204,17 +229,28 @@ check_failed_to_run_queries() {
 
 setup() {
   set -euo pipefail
+  if [[ -z "$TEST_NUM" ]]; then
+    echo "TEST_NUM unset, default to TEST_NUM=100"
+    TEST_NUM=100
+  fi
+  if [[ -z "$ENABLE_RANDOM_SEED" ]]; then
+    echo "ENABLE_RANDOM_SEED unset, default ENABLE_RANDOM_SEED=false (0)"
+    ENABLE_RANDOM_SEED=0
+  fi
   # -x is too verbose, selectively enable it if needed.
   pushd $RW_HOME
+  mkdir -p $LOGDIR
 }
 
-build_madsim() {
-  cargo make sslt-build-all --profile ci-sim
+setup_madsim() {
+  download-and-decompress-artifact risingwave_simulation .
+  chmod +x ./risingwave_simulation
+  export MADSIM_BIN="$PWD/risingwave_simulation"
 }
 
 build() {
-  build_madsim
-  echo_err "[INFO] Finished build"
+  setup_madsim
+  echo_err "[INFO] Finished setting up madsim"
 }
 
 generate() {
@@ -228,6 +264,8 @@ validate() {
   echo_err "[CHECK PASSED] Generated queries should be different"
   check_failed_to_generate_queries
   echo_err "[CHECK PASSED] No seeds failed to generate queries"
+  check_queries_have_at_least_create_table
+  echo_err "[CHECK PASSED] All queries at least have CREATE TABLE"
   extract_fail_info_from_logs "generate"
   echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
@@ -245,9 +283,11 @@ sync_queries() {
   git checkout main
   git pull
   set +e
-  git branch -D stage
+  git branch -D old-main
   set -e
-  git checkout -b stage
+  git checkout -b old-main
+  git push -f --set-upstream origin old-main
+  git checkout -
   popd
 }
 
@@ -259,13 +299,13 @@ sync() {
 
 # Upload step
 upload_queries() {
+  git config --global user.email "buildkite-ci@risingwave-labs.com"
+  git config --global user.name "Buildkite CI"
   set +x
   pushd "$OUTDIR"
   git add .
   git commit -m 'update queries'
-  git push -f origin stage
-  git checkout -
-  git branch -D stage
+  git push origin main
   popd
   set -x
 }
@@ -284,14 +324,25 @@ cleanup() {
 ################### ENTRY POINTS
 
 run_generate() {
+  echo "--- Running setup"
   setup
 
+  echo "--- Running build"
   build
+
+  echo "--- Running synchronizing with upstream snapshot"
   sync
+
+  echo "--- Generating"
   generate
+
+  echo "--- Validating"
   validate
+
+  echo "--- Uploading"
   upload
 
+  echo "--- Cleanup"
   cleanup
 }
 

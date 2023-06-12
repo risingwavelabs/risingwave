@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aws_sdk_kinesis::model::Record;
+use aws_sdk_kinesis::types::Record;
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 

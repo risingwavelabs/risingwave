@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
@@ -56,7 +56,7 @@ impl LogicalTopN {
         order: Order,
         group_key: Vec<usize>,
     ) -> Self {
-        let limit_attr = Limit::new(limit, with_ties);
+        let limit_attr = TopNLimit::new(limit, with_ties);
         let core = generic::TopN::with_group(input, limit_attr, offset, order, group_key);
         core.into()
     }
@@ -79,7 +79,7 @@ impl LogicalTopN {
         Ok(Self::new(input, limit, offset, with_ties, order, group_key).into())
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.core.limit_attr
     }
 
@@ -154,7 +154,7 @@ impl LogicalTopN {
         );
         let vnode_col_idx = exprs.len() - 1;
         let project = StreamProject::new(generic::Project::new(exprs.clone(), stream_input));
-        let limit_attr = Limit::new(
+        let limit_attr = TopNLimit::new(
             self.limit_attr().limit() + self.offset(),
             self.limit_attr().with_ties(),
         );

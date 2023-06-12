@@ -68,10 +68,26 @@ ROW FORMAT UPSERT_AVRO
 row schema location confluent schema registry 'http://message_queue:8081'
 
 statement ok
+CREATE TABLE debezium_non_compact (order_id INT PRIMARY KEY) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_non_compact_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
+
+statement ok
+CREATE TABLE debezium_compact (order_id INT PRIMARY KEY) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_compact_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
+sleep 5s
 
 
 query II
@@ -138,6 +154,16 @@ ORDER BY
 8 Ava Garcia 21 5.2 115
 9 Jacob Anderson 20 5.8 155
 
+query I
+select count(*) from debezium_non_compact;
+----
+2
+
+query I
+select count(*) from debezium_compact;
+----
+2
+
 statement ok
 DROP TABLE upsert_avro_json;
 
@@ -151,3 +177,9 @@ DROP TABLE upsert_avro_json2;
 
 statement ok
 DROP TABLE upsert_student_avro_json;
+
+statement ok
+DROP TABLE debezium_non_compact;
+
+statement ok
+DROP TABLE debezium_compact;

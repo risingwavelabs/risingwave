@@ -23,7 +23,6 @@ mod stream_chunk_iterator;
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock};
 
@@ -42,6 +41,7 @@ use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -202,7 +202,7 @@ where
     F: FnOnce() -> Result<Ret>,
     Ret: Default,
 {
-    match catch_unwind(std::panic::AssertUnwindSafe(inner)) {
+    match rw_catch_unwind(std::panic::AssertUnwindSafe(inner)) {
         Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
@@ -235,7 +235,6 @@ pub enum JavaBindingRowInner {
 #[derive(Default)]
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    byte_array_input_stream_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
 
     date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
@@ -692,25 +691,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
             .unwrap()
             .into_bytea();
         let bytes_value = env.byte_array_from_slice(bytes)?;
-        let (ts_class_ref, constructor) = pointer
-            .as_ref()
-            .class_cache
-            .byte_array_input_stream_ctor
-            .get_or_try_init(|| {
-                let cls = env.find_class("java/io/ByteArrayInputStream")?;
-                let init_method = env.get_method_id(cls, "<init>", "([B)V")?;
-                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
-            })?;
-        let ts_class = JClass::from(ts_class_ref.as_obj());
-        unsafe {
-            let input_stream_obj = env.new_object_unchecked(
-                ts_class,
-                *constructor,
-                &[JValue::Object(JObject::from_raw(bytes_value))],
-            )?;
-
-            Ok(input_stream_obj)
-        }
+        unsafe { Ok(JObject::from_raw(bytes_value)) }
     })
 }
 
