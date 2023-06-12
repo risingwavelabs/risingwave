@@ -24,9 +24,12 @@ import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
+import com.risingwave.proto.Data.DataType.TypeName;
 import io.grpc.Status;
+
 import java.util.Map;
 import java.util.Set;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Table;
@@ -60,7 +63,7 @@ public class IcebergSinkFactory implements SinkFactory {
         Configuration hadoopConf = createHadoopConf(scheme, config);
         SinkBase sink = null;
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
             String sinkType = config.getSinkType();
             if (sinkType.equals("append-only")) {
@@ -100,33 +103,9 @@ public class IcebergSinkFactory implements SinkFactory {
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
         Configuration hadoopConf = createHadoopConf(scheme, config);
 
-        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
-
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
-
-            // Check that all columns in tableSchema exist in the iceberg table.
-            for (String columnName : tableSchema.getColumnNames()) {
-                if (icebergTable.schema().findField(columnName) == null) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription(
-                                    String.format(
-                                            "table schema does not match. Column %s not found in iceberg table",
-                                            columnName))
-                            .asRuntimeException();
-                }
-            }
-
-            // Check that all required columns in the iceberg table exist in tableSchema.
-            Set<String> columnNames = Set.of(tableSchema.getColumnNames());
-            for (Types.NestedField column : icebergTable.schema().columns()) {
-                if (column.isRequired() && !columnNames.contains(column.name())) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription(
-                                    String.format("missing a required field %s", column.name()))
-                            .asRuntimeException();
-                }
-            }
-
+            IcebergSinkUtil.checkSchema(tableSchema, icebergTable.schema());
         } catch (Exception e) {
             throw Status.INTERNAL
                     .withDescription(
