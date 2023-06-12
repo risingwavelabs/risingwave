@@ -191,12 +191,11 @@ def test_file_sink(input_binary_file):
         "file", {"output.path": "/tmp/connector", }, input_binary_file, make_mock_schema())
 
 
-def test_jdbc_sink(input_file):
-    test_sink("jdbc",
-              {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
-               "table.name": "test"},
-              input_file)
-
+def test_jdbc_sink(input_binary_file, input_file="./data/sink_input_new.json"):
+    test_sink_stream_chunk("jdbc",
+                           {"jdbc.url": "jdbc:postgresql://localhost:5432/test?user=test&password=connector",
+                            "table.name": "test"},
+                           input_binary_file, make_mock_schema())
     # validate results
     validate_jdbc_sink(input_file)
 
@@ -209,6 +208,10 @@ def validate_jdbc_sink(input_file):
     rows = cur.fetchall()
     expected = [list(row.values())
                 for batch in load_input(input_file) for row in batch]
+    def convert(b): 
+        return [(item[1]['id'], item[1]['name']) for item in b]
+    expected = convert(expected)
+
     if len(rows) != len(expected):
         print("Integration test failed: expected {} rows, but got {}".format(
             len(expected), len(rows)))
@@ -283,13 +286,13 @@ if __name__ == "__main__":
                         help="run deltalake sink test")
     parser.add_argument(
         '--input_file', default="./data/sink_input.json", help="input data to run tests")
-    parser.add_argument('--input_binary_file', default="./data/stream_chunk_data",
+    parser.add_argument('--input_binary_file', default="./data/sink_input",
                         help="input stream chunk data to run tests")
     args = parser.parse_args()
     if args.file_sink:
         test_file_sink(args.input_binary_file)
     if args.jdbc_sink:
-        test_jdbc_sink(args.input_file)
+        test_jdbc_sink(args.input_binary_file)
     if args.stream_chunk_sink:
         test_stream_chunk_sink(args.input_binary_file)
     if args.iceberg_sink:
