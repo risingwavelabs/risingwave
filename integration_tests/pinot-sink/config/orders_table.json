@@ -29,7 +29,7 @@
   },
   "ingestionConfig" : {
     "complexTypeConfig": {
-      "delimeter": "."
+      "delimiter": "."
     }
   },
   "metadata": {
