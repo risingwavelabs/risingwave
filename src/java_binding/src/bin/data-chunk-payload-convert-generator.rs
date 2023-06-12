@@ -11,20 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use serde::{Deserialize, Serialize};
-use serde_json;
-
-use std::fs::File;
-use std::io::Read;
-
 use std::env;
-use std::io::Write;
+use std::fs::File;
+use std::io::{Read, Write};
 
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use serde::{Deserialize, Serialize};
+use serde_json;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Line {
@@ -38,20 +35,28 @@ struct Operation {
     line: Line,
 }
 
+fn convert_to_op(value: u32) -> Option<Op> {
+    match value {
+        1 => Some(Op::Insert),
+        2 => Some(Op::Delete),
+        3 => Some(Op::UpdateDelete),
+        4 => Some(Op::UpdateInsert),
+        _ => None,
+    }
+}
+
 fn main() {
-     let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = env::args().collect();
     // Read the JSON file
     let mut file = File::open(&args[1]).expect("Failed to open file");
     let mut contents = String::new();
-    file.read_to_string(&mut contents).expect("Failed to read file");
+    file.read_to_string(&mut contents)
+        .expect("Failed to read file");
 
     // Parse the JSON data
     let data: Vec<Vec<Operation>> = serde_json::from_str(&contents).expect("Failed to parse JSON");
 
-    let data_types: Vec<_> = vec![
-        DataType::Int64,
-        DataType::Varchar,
-    ];
+    let data_types: Vec<_> = vec![DataType::Int32, DataType::Varchar];
 
     // Access the data
     let mut row_count = 0;
@@ -64,11 +69,15 @@ fn main() {
     for operations in data {
         for operation in operations {
             let mut row_value = Vec::with_capacity(10);
-            row_value.push(Some(ScalarImpl::Int64(operation.line.id as i64)));
+            row_value.push(Some(ScalarImpl::Int32(operation.line.id as i32)));
             row_value.push(Some(ScalarImpl::Utf8(operation.line.name.into_boxed_str())));
             let _ = builder.append_one_row(OwnedRow::new(row_value));
-            let op: Op = unsafe { ::std::mem::transmute(operation.op_type as u8) };
-            ops.push(op);
+            // let op: Op = unsafe { ::std::mem::transmute(operation.op_type as u8) };
+            if let Some(op) = convert_to_op(operation.op_type) {
+                ops.push(op);
+            } else {
+                println!("Invalid value");
+            }
         }
     }
 
