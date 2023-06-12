@@ -281,6 +281,22 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         });
     };
 
+    {
+        // TODO: install tokio
+        let otel_tracer = opentelemetry_jaeger::new_agent_pipeline()
+            .install_simple()
+            .unwrap();
+        let layer = tracing_opentelemetry::layer()
+            .with_tracer(otel_tracer)
+            .with_filter(
+                filter::Targets::new()
+                    .with_target("epoch_trace", Level::INFO)
+                    .with_default(Level::ERROR),
+            );
+
+        layers.push(layer.boxed());
+    }
+
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future

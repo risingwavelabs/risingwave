@@ -25,6 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -38,6 +39,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tracing::span;
 use uuid::Uuid;
 
 use self::command::CommandContext;
@@ -720,8 +722,14 @@ where
                         prev: command_context.prev_epoch.0,
                     }),
                     mutation,
-                    // TODO(chi): add distributed tracing
-                    span: vec![],
+                    // TODO(bugen): add distributed tracing
+                    tracing_context: TracingContext::from_span(&span!(
+                        target: "epoch_trace",
+                        tracing::Level::INFO,
+                        "Epoch",
+                        curr_epoch = command_context.curr_epoch.0,
+                    ))
+                    .to_protobuf(),
                     checkpoint: command_context.checkpoint,
                     passed_actors: vec![],
                 };
