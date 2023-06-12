@@ -296,7 +296,10 @@ pub fn bind_sql_column_constraints(
 }
 
 fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+    for constraint in table_constraints {
+        match constraint {
             TableConstraint::Unique {
+                name: _,
                 columns: _,
                 is_primary: true,
             } => {}
@@ -358,7 +361,6 @@ pub fn bind_sql_table_column_constraints(
     columns_defs: Vec<ColumnDef>,
     table_constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-
     ensure_table_constraints_supported(&table_constraints)?;
     // Mapping from column name to column id.
     let name_to_id = columns_descs
