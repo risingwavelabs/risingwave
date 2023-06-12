@@ -60,6 +60,7 @@ where
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         if event.metadata().target() == "aws_smithy_client::retry"
             && event.metadata().level() == &tracing::Level::DEBUG
+            && event.metadata().name().contains("retry.rs:363")
         {
             self.aws_sdk_retry_counts.inc();
         }
