@@ -14,6 +14,7 @@ extend = [
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
+  { path = "src/stream/tests/integration_tests/integration_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -97,19 +98,16 @@ alias = "logs"
 
 [tasks.logs]
 category = "Misc"
-description = "Open logs with VSCode and dump in console"
+description = "Open logs with VSCode or dump in console"
 script = '''
 #!/usr/bin/env bash
 set -e
 
-code "${PREFIX_LOG}" || true
+code "${PREFIX_LOG}" 2> /dev/null || true
 
 for out_file in ${PREFIX_LOG}/*.log
 do
-  echo ""
-  echo "==="
-  echo "=== Dump log file $out_file ==="
-  echo "==="
+  echo "~~~ Dump log file $out_file"
   echo ""
   cat "$out_file" | tail -n 300
 done
@@ -196,23 +194,26 @@ tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
 [tasks.check-logs]
-category = "Misc"
+category = "RiseDev - CI"
 description = "Check if there is panic in log or significant log size issue"
 script = '''
 #!/usr/bin/env bash
 set -e
 
+echo "~~~ Check logs"
+du -ah ${PREFIX_LOG}
+
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 3)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
+    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
     echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1
   fi
 done
 
 if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
-    echo "$(tput setaf 3)log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
+    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
 '''
@@ -328,7 +329,7 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 [tasks.build-risingwave]
 category = "RiseDev - Build"
 description = "Build Rust components"
-condition = { env_set = ["ENABLE_BUILD_RUST"] }
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 

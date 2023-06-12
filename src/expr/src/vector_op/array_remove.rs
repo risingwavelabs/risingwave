@@ -23,48 +23,48 @@ use risingwave_expr_macro::function;
 ///
 /// ```slt
 /// query T
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[1]);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], array[1]);
 /// ----
 /// {{2},{3},{2},NULL}
 ///
 /// query T
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[2]);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], array[2]);
 /// ----
 /// {{1},{3},NULL}
 ///
 /// query T
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], null::int[]);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], null);
 /// ----
 /// {{1},{2},{3},{2}}
 ///
 /// query T
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[4]);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], array[4]);
 /// ----
 /// {{1},{2},{3},{2},NULL}
 ///
 /// query T
-/// select array_remove(null::int[], 1);
+/// select array_remove(null, 1);
 /// ----
 /// NULL
 ///
 /// query T
-/// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[3.14]);
+/// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[3.14]);
 /// ----
 /// {{1},{2},{3},{2},NULL}
 ///
 /// query T
-/// select array_remove(array[1,NULL,NULL,3], NULL::int);
+/// select array_remove(array[1,NULL,NULL,3], NULL);
 /// ----
 /// {1,3}
 ///
 /// statement error
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], 1);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], 1);
 ///
 /// statement error
-/// select array_remove(array[array[1],array[2],array[3],array[2],null::int[]], array[array[3]]);
+/// select array_remove(array[array[1],array[2],array[3],array[2],null], array[array[3]]);
 ///
 /// statement error
-/// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null::int[]], array[true]);
+/// select array_remove(ARRAY[array[1],array[2],array[3],array[2],null], array[true]);
 /// ```
 #[function("array_remove(list, *) -> list")]
 fn array_remove<'a, T: ScalarRef<'a>>(

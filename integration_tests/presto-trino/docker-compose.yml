@@ -1,0 +1,69 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  trino:
+    image: trinodb/trino:418
+    container_name: trino
+    volumes:
+      - ./etc/risingwave.properties:/etc/trino/catalog/risingwave.properties
+    ports:
+      - "48080:8080"
+  trino-client:
+    image: trinodb/trino:418
+    profiles: [ "client" ]
+    entrypoint: [ "trino", "--server", "trino:8080", "--catalog", "risingwave", "--schema", "public" ]
+  presto:
+    image: ahanaio/prestodb-sandbox
+    container_name: presto
+    volumes:
+      - ./etc/risingwave.properties:/opt/presto-server/etc/catalog/risingwave.properties
+    ports:
+      - "8080:8080"
+  presto-client:
+    image: ahanaio/prestodb-sandbox
+    profiles: [ "client" ]
+    entrypoint: [ "presto-cli", "--server", "presto:8080", "--catalog", "risingwave", "--schema", "public" ]
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

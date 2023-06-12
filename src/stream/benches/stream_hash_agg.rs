@@ -92,6 +92,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
          },
          AggCall {
             kind: AggKind::Count,
@@ -100,6 +101,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: Some(build_from_pretty("(less_than:boolean $2:int8 10000:int8)").into()),
             distinct: false,
+            direct_args: vec![],
          },
          AggCall {
             kind: AggKind::Count,
@@ -108,6 +110,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: Some(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))").into()),
             distinct: false,
+            direct_args: vec![],
          },
          AggCall {
             kind: AggKind::Count,
@@ -116,6 +119,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
             distinct: false,
+            direct_args: vec![],
         },
         // FIXME(kwannoel): Can ignore for now, since it is low cost in q17 (blackhole).
         // It does not work can't diagnose root cause yet.
@@ -152,6 +156,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         // avg (count)
         AggCall {
@@ -161,6 +166,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
         AggCall {
             kind: AggKind::Sum,
@@ -169,6 +175,7 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         },
     ];
 

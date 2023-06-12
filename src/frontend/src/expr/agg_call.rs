@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
 
-use super::{Expr, ExprImpl, OrderBy};
+use super::{Expr, ExprImpl, Literal, OrderBy};
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -29,6 +29,7 @@ pub struct AggCall {
     distinct: bool,
     order_by: OrderBy,
     filter: Condition,
+    direct_args: Vec<Literal>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -68,7 +69,14 @@ impl AggCall {
             // XXX: some special cases that can not be handled by signature map.
 
             // may return list or struct type
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+            (
+                AggKind::Min
+                | AggKind::Max
+                | AggKind::FirstValue
+                | AggKind::PercentileDisc
+                | AggKind::Mode,
+                [input],
+            ) => input.clone(),
             (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
             // functions that are rewritten in the frontend and don't exist in the expr crate
             (AggKind::Avg, [input]) => match input {
@@ -85,6 +93,7 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
+            (AggKind::PercentileCont, _) => Float64,
 
             // other functions are handled by signature map
             _ => {
@@ -105,6 +114,7 @@ impl AggCall {
         distinct: bool,
         order_by: OrderBy,
         filter: Condition,
+        direct_args: Vec<Literal>,
     ) -> Result<Self> {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(agg_kind, &data_types)?;
@@ -115,16 +125,27 @@ impl AggCall {
             distinct,
             order_by,
             filter,
+            direct_args,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, OrderBy, Condition) {
+    pub fn decompose(
+        self,
+    ) -> (
+        AggKind,
+        Vec<ExprImpl>,
+        bool,
+        OrderBy,
+        Condition,
+        Vec<Literal>,
+    ) {
         (
             self.agg_kind,
             self.inputs,
             self.distinct,
             self.order_by,
             self.filter,
+            self.direct_args,
         )
     }
 

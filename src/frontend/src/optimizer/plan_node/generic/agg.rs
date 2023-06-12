@@ -17,16 +17,19 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
+use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
+use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::AggKind;
-use risingwave_pb::expr::PbAggCall;
+use risingwave_pb::data::PbDatum;
+use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
-use super::{stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
+use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
+use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
@@ -174,7 +177,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some((0..self.group_key.count_ones(..)).collect_vec())
+        Some((0..self.group_key.count_ones(..)).collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -488,7 +491,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     }
                 }
                 // TODO: is its state a Table?
-                AggKind::BitAnd | AggKind::BitOr | AggKind::BoolAnd | AggKind::BoolOr => {
+                AggKind::BitAnd
+                | AggKind::BitOr
+                | AggKind::BoolAnd
+                | AggKind::BoolOr
+                | AggKind::PercentileCont
+                | AggKind::PercentileDisc
+                | AggKind::Mode => {
                     unimplemented!()
                 }
             })
@@ -596,23 +605,46 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         builder.field("aggs", &self.agg_calls_display());
     }
 
+    pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
+        let last = ("aggs", self.agg_calls_pretty());
+        if self.group_key.count_ones(..) != 0 {
+            let first = ("group_key", self.group_key_pretty());
+            vec![first, last]
+        } else {
+            vec![last]
+        }
+    }
+
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
-        self.agg_calls
-            .iter()
-            .map(|plan_agg_call| PlanAggCallDisplay {
+        let f = |plan_agg_call| PlanAggCallDisplay {
+            plan_agg_call,
+            input_schema: self.input.schema(),
+        };
+        self.agg_calls.iter().map(f).collect()
+    }
+
+    fn agg_calls_pretty<'a>(&self) -> Pretty<'a> {
+        let f = |plan_agg_call| {
+            Pretty::debug(&PlanAggCallDisplay {
                 plan_agg_call,
                 input_schema: self.input.schema(),
             })
-            .collect_vec()
+        };
+        Pretty::Array(self.agg_calls.iter().map(f).collect())
     }
 
     fn group_key_display(&self) -> Vec<FieldDisplay<'_>> {
-        self.group_key
-            .ones()
-            .map(|i| FieldDisplay(self.input.schema().fields.get(i).unwrap()))
-            .collect_vec()
+        let f = |i| FieldDisplay(self.input.schema().fields.get(i).unwrap());
+        self.group_key.ones().map(f).collect()
+    }
+
+    fn group_key_pretty<'a>(&self) -> Pretty<'a> {
+        let f = |i| Pretty::display(&FieldDisplay(self.input.schema().fields.get(i).unwrap()));
+        Pretty::Array(self.group_key.ones().map(f).collect())
     }
 }
+
+impl_distill_unit_from_fields!(Agg, stream::StreamPlanRef);
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
@@ -639,6 +671,7 @@ pub struct PlanAggCall {
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
+    pub direct_args: Vec<Literal>,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -699,6 +732,16 @@ impl PlanAggCall {
             distinct: self.distinct,
             order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
+            direct_args: self
+                .direct_args
+                .iter()
+                .map(|x| PbConstant {
+                    datum: Some(PbDatum {
+                        body: value_encoding::serialize_datum(x.get_data()),
+                    }),
+                    r#type: Some(x.return_type().to_protobuf()),
+                })
+                .collect(),
         }
     }
 
@@ -712,7 +755,10 @@ impl PlanAggCall {
             | AggKind::Min
             | AggKind::Max
             | AggKind::StringAgg
-            | AggKind::FirstValue => self.agg_kind,
+            | AggKind::FirstValue
+            | AggKind::PercentileCont
+            | AggKind::PercentileDisc
+            | AggKind::Mode => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
             AggKind::Sum => AggKind::Sum,
             AggKind::Avg => {
@@ -742,6 +788,7 @@ impl PlanAggCall {
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
+            direct_args: vec![],
         }
     }
 

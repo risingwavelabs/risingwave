@@ -42,7 +42,7 @@ impl LogicalTableFunction {
     /// Create a [`LogicalTableFunction`] node. Used internally by optimizer.
     pub fn new(table_function: TableFunction, ctx: OptimizerContextRef) -> Self {
         let schema = if let DataType::Struct(s) = table_function.return_type() {
-            Schema::from(&*s)
+            Schema::from(&s)
         } else {
             Schema {
                 fields: vec![Field::with_name(

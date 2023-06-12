@@ -18,7 +18,7 @@ import static org.junit.Assert.*;
 
 import com.risingwave.connector.IcebergSink;
 import com.risingwave.connector.IcebergSinkFactory;
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.TestUtils;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -64,7 +64,7 @@ public class IcebergSinkFactoryTest {
         IcebergSink sink =
                 (IcebergSink)
                         sinkFactory.create(
-                                TableSchema.getMockTableSchema(),
+                                TestUtils.getMockTableSchema(),
                                 Map.of(
                                         "type",
                                         sinkMode,

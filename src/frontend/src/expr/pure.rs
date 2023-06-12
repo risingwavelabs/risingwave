@@ -144,10 +144,13 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPrepend
             | expr_node::Type::FormatType
             | expr_node::Type::ArrayDistinct
+            | expr_node::Type::ArrayDims
             | expr_node::Type::ArrayLength
             | expr_node::Type::Cardinality
             | expr_node::Type::TrimArray
             | expr_node::Type::ArrayRemove
+            | expr_node::Type::ArrayReplace
+            | expr_node::Type::ArrayPosition
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbAccessInner
             | expr_node::Type::JsonbAccessStr

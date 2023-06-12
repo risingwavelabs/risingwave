@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
@@ -23,6 +21,7 @@ use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
+use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamSort, ToBatch, ToStream,
@@ -139,7 +138,7 @@ impl LogicalOverWindow {
                             | AggKind::VarSamp
                     )
                 {
-                    // Refer to LogicalAggBuilder::try_rewrite_agg_call()
+                    // Refer to `LogicalAggBuilder::try_rewrite_agg_call`
                     match agg_kind {
                         AggKind::Avg => {
                             assert_eq!(args.len(), 1);
@@ -393,15 +392,23 @@ impl LogicalOverWindow {
             .collect_vec();
 
         let mut args = window_function.args;
-        let frame = match window_function.kind {
+        let (kind, frame) = match window_function.kind {
             WindowFuncKind::RowNumber | WindowFuncKind::Rank | WindowFuncKind::DenseRank => {
                 // ignore user-defined frame for rank functions
-                Frame::rows(
-                    FrameBound::UnboundedPreceding,
-                    FrameBound::UnboundedFollowing,
+                (
+                    window_function.kind,
+                    Frame::rows(
+                        FrameBound::UnboundedPreceding,
+                        FrameBound::UnboundedFollowing,
+                    ),
                 )
             }
             WindowFuncKind::Lag | WindowFuncKind::Lead => {
+                // `lag(x, const offset N) over ()`
+                //     == `first_value(x) over (rows between N preceding and N preceding)`
+                // `lead(x, const offset N) over ()`
+                //     == `first_value(x) over (rows between N following and N following)`
+
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
                     if !offset_expr.return_type().is_int() {
@@ -411,37 +418,46 @@ impl LogicalOverWindow {
                         ))
                         .into());
                     }
-                    offset_expr
-                        .cast_implicit(DataType::Int64)?
-                        .try_fold_const()
-                        .transpose()?
-                        .flatten()
+                    let const_offset = offset_expr.cast_implicit(DataType::Int64)?.try_fold_const();
+                    if const_offset.is_none() {
+                        // should already be checked in `WindowFunction::infer_return_type`,
+                        // but just in case
+                        return Err(ErrorCode::NotImplemented(
+                            "non-const `offset` of `lag`/`lead` is not supported yet".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                    const_offset
+                        .unwrap()?
                         .map(|v| *v.as_int64() as usize)
                         .unwrap_or(1usize)
                 } else {
                     1usize
                 };
+                let frame = if window_function.kind == WindowFuncKind::Lag {
+                    Frame::rows(FrameBound::Preceding(offset), FrameBound::Preceding(offset))
+                } else {
+                    Frame::rows(FrameBound::Following(offset), FrameBound::Following(offset))
+                };
 
-                // override the frame
-                // TODO(rc): We can only do the optimization for constant offset.
-                if window_function.kind == WindowFuncKind::Lag {
-                    Frame::rows(FrameBound::Preceding(offset), FrameBound::CurrentRow)
-                } else {
-                    Frame::rows(FrameBound::CurrentRow, FrameBound::Following(offset))
-                }
+                (WindowFuncKind::Aggregate(AggKind::FirstValue), frame)
             }
-            WindowFuncKind::Aggregate(_) => window_function.frame.unwrap_or({
-                // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
-                // CurrentRow)` but we don't support yet.
-                if order_by.is_empty() {
-                    Frame::rows(
-                        FrameBound::UnboundedPreceding,
-                        FrameBound::UnboundedFollowing,
-                    )
-                } else {
-                    Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
-                }
-            }),
+            WindowFuncKind::Aggregate(_) => {
+                let frame = window_function.frame.unwrap_or({
+                    // FIXME(rc): The following 2 cases should both be `Frame::Range(Unbounded,
+                    // CurrentRow)` but we don't support yet.
+                    if order_by.is_empty() {
+                        Frame::rows(
+                            FrameBound::UnboundedPreceding,
+                            FrameBound::UnboundedFollowing,
+                        )
+                    } else {
+                        Frame::rows(FrameBound::UnboundedPreceding, FrameBound::CurrentRow)
+                    }
+                });
+                (window_function.kind, frame)
+            }
         };
 
         let args = args
@@ -450,7 +466,7 @@ impl LogicalOverWindow {
             .collect_vec();
 
         Ok(PlanWindowFunction {
-            kind: window_function.kind,
+            kind,
             return_type: window_function.return_type,
             args,
             partition_by,
@@ -558,12 +574,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
 }
 
 impl_plan_tree_node_for_unary! { LogicalOverWindow }
-
-impl fmt::Display for LogicalOverWindow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalOverWindow")
-    }
-}
+impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {

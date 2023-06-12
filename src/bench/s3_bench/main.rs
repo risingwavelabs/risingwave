@@ -19,8 +19,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aws_config::retry::RetryConfig;
-use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::{Client, Endpoint};
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
@@ -632,12 +632,7 @@ async fn main() {
         aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
     let endpoint = std::env::var("OBJECT_STORAGE_ENDPOINT").unwrap_or("".to_string());
     let sdk_config = match endpoint.is_empty() {
-        false => {
-            sdk_config_loader
-                .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
-                .load()
-                .await
-        }
+        false => sdk_config_loader.endpoint_url(endpoint).load().await,
         true => sdk_config_loader.load().await,
     };
 

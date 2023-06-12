@@ -22,9 +22,9 @@ import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
-import java.io.ByteArrayInputStream;
 import java.sql.*;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
@@ -62,13 +62,13 @@ public class JDBCSinkTest {
                 Lists.newArrayList(
                         "id", "v_varchar", "v_date", "v_time", "v_timestamp", "v_jsonb", "v_bytea"),
                 Lists.newArrayList(
-                        TypeName.INT32,
-                        TypeName.VARCHAR,
-                        TypeName.DATE,
-                        TypeName.TIME,
-                        TypeName.TIMESTAMP,
-                        TypeName.JSONB,
-                        TypeName.BYTEA),
+                        Data.DataType.newBuilder().setTypeName(TypeName.INT32).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.VARCHAR).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.DATE).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIME).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.TIMESTAMP).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.JSONB).build(),
+                        Data.DataType.newBuilder().setTypeName(TypeName.BYTEA).build()),
                 Lists.newArrayList("id"));
     }
 
@@ -93,7 +93,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes()))));
+                                "I want to sleep".getBytes())));
         sink.sync();
 
         Statement stmt = conn.createStatement();
@@ -114,7 +114,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes()))));
+                                "I want to sleep".getBytes())));
         sink.sync();
         stmt = conn.createStatement();
         rs = stmt.executeQuery("SELECT * FROM test");
@@ -149,7 +149,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                                "I want to sleep".getBytes()),
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
@@ -158,7 +158,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                                "I want to sleep".getBytes()),
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
@@ -167,7 +167,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes())),
+                                "I want to sleep".getBytes()),
                         new ArraySinkRow(
                                 Op.UPDATE_INSERT,
                                 1,
@@ -176,7 +176,7 @@ public class JDBCSinkTest {
                                 new Time(2000000000),
                                 new Timestamp(2000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123123123123\"}",
-                                new ByteArrayInputStream("I want to eat".getBytes())),
+                                "I want to eat".getBytes()),
                         new ArraySinkRow(
                                 Op.DELETE,
                                 2,
@@ -185,7 +185,7 @@ public class JDBCSinkTest {
                                 new Time(1000000000),
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
-                                new ByteArrayInputStream("I want to sleep".getBytes()))));
+                                "I want to sleep".getBytes())));
         sink.sync();
 
         Statement stmt = conn.createStatement();
