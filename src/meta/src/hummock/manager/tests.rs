@@ -1934,7 +1934,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        2
+        3
     );
 
     let level = &current_version
@@ -1995,7 +1995,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        1
+        2
     );
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
     assert_eq!(branched_ssts.len(), 5);
