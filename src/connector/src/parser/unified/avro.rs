@@ -40,7 +40,7 @@ impl<'a> AvroParseOptions<'a> {
         self.schema
             .map(|schema| extract_inner_field_schema(schema, key))
             .transpose()
-            .map_err(|err| tracing::error!(?err, "extract sub-schema"))
+            .map_err(|_err| tracing::error!("extract sub-schema"))
             .ok()
             .flatten()
     }

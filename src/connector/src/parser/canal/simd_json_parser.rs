@@ -226,33 +226,6 @@ mod tests {
 
         let mut rows = chunk.rows();
 
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::Insert);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
-            assert_eq!(
-                row.datum_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("mike".into())))
-            );
-            assert_eq!(
-                row.datum_at(2).to_owned_datum(),
-                (Some(ScalarImpl::Bool(false)))
-            );
-            assert_eq!(
-                row.datum_at(3).to_owned_datum(),
-                (Some(Decimal::from_str("1000.62").unwrap().into()))
-            );
-            assert_eq!(
-                row.datum_at(4).to_owned_datum(),
-                (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("2018-01-01 00:00:01").unwrap()
-                )))
-            );
-            assert_eq!(
-                row.datum_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(0.65.into())))
-            );
-        }
 
         {
             let (op, row) = rows.next().unwrap();

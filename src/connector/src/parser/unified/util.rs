@@ -20,8 +20,14 @@ pub fn apply_row_operation_on_stream_chunk_writer(
         }),
         super::ChangeEventOperation::Delete => writer.delete(|column| {
             let res = row_op.access_field(&column.name, &column.data_type);
-            tracing::info!("del {:?} {:?} {:?}", &column.name, &column.data_type, res);
-            Ok(res?)
+            match res {
+                Ok(datum) => Ok(datum),
+                Err(e) => {
+                    tracing::error!(name=?column.name, data_type=?&column.data_type, err=?e, "delete column error");
+                    Ok(None)
+                }
+            }
+           
         }),
     }
 }

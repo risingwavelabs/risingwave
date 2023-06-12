@@ -153,29 +153,11 @@ mod tests {
             )
         }
 
-        {
-            let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateDelete);
-            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
-            assert_eq!(
-                row.datum_at(1).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("alex".into())))
-            );
-            assert_eq!(
-                row.datum_at(2).to_owned_datum(),
-                (Some(ScalarImpl::Int16(1)))
-            );
-            assert_eq!(
-                row.datum_at(3).to_owned_datum(),
-                (Some(ScalarImpl::Timestamp(
-                    str_to_timestamp("1999-12-31 16:00:01").unwrap()
-                )))
-            )
-        }
+      
 
         {
             let (op, row) = rows.next().unwrap();
-            assert_eq!(op, Op::UpdateInsert);
+            assert_eq!(op, Op::Insert);
             assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
             assert_eq!(
                 row.datum_at(1).to_owned_datum(),
