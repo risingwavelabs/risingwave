@@ -220,11 +220,9 @@ enum MetaCommands {
         dry_run: bool,
     },
     /// mark a compute node as unschedulable
-    ///
-    /// another comment here TODO
     #[clap(verbatim_doc_comment)]
     Cordon {
-        /// IP of compute node e.g. 123.0.0.1:1234
+        /// IP of compute node to cordon e.g. 123.0.0.1:1234
         #[clap(long)]
         ip: String,
     },
@@ -360,10 +358,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(context, plan, dry_run).await?
         }
+        Commands::Meta(MetaCommands::Cordon { ip }) => cmd_impl::meta::cordon(context, ip).await?,
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
-        Commands::Meta(MetaCommands::Cordon { ip: String }) => {
-            cmd_impl::meta::cordon(context, ip).await?
-        }
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
         }

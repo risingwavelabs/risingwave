@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Error, Result};
+use itertools::Itertools;
 use regex::{Match, Regex};
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::reschedule_request::Reschedule;
 
 use crate::CtlContext;
@@ -25,11 +27,25 @@ const RESCHEDULE_MATCH_REGEXP: &str =
 const RESCHEDULE_FRAGMENT_KEY: &str = "fragment";
 const RESCHEDULE_REMOVED_KEY: &str = "removed";
 const RESCHEDULE_ADDED_KEY: &str = "added";
+const IP_ADDR_REGEXP: &str =
+    r"(\b25[0-5]|\b2[0-4][0-9]|\b[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}";
 
 // Mark a compute node as unschedulable
 pub async fn cordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
-    println!("now let's cordon a meta node {}", ip);
-    tracing::info!("some tracing info here!");
+    let splits = ip.clone().split(":").map(|s| s.to_owned()).collect_vec();
+    let re = Regex::new(IP_ADDR_REGEXP).unwrap();
+
+    if splits.len() != 2 as usize || !re.is_match(ip.as_str()) {
+        return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
+    }
+    let host = splits[0].clone();
+    let port = (&splits[1]).parse::<i32>()?;
+    let addr = HostAddress { host, port };
+
+    let meta_client = context.meta_client().await?;
+    tracing::info!("trying to cordon {:?}", addr);
+    //  meta_client.cordon(addr).await?; // TODO
+
     Ok(())
 }
 
