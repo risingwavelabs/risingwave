@@ -58,12 +58,12 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
             .transpose()?
             .unwrap_or_default();
 
-        let source_type = props.get_source_type()?;
+        let source_type = props.get_pb_source_type()?;
         // validate connector properties
         connector_client
             .validate_source_properties(
                 props.source_id as u64,
-                props.get_source_type()?,
+                props.get_pb_source_type()?,
                 props.props,
                 props.table_schema,
             )

@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::intrinsics::unreachable;
 
 use anyhow::anyhow;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::source::{SplitId, SplitMetaData};
 
@@ -30,6 +31,9 @@ pub struct CdcSplit {
     pub start_offset: Option<String>,
 
     pub snapshot_done: bool,
+    // we need to differentiate the type of source, e.g. mysql, postgres
+    // since the flag denoting snapshot done is different
+    pub source_type: String,
 }
 
 impl SplitMetaData for CdcSplit {
@@ -46,6 +50,7 @@ impl SplitMetaData for CdcSplit {
     }
 }
 
+// Example debezium offset JSON:
 // {
 //     "sourcePartition":
 //     {
@@ -68,20 +73,23 @@ struct DebeziumOffset {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DebeziumSourceOffset {
-    last_snapshot_record: bool,
+    // postgres field
+    last_snapshot_record: Option<bool>,
+    // mysql field
+    snapshot: Option<bool>,
     lsn: u64,
     tx_id: u64,
     ts_usec: u64,
-    snapshot: bool,
 }
 
 impl CdcSplit {
-    pub fn new(split_id: u32, start_offset: String) -> CdcSplit {
+    pub fn new(split_id: u32, start_offset: String, source_type: String) -> CdcSplit {
         Self {
             split_id,
             server_addr: None,
             start_offset: Some(start_offset),
             snapshot_done: false,
+            source_type,
         }
     }
 
@@ -90,11 +98,25 @@ impl CdcSplit {
         let dbz_offset: DebeziumOffset = serde_json::from_str(&start_offset)
             .expect(&format!("invalid cdc offset: {}", start_offset));
 
+        info!("dbz_offset: {:?}", dbz_offset);
+
+        let snapshot_done = match self.source_type.as_str() {
+            "mysql" => match dbz_offset.source_offset.snapshot {
+                None => true,
+                Some(val) => val,
+            },
+            "postgres" => match dbz_offset.source_offset.last_snapshot_record {
+                Some(val) => val,
+                None => false,
+            },
+            _ => unreachable!(),
+        };
+
         Self {
             split_id: self.split_id,
             server_addr: self.server_addr.clone(),
             start_offset: Some(start_offset),
-            snapshot_done: !dbz_offset.source_offset.snapshot,
+            snapshot_done,
         }
     }
 }

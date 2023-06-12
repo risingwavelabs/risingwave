@@ -117,7 +117,7 @@ impl CdcSplitReader {
         let cdc_stream = cdc_client
             .start_source_stream(
                 self.source_id,
-                self.conn_props.get_source_type()?,
+                self.conn_props.get_pb_source_type()?,
                 self.start_offset,
                 properties,
             )
