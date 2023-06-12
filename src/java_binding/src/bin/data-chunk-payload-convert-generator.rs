@@ -21,7 +21,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Line {
