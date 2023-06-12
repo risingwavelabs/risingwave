@@ -38,6 +38,7 @@ mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"
 '''
 
 [tasks.clean-etcd-data]
+private = true
 category = "Misc"
 description = "Clean etcd data"
 condition = { env_set = [ "PREFIX_DATA" ] }

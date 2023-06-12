@@ -18,4 +18,6 @@ if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
 fi
 
 cargo make --allow-private configure-if-not-configured
-cargo make "$@"
+# We marked many tasks as private, so we can have a more concise output when listing all tasks.
+# But we allow private tasks to be executed.
+cargo make --allow-private "$@"

@@ -75,14 +75,14 @@ min_version = "0.36.10"
 
 [tasks.clean-full]
 category = "Misc"
-description = "Clean all downloaded binaries by deleting .risingwave folder"
+description = "Clean all downloaded binaries and all data, config and logs by deleting .risingwave folder"
 script = '''
 #!@duckscript
 rm -rf "${PREFIX}"
 '''
 
 [tasks.clean-data]
-category = "Misc"
+category = "RiseDev - Start/Stop"
 description = "Clean all data, config and logs"
 script = '''
 #!@duckscript
@@ -97,7 +97,7 @@ rm -rf "${PREFIX_PROFILING}"
 alias = "logs"
 
 [tasks.logs]
-category = "Misc"
+category = "RiseDev - Start/Stop"
 description = "Open logs with VSCode or dump in console"
 script = '''
 #!/usr/bin/env bash
@@ -140,7 +140,7 @@ watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
 alias = "delete"
 
 [tasks.delete]
-category = "Misc"
+category = "RiseDev - Start/Stop"
 description = "Delete a node in the cluster"
 script = '''
 #!/usr/bin/env bash
@@ -251,6 +251,7 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${
 '''
 
 [tasks.link-all-in-one-binaries]
+private = true
 category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
@@ -353,6 +354,7 @@ cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}
 '''
 
 [tasks.clean]
+private = true
 category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
@@ -363,6 +365,7 @@ cargo clean
 '''
 
 [tasks.build-docs]
+private = true
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
@@ -390,6 +393,7 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.download-all]
+private = true
 category = "Misc"
 description = "Download all available components at once"
 dependencies = [
@@ -794,6 +798,7 @@ cargo llvm-cov run \
 """
 
 [tasks.check-java]
+private = true
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -813,6 +818,7 @@ cd "${JAVA_DIR}"
 """
 
 [tasks.check-java-fix]
+private = true
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -832,6 +838,7 @@ cd "${JAVA_DIR}"
 """
 
 [tasks.check-hakari]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
 install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = [
@@ -849,6 +856,7 @@ test $? -eq 0 || exit 1
 """
 
 [tasks.check-dep-sort]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
 install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
@@ -866,6 +874,7 @@ test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)car
 """
 
 [tasks.check-fmt]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo fmt check and attempt to fix"
 script = """
@@ -877,6 +886,7 @@ test $? -eq 0 || exit 1
 """
 
 [tasks.check-clippy]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo clippy check"
 script = """
@@ -889,6 +899,7 @@ echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput
 """
 
 [tasks.check-clippy-fix]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo clippy check and fixes all files (including dirty and staged)"
 script = """
@@ -908,6 +919,7 @@ fi
 """
 
 [tasks.check-typos]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
 install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = [
@@ -922,6 +934,7 @@ fi
 """
 
 [tasks.check-udeps]
+private = true
 category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
@@ -948,8 +961,8 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
-  "check-clippy",
   "check-typos",
+  "check-clippy",
   "check-java",
 ]
 script = """
@@ -958,7 +971,7 @@ script = """
 echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
-description = "🌟 Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
+description = "🌟 Perform pre-CI checks and automatically fix cargo sort/hakari/fmt warnings"
 
 [tasks.c]
 alias = "check"
@@ -970,8 +983,8 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
-  "check-clippy-fix",
   "check-typos",
+  "check-clippy-fix",
   "check-java-fix",
 ]
 script = """
@@ -980,7 +993,7 @@ script = """
 echo "Tip: use the alias $(tput setaf 4)./risedev cf$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
-description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"
+description = "Same as check, but also fixes clippy"
 
 [tasks.cf]
 alias = "check-fix"

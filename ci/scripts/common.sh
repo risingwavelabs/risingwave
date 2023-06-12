@@ -81,7 +81,7 @@ function download_and_prepare_rw() {
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"
 
   cargo make pre-start-dev
-  cargo make link-all-in-one-binaries
+  cargo make --allow-private link-all-in-one-binaries
 }
 
 # Arguments:
