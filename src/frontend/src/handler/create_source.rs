@@ -180,20 +180,19 @@ async fn extract_protobuf_table_schema(
 }
 
 /// resolve the schema of the source from external schema file, return the relation's columns. see https://www.risingwave.dev/docs/current/sql-create-source for more information.
+/// return (columns, pk_names, source info)
 pub(crate) async fn bind_source_schema(
     source_schema: &SourceSchema,
-    columns_defs: Vec<ColumnDef>,
-    table_constraints: &[TableConstraint],
+    sql_defined_pk_names: Vec<String>,
+    sql_defined_schema: bool,
     with_properties: &HashMap<String, String>,
-) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
-    let pk_column_names = bind_pk_names(&columns_defs, &table_constraints)?;
-    let user_defined_pk: bool = !pk_column_names.is_empty();
-    let user_defined_schema: bool = !columns_defs.is_empty();
+) -> Result<(Option<Vec<ColumnCatalog>>, Vec<String>, StreamSourceInfo)> {
+    let sql_defined_pk: bool = !sql_defined_pk_names.is_empty();
     let is_kafka = is_kafka_connector(with_properties);
 
     Ok(match source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            if user_defined_schema {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string())));
             };
@@ -201,6 +200,7 @@ pub(crate) async fn bind_source_schema(
                 Some(
                     extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
                 ),
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::Protobuf as i32,
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
@@ -211,12 +211,13 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::Avro(avro_schema) => {
-            if user_defined_schema {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
             (
                 Some(extract_avro_table_schema(avro_schema, with_properties).await?),
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::Avro as i32,
 
@@ -228,24 +229,25 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::UpsertAvro(avro_schema) => {
-            if user_defined_schema {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format upsert avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string())));
             }
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format upsert avro."
                         .to_string(),
                 )));
             }
-            if pk_column_names.len() != 1 {
+            if sql_defined_pk_names.len() != 1 {
                 return Err(RwError::from(ProtocolError(
                     "upsert avro supports only one primary key column.".to_string(),
                 )));
             }
-            let upsert_avro_primary_key = pk_column_names[0].clone();
+            let upsert_avro_primary_key = sql_defined_pk_names[0].clone();
             (
                 Some(extract_avro_table_schema(avro_schema, with_properties).await?),
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::UpsertAvro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
@@ -256,21 +258,42 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::DebeziumAvro(avro_schema) => {
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
-                "Primary key must be specified when creating source with row format upsert avro."
+                "Primary key must be specified when creating source with row format debezium avro."
                     .to_string(),
             )));
             }
-            if pk_column_names.len() != 1 {
+            if sql_defined_schema {
                 return Err(RwError::from(ProtocolError(
-                    "upsert avro supports only one primary key column.".to_string(),
+                    "User-defined schema is not allowed with row format debezium avro.".to_string(),
                 )));
             }
-            let upsert_avro_primary_key = pk_column_names[0].clone();
+            let full_columns =
+                extract_debezium_avro_table_schema(avro_schema, with_properties).await?;
 
+            let pk_names = if sql_defined_pk {
+                sql_defined_pk_names
+            } else {
+                let pk_names =
+                    extract_debezium_avro_table_pk_columns(avro_schema, with_properties).await?;
+                // extract pk(s) from schema registry
+                for pk_name in &pk_names {
+                    full_columns
+                        .iter()
+                        .find(|c: &&ColumnCatalog| c.name().eq(pk_name))
+                        .ok_or_else(|| {
+                            RwError::from(ProtocolError(format!(
+                                "avro's key column {} not exists in avro's row schema",
+                                pk_name
+                            )))
+                        })?;
+                }
+                pk_names
+            };
             (
-                todo!(),
+                Some(full_columns),
+                pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumAvro as i32,
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
@@ -280,7 +303,7 @@ pub(crate) async fn bind_source_schema(
         }
 
         SourceSchema::DebeziumJson => {
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format debezium."
                         .to_string(),
@@ -288,6 +311,7 @@ pub(crate) async fn bind_source_schema(
             }
             (
                 None,
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::DebeziumJson as i32,
                     ..Default::default()
@@ -295,7 +319,7 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::UpsertJson => {
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format upsert_json."
                         .to_string(),
@@ -303,6 +327,7 @@ pub(crate) async fn bind_source_schema(
             }
             (
                 None,
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::UpsertJson as i32,
                     ..Default::default()
@@ -310,7 +335,7 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::Maxwell => {
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format maxwell."
                         .to_string(),
@@ -318,6 +343,7 @@ pub(crate) async fn bind_source_schema(
             }
             (
                 None,
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::Maxwell as i32,
                     ..Default::default()
@@ -325,7 +351,7 @@ pub(crate) async fn bind_source_schema(
             )
         }
         SourceSchema::CanalJson => {
-            if !user_defined_pk {
+            if !sql_defined_pk {
                 return Err(RwError::from(ProtocolError(
                     "Primary key must be specified when creating source with row format cannal_json."
                         .to_string(),
@@ -333,6 +359,7 @@ pub(crate) async fn bind_source_schema(
             }
             (
                 None,
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::Maxwell as i32,
                     ..Default::default()
@@ -348,6 +375,7 @@ pub(crate) async fn bind_source_schema(
             }
             (
                 None,
+                sql_defined_pk_names,
                 StreamSourceInfo {
                     row_format: RowFormatType::Csv as i32,
                     csv_delimiter: csv_info.delimiter as i32,
@@ -358,6 +386,7 @@ pub(crate) async fn bind_source_schema(
         }
         SourceSchema::Json => (
             None,
+            sql_defined_pk_names,
             StreamSourceInfo {
                 row_format: RowFormatType::Json as i32,
                 ..Default::default()
@@ -365,6 +394,7 @@ pub(crate) async fn bind_source_schema(
         ),
         SourceSchema::Native => (
             None,
+            sql_defined_pk_names,
             StreamSourceInfo {
                 row_format: RowFormatType::Native as i32,
                 ..Default::default()
