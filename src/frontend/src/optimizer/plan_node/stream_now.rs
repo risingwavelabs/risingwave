@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::NowNode;
 
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
-use super::utils::{formatter_debug_plan_node, IndicesDisplay, TableCatalogBuilder, Distill};
+use super::utils::{formatter_debug_plan_node, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;

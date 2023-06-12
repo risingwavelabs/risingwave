@@ -323,10 +323,13 @@ impl Distill for LogicalScan {
 
         if !self.predicate().always_true() {
             let input_schema = self.core.fields_pretty_schema();
-            vec.push(("predicate", Pretty::display(&ConditionDisplay {
-                condition: &self.predicate(),
-                input_schema: &input_schema,
-            })))
+            vec.push((
+                "predicate",
+                Pretty::display(&ConditionDisplay {
+                    condition: &self.predicate(),
+                    input_schema: &input_schema,
+                }),
+            ))
         }
 
         Pretty::childless_record("LogicalScan", vec)
