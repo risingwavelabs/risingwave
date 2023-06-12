@@ -159,6 +159,12 @@ impl Binder {
             ))
             .into());
         }
+        if kind == AggKind::Mode && !f.args.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "no arguments are expected in mode agg".to_string(),
+            )
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
         let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
             f.within_group

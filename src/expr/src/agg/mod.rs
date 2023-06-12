@@ -30,6 +30,7 @@ mod general;
 mod jsonb_agg;
 mod percentile_cont;
 mod percentile_disc;
+mod mode;
 mod string_agg;
 
 // wrappers

@@ -758,3 +758,13 @@
     select percentile_disc(1) within group (order by y desc) from t;
   expected_outputs:
   - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select mode() within group (order by y desc) from t;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table t (x int, y varchar);
+    select mode(1) within group (order by y desc) from t;
+  expected_outputs:
+  - binder_error

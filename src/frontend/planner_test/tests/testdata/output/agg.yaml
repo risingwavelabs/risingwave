@@ -1366,3 +1366,18 @@
     BatchSimpleAgg { aggs: [percentile_disc(t.y order_by(t.y DESC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y varchar);
+    select mode() within group (order by y desc) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [mode(t.y order_by(t.y DESC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.y], distribution: SomeShard }
+- sql: |
+    create table t (x int, y varchar);
+    select mode(1) within group (order by y desc) from t;
+  binder_error: |-
+    Bind error: failed to bind expression: mode(1)
+
+    Caused by:
+      Invalid input syntax: no arguments are expected in mode agg
