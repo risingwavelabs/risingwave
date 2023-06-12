@@ -123,7 +123,8 @@ impl ExprRewritable for LogicalInsert {
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut new = self.clone();
-        new.default_columns = new
+        new.core.default_columns = new
+            .core
             .default_columns
             .into_iter()
             .map(|(c, e)| (c, r.rewrite_expr(e)))
