@@ -125,9 +125,9 @@ impl LogStoreRowSerde {
         let payload_schema = data_types[PREDEFINED_COLUMNS_TYPES.len()..].to_vec();
 
         let row_serde = BasicSerde::new(
-            &[],
+            Arc::from_iter(std::iter::empty()),
             Arc::from(data_types.into_boxed_slice()),
-            std::iter::empty(),
+            Arc::from_iter(std::iter::empty()),
         );
 
         let vnodes = match vnodes {

@@ -223,11 +223,6 @@ where
             .map(|idx| table_columns[*idx].data_type.clone())
             .collect_vec();
 
-        let column_ids = input_value_indices
-            .iter()
-            .map(|idx| table_columns[*idx].column_id)
-            .collect_vec();
-
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
         // if value_indices is the no shuffle full columns.
@@ -240,9 +235,9 @@ where
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
         let row_serde = SD::new(
-            &column_ids,
+            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
             Arc::from(data_types.into_boxed_slice()),
-            table_columns.iter().cloned(),
+            Arc::from(table_columns.into_boxed_slice()),
         );
         assert_eq!(
             row_serde.kind().is_column_aware(),

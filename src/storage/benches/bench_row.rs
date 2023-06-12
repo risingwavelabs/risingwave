@@ -81,7 +81,11 @@ fn basic_encode(c: &Case) -> Vec<Vec<u8>> {
 }
 
 fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
-    let seralizer = ColumnAwareSerde::new(&c.column_ids, c.schema.clone(), std::iter::empty());
+    let seralizer = ColumnAwareSerde::new(
+        Arc::from_iter(c.column_ids.iter().map(|id| id.get_id() as usize)),
+        c.schema.clone(),
+        Arc::from_iter(std::iter::empty()),
+    );
     let mut array = vec![];
     for row in &c.rows {
         let row_bytes = seralizer.serialize(row);
@@ -133,7 +137,11 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer = BasicSerde::new(&c.column_ids, c.schema.clone(), std::iter::empty());
+    let deserializer = BasicSerde::new(
+        Arc::from_iter(c.column_ids.iter().map(|id| id.get_id() as usize)),
+        c.schema.clone(),
+        Arc::from_iter(std::iter::empty()),
+    );
     let mut res = vec![];
     if c.column_ids == c.needed_ids {
         for byte in bytes {
@@ -171,8 +179,11 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 }
 
 fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
-    let deserializer =
-        ColumnAwareSerde::new(&c.needed_ids, c.needed_schema.clone(), std::iter::empty());
+    let deserializer = ColumnAwareSerde::new(
+        Arc::from_iter(c.needed_ids.iter().map(|id| id.get_id() as usize)),
+        c.needed_schema.clone(),
+        Arc::from_iter(std::iter::empty()),
+    );
     let mut res = vec![];
     for byte in bytes {
         let row = deserializer.deserialize(byte)?;

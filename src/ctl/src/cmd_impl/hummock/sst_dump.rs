@@ -373,16 +373,20 @@ fn print_table_column(
             .iter()
             .map(|idx| table_catalog.columns[*idx].data_type().clone())
             .collect_vec();
-        let column_ids = table_catalog
-            .value_indices
-            .iter()
-            .map(|idx| table_catalog.columns[*idx].column_id())
-            .collect_vec();
-        let schema = Arc::from(data_types.into_boxed_slice());
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
-            ColumnAwareSerde::new(&column_ids, schema, std::iter::empty()).into()
+            ColumnAwareSerde::new(
+                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from(data_types.into_boxed_slice()),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into()
         } else {
-            BasicSerde::new(&column_ids, schema, std::iter::empty()).into()
+            BasicSerde::new(
+                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from(data_types.into_boxed_slice()),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into()
         };
         let row = row_deserializer.deserialize(user_val)?;
         for (c, v) in column_desc.iter().zip_eq_fast(row.iter()) {

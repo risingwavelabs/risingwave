@@ -134,9 +134,19 @@ impl HummockJavaBindingIterator {
 
         // Decide which serializer to use based on whether the table is versioned or not.
         let row_serde = if versioned {
-            ColumnAwareSerde::new(&column_ids, schema.into(), std::iter::empty()).into()
+            ColumnAwareSerde::new(
+                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from(data_types.into_boxed_slice()),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into()
         } else {
-            BasicSerde::new(&column_ids, schema.into(), std::iter::empty()).into()
+            BasicSerde::new(
+                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from(data_types.into_boxed_slice()),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into()
         };
 
         Ok(Self {
