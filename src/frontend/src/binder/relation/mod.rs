@@ -40,6 +40,7 @@ use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 mod join;
 mod share;
 mod subquery;
+mod table_function;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
@@ -405,72 +406,7 @@ impl Binder {
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].real_value();
-                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
-                    return self.bind_internal_table(args, alias);
-                }
-                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
-                    || name.real_value().eq_ignore_ascii_case(
-                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
-                            .as_str(),
-                    )
-                {
-                    return self.bind_relation_by_name_inner(
-                        Some(PG_CATALOG_SCHEMA_NAME),
-                        PG_KEYWORDS_TABLE_NAME,
-                        alias,
-                        false,
-                    );
-                }
-                if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
-                    return Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )));
-                }
-                if is_watermark_func(func_name) {
-                    return Ok(Relation::Watermark(Box::new(
-                        self.bind_watermark(alias, args)?,
-                    )));
-                };
-
-                let args: Vec<ExprImpl> = args
-                    .into_iter()
-                    .map(|arg| self.bind_function_arg(arg))
-                    .flatten_ok()
-                    .try_collect()?;
-                let tf = if let Some(func) = self
-                    .catalog
-                    .first_valid_schema(
-                        &self.db_name,
-                        &self.search_path,
-                        &self.auth_context.user_name,
-                    )?
-                    .get_function_by_name_args(
-                        func_name,
-                        &args.iter().map(|arg| arg.return_type()).collect_vec(),
-                    )
-                    && matches!(func.kind, FunctionKind::Table { .. })
-                {
-                    TableFunction::new_user_defined(func.clone(), args)
-                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                    TableFunction::new(table_function_type, args)?
-                } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("unknown table function: {}", func_name),
-                        1191.into(),
-                    )
-                    .into());
-                };
-                let columns = if let DataType::Struct(s) = tf.return_type() {
-                    let schema = Schema::from(&s);
-                    schema.fields.into_iter().map(|f| (false, f)).collect_vec()
-                } else {
-                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
-                };
-
-                self.bind_table_to_context(columns, tf.name(), alias)?;
-
-                Ok(Relation::TableFunction(Box::new(tf)))
+                self.bind_table_function(name, alias, args)
             }
             TableFactor::Derived {
                 lateral,
