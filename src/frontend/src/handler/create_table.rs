@@ -295,7 +295,7 @@ pub fn bind_sql_column_constraints(
     Ok(())
 }
 
-fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
     for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
