@@ -936,6 +936,20 @@ where
             .map(get_second))
     }
 
+    pub async fn iter_ordered_with_pk_range(
+        &self,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        // Optional vnode that returns an iterator only over the given range under that vnode.
+        // For now, we require this parameter, and will panic. In the future, when `None`, we can
+        // iterate over each vnode that the `StateTableInner` owns.
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+        Ok(self
+            .iter_key_and_val_with_pk_range(pk_range, VirtualNode::ZERO, prefetch_options)
+            .await?
+            .map(get_second))
+    }
+
     pub async fn iter_key_and_val_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),

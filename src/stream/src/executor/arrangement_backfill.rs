@@ -431,24 +431,24 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        // TODO: iter over all vnodes of this state table.
+        // // TODO: iter over all vnodes of this state table.
         let iter = upstream_table
-            .iter_with_pk_range(&range_bounds, VirtualNode::ZERO, Default::default())
+            .iter_ordered_with_pk_range(&range_bounds, Default::default())
             .await?;
-        // pin_mut!(iter);
-
-        // TODO: these are rows instead...
-        #[for_await]
-        for data_chunk in iter
-        // .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
-        // .instrument_await("backfill_snapshot_read")
-        {
-            if data_chunk.cardinality() != 0 {
-                let ops = vec![Op::Insert; data_chunk.capacity()];
-                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                yield Some(stream_chunk);
-            }
-        }
+        // // pin_mut!(iter);
+        //
+        // // TODO: these are rows instead...
+        // #[for_await]
+        // for data_chunk in iter
+        // // .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
+        // // .instrument_await("backfill_snapshot_read")
+        // {
+        //     if data_chunk.cardinality() != 0 {
+        //         let ops = vec![Op::Insert; data_chunk.capacity()];
+        //         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+        //         yield Some(stream_chunk);
+        //     }
+        // }
 
         yield None;
     }
