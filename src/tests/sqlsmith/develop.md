@@ -23,9 +23,9 @@ If it affects generation of other parts of the query, you may wish to re-order t
 For instance, the `GROUP BY` clause affects which columns we can select,
 so we generate it before generating the `SELECT` items.
 
-> TODO: Here provide an example / tutorial of adding `Emit On Window Close`.
+Checkout [tutorial doc](./tutorial.md) to see how we add new tests for `Emit On Window Close` (`EOWC`).
 
-## Adding new expressions
+### Adding new expressions
 
 To check if your expression is included just generate ft.txt (see README.md), and make sure your newly added function is there.
 
