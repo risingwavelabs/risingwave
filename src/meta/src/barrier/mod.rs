@@ -39,7 +39,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tracing::span;
 use uuid::Uuid;
 
 use self::command::CommandContext;
@@ -328,9 +327,9 @@ where
         let timer = self.metrics.barrier_latency.start_timer();
 
         let span = tracing::info_span!(
-            target: "epoch_trace",
             parent: None,
-            "Epoch",
+            "epoch",
+            prev_epoch = command_ctx.prev_epoch.0,
             curr_epoch = command_ctx.curr_epoch.0,
         );
 

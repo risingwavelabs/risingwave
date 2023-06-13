@@ -782,8 +782,6 @@ where
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        use crate::tracing::Instrument;
-
         assert_eq!(self.epoch(), new_epoch.prev);
         trace!(
             table_id = %self.table_id,
@@ -794,7 +792,7 @@ where
         // per epoch.
         self.watermark_buffer_strategy.tick();
         self.seal_current_epoch(new_epoch.curr)
-            .instrument(tracing::info_span!(target: "epoch_trace", "state_table_commit"))
+            .instrument(tracing::info_span!("state_table_commit"))
             .await
     }
 

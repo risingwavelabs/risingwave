@@ -367,7 +367,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
-        Self::into_stream_inner(self).instrument(tracing::info_span!("store_iter"))
+        Self::into_stream_inner(self).instrument(tracing::debug_span!("store_iter"))
     }
 }
 

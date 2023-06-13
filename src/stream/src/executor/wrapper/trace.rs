@@ -17,7 +17,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use tracing::{event, Instrument};
+use tracing::{event, Instrument, Span};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -37,14 +37,7 @@ pub async fn trace(
 ) {
     let actor_id_string = actor_id.to_string();
 
-    let new_span = || {
-        tracing::info_span!(
-            target: "epoch_trace",
-            parent: None,
-            "executor",
-            executor = info.identity
-        )
-    };
+    let new_span = || tracing::info_span!("executor", executor = info.identity, actor_id);
     let mut span = new_span();
 
     pin_mut!(input);
@@ -62,20 +55,27 @@ pub async fn trace(
             }
         }
 
-        let new_tracing_context = message.as_barrier().map(|b| b.tracing_context().clone());
+        match &message {
+            Message::Chunk(_) | Message::Watermark(_) => yield message,
 
-        {
-            // let _barrier_span = tracing::info_span!(
-            //     target: "epoch_trace",
-            //     parent: &span,
-            //     "barrier"
-            // );
+            Message::Barrier(barrier) => {
+                let tracing_context = barrier.tracing_context().clone();
 
-            yield message;
-        }
+                {
+                    let _barrier_span = tracing::info_span!(
+                        "barrier",
+                        upstream_executor = info.identity,
+                        upstream_actor_id = actor_id
+                    );
+                    yield message;
+                }
 
-        if let Some(tracing_context) = new_tracing_context {
-            span = tracing_context.attach(new_span());
+                if Span::current().is_none() {
+                    span = tracing_context.attach(new_span());
+                } else {
+                    span = new_span();
+                }
+            }
         }
     }
 }
