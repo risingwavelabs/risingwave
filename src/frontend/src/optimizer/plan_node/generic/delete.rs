@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::fmt;
+use std::hash::Hash;
 
+use educe::Educe;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Schema, TableVersionId};
 
@@ -20,8 +22,11 @@ use super::{DistillUnit, GenericPlanRef};
 use crate::catalog::TableId;
 use crate::OptimizerContextRef;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Delete<PlanRef> {
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub struct Delete<PlanRef: Eq + Hash> {
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
@@ -39,7 +44,7 @@ impl<PlanRef: GenericPlanRef> Delete<PlanRef> {
     }
 }
 
-impl<PlanRef> Delete<PlanRef> {
+impl<PlanRef: Eq + Hash> Delete<PlanRef> {
     pub fn new(
         input: PlanRef,
         table_name: String,
@@ -71,10 +76,10 @@ impl<PlanRef> Delete<PlanRef> {
     }
 }
 
-impl<PlanRef> DistillUnit for Delete<PlanRef> {
+impl<PlanRef: Eq + Hash> DistillUnit for Delete<PlanRef> {
     fn distill_with_name<'a>(&self, name: &'a str) -> Pretty<'a> {
         let mut vec = Vec::with_capacity(if self.returning { 2 } else { 1 });
-        vec.push(("table", Pretty::Text(self.table_name.clone().into())));
+        vec.push(("table", Pretty::from(self.table_name.clone())));
         if self.returning {
             vec.push(("returning", Pretty::display(&true)));
         }

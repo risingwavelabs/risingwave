@@ -47,6 +47,7 @@ fn create_agg_call(
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
