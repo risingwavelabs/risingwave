@@ -25,8 +25,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    ClusterManagerRef, FragmentManager, FragmentManagerRef, LocalNotification,
-    NotificationManagerRef,
+    ClusterManagerRef, FragmentManagerRef, LocalNotification, NotificationManagerRef,
 };
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
@@ -47,38 +46,26 @@ impl ServingVnodeMapping {
     /// Returns (successful updates, failed updates).
     fn upsert(
         &self,
-        streaming_fragment_mappings: impl IntoIterator<Item = FragmentParallelUnitMapping>,
+        streaming_parallelisms: HashMap<FragmentId, usize>,
         workers: &[WorkerNode],
     ) -> (HashMap<FragmentId, ParallelUnitMapping>, Vec<FragmentId>) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, ParallelUnitMapping> = HashMap::default();
         let mut failed: Vec<FragmentId> = vec![];
-        for fragment in streaming_fragment_mappings {
+        for (fragment_id, streaming_parallelism) in streaming_parallelisms {
             let new_mapping = {
-                let old_mapping = serving_vnode_mappings.get(&fragment.fragment_id);
+                let old_mapping = serving_vnode_mappings.get(&fragment_id);
                 // Set max serving parallelism to `streaming_parallelism`. It's not a must.
-                let streaming_parallelism = match fragment.mapping.as_ref() {
-                    Some(mapping) => ParallelUnitMapping::from_protobuf(mapping)
-                        .iter_unique()
-                        .count(),
-                    None => {
-                        tracing::warn!(
-                            "vnode mapping for fragment {} not found",
-                            fragment.fragment_id
-                        );
-                        1
-                    }
-                };
                 place_vnode(old_mapping, workers, streaming_parallelism)
             };
             match new_mapping {
                 None => {
-                    serving_vnode_mappings.remove(&fragment.fragment_id as _);
-                    failed.push(fragment.fragment_id);
+                    serving_vnode_mappings.remove(&fragment_id as _);
+                    failed.push(fragment_id);
                 }
                 Some(mapping) => {
-                    serving_vnode_mappings.insert(fragment.fragment_id, mapping.clone());
-                    upserted.insert(fragment.fragment_id, mapping);
+                    serving_vnode_mappings.insert(fragment_id, mapping.clone());
+                    upserted.insert(fragment_id, mapping);
                 }
             }
         }
@@ -91,13 +78,6 @@ impl ServingVnodeMapping {
             mappings.remove(fragment_id);
         }
     }
-}
-
-async fn all_streaming_fragment_mappings<S: MetaStore>(
-    fragment_manager: &FragmentManager<S>,
-) -> Vec<FragmentParallelUnitMapping> {
-    let guard = fragment_manager.get_fragment_read_guard().await;
-    guard.all_running_fragment_mappings().collect()
 }
 
 fn to_fragment_parallel_unit_mapping(
@@ -130,9 +110,9 @@ pub(crate) async fn on_meta_start<S: MetaStore>(
     fragment_manager: FragmentManagerRef<S>,
     serving_vnode_mapping: ServingVnodeMappingRef,
 ) {
-    let streaming_fragment_mappings = all_streaming_fragment_mappings(&fragment_manager).await;
+    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(None).await;
     let (mappings, _) = serving_vnode_mapping.upsert(
-        streaming_fragment_mappings,
+        streaming_parallelisms,
         &cluster_manager.list_active_serving_compute_nodes().await,
     );
     tracing::debug!(
@@ -170,8 +150,8 @@ pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
                                         continue;
                                     }
                                     let workers = cluster_manager.list_active_serving_compute_nodes().await;
-                                    let all_streaming_mappings = all_streaming_fragment_mappings(&fragment_manager).await;
-                                    let (mappings, _) = serving_vnode_mapping.upsert(all_streaming_mappings, &workers);
+                                    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(None).await;
+                                    let (mappings, _) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
                                     notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&mappings) }));
                                 }
@@ -180,8 +160,8 @@ pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
                                         continue;
                                     }
                                     let workers = cluster_manager.list_active_serving_compute_nodes().await;
-                                    let added_streaming_mappings = all_streaming_fragment_mappings(&fragment_manager).await.into_iter().filter(|f|fragment_ids.contains(&f.fragment_id));
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(added_streaming_mappings, &workers);
+                                    let streaming_parallelisms = fragment_manager.running_fragment_parallelisms(Some(fragment_ids.into_iter().collect())).await;
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(streaming_parallelisms, &workers);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&upserted) }));

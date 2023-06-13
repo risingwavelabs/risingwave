@@ -68,6 +68,34 @@ impl FragmentManagerCore {
                 })
             })
     }
+
+    fn running_fragment_parallelisms(
+        &self,
+        id_filter: Option<HashSet<FragmentId>>,
+    ) -> HashMap<FragmentId, usize> {
+        self.table_fragments
+            .values()
+            .filter(|tf| tf.state() != State::Initial)
+            .flat_map(|table_fragments| {
+                table_fragments.fragments.values().filter_map(|fragment| {
+                    if let Some(id_filter) = id_filter.as_ref() && !id_filter.contains(&fragment.fragment_id) {
+                        return None;
+                    }
+                    let parallelism = match fragment.vnode_mapping.as_ref() {
+                        None => {
+                            tracing::warn!(
+                                "vnode mapping for fragment {} not found",
+                                fragment.fragment_id
+                            );
+                            1
+                        }
+                        Some(m) => ParallelUnitMapping::from_protobuf(m).iter_unique().count(),
+                    };
+                    Some((fragment.fragment_id, parallelism))
+                })
+            })
+            .collect()
+    }
 }
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
@@ -1042,5 +1070,15 @@ where
             .with_context(|| format!("mview fragment not exist: id={}", table_id))?;
 
         Ok(mview_fragment)
+    }
+
+    pub async fn running_fragment_parallelisms(
+        &self,
+        id_filter: Option<HashSet<FragmentId>>,
+    ) -> HashMap<FragmentId, usize> {
+        self.core
+            .read()
+            .await
+            .running_fragment_parallelisms(id_filter)
     }
 }
