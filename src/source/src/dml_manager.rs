@@ -22,19 +22,18 @@ use parking_lot::RwLock;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
 use risingwave_common::error::Result;
+use risingwave_common::hash::ActorId;
 use risingwave_common::transaction::transaction_id::{TxnId, TxnIdGenerator};
-use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common::util::worker_util::WorkerNodeId;
-use tokio::sync::oneshot;
 
 use crate::{TableDmlHandle, TableDmlHandleRef};
 
 pub type DmlManagerRef = Arc<DmlManager>;
 
 #[derive(Debug)]
-struct TableReader {
+pub struct TableReader {
     version_id: TableVersionId,
-    handle: Weak<TableDmlHandle>,
+    pub handle: Weak<TableDmlHandle>,
 }
 
 /// [`DmlManager`] manages the communication between batch data manipulation and streaming
@@ -44,7 +43,7 @@ struct TableReader {
 /// interface).
 #[derive(Debug)]
 pub struct DmlManager {
-    table_readers: RwLock<HashMap<TableId, TableReader>>,
+    pub table_readers: RwLock<HashMap<TableId, TableReader>>,
     txn_id_generator: TxnIdGenerator,
 }
 
@@ -118,13 +117,25 @@ impl DmlManager {
         Ok(handle)
     }
 
-    pub async fn write_txn_msg(
+    pub fn unregister_changes_sender(&self, table_id: TableId, actor_id: ActorId) {
+        let table_readers = self.table_readers.write();
+        let table_reader = table_readers.get(&table_id).unwrap();
+        let table_dml_handle = table_reader
+            .handle
+            .upgrade()
+            .expect("should be able to upgrade");
+        let mut guard = table_dml_handle.core.write();
+        guard
+            .changes_txs
+            .retain(|sender| sender.actor_id != actor_id);
+    }
+
+    pub fn table_dml_handle(
         &self,
         table_id: TableId,
         table_version_id: TableVersionId,
-        txn_msg: TxnMsg,
-    ) -> Result<oneshot::Receiver<usize>> {
-        let handle = {
+    ) -> Result<TableDmlHandleRef> {
+        let table_dml_handle = {
             let table_readers = self.table_readers.read();
 
             match table_readers.get(&table_id) {
@@ -151,7 +162,7 @@ impl DmlManager {
         }
         .with_context(|| format!("no reader for dml in table `{table_id:?}`"))?;
 
-        handle.write_txn_msg(txn_msg).await
+        Ok(table_dml_handle)
     }
 
     pub fn clear(&self) {
@@ -168,38 +179,31 @@ mod tests {
     use futures::FutureExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::INITIAL_TABLE_VERSION_ID;
+    use risingwave_common::hash::ActorId;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::transaction::transaction_id::TxnId;
+    use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::DataType;
+    use tokio::sync::oneshot;
 
     use super::*;
+    use crate::WriteHandle;
 
-    #[easy_ext::ext(DmlManagerTestExt)]
-    impl DmlManager {
-        /// Write a chunk and assert that the chunk channel is not blocking.
-        pub fn write_chunk_ready(
-            &self,
-            table_id: TableId,
-            table_version_id: TableVersionId,
-            chunk: StreamChunk,
-        ) -> Result<oneshot::Receiver<usize>> {
-            const TEST_TRANSACTION_ID: TxnId = 1;
-            self.write_txn_msg(
-                table_id,
-                table_version_id,
-                TxnMsg::Begin(TEST_TRANSACTION_ID),
-            )
-            .now_or_never()
-            .unwrap()?;
+    const TEST_TRANSACTION_ID: TxnId = 0;
+    const ACTOR_ID1: ActorId = 1;
+    const ACTOR_ID2: ActorId = 2;
+
+    #[easy_ext::ext(WriteHandleTestExt)]
+    impl WriteHandle {
+        pub fn write_chunk_ready(&self, chunk: StreamChunk) -> Result<oneshot::Receiver<usize>> {
+            self.write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
+                .now_or_never()
+                .unwrap()?;
             let result = self
-                .write_txn_msg(
-                    table_id,
-                    table_version_id,
-                    TxnMsg::Data(TEST_TRANSACTION_ID, chunk),
-                )
+                .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
                 .now_or_never()
                 .unwrap();
-            self.write_txn_msg(table_id, table_version_id, TxnMsg::End(TEST_TRANSACTION_ID))
+            self.write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
                 .now_or_never()
                 .unwrap()?;
             result
@@ -225,27 +229,37 @@ mod tests {
         assert!(Arc::ptr_eq(&h1, &h2));
 
         // Start reading.
-        let r1 = h1.stream_reader();
-        let r2 = h2.stream_reader();
+        let r1 = h1.stream_reader(ACTOR_ID1);
+        let r2 = h2.stream_reader(ACTOR_ID2);
+
+        let table_dml_handle = dml_manager
+            .table_dml_handle(table_id, table_version_id)
+            .unwrap();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
 
         // Should be able to write to the table.
-        dml_manager
-            .write_chunk_ready(table_id, table_version_id, chunk())
-            .unwrap();
+        write_handle.write_chunk_ready(chunk()).unwrap();
 
-        // After dropping one reader, the other one should still be able to write.
+        // After dropping the corresponding reader, the write handle should be not allowed to write.
         // This is to simulate the scale-in of DML executors.
-        drop(r1);
-        dml_manager
-            .write_chunk_ready(table_id, table_version_id, chunk())
-            .unwrap();
+        {
+            dml_manager.unregister_changes_sender(table_id, ACTOR_ID1);
+            drop(r1);
+        }
+
+        write_handle.write_chunk_ready(chunk()).unwrap_err();
+
+        // Unless we create a new write handle.
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.write_chunk_ready(chunk()).unwrap();
 
         // After dropping the last reader, no more writes are allowed.
         // This is to simulate the dropping of the table.
-        drop(r2);
-        dml_manager
-            .write_chunk_ready(table_id, table_version_id, chunk())
-            .unwrap_err();
+        {
+            dml_manager.unregister_changes_sender(table_id, ACTOR_ID2);
+            drop(r2);
+        }
+        write_handle.write_chunk_ready(chunk()).unwrap_err();
     }
 
     #[test]
@@ -268,27 +282,36 @@ mod tests {
         let old_h = dml_manager
             .register_reader(table_id, old_version_id, &old_column_descs)
             .unwrap();
-        let _old_r = old_h.stream_reader();
+        let _old_r = old_h.stream_reader(ACTOR_ID1);
+
+        let table_dml_handle = dml_manager
+            .table_dml_handle(table_id, old_version_id)
+            .unwrap();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
 
         // Should be able to write to the table.
-        dml_manager
-            .write_chunk_ready(table_id, old_version_id, old_chunk())
-            .unwrap();
+        write_handle.write_chunk_ready(old_chunk()).unwrap();
 
         // Start reading the new version.
         let new_h = dml_manager
             .register_reader(table_id, new_version_id, &new_column_descs)
             .unwrap();
-        let _new_r = new_h.stream_reader();
+        let _new_r = new_h.stream_reader(ACTOR_ID2);
 
-        // Should not be able to write to the old version.
+        // Still be able to write to the old write handle, if the channel is not closed.
+        write_handle.write_chunk_ready(old_chunk()).unwrap();
+
+        // However, it is no longer possible to create a `table_dml_handle` with the old version;
         dml_manager
-            .write_chunk_ready(table_id, old_version_id, old_chunk())
+            .table_dml_handle(table_id, old_version_id)
             .unwrap_err();
+
         // Should be able to write to the new version.
-        dml_manager
-            .write_chunk_ready(table_id, new_version_id, new_chunk())
+        let table_dml_handle = dml_manager
+            .table_dml_handle(table_id, new_version_id)
             .unwrap();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+        write_handle.write_chunk_ready(new_chunk()).unwrap();
     }
 
     #[test]

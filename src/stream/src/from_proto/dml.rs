@@ -49,6 +49,7 @@ impl ExecutorBuilder for DmlExecutorBuilder {
             table_id,
             node.table_version_id,
             column_descs,
+            params.actor_context.id,
         )))
     }
 }

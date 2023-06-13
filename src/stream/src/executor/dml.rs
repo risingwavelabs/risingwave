@@ -30,6 +30,7 @@ use super::{
     PkIndices, PkIndicesRef,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::task::ActorId;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
@@ -53,6 +54,8 @@ pub struct DmlExecutor {
 
     // Column descriptions of the table.
     column_descs: Vec<ColumnDesc>,
+
+    actor_id: ActorId,
 }
 
 const MAX_CHUNK_FOR_ATOMICITY: usize = 32;
@@ -68,6 +71,7 @@ impl DmlExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
+        actor_id: ActorId,
     ) -> Self {
         Self {
             upstream,
@@ -78,6 +82,7 @@ impl DmlExecutor {
             table_id,
             table_version_id,
             column_descs,
+            actor_id,
         }
     }
 
@@ -99,7 +104,7 @@ impl DmlExecutor {
             .dml_manager
             .register_reader(self.table_id, self.table_version_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
-        let batch_reader = batch_reader.stream_reader().into_stream();
+        let batch_reader = batch_reader.stream_reader(self.actor_id).into_stream();
 
         // Merge the two streams using `StreamReaderWithPause` because when we receive a pause
         // barrier, we should stop receiving the data from DML. We poll data from the two streams in
@@ -137,17 +142,10 @@ impl DmlExecutor {
 
                         current_epoch = barrier.epoch.curr.into();
 
-                        // FIXME: consider removing this check, because it seems could happen
-                        // frequently.
-                        if !active_txn_map.is_empty() {
-                            for (txn_id, (_, mut vec)) in active_txn_map
-                                .drain_filter(|_, (epoch, _)| epoch.0 < barrier.epoch.prev)
-                            {
-                                tracing::warn!("txn_id={}. In case of late `TxnMsg::End`, drain those transaction chunks", txn_id);
-                                for chunk in vec.drain(..) {
-                                    yield Message::Chunk(chunk);
-                                }
-                            }
+                        // Stop barrier. It could be issued by scaling or DDLs(e.g. add column).
+                        if barrier.is_stop(self.actor_id) {
+                            self.dml_manager
+                                .unregister_changes_sender(self.table_id, self.actor_id);
                         }
                     }
                     yield msg;
@@ -234,6 +232,9 @@ mod tests {
     use crate::executor::test_utils::MockSource;
     use crate::task::WorkerNodeId;
 
+    const TEST_TRANSACTION_ID: TxnId = 0;
+    const ACTOR_ID1: ActorId = 1;
+
     #[tokio::test]
     async fn test_dml_executor() {
         let table_id = TableId::default();
@@ -249,6 +250,7 @@ mod tests {
         let dml_manager = Arc::new(DmlManager::new(WorkerNodeId::default()));
 
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+
         let dml_executor = Box::new(DmlExecutor::new(
             Box::new(source),
             schema,
@@ -258,6 +260,7 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs,
+            ACTOR_ID1,
         ));
         let mut dml_executor = dml_executor.execute();
 
@@ -293,30 +296,22 @@ mod tests {
         tx.push_chunk(stream_chunk2);
         tx.push_chunk(stream_chunk3);
 
+        let table_dml_handle = dml_manager
+            .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
+            .unwrap();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
+
         // Message from batch
-        const TEST_TRANSACTION_ID: TxnId = 1;
-        dml_manager
-            .write_txn_msg(
-                table_id,
-                INITIAL_TABLE_VERSION_ID,
-                TxnMsg::Begin(TEST_TRANSACTION_ID),
-            )
+        write_handle
+            .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
             .await
             .unwrap();
-        dml_manager
-            .write_txn_msg(
-                table_id,
-                INITIAL_TABLE_VERSION_ID,
-                TxnMsg::Data(TEST_TRANSACTION_ID, batch_chunk),
-            )
+        write_handle
+            .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, batch_chunk))
             .await
             .unwrap();
-        dml_manager
-            .write_txn_msg(
-                table_id,
-                INITIAL_TABLE_VERSION_ID,
-                TxnMsg::End(TEST_TRANSACTION_ID),
-            )
+        write_handle
+            .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();
 

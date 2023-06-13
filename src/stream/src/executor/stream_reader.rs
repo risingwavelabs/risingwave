@@ -150,15 +150,22 @@ mod tests {
 
     use super::*;
     use crate::executor::{barrier_to_message_stream, Barrier};
+    use crate::task::ActorId;
+
+    const TEST_TRANSACTION_ID: TxnId = 0;
+    const ACTOR_ID1: ActorId = 1;
 
     #[tokio::test]
     async fn test_pause_and_resume() {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let table_dml_handle = TableDmlHandle::new(vec![]);
+
         let source_stream = table_dml_handle
-            .stream_reader()
+            .stream_reader(ACTOR_ID1)
             .into_stream_for_source_reader_test();
+
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
 
         let barrier_stream = barrier_to_message_stream(barrier_rx).boxed();
         let stream =
@@ -176,16 +183,16 @@ mod tests {
         }
 
         // Write a chunk, and we should receive it.
-        const TEST_TRANSACTION_ID: TxnId = 1;
-        table_dml_handle
+
+        write_handle
             .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
             .await
             .unwrap();
-        table_dml_handle
+        write_handle
             .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
             .await
             .unwrap();
-        table_dml_handle
+        write_handle
             .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();
@@ -200,15 +207,15 @@ mod tests {
         // Write a barrier.
         barrier_tx.send(Barrier::new_test_barrier(2)).unwrap();
         // Then write a chunk.
-        table_dml_handle
+        write_handle
             .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
             .await
             .unwrap();
-        table_dml_handle
+        write_handle
             .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, StreamChunk::default()))
             .await
             .unwrap();
-        table_dml_handle
+        write_handle
             .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
             .await
             .unwrap();

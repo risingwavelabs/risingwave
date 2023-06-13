@@ -116,6 +116,11 @@ impl InsertExecutor {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
+        let table_dml_handle = self
+            .dml_manager
+            .table_dml_handle(self.table_id, self.table_version_id)?;
+        let write_handle = table_dml_handle.write_handle(self.txn_id)?;
+
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -154,22 +159,17 @@ impl InsertExecutor {
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            self.dml_manager
-                .write_txn_msg(
-                    self.table_id,
-                    self.table_version_id,
-                    TxnMsg::Data(self.txn_id, stream_chunk),
-                )
-                .await
+            let txn_msg = TxnMsg::Data(self.txn_id, stream_chunk);
+
+            #[cfg(debug_assertions)]
+            table_dml_handle.check_txn_msg(&txn_msg);
+
+            write_handle.write_txn_msg(txn_msg).await
         };
 
         notifiers.push(
-            self.dml_manager
-                .write_txn_msg(
-                    self.table_id,
-                    self.table_version_id,
-                    TxnMsg::Begin(self.txn_id),
-                )
+            write_handle
+                .write_txn_msg(TxnMsg::Begin(self.txn_id))
                 .await?,
         );
 
@@ -188,15 +188,7 @@ impl InsertExecutor {
             notifiers.push(write_txn_data(chunk).await?);
         }
 
-        notifiers.push(
-            self.dml_manager
-                .write_txn_msg(
-                    self.table_id,
-                    self.table_version_id,
-                    TxnMsg::End(self.txn_id),
-                )
-                .await?,
-        );
+        notifiers.push(write_handle.write_txn_msg(TxnMsg::End(self.txn_id)).await?);
 
         // Wait for all chunks to be taken / written.
         let rows_inserted = try_join_all(notifiers)
@@ -284,6 +276,7 @@ mod tests {
     use risingwave_common::catalog::{
         schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
     };
+    use risingwave_common::hash::ActorId;
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::worker_util::WorkerNodeId;
     use risingwave_source::dml_manager::DmlManager;
@@ -348,7 +341,8 @@ mod tests {
         let reader = dml_manager
             .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader().into_stream();
+        const ACTOR_ID1: ActorId = 1;
+        let mut reader = reader.stream_reader(ACTOR_ID1).into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(

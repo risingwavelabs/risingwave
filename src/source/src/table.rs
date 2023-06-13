@@ -15,25 +15,31 @@
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use futures::FutureExt;
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::hash::ActorId;
+use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_connector::source::StreamChunkWithState;
-use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
 pub type TableDmlHandleRef = Arc<TableDmlHandle>;
 
 #[derive(Debug)]
-struct TableDmlHandleCore {
+pub struct ChangesSender {
+    pub actor_id: ActorId,
+    pub tx: mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>,
+}
+
+#[derive(Debug)]
+pub struct TableDmlHandleCore {
     /// The senders of the changes channel.
     ///
     /// When a `StreamReader` is created, a channel will be created and the sender will be
     /// saved here. The insert statement will take one channel randomly.
-    changes_txs: Vec<mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>>,
+    pub changes_txs: Vec<ChangesSender>,
 }
 
 /// The buffer size of the channel between each [`TableDmlHandle`] and the source executors.
@@ -48,10 +54,10 @@ const DML_CHUNK_BUFFER_SIZE: usize = 32;
 /// effects.
 #[derive(Debug)]
 pub struct TableDmlHandle {
-    core: RwLock<TableDmlHandleCore>,
+    pub core: RwLock<TableDmlHandleCore>,
 
     /// All columns in this table.
-    column_descs: Vec<ColumnDesc>,
+    pub column_descs: Vec<ColumnDesc>,
 }
 
 impl TableDmlHandle {
@@ -66,83 +72,78 @@ impl TableDmlHandle {
         }
     }
 
-    pub fn stream_reader(&self) -> TableStreamReader {
+    pub fn stream_reader(&self, actor_id: ActorId) -> TableStreamReader {
         let mut core = self.core.write();
         let (tx, rx) = mpsc::channel(DML_CHUNK_BUFFER_SIZE);
-        core.changes_txs.push(tx);
+        core.changes_txs.push(ChangesSender { actor_id, tx });
 
         TableStreamReader { rx }
     }
 
-    /// Asynchronously write stream chunk into table. Changes written here will be simply passed to
-    /// the associated streaming task via channel, and then be materialized to storage there.
-    ///
-    /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
-    /// and the `usize` represents the cardinality of this chunk.
-    pub async fn write_txn_msg(&self, mut txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
-        loop {
-            // The `changes_txs` should not be empty normally, since we ensured that the channels
-            // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
-            // table catalog visible to the users. However, when we're recovering, it's possible
-            // that the streaming executors are not ready when the frontend is able to schedule DML
-            // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
-            // error instead of asserting here.
-            // TODO: may reject DML when streaming executors are not recovered.
-            let tx = {
-                let guard = self.core.read();
-                if guard.changes_txs.is_empty() {
-                    return Err(RwError::from(anyhow!(
-                        "no available table reader in streaming source executors"
-                    )));
-                }
-                let len = guard.changes_txs.len();
-                guard
-                    .changes_txs
-                    .get((txn_msg.txn_id() % len as u64) as usize)
-                    .context("no available table reader in streaming source executors")?
-                    .clone()
-            };
-
-            #[cfg(debug_assertions)]
-            if let TxnMsg::Data(_, chunk) = &txn_msg {
-                risingwave_common::util::schema_check::schema_check(
-                    self.column_descs
-                        .iter()
-                        .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
-                    chunk.columns(),
-                )
-                .expect("table source write chunk schema check failed");
-            }
-
-            let (notifier_tx, notifier_rx) = oneshot::channel();
-
-            match tx.send((txn_msg, notifier_tx)).await {
-                Ok(_) => return Ok(notifier_rx),
-
-                // It's possible that the source executor is scaled in or migrated, so the channel
-                // is closed. In this case, we should remove the closed channel and retry.
-                Err(SendError((txn_msg_, _))) => {
-                    tracing::info!("find one closed table source channel, retry");
-                    txn_msg = txn_msg_;
-
-                    // Remove all closed channels.
-                    self.core.write().changes_txs.retain(|tx| !tx.is_closed());
-                }
-            }
+    pub fn write_handle(&self, txn_id: TxnId) -> Result<WriteHandle> {
+        // The `changes_txs` should not be empty normally, since we ensured that the channels
+        // between the `TableDmlHandle` and the `SourceExecutor`s are ready before we making the
+        // table catalog visible to the users. However, when we're recovering, it's possible
+        // that the streaming executors are not ready when the frontend is able to schedule DML
+        // tasks to the compute nodes, so this'll be temporarily unavailable, so we throw an
+        // error instead of asserting here.
+        // TODO: may reject DML when streaming executors are not recovered.
+        let guard = self.core.read();
+        if guard.changes_txs.is_empty() {
+            return Err(RwError::from(anyhow!(
+                "no available table reader in streaming source executors"
+            )));
         }
+        let len = guard.changes_txs.len();
+        let tx = guard
+            .changes_txs
+            .get((txn_id % len as u64) as usize)
+            .context("no available table reader in streaming source executors")?
+            .tx
+            .clone();
+
+        Ok(WriteHandle { txn_id, tx })
     }
 
     /// Get the reference of all columns in this table.
     pub(super) fn column_descs(&self) -> &[ColumnDesc] {
         self.column_descs.as_ref()
     }
+
+    pub fn check_txn_msg(&self, txn_msg: &TxnMsg) {
+        if let TxnMsg::Data(_, chunk) = txn_msg {
+            risingwave_common::util::schema_check::schema_check(
+                self.column_descs
+                    .iter()
+                    .filter_map(|c| (!c.is_generated()).then_some(&c.data_type)),
+                chunk.columns(),
+            )
+            .expect("table source write txn_msg schema check failed");
+        }
+    }
 }
 
-#[easy_ext::ext(TableDmlHandleTestExt)]
-impl TableDmlHandle {
-    /// Write a chunk and assert that the chunk channel is not blocking.
-    fn write_txn_msg_ready(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
-        self.write_txn_msg(txn_msg).now_or_never().unwrap()
+pub struct WriteHandle {
+    txn_id: TxnId,
+    tx: mpsc::Sender<(TxnMsg, oneshot::Sender<usize>)>,
+}
+
+impl WriteHandle {
+    /// Asynchronously write txn messages into table. Changes written here will be simply passed to
+    /// the associated streaming task via channel, and then be materialized to storage there.
+    ///
+    /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,
+    /// and the `usize` represents the cardinality of this chunk.
+    pub async fn write_txn_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
+        assert_eq!(self.txn_id, txn_msg.txn_id());
+        let (notifier_tx, notifier_rx) = oneshot::channel();
+        match self.tx.send((txn_msg, notifier_tx)).await {
+            Ok(_) => Ok(notifier_rx),
+
+            // It's possible that the source executor is scaled in or migrated, so the channel
+            // is closed. To guarantee the transactional atomicity, bail out.
+            Err(_) => Err(RwError::from("write txn_msg channel closed".to_string())),
+        }
     }
 }
 
@@ -196,7 +197,7 @@ mod tests {
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
-    use futures::StreamExt;
+    use futures::{FutureExt, StreamExt};
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op, StreamChunk};
     use risingwave_common::catalog::ColumnId;
@@ -205,7 +206,10 @@ mod tests {
 
     use super::*;
 
-    fn new_source() -> TableDmlHandle {
+    const TEST_TRANSACTION_ID: TxnId = 0;
+    const ACTOR_ID1: ActorId = 1;
+
+    fn new_table_dml_handle() -> TableDmlHandle {
         TableDmlHandle::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,
@@ -214,26 +218,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_dml_handle() -> Result<()> {
-        let source = Arc::new(new_source());
-        let mut reader = source.stream_reader().into_stream();
-        const TEST_TRANSACTION_ID: TxnId = 1;
+        let table_dml_handle = Arc::new(new_table_dml_handle());
+        let mut reader = table_dml_handle.stream_reader(ACTOR_ID1).into_stream();
+        let write_handle = table_dml_handle.write_handle(TEST_TRANSACTION_ID).unwrap();
 
         macro_rules! write_chunk {
             ($i:expr) => {{
-                let source = source.clone();
                 let chunk = StreamChunk::new(
                     vec![Op::Insert],
                     vec![I64Array::from_iter([$i]).into_ref()],
                     None,
                 );
-                source
-                    .write_txn_msg_ready(TxnMsg::Begin(TEST_TRANSACTION_ID))
+                write_handle
+                    .write_txn_msg(TxnMsg::Begin(TEST_TRANSACTION_ID))
+                    .now_or_never()
+                    .unwrap()
                     .unwrap();
-                source
-                    .write_txn_msg_ready(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
+                write_handle
+                    .write_txn_msg(TxnMsg::Data(TEST_TRANSACTION_ID, chunk))
+                    .now_or_never()
+                    .unwrap()
                     .unwrap();
-                source
-                    .write_txn_msg_ready(TxnMsg::End(TEST_TRANSACTION_ID))
+                write_handle
+                    .write_txn_msg(TxnMsg::End(TEST_TRANSACTION_ID))
+                    .now_or_never()
+                    .unwrap()
                     .unwrap();
             }};
         }
