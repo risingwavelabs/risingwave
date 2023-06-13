@@ -4,6 +4,9 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.lang.reflect.Method;
@@ -58,5 +61,18 @@ class Reflection {
                     "Exactly one eval method must be defined for class " + obj.getClass().getName());
         }
         return methods.get(0);
+    }
+
+    /**
+     * Get the method handle of the given method.
+     */
+    static MethodHandle getMethodHandle(Method method) {
+        var lookup = MethodHandles.lookup();
+        try {
+            return lookup.unreflect(method);
+        } catch (IllegalAccessException e) {
+            throw new IllegalArgumentException(
+                    "The eval method must be public for class " + method.getDeclaringClass().getName());
+        }
     }
 }

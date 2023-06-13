@@ -3,8 +3,7 @@ package com.risingwave.functions;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.lang.invoke.MethodHandle;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.function.Function;
@@ -14,17 +13,18 @@ import java.util.function.Function;
  */
 class TableFunctionBatch extends UserDefinedFunctionBatch {
     TableFunction<?> function;
-    Method method;
+    MethodHandle methodHandle;
     Function<Object, Object>[] processInputs;
     int chunkSize = 1024;
 
     TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
-        this.method = Reflection.getEvalMethod(function);
-        this.inputSchema = TypeUtils.methodToInputSchema(this.method);
+        var method = Reflection.getEvalMethod(function);
+        this.methodHandle = Reflection.getMethodHandle(method);
+        this.inputSchema = TypeUtils.methodToInputSchema(method);
         this.outputSchema = TypeUtils.tableFunctionToOutputSchema(function.getClass());
-        this.processInputs = TypeUtils.methodToProcessInputs(this.method);
+        this.processInputs = TypeUtils.methodToProcessInputs(method);
     }
 
     @Override
@@ -53,8 +53,8 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
             // call function
             var sizeBefore = this.function.size();
             try {
-                this.method.invoke(this.function, row);
-            } catch (IllegalAccessException | InvocationTargetException e) {
+                this.methodHandle.invokeWithArguments(row);
+            } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
             var sizeAfter = this.function.size();

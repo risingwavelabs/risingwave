@@ -3,8 +3,7 @@ package com.risingwave.functions;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
+import java.lang.invoke.MethodHandle;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.function.Function;
@@ -14,16 +13,17 @@ import java.util.function.Function;
  */
 class ScalarFunctionBatch extends UserDefinedFunctionBatch {
     ScalarFunction function;
-    Method method;
+    MethodHandle methodHandle;
     Function<Object, Object>[] processInputs;
 
     ScalarFunctionBatch(ScalarFunction function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
-        this.method = Reflection.getEvalMethod(function);
-        this.inputSchema = TypeUtils.methodToInputSchema(this.method);
-        this.outputSchema = TypeUtils.methodToOutputSchema(this.method);
-        this.processInputs = TypeUtils.methodToProcessInputs(this.method);
+        var method = Reflection.getEvalMethod(function);
+        this.methodHandle = Reflection.getMethodHandle(method);
+        this.inputSchema = TypeUtils.methodToInputSchema(method);
+        this.outputSchema = TypeUtils.methodToOutputSchema(method);
+        this.processInputs = TypeUtils.methodToProcessInputs(method);
     }
 
     @Override
@@ -36,8 +36,8 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
                 row[j] = this.processInputs[j].apply(val);
             }
             try {
-                outputValues[i] = this.method.invoke(this.function, row);
-            } catch (IllegalAccessException | InvocationTargetException e) {
+                outputValues[i] = this.methodHandle.invokeWithArguments(row);
+            } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
         }
@@ -45,5 +45,4 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
         var outputBatch = VectorSchemaRoot.of(outputVector);
         return Collections.singleton(outputBatch).iterator();
     }
-
 }
