@@ -74,6 +74,8 @@ Or you can use conda and install the necessary package `grpcio grpcio-tools psyc
 
 The connector service is the server and Python integration test is a client, which will send gRPC request and get response from the connector server. So when running integration_tests, remember to launch the connector service in advance. You can get the gRPC response and check messages or errors in client part. And check the detailed exception information on server side.
 
+### JDBC test
+
 We have integration tests that involve the use of several sinks, including file sink, jdbc sink, iceberg sink, and deltalake sink. If you wish to run these tests locally, you will need to configure both MinIO and PostgreSQL. 
 Downloading and launching MinIO is a straightforward process. For PostgreSQL, I recommend launching it using Docker. When setting up PostgreSQL, please ensure that the values for `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_USER` match the corresponding settings in the `integration_tests.py` file.
 
