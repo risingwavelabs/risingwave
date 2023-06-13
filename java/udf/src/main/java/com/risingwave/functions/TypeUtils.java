@@ -152,7 +152,18 @@ class TypeUtils {
      */
     static Schema tableFunctionToOutputSchema(Class<?> type) {
         var hint = type.getAnnotation(DataTypeHint.class);
-        var parameterizedType = (ParameterizedType) type.getGenericSuperclass();
+        ParameterizedType parameterizedType = null;
+        for (var iface : type.getGenericInterfaces()) {
+            if (iface instanceof ParameterizedType) {
+                var ptype = (ParameterizedType) iface;
+                if (ptype.getRawType().equals(TableFunction.class)) {
+                    parameterizedType = ptype;
+                }
+            }
+        }
+        if (parameterizedType == null) {
+            throw new IllegalArgumentException("Class " + type + " does not implement TableFunction");
+        }
         var typeArguments = parameterizedType.getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
 

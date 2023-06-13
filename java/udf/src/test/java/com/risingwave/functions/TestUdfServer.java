@@ -41,6 +41,7 @@ public class TestUdfServer {
         server = new UdfServer("localhost", 0);
         server.addFunction("gcd", new UdfExample.Gcd());
         server.addFunction("to_string", new UdfExample.ToString());
+        server.addFunction("series", new UdfExample.Series());
         server.start();
 
         client = new UdfClient("localhost", server.getPort());
@@ -85,6 +86,24 @@ public class TestUdfServer {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(output.contentToTSVString().trim(), "string");
+        }
+    }
+
+    @Test
+    public void series() throws Exception {
+        var c0 = new IntVector("", allocator);
+        c0.allocateNew(3);
+        c0.set(0, 0);
+        c0.set(1, 1);
+        c0.set(2, 2);
+        c0.setValueCount(3);
+
+        var input = VectorSchemaRoot.of(c0);
+
+        try (var stream = client.call("series", input)) {
+            var output = stream.getRoot();
+            assertTrue(stream.next());
+            assertEquals(output.contentToTSVString(), "row_index\t\n1\t0\n2\t0\n2\t1\n");
         }
     }
 }

@@ -47,7 +47,8 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         // due to the lack of generator support in Java, we can not yield from a
         // function call.
         var outputs = new ArrayList<VectorSchemaRoot>();
-        var row = new Object[batch.getSchema().getFields().size()];
+        var row = new Object[batch.getSchema().getFields().size() + 1];
+        row[0] = this.function;
         var indexes = new ArrayList<Integer>();
         Runnable buildChunk = () -> {
             var indexVector = TypeUtils.createVector(this.outputSchema.getFields().get(0), this.allocator,
@@ -60,9 +61,9 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         };
         for (int i = 0; i < batch.getRowCount(); i++) {
             // prepare input row
-            for (int j = 0; j < row.length; j++) {
+            for (int j = 0; j < row.length - 1; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = this.processInputs[j].apply(val);
+                row[j + 1] = this.processInputs[j].apply(val);
             }
             // call function
             var sizeBefore = this.function.size();
