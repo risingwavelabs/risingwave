@@ -365,6 +365,7 @@ impl ReplaceTableExprRewriter {
             RexNode::Constant(_) => {}
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
+            RexNode::Now(_) => {}
         }
     }
 

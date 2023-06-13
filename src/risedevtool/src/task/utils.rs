@@ -91,13 +91,8 @@ pub fn add_hummock_backend(
             (true, true)
         }
         ([], [aws_s3], []) => {
-            // if s3-compatible is true, using some s3 compatible object store.
-            match aws_s3.s3_compatible{
-                true => cmd.arg("--state-store")
-                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
-                false => cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
-            };
+            cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket));
             (true, true)
         }
         ([], [], [opendal]) => {

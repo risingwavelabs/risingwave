@@ -5,6 +5,7 @@ MAVEN_VERSION = "3.9.0"
 MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 
 [tasks.download-maven]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_BUILD_RW_CONNECTOR" ] }

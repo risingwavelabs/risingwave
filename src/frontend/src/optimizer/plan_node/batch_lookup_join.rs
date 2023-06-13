@@ -15,12 +15,12 @@
 use std::fmt;
 
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{ColumnId, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnId, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
-use super::generic::{self, GenericPlanRef};
+use super::generic::{self};
 use super::utils::Distill;
 use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
@@ -120,9 +120,7 @@ impl Distill for BatchLookupJoin {
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.logical.join_type)));
 
-        let mut concat_schema = self.logical.left.schema().fields.clone();
-        concat_schema.extend(self.logical.right.schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         vec.push((
             "predicate",
             Pretty::debug(&EqJoinPredicateDisplay {
@@ -132,12 +130,8 @@ impl Distill for BatchLookupJoin {
         ));
 
         if verbose {
-            let data = IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            )
-            .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            let data = IndicesDisplay::from_join(&self.logical, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
             vec.push(("output", data));
         }
 
@@ -151,9 +145,7 @@ impl fmt::Display for BatchLookupJoin {
         let mut builder = f.debug_struct("BatchLookupJoin");
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.logical.left.schema().fields.clone();
-        concat_schema.extend(self.logical.right.schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -163,11 +155,7 @@ impl fmt::Display for BatchLookupJoin {
         );
 
         if verbose {
-            match IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            ) {
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
                 None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };

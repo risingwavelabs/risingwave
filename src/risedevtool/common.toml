@@ -37,6 +37,7 @@ exit 1
 '''
 
 [tasks.prepare]
+private = true
 category = "Misc"
 description = "Create .risingwave folder for storing temporary files and data"
 dependencies = ["prepare-dir", "check-risedev-configured"]

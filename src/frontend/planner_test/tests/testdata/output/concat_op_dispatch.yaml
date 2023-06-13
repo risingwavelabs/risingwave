@@ -36,7 +36,7 @@
     Bind error: failed to bind expression: ARRAY[1] || s
 
     Caused by:
-      Bind error: Cannot append integer[] to varchar
+      Bind error: Cannot append varchar to integer[]
 - name: jsonb || jsonb -> jsonb
   sql: |
     select '1'::jsonb || '2'::jsonb;
