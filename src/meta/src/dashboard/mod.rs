@@ -191,7 +191,6 @@ pub(super) mod handlers {
             .fragment_manager
             .list_table_fragments()
             .await
-            .map_err(err)?
             .iter()
             .map(|f| (f.table_id().table_id() as i32, f.actors()))
             .collect::<Vec<_>>();
