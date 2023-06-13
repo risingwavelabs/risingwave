@@ -14,28 +14,17 @@
 
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
-use std::str::FromStr;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{
-    Field, Schema, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-    RW_INTERNAL_TABLE_FUNCTION_NAME,
-};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
 
-use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
-use crate::catalog::function_catalog::FunctionKind;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
-};
-use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
+use crate::expr::{ExprImpl, InputRef, TableFunction};
 
 mod join;
 mod share;

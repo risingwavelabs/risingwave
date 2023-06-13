@@ -114,18 +114,10 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name
-        if let Some(func) = self
-            .catalog
-            .first_valid_schema(
-                &self.db_name,
-                &self.search_path,
-                &self.auth_context.user_name,
-            )?
-            .get_function_by_name_args(
-                &function_name,
-                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-            )
-        {
+        if let Some(func) = self.first_valid_schema()?.get_function_by_name_args(
+            &function_name,
+            &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+        ) {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
@@ -651,12 +643,7 @@ impl Binder {
                 }))),
                 ("current_schema", guard_by_len(0, raw(|binder, _inputs| {
                     return Ok(binder
-                        .catalog
-                        .first_valid_schema(
-                            &binder.db_name,
-                            &binder.search_path,
-                            &binder.auth_context.user_name,
-                        )
+                        .first_valid_schema()
                         .map(|schema| ExprImpl::literal_varchar(schema.name()))
                         .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
                 }))),
