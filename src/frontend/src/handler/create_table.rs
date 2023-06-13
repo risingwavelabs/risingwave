@@ -140,15 +140,11 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(
-    column_defs: &[ColumnDef],
-    col_id_gen: &mut ColumnIdGenerator,
-) -> Result<Vec<ColumnCatalog>> {
+pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>> {
     let mut columns = Vec::with_capacity(column_defs.len());
 
     for column in column_defs {
         ensure_column_options_supported(column)?;
-        let column_id = col_id_gen.generate(&column.name.real_value());
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
         // Reject them with a clear NotImplemented error.
@@ -183,7 +179,7 @@ pub fn bind_sql_columns(
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
-                column_id,
+                column_id: ColumnId::placeholder(),
                 name: name.real_value(),
                 field_descs,
                 type_name: "".to_string(),
@@ -463,7 +459,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
-    let columns = bind_sql_columns(&column_defs, &mut col_id_gen)?;
+    let mut columns = bind_sql_columns(&column_defs)?;
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
     let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let pk_names: Vec<String> = bind_pk_names(&column_defs, &constraints)?;
@@ -531,8 +530,10 @@ pub(crate) fn gen_create_table_plan(
     append_only: bool,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
-    let columns = bind_sql_columns(&column_defs, &mut col_id_gen)?;
-
+    let mut columns = bind_sql_columns(&column_defs)?;
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
     let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
@@ -915,8 +916,11 @@ mod tests {
                 panic!("test case should be create table")
             };
             let actual: Result<_> = (|| {
-                let columns =
-                    bind_sql_columns(&column_defs, &mut ColumnIdGenerator::new_initial())?;
+                let mut columns = bind_sql_columns(&column_defs)?;
+                let mut col_id_gen = ColumnIdGenerator::new_initial();
+                for c in &mut columns {
+                    c.column_desc.column_id = col_id_gen.generate(c.name())
+                }
                 let pk_names = bind_pk_names(&column_defs, &constraints)?;
                 let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
                 Ok(pk_column_ids)

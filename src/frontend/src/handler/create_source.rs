@@ -540,13 +540,12 @@ pub(crate) async fn resolve_source_schema(
 fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
     columns: &mut Vec<ColumnCatalog>,
-    col_id_gen: &mut ColumnIdGenerator,
 ) {
     if is_kafka_connector(with_properties) {
         let kafka_timestamp_column = ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: DataType::Timestamptz,
-                column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
+                column_id: ColumnId::placeholder(),
                 name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
                 field_descs: vec![],
                 type_name: "".to_string(),
@@ -763,11 +762,14 @@ pub async fn handle_create_source(
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
 
+    let mut columns = bind_sql_columns(&stmt.columns)?;
+
+    check_and_add_timestamp_column(&with_properties, &mut columns);
+
     let mut col_id_gen = ColumnIdGenerator::new_initial();
-
-    let mut columns = bind_sql_columns(&stmt.columns, &mut col_id_gen)?;
-
-    check_and_add_timestamp_column(&with_properties, &mut columns, &mut col_id_gen);
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
 
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
