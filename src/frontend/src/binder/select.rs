@@ -304,6 +304,18 @@ impl Binder {
     /// * an arbitrary expression on input columns
     /// * an output-column name
     ///
+    /// Note the differences from `bind_order_by_expr_in_query`:
+    /// * When a name matches both an input column and an output column, `group by` interprets it as
+    ///   input column while `order by` interprets it as output column.
+    /// * As the name suggests, `group by` is part of `select` while `order by` is part of `query`.
+    ///   A `query` may consist unions of multiple `select`s (each with their own `group by`) but
+    ///   only one `order by`.
+    /// * Logically / semantically, `group by` evaluates before `select items`, which evaluates
+    ///   before `order by`. This means, `group by` can evaluate arbitrary expressions itself, or
+    ///   take expressions from `select items` (we `clone` here and `logical_agg` will rewrite those
+    ///   `select items` to `InputRef`). However, `order by` can only refer to `select items`, or
+    ///   append its extra arbitrary expressions as hidden `select items` for evaluation.
+    ///
     /// # Arguments
     ///
     /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are

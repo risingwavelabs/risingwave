@@ -218,6 +218,8 @@ impl Binder {
     /// * index of an output column
     /// * an arbitrary expression
     ///
+    /// Refer to `bind_group_by_expr_in_select` to see their similarities and differences.
+    ///
     /// # Arguments
     ///
     /// * `name_to_index` - visible output column name -> index. Ambiguous (duplicate) output names
