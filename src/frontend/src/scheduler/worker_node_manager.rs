@@ -116,12 +116,12 @@ impl WorkerNodeManager {
         serving_mapping: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut write_guard = self.inner.write().unwrap();
-        tracing::info!("Refresh worker nodes {:?}.", nodes);
-        tracing::info!(
+        tracing::debug!("Refresh worker nodes {:?}.", nodes);
+        tracing::debug!(
             "Refresh streaming vnode mapping for fragments {:?}.",
             streaming_mapping.keys()
         );
-        tracing::info!(
+        tracing::debug!(
             "Refresh serving vnode mapping for fragments {:?}.",
             serving_mapping.keys()
         );
@@ -215,7 +215,7 @@ impl WorkerNodeManager {
 
     pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, ParallelUnitMapping>) {
         let mut guard = self.inner.write().unwrap();
-        tracing::info!(
+        tracing::debug!(
             "Set serving vnode mapping for fragments {:?}",
             mappings.keys()
         );
@@ -227,7 +227,7 @@ impl WorkerNodeManager {
         mappings: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut guard = self.inner.write().unwrap();
-        tracing::info!(
+        tracing::debug!(
             "Upsert serving vnode mapping for fragments {:?}",
             mappings.keys()
         );
@@ -240,7 +240,7 @@ impl WorkerNodeManager {
 
     pub fn remove_serving_fragment_mapping(&self, fragment_ids: &[FragmentId]) {
         let mut guard = self.inner.write().unwrap();
-        tracing::info!(
+        tracing::debug!(
             "Delete serving vnode mapping for fragments {:?}",
             fragment_ids
         );

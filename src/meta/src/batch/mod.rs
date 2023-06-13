@@ -135,7 +135,7 @@ pub(crate) async fn on_meta_start<S: MetaStore>(
         streaming_fragment_mappings,
         &cluster_manager.list_active_serving_compute_nodes().await,
     );
-    tracing::info!(
+    tracing::debug!(
         "Initialize serving vnode mapping snapshot for fragments {:?}.",
         mappings.keys()
     );
@@ -172,7 +172,7 @@ pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
                                     let workers = cluster_manager.list_active_serving_compute_nodes().await;
                                     let all_streaming_mappings = all_streaming_fragment_mappings(&fragment_manager).await;
                                     let (mappings, _) = serving_vnode_mapping.upsert(all_streaming_mappings, &workers);
-                                    tracing::info!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
+                                    tracing::debug!("Update serving vnode mapping snapshot for fragments {:?}.", mappings.keys());
                                     notification_manager.notify_frontend_without_version(Operation::Snapshot, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&mappings) }));
                                 }
                                 LocalNotification::FragmentMappingsUpsert(fragment_ids) => {
@@ -183,11 +183,11 @@ pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
                                     let added_streaming_mappings = all_streaming_fragment_mappings(&fragment_manager).await.into_iter().filter(|f|fragment_ids.contains(&f.fragment_id));
                                     let (upserted, failed) = serving_vnode_mapping.upsert(added_streaming_mappings, &workers);
                                     if !upserted.is_empty() {
-                                        tracing::info!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
+                                        tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_fragment_parallel_unit_mapping(&upserted) }));
                                     }
                                     if !failed.is_empty() {
-                                        tracing::info!("Fail to update serving vnode mapping for fragments {:?}.", failed);
+                                        tracing::debug!("Fail to update serving vnode mapping for fragments {:?}.", failed);
                                         notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_deleted_fragment_parallel_unit_mapping(&failed)}));
                                     }
                                 }
@@ -195,7 +195,7 @@ pub(crate) async fn start_serving_vnode_mapping_worker<S: MetaStore>(
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
-                                    tracing::info!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
+                                    tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
                                     notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: to_deleted_fragment_parallel_unit_mapping(&fragment_ids) }));
                                 }
