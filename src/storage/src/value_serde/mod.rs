@@ -54,9 +54,9 @@ pub trait ValueRowSerde:
 
 impl ValueRowSerdeNew for EitherSerde {
     fn new(
-        value_indices: Arc<[usize]>,
-        schema: Arc<[DataType]>,
-        table_columns: Arc<[ColumnDesc]>,
+        _value_indices: Arc<[usize]>,
+        _schema: Arc<[DataType]>,
+        _table_columns: Arc<[ColumnDesc]>,
     ) -> EitherSerde {
         unreachable!("should construct manually")
     }
@@ -220,7 +220,9 @@ mod tests {
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..20000),
             Arc::from(data_types.into_boxed_slice()),
-            Arc::from_iter(std::iter::empty()),
+            Arc::from_iter(
+                (0..20000).map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16)),
+            ),
         );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);
@@ -228,7 +230,6 @@ mod tests {
     }
     #[test]
     fn test_row_hard2() {
-        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
         let mut data = vec![Some(Int16(233)); 5000];
         data.extend(vec![None; 5000]);
         data.extend(vec![Some(Utf8("risingwave risingwave".into())); 5000]);
@@ -239,7 +240,14 @@ mod tests {
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..20000),
             Arc::from(data_types.into_boxed_slice()),
-            Arc::from_iter(std::iter::empty()),
+            Arc::from_iter(
+                (0..10000)
+                    .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16))
+                    .chain(
+                        (10000..20000)
+                            .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Varchar)),
+                    ),
+            ),
         );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);
@@ -247,7 +255,6 @@ mod tests {
     }
     #[test]
     fn test_row_hard3() {
-        let column_ids = (0..1000000).map(ColumnId::new).collect_vec();
         let mut data = vec![Some(Int64(233)); 500000];
         data.extend(vec![None; 250000]);
         data.extend(vec![Some(Utf8("risingwave risingwave".into())); 250000]);
@@ -257,7 +264,14 @@ mod tests {
         let serde = ColumnAwareSerde::new(
             Arc::from_iter(0..1000000),
             Arc::from(data_types.into_boxed_slice()),
-            Arc::from_iter(std::iter::empty()),
+            Arc::from_iter(
+                (0..500000)
+                    .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Int16))
+                    .chain(
+                        (500000..1000000)
+                            .map(|id| ColumnDesc::unnamed(ColumnId::new(id), DataType::Varchar)),
+                    ),
+            ),
         );
         let encoded_bytes = serde.serialize(row);
         let decoded_row = serde.deserialize(&encoded_bytes);

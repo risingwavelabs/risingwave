@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
-use risingwave_common::catalog::ColumnId;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
@@ -120,14 +120,14 @@ impl HummockJavaBindingIterator {
 
         let table = read_plan.table_catalog.unwrap();
         let versioned = table.version.is_some();
-        let (column_ids, schema): (Vec<_>, Vec<_>) = table
+        let (schema, table_columns): (Vec<_>, Vec<_>) = table
             .columns
             .into_iter()
             .map(|c| c.column_desc.unwrap())
             .map(|c| {
                 (
-                    ColumnId::new(c.column_id),
-                    DataType::from(&c.column_type.unwrap()),
+                    DataType::from(&c.column_type.clone().unwrap()),
+                    ColumnDesc::from(c),
                 )
             })
             .unzip();
@@ -135,16 +135,16 @@ impl HummockJavaBindingIterator {
         // Decide which serializer to use based on whether the table is versioned or not.
         let row_serde = if versioned {
             ColumnAwareSerde::new(
-                Arc::from(value_indices.into_boxed_slice()),
-                Arc::from(data_types.into_boxed_slice()),
+                Arc::from_iter(0..table_columns.len()),
+                Arc::from(schema.into_boxed_slice()),
                 Arc::from(table_columns.into_boxed_slice()),
             )
             .into()
         } else {
             BasicSerde::new(
-                Arc::from(value_indices.into_boxed_slice()),
-                Arc::from(data_types.into_boxed_slice()),
-                Arc::from(table_columns.into_boxed_slice()),
+                Arc::from_iter(std::iter::empty()),
+                Arc::from(schema.into_boxed_slice()),
+                Arc::from_iter(std::iter::empty()),
             )
             .into()
         };

@@ -138,7 +138,7 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
 
 fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     let deserializer = BasicSerde::new(
-        Arc::from_iter(c.column_ids.iter().map(|id| id.get_id() as usize)),
+        Arc::from_iter(std::iter::empty()),
         c.schema.clone(),
         Arc::from_iter(std::iter::empty()),
     );

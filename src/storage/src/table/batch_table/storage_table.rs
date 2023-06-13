@@ -241,9 +241,9 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
                 .into()
             } else {
                 BasicSerde::new(
-                    Arc::from(value_indices.into_boxed_slice()),
+                    Arc::from_iter(std::iter::empty()),
                     Arc::from(data_types.into_boxed_slice()),
-                    Arc::from(table_columns.into_boxed_slice()),
+                    Arc::from_iter(std::iter::empty()),
                 )
                 .into()
             }

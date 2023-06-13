@@ -375,16 +375,16 @@ fn print_table_column(
             .collect_vec();
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {
             ColumnAwareSerde::new(
-                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from(table_catalog.value_indices.clone().into_boxed_slice()),
                 Arc::from(data_types.into_boxed_slice()),
-                Arc::from(table_columns.into_boxed_slice()),
+                Arc::from_iter(table_catalog.columns().iter().cloned().map(|c| c.column_desc)),
             )
             .into()
         } else {
             BasicSerde::new(
-                Arc::from(value_indices.into_boxed_slice()),
+                Arc::from_iter(std::iter::empty()),
                 Arc::from(data_types.into_boxed_slice()),
-                Arc::from(table_columns.into_boxed_slice()),
+                Arc::from_iter(std::iter::empty()),
             )
             .into()
         };

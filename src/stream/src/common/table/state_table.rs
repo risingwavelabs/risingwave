@@ -407,22 +407,19 @@ where
                 .map(|c| c.data_type.clone())
                 .collect_vec(),
         };
-
-        let column_ids = match &value_indices {
-            Some(value_indices) => value_indices
-                .iter()
-                .map(|idx| table_columns[*idx].column_id)
-                .collect_vec(),
-            None => table_columns.iter().map(|c| c.column_id).collect_vec(),
-        };
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
             row_serde: SD::new(
-                &column_ids,
+                Arc::from(
+                    value_indices
+                        .clone()
+                        .unwrap_or_else(|| (0..table_columns.len()).collect_vec())
+                        .into_boxed_slice(),
+                ),
                 Arc::from(data_types.into_boxed_slice()),
-                std::iter::empty(),
+                Arc::from(table_columns.into_boxed_slice()),
             ),
             pk_indices,
             dist_key_in_pk_indices,
