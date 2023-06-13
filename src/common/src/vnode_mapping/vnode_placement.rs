@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, LinkedList, VecDeque};
+use std::collections::{HashMap, HashSet, LinkedList, VecDeque};
 
 use itertools::Itertools;
 use num_integer::Integer;
-use risingwave_pb::common::{ParallelUnit, WorkerNode};
+use risingwave_pb::common::WorkerNode;
 
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
@@ -25,26 +25,28 @@ use crate::hash::{ParallelUnitId, ParallelUnitMapping, VirtualNode};
 /// The strategy is similar to `rebalance_actor_vnode` used in meta node, but is modified to
 /// consider `max_parallelism` too.
 pub fn place_vnode(
-    old_pu_mapping: Option<&ParallelUnitMapping>,
+    hint_pu_mapping: Option<&ParallelUnitMapping>,
     new_workers: &[WorkerNode],
     max_parallelism: usize,
 ) -> Option<ParallelUnitMapping> {
-    let get_pu_map = |worker_nodes: &[WorkerNode]| {
-        worker_nodes
-            .iter()
-            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
-            .sorted_by_key(|w| w.id)
-            .map(|w| (w.id, w.parallel_units.clone()))
-            .collect::<BTreeMap<u32, Vec<ParallelUnit>>>()
-    };
-    let mut new_pus: LinkedList<_> = get_pu_map(new_workers)
-        .into_values()
-        .map(|pus| pus.into_iter().sorted_by_key(|p| p.id))
+    // Get all serving parallel units from all available workers, grouped by worker id and ordered
+    // by parallel unit id in each group.
+    let mut new_pus: LinkedList<_> = new_workers
+        .iter()
+        .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+        .sorted_by_key(|w| w.id)
+        .map(|w| w.parallel_units.clone().into_iter().sorted_by_key(|p| p.id))
         .collect();
+
+    // Set serving parallelism to the minimum of total number of parallel units, specified
+    // `max_parallelism` and total number of virtual nodes.
     let serving_parallelism = std::cmp::min(
         new_pus.iter().map(|pus| pus.len()).sum(),
         std::cmp::min(max_parallelism, VirtualNode::COUNT),
     );
+
+    // Select `serving_parallelism` parallel units in a round-robin fashion, to distribute workload
+    // evenly among workers.
     let mut selected_pu_ids = Vec::new();
     while !new_pus.is_empty() {
         new_pus.drain_filter(|ps| {
@@ -62,6 +64,9 @@ pub fn place_vnode(
         return None;
     }
 
+    // Calculate balance for each selected parallel unit. Initially, each parallel unit is assigned
+    // no vnodes. Thus its negative balance means that many vnodes should be assigned to it later.
+    // `is_temp` is a mark for a special temporary parallel unit, only to simplify implementation.
     #[derive(Debug)]
     struct Balance {
         pu_id: ParallelUnitId,
@@ -85,21 +90,23 @@ pub fn place_vnode(
         balances.insert(*pu_id, balance);
     }
 
-    // Assign vnodes that doesn't belong to any old parallel unit to `temp_pu` temporarily.
-    // These vnodes will be reassigned later.
+    // Now to maintain affinity, if a hint has been provided via `hint_pu_mapping`, follow
+    // that mapping to adjust balances.
     let mut temp_pu = Balance {
         pu_id: 0, // This id doesn't matter for `temp_pu`. It's distinguishable via `is_temp`.
         balance: 0,
         builder: BitmapBuilder::zeroed(VirtualNode::COUNT),
         is_temp: true,
     };
-    match old_pu_mapping {
-        Some(old_pu_mapping) => {
-            // redistribute
-            for (vnode, pu_id) in old_pu_mapping.iter_with_vnode() {
+    match hint_pu_mapping {
+        Some(hint_pu_mapping) => {
+            for (vnode, pu_id) in hint_pu_mapping.iter_with_vnode() {
                 let b = if selected_pu_id_set.contains(&pu_id) {
+                    // Assign vnode to the same parallel unit as hint.
                     balances.get_mut(&pu_id).unwrap()
                 } else {
+                    // Assign vnode that doesn't belong to any parallel unit to `temp_pu`
+                    // temporarily. They will be reassigned later.
                     &mut temp_pu
                 };
                 b.balance += 1;
@@ -107,13 +114,20 @@ pub fn place_vnode(
             }
         }
         None => {
-            // initialize
+            // No hint is provided, assign all vnodes to `temp_pu`.
             for vnode in VirtualNode::all() {
                 temp_pu.balance += 1;
                 temp_pu.builder.set(vnode.to_index(), true);
             }
         }
     }
+
+    // The final step is to move vnodes from parallel units with positive balance to parallel units
+    // with negative balance, until all parallel units are of 0 balance.
+    // A double-ended queue with parallel units ordered by balance in descending order is consumed:
+    // 1. Peek 2 parallel units from front and back.
+    // 2. It any of them is of 0 balance, pop it and go to step 1.
+    // 3. Otherwise, move vnodes from front to back.
     let mut balances: VecDeque<_> = balances
         .into_values()
         .chain(std::iter::once(temp_pu))
