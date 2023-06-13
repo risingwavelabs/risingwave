@@ -66,7 +66,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 18
+    timeout_in_minutes: 15
 
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
@@ -79,7 +79,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 12
 
   - label: "end-to-end test for opendal (parallel)"
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-dev"
@@ -92,7 +92,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 12
 
   - label: "end-to-end test (parallel, in-memory)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-dev"
@@ -103,7 +103,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 12
 
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
