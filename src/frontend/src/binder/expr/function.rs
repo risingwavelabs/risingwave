@@ -43,7 +43,7 @@ use crate::expr::{
 use crate::utils::Condition;
 
 impl Binder {
-    pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
+    pub(in crate::binder) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
         let function_name = match f.name.0.as_slice() {
             [name] => name.real_value(),
             [schema, name] => {
@@ -871,7 +871,8 @@ impl Binder {
                 | Clause::Values
                 | Clause::GroupBy
                 | Clause::Having
-                | Clause::Filter => {
+                | Clause::Filter
+                | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "window functions are not allowed in {}",
                         clause
@@ -912,7 +913,7 @@ impl Binder {
     fn ensure_aggregate_allowed(&self) -> Result<()> {
         if let Some(clause) = self.context.clause {
             match clause {
-                Clause::Where | Clause::Values => {
+                Clause::Where | Clause::Values | Clause::From => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "aggregate functions are not allowed in {}",
                         clause
@@ -935,7 +936,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                Clause::GroupBy | Clause::Having | Clause::Filter => {}
+                Clause::GroupBy | Clause::Having | Clause::Filter | Clause::From => {}
             }
         }
         Ok(())

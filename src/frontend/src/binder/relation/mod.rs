@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
-use crate::expr::{ExprImpl, InputRef, TableFunction};
+use crate::expr::{ExprImpl, InputRef};
 
 mod join;
 mod share;
@@ -53,7 +53,7 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<TableFunction>),
+    TableFunction(ExprImpl),
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
@@ -66,13 +66,7 @@ impl RewriteExprsRecursive for Relation {
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::TableFunction(inner) => {
-                let new_args = std::mem::take(&mut inner.args)
-                    .into_iter()
-                    .map(|expr| rewriter.rewrite_expr(expr))
-                    .collect();
-                inner.args = new_args;
-            }
+            Relation::TableFunction(inner) => *inner = rewriter.rewrite_expr(inner.take()),
             _ => {}
         }
     }
