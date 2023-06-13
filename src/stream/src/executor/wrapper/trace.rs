@@ -37,12 +37,15 @@ pub async fn trace(
 ) {
     let actor_id_string = actor_id.to_string();
 
-    let mut span = tracing::span!(
-        target: "epoch_trace",
-        tracing::Level::INFO,
-        "executor_next",
-        executor = info.identity
-    );
+    let new_span = || {
+        tracing::info_span!(
+            target: "epoch_trace",
+            parent: None,
+            "executor",
+            executor = info.identity
+        )
+    };
+    let mut span = new_span();
 
     pin_mut!(input);
 
@@ -59,11 +62,21 @@ pub async fn trace(
             }
         }
 
-        if let Message::Barrier(barrier) = &message {
-            span = barrier.tracing_context().attach(span);
+        let new_tracing_context = message.as_barrier().map(|b| b.tracing_context().clone());
+
+        {
+            // let _barrier_span = tracing::info_span!(
+            //     target: "epoch_trace",
+            //     parent: &span,
+            //     "barrier"
+            // );
+
+            yield message;
         }
 
-        yield message;
+        if let Some(tracing_context) = new_tracing_context {
+            span = tracing_context.attach(new_span());
+        }
     }
 }
 

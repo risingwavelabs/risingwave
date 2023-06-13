@@ -167,6 +167,8 @@ struct CheckpointControl<S: MetaStore> {
 
     metrics: Arc<MetaMetrics>,
 
+    prev_span: Option<tracing::Span>,
+
     /// Get notified when we finished Create MV and collect a barrier(checkpoint = true)
     finished_commands: Vec<TrackingCommand<S>>,
 }
@@ -183,6 +185,7 @@ where
             adding_actors: Default::default(),
             removing_actors: Default::default(),
             metrics,
+            prev_span: None,
             finished_commands: Default::default(),
         }
     }
@@ -317,15 +320,34 @@ where
     }
 
     /// Enqueue a barrier command, and init its state to `InFlight`.
-    fn enqueue_command(&mut self, command_ctx: Arc<CommandContext<S>>, notifiers: Vec<Notifier>) {
+    fn enqueue_command(
+        &mut self,
+        command_ctx: Arc<CommandContext<S>>,
+        notifiers: Vec<Notifier>,
+    ) -> TracingContext {
         let timer = self.metrics.barrier_latency.start_timer();
+
+        let span = tracing::info_span!(
+            target: "epoch_trace",
+            parent: None,
+            "Epoch",
+            curr_epoch = command_ctx.curr_epoch.0,
+        );
+
+        let tracing_context = TracingContext::from_span(&span);
+
         self.command_ctx_queue.push_back(EpochNode {
             timer: Some(timer),
             wait_commit_timer: None,
+
+            span: Some(span),
+
             state: InFlight,
             command_ctx,
             notifiers,
         });
+
+        tracing_context
     }
 
     /// Change the state of this `prev_epoch` to `Completed`. Return continuous nodes
@@ -450,6 +472,9 @@ pub struct EpochNode<S: MetaStore> {
     timer: Option<HistogramTimer>,
     /// The timer of `barrier_wait_commit_latency`
     wait_commit_timer: Option<HistogramTimer>,
+
+    span: Option<tracing::Span>,
+
     /// Whether this barrier is in-flight or completed.
     state: BarrierEpochState,
     /// Context of this command to generate barrier and do some post jobs.
@@ -664,18 +689,22 @@ where
         notifiers.iter_mut().for_each(Notifier::notify_to_send);
         send_latency_timer.observe_duration();
 
-        checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
-        self.inject_barrier(command_ctx, barrier_complete_tx).await;
+        let tracing_context = checkpoint_control.enqueue_command(command_ctx.clone(), notifiers);
+        self.inject_barrier(command_ctx, tracing_context, barrier_complete_tx)
+            .await;
     }
 
     /// Inject a barrier to all CNs and spawn a task to collect it
     async fn inject_barrier(
         &self,
         command_context: Arc<CommandContext<S>>,
+        tracing_context: TracingContext,
         barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
     ) {
         let prev_epoch = command_context.prev_epoch.0;
-        let result = self.inject_barrier_inner(command_context.clone()).await;
+        let result = self
+            .inject_barrier_inner(command_context.clone(), tracing_context)
+            .await;
         match result {
             Ok(node_need_collect) => {
                 // todo: the collect handler should be abort when recovery.
@@ -699,6 +728,7 @@ where
     async fn inject_barrier_inner(
         &self,
         command_context: Arc<CommandContext<S>>,
+        tracing_context: TracingContext,
     ) -> MetaResult<HashMap<WorkerId, bool>> {
         fail_point!("inject_barrier_err", |_| bail!("inject_barrier_err"));
         let mutation = command_context.to_mutation().await?;
@@ -723,13 +753,7 @@ where
                     }),
                     mutation,
                     // TODO(bugen): add distributed tracing
-                    tracing_context: TracingContext::from_span(&span!(
-                        target: "epoch_trace",
-                        tracing::Level::INFO,
-                        "Epoch",
-                        curr_epoch = command_context.curr_epoch.0,
-                    ))
-                    .to_protobuf(),
+                    tracing_context: tracing_context.to_protobuf(),
                     checkpoint: command_context.checkpoint,
                     passed_actors: vec![],
                 };
@@ -865,6 +889,7 @@ where
             if let Some(timer) = node.timer {
                 timer.observe_duration();
             }
+            // TODO: tracing
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }
@@ -995,6 +1020,10 @@ where
 
                 node.timer.take().unwrap().observe_duration();
                 node.wait_commit_timer.take().unwrap().observe_duration();
+
+                let _ = checkpoint_control
+                    .prev_span
+                    .replace(node.span.take().unwrap());
 
                 Ok(())
             }

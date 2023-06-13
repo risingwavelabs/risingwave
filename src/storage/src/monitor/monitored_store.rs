@@ -22,6 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
+use tracing_futures::Instrument;
 
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
@@ -366,7 +367,7 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     }
 
     fn into_stream(self) -> impl StateStoreIterItemStream {
-        Self::into_stream_inner(self)
+        Self::into_stream_inner(self).instrument(tracing::info_span!("store_iter"))
     }
 }
 

@@ -20,7 +20,7 @@ console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 opentelemetry = { version = "0.19", features = ["rt-tokio"] }
-opentelemetry-jaeger = "0.18"
+opentelemetry-jaeger = { version = "0.18", features = ["rt-tokio"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
 risingwave_common = { path = "../../common" }
