@@ -21,8 +21,9 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, GroupTableChange,
-    HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+    CompactionConfig, CompatibilityVersion, GroupConstruct, GroupDestroy, GroupMetaChange,
+    GroupTableChange, HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel,
+    SstableInfo,
 };
 
 use super::StateTableId;
@@ -141,7 +142,7 @@ pub trait HummockVersionUpdateExt {
         group_id: CompactionGroupId,
         member_table_ids: HashSet<StateTableId>,
         new_sst_start_id: u64,
-        no_trivial_split: bool,
+        allow_trivial_split: bool,
     ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
@@ -303,19 +304,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .chain(parent_levels.get_levels().iter())
                     .flat_map(|level| level.get_table_infos())
                     .map(|sst_info| {
-                        // `flag` is a bitmap
-                        let mut flag = 0;
                         // `sst_info.table_ids` will never be empty.
                         for table_id in sst_info.get_table_ids() {
                             if member_table_ids.contains(table_id) {
-                                flag = 2;
-                                break;
+                                return 2;
                             }
                         }
-                        // We need to replace the SST id of the divided part in parent group with a
-                        // new SST id when it's not a trivial adjust. View function
-                        // `init_with_parent_group` for details.
-                        flag
+                        0
                     })
                     .sum()
             })
@@ -327,7 +322,7 @@ impl HummockVersionUpdateExt for HummockVersion {
         group_id: CompactionGroupId,
         member_table_ids: HashSet<StateTableId>,
         new_sst_start_id: u64,
-        no_trivial_split: bool,
+        allow_trivial_split: bool,
     ) -> Vec<SstSplitInfo> {
         let mut new_sst_id = new_sst_start_id;
         let mut split_id_vers = vec![];
@@ -364,7 +359,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 // whenever another compaction task is finished.
                 let insert_table_infos = split_sst_info_for_level(
                     &member_table_ids,
-                    no_trivial_split,
+                    allow_trivial_split,
                     sub_level,
                     &mut split_id_vers,
                     &mut new_sst_id,
@@ -397,7 +392,7 @@ impl HummockVersionUpdateExt for HummockVersion {
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
             let insert_table_infos = split_sst_info_for_level(
                 &member_table_ids,
-                no_trivial_split,
+                allow_trivial_split,
                 level,
                 &mut split_id_vers,
                 &mut new_sst_id,
@@ -445,7 +440,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     *compaction_group_id,
                     HashSet::from_iter(group_construct.table_ids.clone()),
                     group_construct.get_new_sst_start_id(),
-                    group_construct.no_trivial_split,
+                    group_construct.version() == CompatibilityVersion::InitVersion,
                 ));
             } else if let Some(group_change) = &summary.group_table_change {
                 sst_split_info.extend(self.init_with_parent_group(
@@ -453,7 +448,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     group_change.target_group_id,
                     HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
-                    group_change.no_trivial_split,
+                    group_change.version() == CompatibilityVersion::InitVersion,
                 ));
 
                 let levels = self
@@ -690,7 +685,7 @@ pub fn build_initial_compaction_group_levels(
 
 fn split_sst_info_for_level(
     member_table_ids: &HashSet<u32>,
-    no_trivial_split: bool,
+    allow_trivial_split: bool,
     level: &mut Level,
     split_id_vers: &mut Vec<SstSplitInfo>,
     new_sst_id: &mut u64,
@@ -707,7 +702,7 @@ fn split_sst_info_for_level(
             .collect_vec();
         if !removed_table_ids.is_empty() {
             let is_trivial =
-                !no_trivial_split && removed_table_ids.len() == sst_info.table_ids.len();
+                allow_trivial_split && removed_table_ids.len() == sst_info.table_ids.len();
             let mut branch_table_info = sst_info.clone();
             branch_table_info.sst_id = *new_sst_id;
             *new_sst_id += 1;

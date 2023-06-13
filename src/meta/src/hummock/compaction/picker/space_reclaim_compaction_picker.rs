@@ -105,7 +105,7 @@ impl SpaceReclaimCompactionPicker {
             for sst in &levels.levels[state.last_level - 1].table_infos {
                 let exist_count = self.exist_table_count(sst);
                 let need_reclaim = exist_count < sst.table_ids.len();
-                let is_trivial = exist_count == 0;
+                let is_trivial_sst = exist_count == 0;
                 if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
                 {
                     if !select_input_ssts.is_empty() {
@@ -118,7 +118,7 @@ impl SpaceReclaimCompactionPicker {
                     continue;
                 }
 
-                if !is_trivial {
+                if !is_trivial_sst {
                     if !select_input_ssts.is_empty() && is_trivial_task {
                         break;
                     }
