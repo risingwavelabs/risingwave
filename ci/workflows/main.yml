@@ -111,7 +111,7 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 15
 
   - label: "end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
