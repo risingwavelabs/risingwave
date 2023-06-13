@@ -16,6 +16,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
@@ -24,6 +25,7 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
+use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
@@ -115,39 +117,108 @@ impl BatchSeqScan {
     pub fn scan_ranges(&self) -> &[ScanRange] {
         &self.scan_ranges
     }
+
+    fn scan_ranges_as_strs(&self, verbose: bool) -> Vec<String> {
+        let order_names = match verbose {
+            true => self.logical.order_names_with_table_prefix(),
+            false => self.logical.order_names(),
+        };
+        let mut range_strs = vec![];
+
+        let explain_max_range = 20;
+        for scan_range in self.scan_ranges.iter().take(explain_max_range) {
+            #[expect(clippy::disallowed_methods)]
+            let mut range_str = scan_range
+                .eq_conds
+                .iter()
+                .zip(order_names.iter())
+                .map(|(v, name)| match v {
+                    Some(v) => format!("{} = {:?}", name, v),
+                    None => format!("{} IS NULL", name),
+                })
+                .collect_vec();
+            if !is_full_range(&scan_range.range) {
+                let i = scan_range.eq_conds.len();
+                range_str.push(range_to_string(&order_names[i], &scan_range.range))
+            }
+            range_strs.push(range_str.join(" AND "));
+        }
+        if self.scan_ranges.len() > explain_max_range {
+            range_strs.push("...".to_string());
+        }
+        range_strs
+    }
 }
 
 impl_plan_tree_node_for_leaf! { BatchSeqScan }
 
-impl fmt::Display for BatchSeqScan {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match lb {
-                Bound::Included(v) => (">=", v),
-                Bound::Excluded(v) => (">", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
+fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match lb {
+        Bound::Included(v) => (">=", v),
+        Bound::Excluded(v) => (">", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
+    let (op, v) = match ub {
+        Bound::Included(v) => ("<=", v),
+        Bound::Excluded(v) => ("<", v),
+        Bound::Unbounded => unreachable!(),
+    };
+    format!("{} {} {:?}", name, op, v)
+}
+fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
+    match (&range.0, &range.1) {
+        (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+        (Bound::Unbounded, ub) => ub_to_string(name, ub),
+        (lb, Bound::Unbounded) => lb_to_string(name, lb),
+        (lb, ub) => {
+            format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
         }
-        fn ub_to_string(name: &str, ub: &Bound<ScalarImpl>) -> String {
-            let (op, v) = match ub {
-                Bound::Included(v) => ("<=", v),
-                Bound::Excluded(v) => ("<", v),
-                Bound::Unbounded => unreachable!(),
-            };
-            format!("{} {} {:?}", name, op, v)
-        }
-        fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -> String {
-            match (&range.0, &range.1) {
-                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
-                (Bound::Unbounded, ub) => ub_to_string(name, ub),
-                (lb, Bound::Unbounded) => lb_to_string(name, lb),
-                (lb, ub) => {
-                    format!("{} AND {}", lb_to_string(name, lb), ub_to_string(name, ub))
+    }
+}
+
+impl Distill for BatchSeqScan {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(4);
+        vec.push(("table", Pretty::display(&self.logical.table_name)));
+        vec.push((
+            "columns",
+            Pretty::Array(
+                match verbose {
+                    true => self.logical.column_names_with_table_prefix(),
+                    false => self.logical.column_names(),
                 }
-            }
+                .into_iter()
+                .map(Pretty::from)
+                .collect(),
+            ),
+        ));
+
+        if !self.scan_ranges.is_empty() {
+            let range_strs = self.scan_ranges_as_strs(verbose);
+            vec.push((
+                "scan_ranges",
+                Pretty::Array(range_strs.into_iter().map(Pretty::from).collect()),
+            ));
         }
 
+        if verbose {
+            let dist = Pretty::display(&DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            });
+            vec.push(("distribution", dist));
+        }
+
+        Pretty::childless_record("BatchScan", vec)
+    }
+}
+
+impl fmt::Display for BatchSeqScan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
 
         write!(
@@ -162,45 +233,16 @@ impl fmt::Display for BatchSeqScan {
         )?;
 
         if !self.scan_ranges.is_empty() {
-            let order_names = match verbose {
-                true => self.logical.order_names_with_table_prefix(),
-                false => self.logical.order_names(),
-            };
-            let mut range_strs = vec![];
-
-            let explain_max_range = 20;
-            for scan_range in self.scan_ranges.iter().take(explain_max_range) {
-                #[expect(clippy::disallowed_methods)]
-                let mut range_str = scan_range
-                    .eq_conds
-                    .iter()
-                    .zip(order_names.iter())
-                    .map(|(v, name)| match v {
-                        Some(v) => format!("{} = {:?}", name, v),
-                        None => format!("{} IS NULL", name),
-                    })
-                    .collect_vec();
-                if !is_full_range(&scan_range.range) {
-                    let i = scan_range.eq_conds.len();
-                    range_str.push(range_to_string(&order_names[i], &scan_range.range))
-                }
-                range_strs.push(range_str.join(" AND "));
-            }
-            if self.scan_ranges.len() > explain_max_range {
-                range_strs.push("...".to_string());
-            }
+            let range_strs = self.scan_ranges_as_strs(verbose);
             write!(f, ", scan_ranges: [{}]", range_strs.join(" , "))?;
         }
 
         if verbose {
-            write!(
-                f,
-                ", distribution: {}",
-                &DistributionDisplay {
-                    distribution: self.distribution(),
-                    input_schema: &self.base.schema,
-                }
-            )?;
+            let dist = &DistributionDisplay {
+                distribution: self.distribution(),
+                input_schema: &self.base.schema,
+            };
+            write!(f, ", distribution: {}", dist)?;
         }
 
         write!(f, " }}")

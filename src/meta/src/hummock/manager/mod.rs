@@ -14,7 +14,7 @@
 
 use std::borrow::BorrowMut;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::{compact_task_to_string, estimate_state_for_compaction};
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_version_delta_after_version, get_compaction_group_ids,
+    build_version_delta_after_version, get_compaction_group_ids, insert_new_sub_level,
     try_get_compaction_group_id_by_table_id, BranchedSstInfo, HummockVersionExt,
     HummockVersionUpdateExt,
 };
@@ -51,7 +51,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::{Notify, RwLockWriteGuard};
+use tokio::sync::RwLockWriteGuard;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
@@ -112,12 +112,11 @@ pub struct HummockManager<S: MetaStore> {
     versioning: MonitoredRwLock<Versioning>,
     latest_snapshot: Snapshot,
 
-    metrics: Arc<MetaMetrics>,
+    pub metrics: Arc<MetaMetrics>,
 
     // `compaction_request_channel` is used to schedule a compaction for specified
     // CompactionGroupId
     compaction_request_channel: parking_lot::RwLock<Option<CompactionRequestChannelRef>>,
-    compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
 
     pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
@@ -339,7 +338,6 @@ where
             catalog_manager,
             compaction_group_manager,
             compaction_request_channel: parking_lot::RwLock::new(None),
-            compaction_resume_notifier: parking_lot::RwLock::new(None),
             compactor_manager,
             latest_snapshot: ArcSwap::from_pointee(HummockSnapshot {
                 committed_epoch: INVALID_EPOCH,
@@ -834,15 +832,30 @@ where
             .unwrap()
             .member_table_ids
             .clone();
+        let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
 
-        if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
+        if is_trivial_reclaim {
+            compact_task.set_task_status(TaskStatus::Success);
+            self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
+                .await?;
+            tracing::debug!(
+                "TrivialReclaim for compaction group {}: remove {} sstables, cost time: {:?}",
+                compaction_group_id,
+                compact_task
+                    .input_ssts
+                    .iter()
+                    .map(|level| level.table_infos.len())
+                    .sum::<usize>(),
+                start_time.elapsed()
+            );
+        } else if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
             // this task has been finished and `trivial_move_task` does not need to be schedule.
             compact_task.set_task_status(TaskStatus::Success);
             self.report_compact_task_impl(None, &mut compact_task, Some(compaction_guard), None)
                 .await?;
             tracing::debug!(
-                "TrivialMove for compaction group {}: pick up {} tables in level {} to compact to target_level {}  cost time: {:?}",
+                "TrivialMove for compaction group {}: pick up {} sstables in level {} to compact to target_level {}  cost time: {:?}",
                 compaction_group_id,
                 compact_task.input_ssts[0].table_infos.len(),
                 compact_task.input_ssts[0].level_idx,
@@ -908,6 +921,8 @@ where
                         && compact_task.input_ssts[1].table_infos.is_empty()
                     {
                         "trivial-move"
+                    } else if is_trivial_reclaim {
+                        "trivial-space-reclaim"
                     } else {
                         ""
                     };
@@ -953,6 +968,8 @@ where
                     compact_task.input_ssts[1].level_idx,
                     if CompactStatus::is_trivial_move_task(&compact_task) {
                         "trivial-move"
+                    } else if is_trivial_reclaim {
+                        "trivial-space-reclaim"
                     } else {
                         ""
                     }
@@ -1042,7 +1059,10 @@ where
             if let TaskStatus::Pending = task.task_status() {
                 return Ok(Some(task));
             }
-            assert!(CompactStatus::is_trivial_move_task(&task));
+            assert!(
+                CompactStatus::is_trivial_move_task(&task)
+                    || CompactStatus::is_trivial_reclaim(&task)
+            );
         }
 
         Ok(None)
@@ -1188,7 +1208,6 @@ where
         let start_time = Instant::now();
         let original_keys = compaction.compaction_statuses.keys().cloned().collect_vec();
         let mut compact_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
-        let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         let assignee_context_id = compact_task_assignment
@@ -1319,14 +1338,6 @@ where
             // policy.
             self.compactor_manager
                 .report_compact_task(context_id, compact_task);
-            // Tell compaction scheduler to resume compaction if there's any compactor becoming
-            // available.
-            if assigned_task_num == self.compactor_manager.max_concurrent_task_number() {
-                self.try_resume_compaction(CompactionResumeTrigger::TaskReport {
-                    original_task_num: assigned_task_num,
-                });
-            }
-
             // Update compaction task count.
             //
             // A corner case is that the compactor is deleted
@@ -1348,8 +1359,9 @@ where
             // There are two cases where assignee_context_id is not available
             // 1. compactor does not exist
             // 2. trivial_move
-
-            let label = if CompactStatus::is_trivial_move_task(compact_task) {
+            let label = if CompactStatus::is_trivial_reclaim(compact_task) {
+                "trivial-space-reclaim"
+            } else if CompactStatus::is_trivial_move_task(compact_task) {
                 // TODO: only support can_trivial_move in DynamicLevelCompcation, will check
                 // task_type next PR
                 "trivial-move"
@@ -1560,6 +1572,11 @@ where
                 .entry(compaction_group_id)
                 .or_default()
                 .group_deltas;
+            let version_l0 = new_hummock_version
+                .get_compaction_group_levels_mut(compaction_group_id)
+                .l0
+                .as_mut()
+                .expect("Expect level 0 is not empty");
             let l0_sub_level_id = epoch;
             let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
@@ -1570,8 +1587,18 @@ where
                 })),
             };
             group_deltas.push(group_delta);
+
+            insert_new_sub_level(
+                version_l0,
+                l0_sub_level_id,
+                LevelType::Overlapping,
+                group_sstables,
+                None,
+            );
         }
-        new_hummock_version.apply_version_delta(new_version_delta.deref());
+
+        // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
+        new_hummock_version.max_committed_epoch = epoch;
 
         // Apply stats changes.
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
@@ -1853,13 +1880,8 @@ where
         Ok(())
     }
 
-    pub fn init_compaction_scheduler(
-        &self,
-        sched_channel: CompactionRequestChannelRef,
-        notifier: Option<Arc<Notify>>,
-    ) {
+    pub fn init_compaction_scheduler(&self, sched_channel: CompactionRequestChannelRef) {
         *self.compaction_request_channel.write() = Some(sched_channel);
-        *self.compaction_resume_notifier.write() = notifier;
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.
@@ -1917,14 +1939,6 @@ where
         } else {
             tracing::warn!("compaction_request_channel is not initialized");
             false
-        }
-    }
-
-    /// Tell compaction scheduler to resume compaction.
-    pub fn try_resume_compaction(&self, trigger: CompactionResumeTrigger) {
-        tracing::debug!("resume compaction, trigger: {:?}", trigger);
-        if let Some(notifier) = self.compaction_resume_notifier.read().as_ref() {
-            notifier.notify_one();
         }
     }
 

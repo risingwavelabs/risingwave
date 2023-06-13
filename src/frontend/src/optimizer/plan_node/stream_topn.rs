@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::Limit;
+use super::generic::TopNLimit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -45,7 +45,7 @@ impl StreamTopN {
         StreamTopN { base, logical }
     }
 
-    pub fn limit_attr(&self) -> Limit {
+    pub fn limit_attr(&self) -> TopNLimit {
         self.logical.limit_attr
     }
 

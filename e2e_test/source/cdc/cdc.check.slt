@@ -27,7 +27,12 @@ select count(*) as cnt from mytable;
 ----
 4
 
-query IIII
+query VI
+select count(*) from orders_2;
+----
+3
+
+query VII
 select count(*) from shipments_2;
 ----
 3

@@ -169,11 +169,7 @@ async fn test_hummock_compaction_task() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_sstables_with_table_id(
-        epoch,
-        1,
-        get_sst_ids(&hummock_manager, sst_num).await,
-    );
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
         &original_tables,
@@ -734,8 +730,7 @@ async fn test_print_compact_task() {
     let (_, hummock_manager, _cluster_manager, _) = setup_compute_env(80).await;
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables =
-        generate_test_sstables_with_table_id(epoch, 1, get_sst_ids(&hummock_manager, 2).await);
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     register_sstable_infos_to_compaction_group(
         &hummock_manager,
         &original_tables,
@@ -949,14 +944,10 @@ async fn test_hummock_compaction_task_heartbeat() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_sstables_with_table_id(
-        epoch,
-        1,
-        get_sst_ids(&hummock_manager, sst_num).await,
-    );
-    register_table_ids_to_compaction_group(
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
         &hummock_manager,
-        &[1],
+        &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
@@ -1081,14 +1072,10 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let original_tables = generate_test_sstables_with_table_id(
-        epoch,
-        1,
-        get_sst_ids(&hummock_manager, sst_num).await,
-    );
-    register_table_ids_to_compaction_group(
+    let original_tables = generate_test_tables(epoch, get_sst_ids(&hummock_manager, sst_num).await);
+    register_sstable_infos_to_compaction_group(
         &hummock_manager,
-        &[1],
+        &original_tables,
         StaticCompactionGroupId::StateDefault.into(),
     )
     .await;
@@ -1466,11 +1453,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         sst_info: SstableInfo {
             object_id: 10,
             sst_id: 10,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(100, 1, 20),
-                right: iterator_test_key_of_epoch(100, 100, 20),
-                right_exclusive: false,
-            }),
+            key_range: None,
             table_ids: vec![100],
             min_epoch: 20,
             max_epoch: 20,
@@ -1483,11 +1466,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         sst_info: SstableInfo {
             object_id: 11,
             sst_id: 11,
-            key_range: Some(KeyRange {
-                left: iterator_test_key_of_epoch(100, 101, 20),
-                right: iterator_test_key_of_epoch(101, 100, 20),
-                right_exclusive: false,
-            }),
+            key_range: None,
             table_ids: vec![100, 101],
             min_epoch: 20,
             max_epoch: 20,
@@ -1528,9 +1507,9 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(current_version.levels.len(), 3);
     let new_group_id = current_version.levels.keys().max().cloned().unwrap();
     assert!(new_group_id > StaticCompactionGroupId::End as u64);
-    assert!(
-        get_compaction_group_object_ids(&current_version, 2).is_empty(),
-        "SST 10, 11 has been moved to new_group completely."
+    assert_eq!(
+        get_compaction_group_object_ids(&current_version, 2),
+        vec![10, 11]
     );
     assert_eq!(
         get_compaction_group_object_ids(&current_version, new_group_id),
@@ -1551,7 +1530,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     let branched_ssts = get_branched_ssts(&hummock_manager).await;
     assert_eq!(branched_ssts.len(), 2);
     for object_id in [10, 11] {
-        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 1);
+        assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 2);
         assert_ne!(
             branched_ssts
                 .get(&object_id)
@@ -1759,7 +1738,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        1
+        2
     );
 
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
@@ -1955,7 +1934,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        2
+        3
     );
 
     let level = &current_version
@@ -2016,7 +1995,7 @@ async fn test_move_tables_between_compaction_group() {
         current_version.get_compaction_group_levels(2).levels[base_level - 1]
             .table_infos
             .len(),
-        1
+        2
     );
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
     assert_eq!(branched_ssts.len(), 5);

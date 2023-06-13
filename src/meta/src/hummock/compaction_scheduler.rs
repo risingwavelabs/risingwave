@@ -29,7 +29,6 @@ use risingwave_pb::hummock::CompactTask;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
-use tokio::sync::Notify;
 use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
 
 use super::Compactor;
@@ -96,11 +95,6 @@ impl CompactionRequestChannel {
 }
 
 /// Schedules compaction task picking and assignment.
-///
-/// When no idle compactor is available, the scheduling will be paused until
-/// `compaction_resume_notifier` is `notified`. Compaction should only be resumed by calling
-/// `HummockManager::try_resume_compaction`. See [`CompactionResumeTrigger`] for all cases that can
-/// resume compaction.
 pub struct CompactionScheduler<S>
 where
     S: MetaStore,
@@ -108,7 +102,6 @@ where
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
     compactor_manager: CompactorManagerRef,
-    compaction_resume_notifier: Arc<Notify>,
 }
 
 impl<S> CompactionScheduler<S>
@@ -124,7 +117,6 @@ where
             env,
             hummock_manager,
             compactor_manager,
-            compaction_resume_notifier: Arc::new(Notify::new()),
         }
     }
 
@@ -133,11 +125,8 @@ where
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
-        self.hummock_manager.init_compaction_scheduler(
-            sched_channel.clone(),
-            Some(self.compaction_resume_notifier.clone()),
-        );
-
+        self.hummock_manager
+            .init_compaction_scheduler(sched_channel.clone());
         tracing::info!("Start compaction scheduler.");
 
         let compaction_selectors = Self::init_selectors();
@@ -149,7 +138,7 @@ where
             self.env.opts.periodic_compaction_interval_sec,
         );
         self.schedule_loop(
-            sched_channel.clone(),
+            sched_channel,
             shutdown_rx,
             compaction_selectors,
             schedule_event_stream,
@@ -344,11 +333,14 @@ where
                                         &mut compaction_selectors,
                                         task_type,
                                         sched_channel.clone(),
-                                        shutdown_rx.clone(),
                                     )
                                     .await
                                 {
-                                    break;
+                                    self.hummock_manager
+                                        .metrics
+                                        .compact_skip_frequency
+                                        .with_label_values(&["total", "no-compactor"])
+                                        .inc();
                                 }
                             }
                             SchedulerEvent::DynamicTrigger => {
@@ -404,7 +396,6 @@ where
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         task_type: compact_task::TaskType,
         sched_channel: Arc<CompactionRequestChannel>,
-        shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
         sync_point::sync_point!("BEFORE_SCHEDULE_COMPACTION_TASK");
         sched_channel.unschedule(compaction_group, task_type);
@@ -414,7 +405,6 @@ where
             task_type,
             compaction_selectors,
             sched_channel,
-            shutdown_rx,
         )
         .await
     }
@@ -442,34 +432,14 @@ where
         task_type: compact_task::TaskType,
         compaction_selectors: &mut HashMap<compact_task::TaskType, Box<dyn LevelSelector>>,
         sched_channel: Arc<CompactionRequestChannel>,
-        mut shutdown_rx: Shared<Receiver<()>>,
     ) -> bool {
-        const NOTIFIED_TIMEOUT: Duration = Duration::from_secs(30);
-
         // Wait for a compactor to become available.
-        let compactor = loop {
-            if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
-                break compactor;
-            } else {
-                tracing::debug!("No available compactor, pausing compaction.");
-                tokio::select! {
-                    notify_result = tokio::time::timeout(NOTIFIED_TIMEOUT, self.compaction_resume_notifier.notified()) => {
-                        match notify_result {
-                            Ok(_) => {}
-
-                            Err(err) => {
-                                tracing::warn!("No available compactor notify timeout {}", err);
-                            }
-                        }
-                    }
-                    _ = &mut shutdown_rx => {
-                        return false;
-                    }
-                }
-            }
+        let compactor = match self.hummock_manager.get_idle_compactor().await {
+            Some(compactor) => compactor,
+            None => return false,
         };
         let selector = compaction_selectors.get_mut(&task_type).unwrap();
-        self.pick_and_assign(compaction_group, compactor, sched_channel.clone(), selector)
+        self.pick_and_assign(compaction_group, compactor, sched_channel, selector)
             .await;
 
         true
@@ -543,9 +513,7 @@ mod tests {
     use crate::hummock::compaction_scheduler::{
         CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
     };
-    use crate::hummock::test_utils::{
-        add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
-    };
+    use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
 
     #[tokio::test]
@@ -578,15 +546,7 @@ mod tests {
                 .await
         );
 
-        register_table_ids_to_compaction_group(
-            hummock_manager.as_ref(),
-            &[1],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
-        let _sst_infos = add_ssts(3, hummock_manager.as_ref(), context_id).await;
 
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         // Cannot assign because of invalid compactor
@@ -620,7 +580,7 @@ mod tests {
         );
 
         // Add more SSTs for compaction.
-        let _sst_infos = add_ssts(4, hummock_manager.as_ref(), context_id).await;
+        let _sst_infos = add_ssts(2, hummock_manager.as_ref(), context_id).await;
 
         // No idle compactor
         assert_eq!(
@@ -675,12 +635,6 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
-        register_table_ids_to_compaction_group(
-            hummock_manager.as_ref(),
-            &[1],
-            StaticCompactionGroupId::StateDefault.into(),
-        )
-        .await;
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
         let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 

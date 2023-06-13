@@ -257,3 +257,10 @@
   expected_outputs:
   - batch_plan
   - logical_plan
+- name: insert to a table with default now
+  sql: |
+    create table t (a int, b timestamptz default now());
+    insert into t values (1);
+  expected_outputs:
+  - batch_plan
+  - logical_plan
