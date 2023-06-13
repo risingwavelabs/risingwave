@@ -82,7 +82,7 @@ Downloading and launching MinIO is a straightforward process. For PostgreSQL, I 
 ```shell
 docker run --name my-postgres -e POSTGRES_PASSWORD=connector -e POSTGRES_DB=test -e POSTGRES_USER=test -d -p 5432:5432 postgres
 ```
-Also remeber to create the databse and tables in postgress
+Also remember to create the database and tables in postgresql
 
 ```sql
 CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);
@@ -90,7 +90,7 @@ CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);
 
 By maintaining consistency between these configurations, you can ensure a smooth execution of the integration tests. Please check more details in `connector-node-integration.yml`.
 
-Also, if you change the file in `src/java_binding`, remeber to use `cargo fmt` and `cargo sort` to format the `Cargo.toml` file to pass the github ci check.
+Also, if you change the file in `src/java_binding`, remember to use `cargo fmt` and `cargo sort` to format the `Cargo.toml` file to pass the github ci check.
 
 ## Connect with RisingWave
 
