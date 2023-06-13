@@ -51,7 +51,7 @@ pub struct FragmentManagerCore {
 }
 
 impl FragmentManagerCore {
-    /// List all fragment vnode mapping info that excludes `exclude_state`.
+    /// List all fragment vnode mapping info that not in `State::Initial`.
     pub fn all_running_fragment_mappings(
         &self,
     ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
