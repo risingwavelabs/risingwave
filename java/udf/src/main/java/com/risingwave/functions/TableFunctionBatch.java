@@ -44,7 +44,8 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     @Override
     Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
         var outputs = new ArrayList<VectorSchemaRoot>();
-        var row = new Object[batch.getSchema().getFields().size()];
+        var row = new Object[batch.getSchema().getFields().size() + 1];
+        row[0] = this.function;
         var indexes = new ArrayList<Integer>();
         var values = new ArrayList<Object>();
         Runnable buildChunk = () -> {
@@ -58,9 +59,9 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
         };
         for (int i = 0; i < batch.getRowCount(); i++) {
             // prepare input row
-            for (int j = 0; j < row.length; j++) {
+            for (int j = 0; j < row.length - 1; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = this.processInputs[j].apply(val);
+                row[j + 1] = this.processInputs[j].apply(val);
             }
             // call function
             Iterator<?> iterator;

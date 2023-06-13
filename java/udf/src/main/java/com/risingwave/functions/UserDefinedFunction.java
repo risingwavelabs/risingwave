@@ -20,5 +20,5 @@ package com.risingwave.functions;
  * @see ScalarFunction
  * @see TableFunction
  */
-public abstract interface UserDefinedFunction {
+public interface UserDefinedFunction {
 }

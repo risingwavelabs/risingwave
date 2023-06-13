@@ -20,9 +20,9 @@ package com.risingwave.functions;
  * 
  * <p>
  * The behavior of a {@link ScalarFunction} can be defined by implementing a
- * custom evaluation method. An evaluation method must be declared publicly and
- * named <code>eval</code>. Multiple overloaded methods named <code>eval</code>
- * are not supported yet.
+ * custom evaluation method. An evaluation method must be declared publicly, not
+ * static, and named <code>eval</code>. Multiple overloaded methods named
+ * <code>eval</code> are not supported yet.
  * 
  * <p>
  * By default, input and output data types are automatically extracted using
@@ -56,5 +56,5 @@ package com.risingwave.functions;
  * }
  * }</pre>
  */
-public abstract interface ScalarFunction extends UserDefinedFunction {
+public interface ScalarFunction extends UserDefinedFunction {
 }

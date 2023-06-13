@@ -23,6 +23,7 @@ import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 
 /**
  * Base class for a batch-processing user-defined function.
@@ -73,7 +74,12 @@ class Reflection {
             throw new IllegalArgumentException(
                     "Exactly one eval method must be defined for class " + obj.getClass().getName());
         }
-        return methods.get(0);
+        var method = methods.get(0);
+        if (Modifier.isStatic(method.getModifiers())) {
+            throw new IllegalArgumentException(
+                    "The eval method should not be static for class " + obj.getClass().getName());
+        }
+        return method;
     }
 
     /**

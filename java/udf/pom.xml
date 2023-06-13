@@ -4,7 +4,7 @@
   <groupId>com.risingwave.java</groupId>
   <artifactId>risingwave-udf</artifactId>
   <packaging>jar</packaging>
-  <version>1.0-SNAPSHOT</version>
+  <version>0.0.1</version>
   <name>risingwave-udf</name>
   <url>http://maven.apache.org</url>
 

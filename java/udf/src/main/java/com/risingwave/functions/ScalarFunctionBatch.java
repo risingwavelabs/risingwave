@@ -42,12 +42,13 @@ class ScalarFunctionBatch extends UserDefinedFunctionBatch {
 
     @Override
     Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
-        var row = new Object[batch.getSchema().getFields().size()];
+        var row = new Object[batch.getSchema().getFields().size() + 1];
+        row[0] = this.function;
         var outputValues = new Object[batch.getRowCount()];
         for (int i = 0; i < batch.getRowCount(); i++) {
-            for (int j = 0; j < row.length; j++) {
+            for (int j = 0; j < row.length - 1; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j] = this.processInputs[j].apply(val);
+                row[j + 1] = this.processInputs[j].apply(val);
             }
             try {
                 outputValues[i] = this.methodHandle.invokeWithArguments(row);

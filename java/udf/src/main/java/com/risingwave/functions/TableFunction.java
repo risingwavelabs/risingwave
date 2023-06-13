@@ -23,7 +23,7 @@ package com.risingwave.functions;
  *
  * <p>
  * The behavior of a {@link TableFunction} can be defined by implementing a
- * custom evaluation method. An evaluation method must be declared publicly,
+ * custom evaluation method. An evaluation method must be declared publicly, not
  * static, and named <code>eval</code>. The return type must be an Iterator.
  * Multiple overloaded methods named <code>eval</code> are not supported yet.
  *
@@ -39,7 +39,7 @@ package com.risingwave.functions;
  * // a function that accepts an INT arguments and emits the range from 0 to the
  * // given number.
  * class Series implements TableFunction {
- *     public static Iterator<Integer> eval(int n) {
+ *     public Iterator<Integer> eval(int n) {
  *         return IntStream.range(0, n).iterator();
  *     }
  * }
@@ -52,7 +52,7 @@ package com.risingwave.functions;
  *         public int length;
  *     }
  * 
- *     public static Iterator<Row> eval(String str) {
+ *     public Iterator<Row> eval(String str) {
  *         return Stream.of(str.split(" ")).map(s -> {
  *             Row row = new Row();
  *             row.word = s;
@@ -63,5 +63,5 @@ package com.risingwave.functions;
  * }
  * }</pre>
  */
-public abstract interface TableFunction extends UserDefinedFunction {
+public interface TableFunction extends UserDefinedFunction {
 }

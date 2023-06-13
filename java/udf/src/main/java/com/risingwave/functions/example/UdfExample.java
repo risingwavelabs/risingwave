@@ -54,13 +54,13 @@ public class UdfExample {
     }
 
     public static class Int42 implements ScalarFunction {
-        public static int eval() {
+        public int eval() {
             return 42;
         }
     }
 
     public static class Gcd implements ScalarFunction {
-        public static int eval(int a, int b) {
+        public int eval(int a, int b) {
             while (b != 0) {
                 int temp = b;
                 b = a % b;
@@ -71,13 +71,14 @@ public class UdfExample {
     }
 
     public static class Gcd3 implements ScalarFunction {
-        public static int eval(int a, int b, int c) {
-            return Gcd.eval(Gcd.eval(a, b), c);
+        public int eval(int a, int b, int c) {
+            var gcd = new Gcd();
+            return gcd.eval(gcd.eval(a, b), c);
         }
     }
 
     public static class ToString implements ScalarFunction {
-        public static String eval(String s) {
+        public String eval(String s) {
             return s;
         }
     }
@@ -90,7 +91,7 @@ public class UdfExample {
             public short dstPort;
         }
 
-        public static TcpPacketInfo eval(byte[] tcpPacket) {
+        public TcpPacketInfo eval(byte[] tcpPacket) {
             var info = new TcpPacketInfo();
             var buffer = ByteBuffer.wrap(tcpPacket);
             info.srcAddr = intToIpAddr(buffer.getInt(12));
@@ -107,7 +108,7 @@ public class UdfExample {
     }
 
     public static class HexToDec implements ScalarFunction {
-        public static BigDecimal eval(String hex) {
+        public BigDecimal eval(String hex) {
             if (hex == null) {
                 return null;
             }
@@ -116,7 +117,7 @@ public class UdfExample {
     }
 
     public static class ArrayAccess implements ScalarFunction {
-        public static String eval(String[] array, int index) {
+        public String eval(String[] array, int index) {
             return array[index - 1];
         }
     }
@@ -124,7 +125,7 @@ public class UdfExample {
     public static class JsonbAccess implements ScalarFunction {
         static Gson gson = new Gson();
 
-        public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
+        public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
             if (json == null)
                 return null;
             var array = gson.fromJson(json, Object[].class);
@@ -136,7 +137,7 @@ public class UdfExample {
     }
 
     public static class JsonbConcat implements ScalarFunction {
-        public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
+        public @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
             if (jsons == null)
                 return null;
             return "[" + String.join(",", jsons) + "]";
@@ -144,7 +145,7 @@ public class UdfExample {
     }
 
     public static class JsonbArrayIdentity implements ScalarFunction {
-        public static @DataTypeHint("JSONB[]") String[] eval(@DataTypeHint("JSONB[]") String[] jsons) {
+        public @DataTypeHint("JSONB[]") String[] eval(@DataTypeHint("JSONB[]") String[] jsons) {
             return jsons;
         }
     }
@@ -155,13 +156,13 @@ public class UdfExample {
             public int len;
         }
 
-        public static Row eval(Row s) {
+        public Row eval(Row s) {
             return s;
         }
     }
 
     public static class Series implements TableFunction {
-        public static Iterator<Integer> eval(int n) {
+        public Iterator<Integer> eval(int n) {
             return IntStream.range(0, n).iterator();
         }
     }
@@ -172,7 +173,7 @@ public class UdfExample {
             public int length;
         }
 
-        public static Iterator<Row> eval(String str) {
+        public Iterator<Row> eval(String str) {
             return Stream.of(str.split(" ")).map(s -> {
                 Row row = new Row();
                 row.word = s;
