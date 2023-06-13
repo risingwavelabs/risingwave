@@ -34,6 +34,7 @@ Sometimes, you need to specify the shared library path. For example, when progra
 
 ```
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+JAVA_ROOT=$RISINGWAVE_ROOT/java
 CONNECTOR_ROOT=$JAVA_ROOT/connector-node
 # Build shared library file
 cd $RISINGWAVE_ROOT && cargo build -p risingwave_java_binding
@@ -72,6 +73,22 @@ python3 integration_tests.py
 Or you can use conda and install the necessary package `grpcio grpcio-tools psycopg2 psycopg2-binary`. 
 
 The connector service is the server and Python integration test is a client, which will send gRPC request and get response from the connector server. So when running integration_tests, remember to launch the connector service in advance. You can get the gRPC response and check messages or errors in client part. And check the detailed exception information on server side.
+
+We have integration tests that involve the use of several sinks, including file sink, jdbc sink, iceberg sink, and deltalake sink. If you wish to run these tests locally, you will need to configure both MinIO and PostgreSQL. 
+Downloading and launching MinIO is a straightforward process. For PostgreSQL, I recommend launching it using Docker. When setting up PostgreSQL, please ensure that the values for `POSTGRES_PASSWORD`, `POSTGRES_DB`, and `POSTGRES_USER` match the corresponding settings in the `integration_tests.py` file.
+
+```shell
+docker run --name my-postgres -e POSTGRES_PASSWORD=connector -e POSTGRES_DB=test -e POSTGRES_USER=test -d -p 5432:5432 postgres
+```
+Also remeber to create the databse and tables in postgress
+
+```sql
+CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);
+```
+
+By maintaining consistency between these configurations, you can ensure a smooth execution of the integration tests. Please check more details in `connector-node-integration.yml`.
+
+Also, if you change the file in `src/java_binding`, remeber to use `cargo fmt` and `cargo sort` to format the `Cargo.toml` file to pass the github ci check.
 
 ## Connect with RisingWave
 
