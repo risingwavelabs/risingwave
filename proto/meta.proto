@@ -334,6 +334,7 @@ message GetClusterInfoResponse {
   repeated TableFragments table_fragments = 2;
   map<uint32, source.ConnectorSplits> actor_splits = 3;
   map<uint32, catalog.Source> source_infos = 4;
+  uint64 revision = 5;
 }
 
 message RescheduleRequest {
@@ -343,10 +344,12 @@ message RescheduleRequest {
   }
   // reschedule plan for each fragment
   map<uint32, Reschedule> reschedules = 1;
+  uint64 revision = 2;
 }
 
 message RescheduleResponse {
   bool success = 1;
+  uint64 revision = 2;
 }
 
 service ScaleService {
