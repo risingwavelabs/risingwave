@@ -31,37 +31,39 @@ macro_rules! main {
         #[cfg_attr(coverage, no_coverage)]
         fn main() {
             let opts = clap::Parser::parse();
-            $crate::$component(opts);
+            let registry = prometheus::Registry::new();
+            $crate::$component(opts, registry);
         }
     };
 }
 
 // Entry point functions.
 
-pub fn compute(opts: ComputeNodeOpts) {
+pub fn compute(opts: ComputeNodeOpts, registry: prometheus::Registry) {
     risingwave_rt::init_risingwave_logger(
         risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
+        registry.clone(),
     );
-    risingwave_rt::main_okk(risingwave_compute::start(opts));
+    risingwave_rt::main_okk(risingwave_compute::start(opts, registry));
 }
 
-pub fn meta(opts: MetaNodeOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+pub fn meta(opts: MetaNodeOpts, registry: prometheus::Registry) {
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(), registry);
     risingwave_rt::main_okk(risingwave_meta::start(opts));
 }
 
-pub fn frontend(opts: FrontendOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+pub fn frontend(opts: FrontendOpts, registry: prometheus::Registry) {
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(), registry);
     risingwave_rt::main_okk(risingwave_frontend::start(opts));
 }
 
-pub fn compactor(opts: CompactorOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+pub fn compactor(opts: CompactorOpts, registry: prometheus::Registry) {
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(), registry);
     risingwave_rt::main_okk(risingwave_compactor::start(opts));
 }
 
-pub fn ctl(opts: CtlOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+pub fn ctl(opts: CtlOpts, registry: prometheus::Registry) {
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(), registry);
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need
