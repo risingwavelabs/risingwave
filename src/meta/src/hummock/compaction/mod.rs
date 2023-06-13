@@ -185,7 +185,8 @@ impl CompactStatus {
         false
     }
 
-    pub fn is_trivial_reclaim(task: &CompactTask, exist_table_ids: &HashSet<u32>) -> bool {
+    pub fn is_trivial_reclaim(task: &CompactTask) -> bool {
+        let exist_table_ids = HashSet::<u32>::from_iter(task.existing_table_ids.clone());
         task.input_ssts.iter().all(|level| {
             level.table_infos.iter().all(|sst| {
                 sst.table_ids

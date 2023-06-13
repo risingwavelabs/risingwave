@@ -106,7 +106,7 @@ impl SpaceReclaimCompactionPicker {
                 let exist_count = self.exist_table_count(sst);
                 let need_reclaim = exist_count < sst.table_ids.len();
                 let is_trivial = exist_count == 0;
-                if level_handlers[state.last_level].is_pending_compact(&sst.sst_id) || !need_reclaim
+                if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
                 {
                     if !select_input_ssts.is_empty() {
                         // Our goal is to pick as many complete layers of data as possible and keep
