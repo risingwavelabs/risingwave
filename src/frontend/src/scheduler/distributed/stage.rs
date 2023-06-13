@@ -642,13 +642,15 @@ impl StageRunner {
         &self,
         table_id: &TableId,
     ) -> SchedulerResult<ParallelUnitMapping> {
-        let reader = self.catalog_reader.read_guard();
-        let table = reader
+        let fragment_id = self
+            .catalog_reader
+            .read_guard()
             .get_table_by_id(table_id)
-            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
+            .fragment_id;
         self.worker_node_manager
             .manager
-            .get_streaming_fragment_mapping(&table.fragment_id)
+            .get_streaming_fragment_mapping(&fragment_id)
     }
 
     fn choose_worker(

@@ -43,8 +43,8 @@ pub enum LocalNotification {
     WorkerNodeActivated(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
     SystemParamsChange(SystemParamsReader),
-    FragmentsAdded(Vec<FragmentId>),
-    FragmentsDeleted(Vec<FragmentId>),
+    FragmentMappingsUpsert(Vec<FragmentId>),
+    FragmentMappingsDelete(Vec<FragmentId>),
 }
 
 #[derive(Debug)]

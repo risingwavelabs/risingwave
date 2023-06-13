@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 
 use rand::seq::SliceRandom;
@@ -117,6 +116,15 @@ impl WorkerNodeManager {
         serving_mapping: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut write_guard = self.inner.write().unwrap();
+        tracing::info!("Refresh worker nodes {:?}.", nodes);
+        tracing::info!(
+            "Refresh streaming vnode mapping for fragments {:?}.",
+            streaming_mapping.keys()
+        );
+        tracing::info!(
+            "Refresh serving vnode mapping for fragments {:?}.",
+            serving_mapping.keys()
+        );
         write_guard.worker_nodes = nodes;
         write_guard.streaming_fragment_vnode_mapping = streaming_mapping;
         write_guard.serving_fragment_vnode_mapping = serving_mapping;
@@ -207,7 +215,10 @@ impl WorkerNodeManager {
 
     pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, ParallelUnitMapping>) {
         let mut guard = self.inner.write().unwrap();
-        tracing::debug!("set serving fragment mapping {:#?}", mappings);
+        tracing::info!(
+            "Set serving vnode mapping for fragments {:?}",
+            mappings.keys()
+        );
         guard.serving_fragment_vnode_mapping = mappings;
     }
 
@@ -216,7 +227,10 @@ impl WorkerNodeManager {
         mappings: HashMap<FragmentId, ParallelUnitMapping>,
     ) {
         let mut guard = self.inner.write().unwrap();
-        tracing::debug!("upsert serving fragment mapping {:#?}", mappings);
+        tracing::info!(
+            "Upsert serving vnode mapping for fragments {:?}",
+            mappings.keys()
+        );
         for (fragment_id, mapping) in mappings {
             guard
                 .serving_fragment_vnode_mapping
@@ -224,14 +238,14 @@ impl WorkerNodeManager {
         }
     }
 
-    pub fn remove_serving_fragment_mapping(
-        &self,
-        fragment_ids: impl IntoIterator<Item = FragmentId> + Debug,
-    ) {
+    pub fn remove_serving_fragment_mapping(&self, fragment_ids: &[FragmentId]) {
         let mut guard = self.inner.write().unwrap();
-        tracing::debug!("remove serving fragment mapping {:#?}", fragment_ids);
+        tracing::info!(
+            "Delete serving vnode mapping for fragments {:?}",
+            fragment_ids
+        );
         for fragment_id in fragment_ids {
-            guard.serving_fragment_vnode_mapping.remove(&fragment_id);
+            guard.serving_fragment_vnode_mapping.remove(fragment_id);
         }
     }
 }

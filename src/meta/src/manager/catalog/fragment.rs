@@ -50,7 +50,7 @@ pub struct FragmentManagerCore {
 }
 
 impl FragmentManagerCore {
-    /// List all fragment vnode mapping info that not in `State::Initial`.
+    /// List all fragment vnode mapping info that excludes `exclude_state`.
     pub fn all_running_fragment_mappings(
         &self,
     ) -> impl Iterator<Item = FragmentParallelUnitMapping> + '_ {
@@ -139,6 +139,30 @@ where
                     .await;
             }
         }
+
+        // Update serving vnode mappings.
+        let fragment_ids = table_fragment.fragment_ids().collect();
+        match operation {
+            Operation::Add | Operation::Update => {
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
+                        fragment_ids,
+                    ))
+                    .await;
+            }
+            Operation::Delete => {
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
+                        fragment_ids,
+                    ))
+                    .await;
+            }
+            _ => {
+                tracing::warn!("unexpected fragment mapping op");
+            }
+        }
     }
 
     pub async fn select_table_fragments_by_table_id(
@@ -179,15 +203,9 @@ where
         if map.contains_key(&table_id) {
             bail!("table_fragment already exist: id={}", table_id);
         }
-        let fragment_ids = table_fragment.fragment_ids().collect();
         let mut table_fragments = BTreeMapTransaction::new(map);
         table_fragments.insert(table_id, table_fragment);
-        commit_meta!(self, table_fragments)?;
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::FragmentsAdded(fragment_ids))
-            .await;
-        Ok(())
+        commit_meta!(self, table_fragments)
     }
 
     /// Called after the barrier collection of `CreateStreamingJob` command, which updates the
@@ -391,23 +409,11 @@ where
         }
         commit_meta!(self, table_fragments)?;
 
-        for table_fragments in &to_delete_table_fragments {
+        for table_fragments in to_delete_table_fragments {
             if table_fragments.state() != State::Initial {
-                self.notify_fragment_mapping(table_fragments, Operation::Delete)
+                self.notify_fragment_mapping(&table_fragments, Operation::Delete)
                     .await;
             }
-        }
-        let all_deleted_fragment_ids = to_delete_table_fragments
-            .iter()
-            .flat_map(|t| t.fragment_ids())
-            .collect_vec();
-        if !all_deleted_fragment_ids.is_empty() {
-            self.env
-                .notification_manager()
-                .notify_local_subscribers(LocalNotification::FragmentsDeleted(
-                    all_deleted_fragment_ids,
-                ))
-                .await;
         }
 
         Ok(())

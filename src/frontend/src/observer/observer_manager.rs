@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
@@ -377,9 +378,9 @@ impl FrontendObserverNode {
                 self.worker_node_manager
                     .upsert_serving_fragment_mapping(convert_pu_mapping(&mappings));
             }
-            Operation::Delete => self
-                .worker_node_manager
-                .remove_serving_fragment_mapping(mappings.into_iter().map(|m| m.fragment_id)),
+            Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
+                &mappings.into_iter().map(|m| m.fragment_id).collect_vec(),
+            ),
             Operation::Snapshot => {
                 self.worker_node_manager
                     .set_serving_fragment_mapping(convert_pu_mapping(&mappings));
