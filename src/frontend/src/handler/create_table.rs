@@ -359,6 +359,10 @@ pub fn bind_pk_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
+    for c in &columns {
+        assert!(c.column_id() != ColumnId::placeholder());
+    }
+
     // Mapping from column name to column id.
     let name_to_id = columns
         .iter()
