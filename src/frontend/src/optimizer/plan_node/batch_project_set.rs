@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
@@ -48,11 +47,7 @@ impl BatchProjectSet {
     }
 }
 
-impl fmt::Display for BatchProjectSet {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchProjectSet")
-    }
-}
+impl_distill_by_unit!(BatchProjectSet, logical, "BatchProjectSet");
 
 impl PlanTreeNodeUnary for BatchProjectSet {
     fn input(&self) -> PlanRef {

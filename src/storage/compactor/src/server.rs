@@ -167,6 +167,7 @@ pub async fn compactor_serve(
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
         output_memory_limiter.clone(),
+        storage_memory_config,
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -191,7 +192,6 @@ pub async fn compactor_serve(
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-            Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![sstable_object_id_manager],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(

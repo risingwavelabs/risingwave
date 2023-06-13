@@ -131,30 +131,19 @@ pub async fn handle_create_function(
     let client = ArrowFlightUdfClient::connect(&link)
         .await
         .map_err(|e| anyhow!(e))?;
-    let args = arrow_schema::Schema::new(
-        arg_types
-            .iter()
-            .map(|t| arrow_schema::Field::new("", t.into(), true))
-            .collect(),
-    );
-    let returns = match kind {
-        Kind::Scalar(_) => arrow_schema::Schema::new(vec![arrow_schema::Field::new(
-            "",
-            return_type.clone().into(),
-            true,
-        )]),
-        Kind::Table(_) => arrow_schema::Schema::new(match &return_type {
-            DataType::Struct(s) => (s.fields.iter())
-                .map(|t| arrow_schema::Field::new("", t.clone().into(), true))
-                .collect(),
-            _ => vec![arrow_schema::Field::new(
-                "",
-                return_type.clone().into(),
-                true,
-            )],
-        }),
+    /// A helper function to create a unnamed field from data type.
+    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
+        arrow_schema::Field::new("", data_type, true)
+    }
+    let args = arrow_schema::Schema::new(arg_types.iter().map(|t| to_field(t.into())).collect());
+    let returns = arrow_schema::Schema::new(match kind {
+        Kind::Scalar(_) => vec![to_field(return_type.clone().into())],
+        Kind::Table(_) => vec![
+            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+            to_field(return_type.clone().into()),
+        ],
         _ => unreachable!(),
-    };
+    });
     client
         .check(&identifier, &args, &returns)
         .await

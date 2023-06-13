@@ -46,7 +46,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tonic::Streaming;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 use StageEvent::Failed;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -462,6 +462,9 @@ impl StageRunner {
                             sent_signal_to_next = true;
                             break;
                         }
+                        TaskStatusPb::Ping => {
+                            debug!("Receive ping from task {:?}", status.task_id.unwrap());
+                        }
                         status => {
                             // The remain possible variant is Failed, but now they won't be pushed
                             // from CN.
@@ -491,28 +494,13 @@ impl StageRunner {
         }
 
         tracing::trace!(
-            "Stage [{:?}-{:?}], running task count: {}, finished task count: {}",
+            "Stage [{:?}-{:?}], running task count: {}, finished task count: {}, sent signal to next: {}",
             self.stage.query_id,
             self.stage.id,
             running_task_cnt,
-            finished_task_cnt
+            finished_task_cnt,
+            sent_signal_to_next,
         );
-
-        if !sent_signal_to_next || finished_task_cnt != self.tasks.keys().len() {
-            // This situation may come from recovery test: CN may get killed before reporting
-            // status. In this case, batch query is expected to fail. Client in
-            // simulation test should retry this query (w/o kill nodes).
-            self.notify_stage_state_changed(
-                |_| StageState::Failed,
-                QueryMessage::Stage(Failed {
-                    id: self.stage.id,
-                    reason: SchedulerError::Internal(anyhow!(
-                        "Compute node lost connection before finishing responding"
-                    )),
-                }),
-            )
-            .await;
-        }
 
         if let Some(shutdown) = all_streams.take_future() {
             tracing::trace!(
@@ -537,7 +525,7 @@ impl StageRunner {
         self.cancel_all_scheducancled_tasks().await?;
 
         tracing::trace!(
-            "Stage runner [{:?}-{:?}] existed. ",
+            "Stage runner [{:?}-{:?}] exited.",
             self.stage.query_id,
             self.stage.id
         );
@@ -650,17 +638,19 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        self.catalog_reader
+    fn get_streaming_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
+        let fragment_id = self
+            .catalog_reader
             .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| {
-                self.worker_node_manager
-                    .manager
-                    .get_streaming_fragment_mapping(&table.fragment_id)
-            })
-            .ok()
-            .flatten()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
+            .fragment_id;
+        self.worker_node_manager
+            .manager
+            .get_streaming_fragment_mapping(&fragment_id)
     }
 
     fn choose_worker(
@@ -671,7 +661,7 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
+            Some(table_id) => Some(self.get_streaming_vnode_mapping(&table_id)?),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)

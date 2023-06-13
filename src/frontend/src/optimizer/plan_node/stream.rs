@@ -220,6 +220,10 @@ pub struct HashAgg {
     vnode_col_idx: Option<usize>,
     /// The index of `count(*)` in `agg_calls`.
     row_count_idx: usize,
+    /// Whether to emit output only when the window is closed by watermark.
+    emit_on_window_close: bool,
+    /// The watermark column that Emit-On-Window-Close behavior is based on.
+    window_col_idx: Option<usize>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HashAgg, core, input);
 
@@ -468,12 +472,12 @@ pub fn to_stream_prost_body(
                 .predicate()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto());
-            let left_table = infer_left_internal_table_catalog(base, me.left_index)
+            let left_table = infer_left_internal_table_catalog(base, me.left_index())
                 .with_id(state.gen_table_id_wrapped());
-            let right_table = infer_right_internal_table_catalog(&me.right.0)
+            let right_table = infer_right_internal_table_catalog(&me.right().0)
                 .with_id(state.gen_table_id_wrapped());
             PbNodeBody::DynamicFilter(DynamicFilterNode {
-                left_key: me.left_index as u32,
+                left_key: me.left_index() as u32,
                 condition,
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),
@@ -561,9 +565,9 @@ pub fn to_stream_prost_body(
             })
         }
         Node::SimpleAgg(me) => {
-            let result_table = me.core.infer_result_table(base, None);
-            let agg_states = me.core.infer_stream_agg_state(base, None);
-            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
+            let result_table = me.core.infer_result_table(base, None, None);
+            let agg_states = me.core.infer_stream_agg_state(base, None, None);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None, None);
 
             PbNodeBody::SimpleAgg(SimpleAggNode {
                 agg_calls: me
@@ -618,9 +622,15 @@ pub fn to_stream_prost_body(
             PbNodeBody::GroupTopN(group_topn_node)
         }
         Node::HashAgg(me) => {
-            let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
-            let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
-            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
+            let result_table =
+                me.core
+                    .infer_result_table(base, me.vnode_col_idx, me.window_col_idx);
+            let agg_states =
+                me.core
+                    .infer_stream_agg_state(base, me.vnode_col_idx, me.window_col_idx);
+            let distinct_dedup_tables =
+                me.core
+                    .infer_distinct_dedup_tables(base, me.vnode_col_idx, me.window_col_idx);
 
             PbNodeBody::HashAgg(HashAggNode {
                 group_key: me.core.group_key.ones().map(|idx| idx as u32).collect(),
@@ -645,6 +655,7 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
+                emit_on_window_close: me.emit_on_window_close(),
             })
         }
         Node::HashJoin(_) => {

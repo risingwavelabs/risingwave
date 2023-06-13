@@ -192,7 +192,6 @@ fn bool_or(state: bool, input: bool) -> bool {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::types::{DataType, Decimal};
 
@@ -207,7 +206,7 @@ mod tests {
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let len = input.len();
-        let input_chunk = DataChunk::new(vec![Column::new(input)], len);
+        let input_chunk = DataChunk::new(vec![input], len);
         let mut agg_state = crate::agg::build(AggCall {
             kind: agg_kind,
             args: AggArgs::Unary(input_type, 0),
@@ -215,6 +214,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
@@ -265,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_iter([Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
+        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -397,7 +397,7 @@ mod tests {
         mut builder: ArrayBuilderImpl,
     ) -> Result<ArrayImpl> {
         let len = input.len();
-        let input_chunk = DataChunk::new(vec![Column::new(input)], len);
+        let input_chunk = DataChunk::new(vec![input], len);
         let mut agg_state = crate::agg::build(AggCall {
             kind: agg_kind,
             args: AggArgs::Unary(input_type, 0),
@@ -405,6 +405,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: true,
+            direct_args: vec![],
         })?;
         agg_state
             .update_multi(&input_chunk, 0, input_chunk.cardinality())
@@ -455,7 +456,7 @@ mod tests {
 
     #[tokio::test]
     async fn vec_distinct_min_float32() -> Result<()> {
-        let input = F32Array::from_iter([Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
+        let input = F32Array::from_iter([1.0, 2.0, 3.0]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;

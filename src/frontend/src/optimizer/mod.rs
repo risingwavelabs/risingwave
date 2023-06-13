@@ -174,6 +174,10 @@ impl PlanRoot {
             .into());
         }
 
+        let ctx = plan.ctx();
+        // Inline session timezone mainly for rewriting now()
+        plan = inline_session_timezone_in_exprs(ctx, plan)?;
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
@@ -414,9 +418,7 @@ impl PlanRoot {
         .into();
 
         // Add generated columns.
-        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
-        )?;
+        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
             stream_plan = StreamProject::new(logical_project).into();

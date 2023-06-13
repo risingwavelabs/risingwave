@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::pin::pin;
+
 use anyhow::Context;
 use either::Either;
 use futures::stream::PollNext;
@@ -122,8 +124,8 @@ fn prefer_right(_: &mut ()) -> PollNext {
 /// available for both left and right side, instead of being combined.
 #[try_stream(ok = BarrierAlignedMessage, error = StreamExecutorError)]
 pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) {
-    let mut left = Box::pin(left);
-    let mut right = Box::pin(right);
+    let mut left = pin!(left);
+    let mut right = pin!(right);
 
     enum SideStatus {
         LeftBarrier,
@@ -201,7 +203,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
-    let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
+    let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut arrange_buf = vec![];
     let mut stream_side_end = false;
 
@@ -285,7 +287,7 @@ pub async fn stream_lookup_arrange_this_epoch(
     stream: Box<dyn Executor>,
     arrangement: Box<dyn Executor>,
 ) {
-    let mut input = Box::pin(align_barrier(stream.execute(), arrangement.execute()));
+    let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
     let mut stream_buf = vec![];
     let mut arrange_buf = vec![];
 

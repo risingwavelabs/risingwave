@@ -30,7 +30,7 @@ educe = "0.4"
 enum-as-inner = "0.5"
 fixedbitset = "0.4.1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 itertools = "0.10"
 lazy_static = "1"
@@ -50,7 +50,6 @@ prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
 risingwave_common = { path = "../common" }
-risingwave_common_proc_macro = { path = "../common/proc_macro" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }

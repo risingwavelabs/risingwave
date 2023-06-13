@@ -39,9 +39,54 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
+
+#[derive(Copy, Clone, Debug)]
+pub struct TableRevision(u64);
+
+const TABLE_REVISION_KEY: &[u8] = b"table_revision";
+
+impl From<TableRevision> for u64 {
+    fn from(value: TableRevision) -> Self {
+        value.0
+    }
+}
+
+impl TableRevision {
+    pub async fn get<S>(store: &S) -> MetaResult<Self>
+    where
+        S: MetaStore,
+    {
+        let version = match store
+            .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
+            .await
+        {
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
+            Err(MetaStoreError::ItemNotFound(_)) => 0,
+            Err(e) => return Err(MetaError::from(e)),
+        };
+
+        Ok(Self(version))
+    }
+
+    pub fn next(&self) -> Self {
+        TableRevision(self.0 + 1)
+    }
+
+    pub fn store(&self, txn: &mut Transaction) {
+        txn.put(
+            DEFAULT_COLUMN_FAMILY.to_string(),
+            TABLE_REVISION_KEY.to_vec(),
+            memcomparable::to_vec(&self.0).unwrap(),
+        );
+    }
+
+    pub fn inner(&self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct ParallelUnitReschedule {
@@ -341,7 +386,7 @@ where
         // Index for actor status, including actor's parallel unit
         let mut actor_status = BTreeMap::new();
         let mut fragment_state = HashMap::new();
-        for table_fragments in self.fragment_manager.list_table_fragments().await? {
+        for table_fragments in self.fragment_manager.list_table_fragments().await {
             fragment_state.extend(
                 table_fragments
                     .fragment_ids()
@@ -557,6 +602,7 @@ where
             }
             return Err(e);
         }
+
         Ok(())
     }
 
@@ -666,15 +712,10 @@ where
                 BTreeMap<ActorId, ParallelUnitId>,
             >,
             fragment_updated_bitmap: &mut HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
-            no_shuffle_upstream_actor_map: &mut HashMap<ActorId, ActorId>,
+            no_shuffle_upstream_actor_map: &mut HashMap<ActorId, HashMap<FragmentId, ActorId>>,
             no_shuffle_downstream_actors_map: &mut HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         ) {
             if !ctx.no_shuffle_target_fragment_ids.contains(fragment_id) {
-                return;
-            }
-
-            if fragment_updated_bitmap.contains_key(fragment_id) {
-                // Diamond dependency
                 return;
             }
 
@@ -707,7 +748,10 @@ where
                     fragment_bitmap.insert(*actor_id, bitmap);
                 }
 
-                no_shuffle_upstream_actor_map.insert(*actor_id as ActorId, upstream_actor_id);
+                no_shuffle_upstream_actor_map
+                    .entry(*actor_id as ActorId)
+                    .or_default()
+                    .insert(*upstream_fragment_id, upstream_actor_id);
                 no_shuffle_downstream_actors_map
                     .entry(upstream_actor_id)
                     .or_default()
@@ -723,10 +767,15 @@ where
                 FragmentDistributionType::Unspecified => unreachable!(),
             }
 
-            fragment_updated_bitmap
-                .try_insert(*fragment_id, fragment_bitmap)
-                .unwrap();
+            if let Err(e) = fragment_updated_bitmap.try_insert(*fragment_id, fragment_bitmap) {
+                assert_eq!(
+                    e.entry.get(),
+                    &e.value,
+                    "bitmaps derived from different no-shuffle upstreams mismatch"
+                );
+            }
 
+            // Visit downstream fragments recursively.
             if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
                 let no_shuffle_downstreams = downstream_fragments
                     .iter()
@@ -906,10 +955,19 @@ where
                 fragment_actors_after_reschedule.get(fragment_id).unwrap();
 
             if ctx.stream_source_fragment_ids.contains(fragment_id) {
-                let actor_ids = actors_after_reschedule.keys().cloned();
+                let fragment = ctx.fragment_map.get(fragment_id).unwrap();
+
+                let prev_actor_ids = fragment
+                    .actors
+                    .iter()
+                    .map(|actor| actor.actor_id)
+                    .collect_vec();
+
+                let curr_actor_ids = actors_after_reschedule.keys().cloned().collect_vec();
+
                 let actor_splits = self
                     .source_manager
-                    .reallocate_splits(fragment_id, actor_ids)
+                    .reallocate_splits(&prev_actor_ids, &curr_actor_ids)
                     .await?;
 
                 fragment_stream_source_actor_splits.insert(*fragment_id, actor_splits);
@@ -1115,7 +1173,9 @@ where
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
+            .run_command_with_paused(Command::RescheduleFragment {
+                reschedules: reschedule_fragment,
+            })
             .await?;
 
         Ok(())
@@ -1249,7 +1309,7 @@ where
         fragment_actors_to_remove: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actors_to_create: &HashMap<FragmentId, BTreeMap<ActorId, ParallelUnitId>>,
         fragment_actor_bitmap: &HashMap<FragmentId, HashMap<ActorId, Bitmap>>,
-        no_shuffle_upstream_actor_map: &HashMap<ActorId, ActorId>,
+        no_shuffle_upstream_actor_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         no_shuffle_downstream_actors_map: &HashMap<ActorId, HashMap<FragmentId, ActorId>>,
         new_actor: &mut StreamActor,
     ) -> MetaResult<()> {
@@ -1293,9 +1353,9 @@ where
                     );
                 }
                 DispatcherType::NoShuffle => {
-                    let no_shuffle_upstream_actor_id = no_shuffle_upstream_actor_map
+                    let no_shuffle_upstream_actor_id = *no_shuffle_upstream_actor_map
                         .get(&new_actor.actor_id)
-                        .cloned()
+                        .and_then(|map| map.get(upstream_fragment_id))
                         .unwrap();
 
                     applied_upstream_fragment_actor_ids.insert(

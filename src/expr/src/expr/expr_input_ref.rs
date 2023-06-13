@@ -18,11 +18,10 @@ use std::ops::Index;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::Expression;
-use crate::{bail, ensure, ExprError, Result};
+use crate::{ExprError, Result};
 
 /// A reference to a column in input relation.
 #[derive(Debug, Clone)]
@@ -38,7 +37,7 @@ impl Expression for InputRefExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        Ok(input.column_at(self.idx).clone())
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
@@ -57,7 +56,7 @@ impl InputRefExpression {
     }
 
     pub fn eval_immut(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        Ok(input.column_at(self.idx).clone())
     }
 }
 
@@ -65,17 +64,13 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::InputRef);
-
         let ret_type = DataType::from(prost.get_return_type().unwrap());
-        if let RexNode::InputRef(input_col_idx) = prost.get_rex_node().unwrap() {
-            Ok(Self {
-                return_type: ret_type,
-                idx: *input_col_idx as _,
-            })
-        } else {
-            bail!("Expect an input ref node")
-        }
+        let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
+
+        Ok(Self {
+            return_type: ret_type,
+            idx: *input_col_idx as _,
+        })
     }
 }
 

@@ -29,6 +29,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
+use tokio::time::Instant;
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
@@ -65,7 +66,7 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
-        let start_time = minstant::Instant::now();
+        let start_time = Instant::now();
         match msg {
             Message::Watermark(watermark) => {
                 for dispatcher in &mut self.dispatchers {
@@ -1230,9 +1231,9 @@ mod tests {
             .into_iter()
             .map(|builder| {
                 let array = builder.finish();
-                array.into()
+                array.into_ref()
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         let chunk = StreamChunk::new(ops, columns, None);
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
@@ -1261,9 +1262,7 @@ mod tests {
                             .iter()
                             .enumerate()
                             .filter(|(_, vis)| *vis)
-                            .map(|(row_idx, _)| {
-                                real_col.array_ref().as_int32().value_at(row_idx).unwrap()
-                            })
+                            .map(|(row_idx, _)| real_col.as_int32().value_at(row_idx).unwrap())
                             .collect::<Vec<_>>();
                         assert_eq!(real_vals.len(), expect_col.len());
                         assert_eq!(real_vals, *expect_col);

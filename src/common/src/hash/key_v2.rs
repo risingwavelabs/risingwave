@@ -328,7 +328,7 @@ impl<S: KeyStorage, N: NullBitmap> HashKey for HashKeyImpl<S, N> {
         };
 
         for &i in column_indices {
-            let array = data_chunk.column_at(i).array_ref();
+            let array = data_chunk.column_at(i).as_ref();
 
             // Dispatch types once to accelerate the inner call.
             dispatch_all_variants!(array, ArrayImpl, array, {

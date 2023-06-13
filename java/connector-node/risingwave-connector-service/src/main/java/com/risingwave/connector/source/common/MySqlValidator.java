@@ -20,6 +20,7 @@ import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 
@@ -127,30 +128,32 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
             stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
             stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
-            var res = stmt.executeQuery();
+
+            // Field name in lower case -> data type
+            var schema = new HashMap<String, String>();
             var pkFields = new HashSet<String>();
-            int index = 0;
+            var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-
-                if (index >= tableSchema.getNumColumns()) {
-                    throw ValidatorUtils.invalidArgument("The number of columns mismatch");
-                }
-
-                var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("column name mismatch: %s, [%s]", field, srcColName));
-                }
-
-                if (!isDataTypeCompatible(dataType, tableSchema.getColumnType(srcColName))) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("incompatible data type of column %s", srcColName));
-                }
+                schema.put(field.toLowerCase(), dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field);
+                    // RisingWave always use lower case for column name
+                    pkFields.add(field.toLowerCase());
+                }
+            }
+
+            // All columns defined must exist in upstream database
+            for (var e : tableSchema.getColumnTypes().entrySet()) {
+                var pgDataType = schema.get(e.getKey().toLowerCase());
+                if (pgDataType == null) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Column '" + e.getKey() + "' not found in the upstream database");
+                }
+                if (!isDataTypeCompatible(pgDataType, e.getValue())) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Incompatible data type of column " + e.getKey());
                 }
             }
 

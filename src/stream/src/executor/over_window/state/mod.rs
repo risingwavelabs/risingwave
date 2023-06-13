@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 
-use risingwave_common::types::{Datum, ScalarImpl};
+use educe::Educe;
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
+use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
@@ -24,13 +26,11 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 mod buffer;
 
 mod aggregate;
-mod lag;
-mod lead;
 
 /// Unique and ordered identifier for a row in internal states.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
 pub(super) struct StateKey {
-    pub order_key: ScalarImpl,
+    pub order_key: DefaultOrdered<ScalarImpl>,
     pub encoded_pk: MemcmpEncoded,
 }
 
@@ -41,14 +41,6 @@ pub(super) struct StatePos<'a> {
     /// 2. It's a pure preceding window, and all ready outputs are consumed.
     pub key: Option<&'a StateKey>,
     pub is_ready: bool,
-}
-
-#[derive(Debug)]
-pub(super) struct StateOutput {
-    /// Window function return value for the current ready window frame.
-    pub return_value: Datum,
-    /// Hint for the executor to evict unneeded rows from the state table.
-    pub evict_hint: StateEvictHint,
 }
 
 #[derive(Debug)]
@@ -99,7 +91,7 @@ impl StateEvictHint {
     }
 }
 
-pub(super) trait WindowState {
+pub(super) trait WindowState: EstimateSize {
     // TODO(rc): may append rows in batch like in `hash_agg`.
     /// Append a new input row to the state. The `key` is expected to be increasing.
     fn append(&mut self, key: StateKey, args: SmallVec<[Datum; 2]>);
@@ -107,10 +99,11 @@ pub(super) trait WindowState {
     /// Get the current window frame position.
     fn curr_window(&self) -> StatePos<'_>;
 
-    // TODO(rc): split `output` into `curr_output` and `slide` to avoid unnecessary computation on
-    // recovery.
-    /// Return the output for the current ready window frame and push the window forward.
-    fn output(&mut self) -> StreamExecutorResult<StateOutput>;
+    /// Get the window function result of current window frame.
+    fn curr_output(&self) -> StreamExecutorResult<Datum>;
+
+    /// Slide the window frame forward.
+    fn slide_forward(&mut self) -> StateEvictHint;
 }
 
 pub(super) fn create_window_state(
@@ -129,8 +122,67 @@ pub(super) fn create_window_state(
                 None,
             ))
         }
-        Lag => Box::new(lag::LagState::new(&call.frame)),
-        Lead => Box::new(lead::LeadState::new(&call.frame)),
+        Lag | Lead => unreachable!("should be rewritten to `first_value` in optimizer"),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
     })
+}
+
+#[derive(Educe)]
+#[educe(Default)]
+pub struct EstimatedVecDeque<T: EstimateSize> {
+    inner: VecDeque<T>,
+    heap_size: KvSize,
+}
+
+impl<T: EstimateSize> EstimatedVecDeque<T> {
+    #[expect(dead_code)]
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.inner.pop_back().inspect(|v| {
+            self.heap_size.sub_val(v);
+        })
+    }
+
+    pub fn pop_front(&mut self) -> Option<T> {
+        self.inner.pop_front().inspect(|v| {
+            self.heap_size.sub_val(v);
+        })
+    }
+
+    pub fn push_back(&mut self, value: T) {
+        self.heap_size.add_val(&value);
+        self.inner.push_back(value)
+    }
+
+    pub fn push_front(&mut self, value: T) {
+        self.heap_size.add_val(&value);
+        self.inner.push_front(value)
+    }
+
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.inner.get(index)
+    }
+
+    pub fn front(&self) -> Option<&T> {
+        self.inner.front()
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+}
+
+impl<T: EstimateSize> std::ops::Index<usize> for EstimatedVecDeque<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.inner[index]
+    }
+}
+
+impl<T: EstimateSize> EstimateSize for EstimatedVecDeque<T> {
+    fn estimated_heap_size(&self) -> usize {
+        // TODO: Add `VecDeque` internal size.
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.heap_size.size()
+    }
 }

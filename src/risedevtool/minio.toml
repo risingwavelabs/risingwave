@@ -6,6 +6,7 @@ MCLI_DOWNLOAD_BIN = { value = "https://dl.min.io/client/mc/release/${MINIO_SYSTE
 MINIO_DOWNLOAD_BIN = { value = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio", condition = { env_not_set = [ "MINIO_DOWNLOAD_BIN" ] } }
 
 [tasks.download-minio]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }
@@ -25,6 +26,7 @@ mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
 '''
 
 [tasks.download-mcli]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }

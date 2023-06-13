@@ -171,6 +171,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
     creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef<S>,
+
+    pub(crate) streaming_job_lock: Mutex<()>,
 }
 
 impl<S> GlobalStreamManager<S>
@@ -193,6 +195,7 @@ where
             source_manager,
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
+            streaming_job_lock: Mutex::new(()),
         })
     }
 
@@ -853,7 +856,7 @@ mod tests {
         async fn drop_materialized_views(&self, table_ids: Vec<TableId>) -> MetaResult<()> {
             for table_id in &table_ids {
                 self.catalog_manager
-                    .drop_table(table_id.table_id, vec![])
+                    .drop_table(table_id.table_id, vec![], self.fragment_manager.clone())
                     .await?;
             }
             self.global_stream_manager

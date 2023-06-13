@@ -18,7 +18,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::catalog::Schema;
+use pretty_xmlish::Pretty;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -26,11 +26,13 @@ use risingwave_pb::stream_plan::ChainType;
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
+use super::utils::Distill;
 use super::{
     generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
     StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::optimizer::plan_node::generic::DynamicFilter;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -54,40 +56,50 @@ pub struct LogicalJoin {
     core: generic::Join<PlanRef>,
 }
 
+impl Distill for LogicalJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let verbose = self.base.ctx.is_explain_verbose();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("type", Pretty::debug(&self.join_type())));
+
+        let concat_schema = self.core.concat_schema();
+        let cond = Pretty::debug(&ConditionDisplay {
+            condition: self.on(),
+            input_schema: &concat_schema,
+        });
+        vec.push(("on", cond));
+
+        if verbose {
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema)
+                .map_or_else(|| Pretty::from("all"), |id| Pretty::display(&id));
+            vec.push(("output", data));
+        }
+
+        Pretty::childless_record("LogicalJoin", vec)
+    }
+}
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("LogicalJoin");
         builder.field("type", &self.join_type());
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-        builder.field(
-            "on",
-            &ConditionDisplay {
-                condition: self.on(),
-                input_schema: &concat_schema,
-            },
-        );
+        let concat_schema = self.core.concat_schema();
+        let cond = &ConditionDisplay {
+            condition: self.on(),
+            input_schema: &concat_schema,
+        };
+        builder.field("on", cond);
 
         if verbose {
-            if self
-                .output_indices()
-                .iter()
-                .copied()
-                .eq(0..self.internal_column_num())
-            {
-                builder.field("output", &format_args!("all"));
-            } else {
-                builder.field(
-                    "output",
-                    &IndicesDisplay {
-                        indices: self.output_indices(),
-                        input_schema: &concat_schema,
-                    },
-                );
-            }
+            match IndicesDisplay::from(
+                self.output_indices(),
+                self.internal_column_num(),
+                &concat_schema,
+            ) {
+                None => builder.field("output", &format_args!("all")),
+                Some(id) => builder.field("output", &id),
+            };
         }
 
         builder.finish()
@@ -266,7 +278,7 @@ impl LogicalJoin {
 
         for expr in &predicate.conjunctions {
             if let ExprImpl::FunctionCall(func) = expr {
-                match func.get_expr_type() {
+                match func.func_type() {
                     ExprType::Equal
                     | ExprType::NotEqual
                     | ExprType::LessThan
@@ -775,17 +787,18 @@ impl PredicatePushdown for LogicalJoin {
     /// | Where predicate (filter) | Pushed              | Not Pushed           |
     fn predicate_pushdown(
         &self,
-        mut predicate: Condition,
+        predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        // rewrite output col referencing indices as internal cols
+        let mut predicate = {
+            let mut mapping = self.core.o2i_col_mapping();
+            predicate.rewrite_expr(&mut mapping)
+        };
+
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
-
-        // rewrite output col referencing indices as internal cols
-        let mut mapping = self.core.o2i_col_mapping();
-
-        predicate = predicate.rewrite_expr(&mut mapping);
 
         let (left_from_filter, right_from_filter, on) =
             push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
@@ -977,7 +990,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a append-only left input".into(),
+                "Temporal join requires an append-only left input".into(),
                 "Please ensure your left input is append-only".into(),
             )));
         }
@@ -1164,8 +1177,8 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let plan = StreamDynamicFilter::new(left_ref.index, comparator, left, right).into();
-
+        let core = DynamicFilter::new(comparator, left_ref.index, left, right);
+        let plan = StreamDynamicFilter::new(core).into();
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
             .output_indices()
@@ -1401,7 +1414,7 @@ mod tests {
 
     use std::collections::HashSet;
 
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 

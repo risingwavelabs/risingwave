@@ -142,6 +142,10 @@ macro_rules! impl_array_for_num256 {
                 self.data.pop().map(|_| self.bitmap.pop().unwrap())
             }
 
+            fn len(&self) -> usize {
+                self.bitmap.len()
+            }
+
             fn finish(self) -> Self::ArrayType {
                 Self::ArrayType {
                     bitmap: self.bitmap.finish(),

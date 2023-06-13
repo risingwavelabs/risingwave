@@ -18,13 +18,12 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use minitrace::future::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{warn, Instrument};
 
 use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
@@ -72,8 +71,6 @@ pub struct LocalHummockStorage {
     memory_limiter: Arc<MemoryLimiter>,
 
     hummock_version_reader: HummockVersionReader,
-
-    tracing: Arc<risingwave_tracing::RwTracingService>,
 
     stats: Arc<HummockStateStoreMetrics>,
 
@@ -169,7 +166,7 @@ impl StateStoreRead for LocalHummockStorage {
     ) -> Self::IterFuture<'_> {
         assert!(epoch <= self.epoch());
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
-            .in_span(self.tracing.new_tracer("hummock_iter"))
+            .instrument(tracing::trace_span!("hummock_iter"))
     }
 }
 
@@ -426,7 +423,6 @@ impl LocalHummockStorage {
         hummock_version_reader: HummockVersionReader,
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
     ) -> Self {
@@ -442,7 +438,6 @@ impl LocalHummockStorage {
             event_sender,
             memory_limiter,
             hummock_version_reader,
-            tracing,
             stats,
             write_limiter,
         }

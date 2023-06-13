@@ -15,17 +15,20 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-aho-corasick = "0.7"
+aho-corasick = "1"
 anyhow = "1"
 arrow-array = "36"
 arrow-schema = "36"
 async-trait = "0.1"
 auto_enums = "0.8"
+await-tree = { workspace = true }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 ctor = "0.1"
 dyn-clone = "1"
+easy-ext = "1"
 either = "1"
+futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4.3"
 itertools = "0.10"
@@ -53,6 +56,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = "0.4"
+expect-test = "1"
 serde_json = "1"
 
 [[bench]]

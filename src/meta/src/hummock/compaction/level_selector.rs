@@ -191,20 +191,6 @@ impl DynamicLevelSelectorCore {
             .sum::<usize>()
             - handlers[0].get_pending_file_count();
 
-        let max_l0_overlapping_score = std::cmp::max(
-            SCORE_BASE * 2,
-            levels
-                .l0
-                .as_ref()
-                .unwrap()
-                .sub_levels
-                .iter()
-                .filter(|sub_level| sub_level.level_type() == LevelType::Overlapping)
-                .count() as u64
-                * SCORE_BASE
-                / self.config.level0_overlapping_sub_level_compact_level_count as u64,
-        );
-
         if idle_file_count > 0 {
             // trigger l0 compaction when the number of files is too large.
 
@@ -220,18 +206,15 @@ impl DynamicLevelSelectorCore {
                 .filter(|level| level.level_type() == LevelType::Overlapping)
                 .map(|level| level.table_infos.len())
                 .sum::<usize>();
-
-            // FIXME: use overlapping idle file count
-            let l0_overlapping_score =
-                std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
-                    / self.config.level0_tier_compact_file_number;
-
-            // Reduce the level num of l0 overlapping sub_level
-            ctx.score_levels.push((
-                std::cmp::min(l0_overlapping_score, max_l0_overlapping_score),
-                0,
-                0,
-            ));
+            if overlapping_file_count > 0 {
+                // FIXME: use overlapping idle file count
+                let l0_overlapping_score =
+                    std::cmp::min(idle_file_count, overlapping_file_count) as u64 * SCORE_BASE
+                        / self.config.level0_tier_compact_file_number;
+                // Reduce the level num of l0 overlapping sub_level
+                ctx.score_levels
+                    .push((std::cmp::max(l0_overlapping_score, SCORE_BASE + 1), 0, 0));
+            }
 
             // The read query at the non-overlapping level only selects ssts that match the query
             // range at each level, so the number of levels is the most important factor affecting
@@ -508,6 +491,7 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
             .state
             .entry(group.group_id)
             .or_insert_with(SpaceReclaimPickerState::default);
+
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
@@ -963,7 +947,6 @@ pub mod tests {
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 0);
         assert_eq!(compaction.input.target_level, 2);
-        assert_eq!(compaction.target_file_size, config.target_file_size_base);
 
         levels_handlers[0].remove_task(1);
         levels_handlers[2].remove_task(1);

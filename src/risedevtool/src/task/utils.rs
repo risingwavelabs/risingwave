@@ -62,17 +62,17 @@ pub fn add_hummock_backend(
     provide_aws_s3: &[AwsS3Config],
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
-) -> Result<bool> {
-    let is_shared_backend = match (provide_minio, provide_aws_s3, provide_opendal) {
+) -> Result<(bool, bool)> {
+    let (is_shared_backend, is_persistent_backend) = match (provide_minio, provide_aws_s3, provide_opendal) {
         ([], [], []) => {
             match hummock_in_memory_strategy {
                 HummockInMemoryStrategy::Isolated => {
                     cmd.arg("--state-store").arg("hummock+memory");
-                    false
+                    (false, false)
                 }
                 HummockInMemoryStrategy::Shared => {
                     cmd.arg("--state-store").arg("hummock+memory-shared");
-                    true
+                    (true, false)
                 },
                 HummockInMemoryStrategy::Disallowed => return Err(anyhow!(
                     "{} is not compatible with in-memory state backend. Need to enable either minio or aws-s3.", id
@@ -88,17 +88,12 @@ pub fn add_hummock_backend(
                 minio_addr = minio.address,
                 minio_port = minio.port,
             ));
-            true
+            (true, true)
         }
         ([], [aws_s3], []) => {
-            // if s3-compatible is true, using some s3 compatible object store.
-            match aws_s3.s3_compatible{
-                true => cmd.arg("--state-store")
-                .arg(format!("hummock+s3-compatible://{}", aws_s3.bucket)),
-                false => cmd.arg("--state-store")
-                .arg(format!("hummock+s3://{}", aws_s3.bucket)),
-            };
-            true
+            cmd.arg("--state-store")
+                .arg(format!("hummock+s3://{}", aws_s3.bucket));
+            (true, true)
         }
         ([], [], [opendal]) => {
             if opendal.engine == "hdfs"{
@@ -128,7 +123,7 @@ pub fn add_hummock_backend(
             else{
                 unimplemented!()
             }
-            true
+            (true, true)
         }
 
         (other_minio, other_s3, _) => {
@@ -140,5 +135,5 @@ pub fn add_hummock_backend(
         }
     };
 
-    Ok(is_shared_backend)
+    Ok((is_shared_backend, is_persistent_backend))
 }

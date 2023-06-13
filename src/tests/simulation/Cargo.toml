@@ -13,10 +13,10 @@ normal = ["serde"]
 [dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-aws-sdk-s3 = { version = "0.2.17", package = "madsim-aws-sdk-s3" }
+aws-sdk-s3 = { version = "0.2.23", package = "madsim-aws-sdk-s3" }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
-etcd-client = { version = "0.2.20", package = "madsim-etcd-client" }
+etcd-client = { version = "0.2.23", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
@@ -25,6 +25,7 @@ madsim = "0.2.21"
 paste = "1"
 pin-project = "1.0"
 pretty_assertions = "1"
+prometheus = { version = "0.13" }
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.14-alpha", features = ["cmake-build"] }
 risingwave_common = { path = "../../common" }

@@ -9,10 +9,17 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  message NowRexNode {}
+  // TODO: move this into `FunctionCall`.
   enum Type {
+    // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
+    // Their types are therefore deprecated and should be `UNSPECIFIED` instead.
+    reserved 1, 2, 3000;
+    reserved "INPUT_REF", "CONSTANT_VALUE", "UDF";
+
+    // Used for `InputRef`, `Constant`, and `UserDefinedFunction`.
     UNSPECIFIED = 0;
-    INPUT_REF = 1;
-    CONSTANT_VALUE = 2;
+
     // arithmetics operators
     ADD = 3;
     SUBTRACT = 4;
@@ -119,6 +126,18 @@ message ExprNode {
     SQRT = 258;
     DEGREES = 259;
     RADIANS = 260;
+    COSH = 261;
+    TANH = 262;
+    COTH = 263;
+    ASINH = 264;
+    ACOSH = 265;
+    ATANH = 266;
+    SINH = 267;
+    // skips 268,269,270 so that acosd, atand, atan2d are close to others
+    TRUNC = 271;
+    LN = 272;
+    LOG10 = 273;
+    CBRT = 274;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -161,6 +180,9 @@ message ExprNode {
     ARRAY_POSITIONS = 539;
     TRIM_ARRAY = 540;
     STRING_TO_ARRAY = 541;
+    ARRAY_POSITION = 542;
+    ARRAY_REPLACE = 543;
+    ARRAY_DIMS = 544;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -180,26 +202,31 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     PROCTIME = 2023;
-    // User defined functions
-    UDF = 3000;
   }
-  Type expr_type = 1;
+  Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
     uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
+    NowRexNode now = 8;
   }
 }
 
 message TableFunction {
   enum Type {
     UNSPECIFIED = 0;
-    GENERATE = 1;
+    GENERATE_SERIES = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // Jsonb functions
+    JSONB_ARRAY_ELEMENTS = 10;
+    JSONB_ARRAY_ELEMENTS_TEXT = 11;
+    JSONB_EACH = 12;
+    JSONB_EACH_TEXT = 13;
+    JSONB_OBJECT_KEYS = 14;
     // User defined table function
     UDTF = 100;
   }
@@ -213,6 +240,11 @@ message TableFunction {
 // Reference to an upstream column, containing its index and data type.
 message InputRef {
   uint32 index = 1;
+  data.DataType type = 2;
+}
+
+message Constant {
+  data.Datum datum = 1;
   data.DataType type = 2;
 }
 
@@ -278,6 +310,9 @@ message AggCall {
     BOOL_OR = 19;
     JSONB_AGG = 20;
     JSONB_OBJECT_AGG = 21;
+    PERCENTILE_CONT = 22;
+    PERCENTILE_DISC = 23;
+    MODE = 24;
   }
   Type type = 1;
   repeated InputRef args = 2;
@@ -285,6 +320,7 @@ message AggCall {
   bool distinct = 4;
   repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
+  repeated Constant direct_args = 7;
 }
 
 message WindowFrame {
@@ -334,9 +370,6 @@ message WindowFunction {
     // NTILE = 6;
     LAG = 7;
     LEAD = 8;
-    // FIRST_VALUE = 9;
-    // LAST_VALUE = 10;
-    // NTH_VALUE = 11;
   }
 
   oneof type {

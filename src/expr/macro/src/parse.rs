@@ -15,6 +15,7 @@
 //! Parse the tokens of the macro.
 
 use proc_macro2::Span;
+use syn::spanned::Spanned;
 
 use super::*;
 
@@ -40,6 +41,10 @@ impl FunctionAttr {
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
         let args = args.trim_start().trim_end_matches([')', ' ']);
+        let (is_table_function, ret) = match ret.trim_start().strip_prefix("setof") {
+            Some(s) => (true, s),
+            None => (false, ret),
+        };
 
         let user_fn = UserFunctionAttr::parse(item)?;
 
@@ -51,9 +56,12 @@ impl FunctionAttr {
                 args.split(',').map(|s| s.trim().to_string()).collect()
             },
             ret: ret.trim().to_string(),
+            is_table_function,
             batch_fn: find_argument(attr, "batch_fn"),
             state: find_argument(attr, "state"),
             init_state: find_argument(attr, "init_state"),
+            prebuild: find_argument(attr, "prebuild"),
+            type_infer: find_argument(attr, "type_infer"),
             user_fn,
         })
     }
@@ -61,13 +69,22 @@ impl FunctionAttr {
 
 impl UserFunctionAttr {
     fn parse(item: &mut syn::ItemFn) -> Result<Self> {
+        let (return_type, iterator_item_type) = match &item.sig.output {
+            syn::ReturnType::Default => (ReturnType::T, None),
+            syn::ReturnType::Type(_, ty) => {
+                let (return_type, inner) = check_type(ty);
+                let iterator_item_type = strip_iterator(inner).map(|ty| check_type(ty).0);
+                (return_type, iterator_item_type)
+            }
+        };
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
             arg_option: args_are_all_option(item),
-            return_type: return_type(item),
+            return_type,
+            iterator_item_type,
             generic: item.sig.generics.params.len(),
-            // prebuild: extract_prebuild_arg(item),
+            return_type_span: item.sig.output.span(),
         })
     }
 }
@@ -104,55 +121,48 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
 }
 
 /// Check the return type.
-fn return_type(item: &syn::ItemFn) -> ReturnType {
-    if return_value_is_result_option(item) {
-        ReturnType::ResultOption
-    } else if return_value_is(item, "Result") {
-        ReturnType::Result
-    } else if return_value_is(item, "Option") {
-        ReturnType::Option
+fn check_type(ty: &syn::Type) -> (ReturnType, &syn::Type) {
+    if let Some(inner) = strip_outer_type(ty, "Result") {
+        if let Some(inner) = strip_outer_type(inner, "Option") {
+            (ReturnType::ResultOption, inner)
+        } else {
+            (ReturnType::Result, inner)
+        }
+    } else if let Some(inner) = strip_outer_type(ty, "Option") {
+        (ReturnType::Option, inner)
+    } else if let Some(inner) = strip_outer_type(ty, "DatumRef") {
+        (ReturnType::Option, inner)
     } else {
-        ReturnType::T
+        (ReturnType::T, ty)
     }
 }
 
-/// Check if the return value is `type_`.
-fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
-    let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    seg.ident == type_
-}
-
-/// Check if the return value is `Result<Option<T>>`.
-fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
-    let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
-    let syn::Type::Path(path) = ty.as_ref() else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    if seg.ident != "Result" {
-        return false;
+/// Check if the type is `type_<T>` and return `T`.
+fn strip_outer_type<'a>(ty: &'a syn::Type, type_: &str) -> Option<&'a syn::Type> {
+    let syn::Type::Path(path) = ty else { return None };
+    let Some(seg) = path.path.segments.last() else { return None };
+    if seg.ident != type_ {
+        return None;
     }
-    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else { return false };
-    let Some(syn::GenericArgument::Type(ty)) = args.args.first() else { return false };
-    let syn::Type::Path(path) = ty else { return false };
-    let Some(seg) = path.path.segments.last() else { return false };
-    seg.ident == "Option"
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else { return None };
+    let Some(syn::GenericArgument::Type(ty)) = args.args.first() else { return None };
+    Some(ty)
 }
 
-/// Extract `#[prebuild("function_name")]` from arguments.
-fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
-    for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
-        let syn::FnArg::Typed(arg) = arg else { continue };
-        if let Some(idx) = arg
-            .attrs
-            .iter_mut()
-            .position(|att| att.path.is_ident("prebuild"))
-        {
-            let attr = arg.attrs.remove(idx);
-            // XXX: this is a hack to parse a string literal from token stream
-            let s = attr.tokens.to_string();
-            let s = s.trim_start_matches("(\"").trim_end_matches("\")");
-            return Some((i, s.to_string()));
+/// Check if the type is `impl Iterator<Item = T>` and return `T`.
+fn strip_iterator(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::ImplTrait(impl_trait) = ty else { return None; };
+    let syn::TypeParamBound::Trait(trait_bound) = impl_trait.bounds.first()? else { return None; };
+    let segment = trait_bound.path.segments.last().unwrap();
+    if segment.ident != "Iterator" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(angle_bracketed) = &segment.arguments else {
+        return None;
+    };
+    for arg in &angle_bracketed.args {
+        if let syn::GenericArgument::Binding(b) = arg && b.ident == "Item" {
+            return Some(&b.ty);
         }
     }
     None

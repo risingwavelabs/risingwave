@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -41,12 +40,6 @@ impl BatchUpdate {
     }
 }
 
-impl fmt::Display for BatchUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchUpdate")
-    }
-}
-
 impl PlanTreeNodeUnary for BatchUpdate {
     fn input(&self) -> PlanRef {
         self.logical.input.clone()
@@ -60,6 +53,7 @@ impl PlanTreeNodeUnary for BatchUpdate {
 }
 
 impl_plan_tree_node_for_unary! { BatchUpdate }
+impl_distill_by_unit!(BatchUpdate, logical, "BatchUpdate");
 
 impl ToDistributedBatch for BatchUpdate {
     fn to_distributed(&self) -> Result<PlanRef> {

@@ -81,6 +81,7 @@ pub async fn compute_node_serve(
     listen_addr: SocketAddr,
     advertise_addr: HostAddr,
     opts: ComputeNodeOpts,
+    registry: prometheus::Registry,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
     let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
@@ -161,7 +162,7 @@ pub async fn compute_node_serve(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, Sender<()>)> = vec![];
     // Initialize the metrics subsystem.
-    let registry = prometheus::Registry::new();
+
     monitor_process(&registry).unwrap();
     let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
     let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
@@ -191,16 +192,6 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if config.streaming.enable_jaeger_tracing {
-            Arc::new(
-                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
-                    "127.0.0.1:6831".to_string(),
-                ))
-                .unwrap(),
-            )
-        } else {
-            Arc::new(risingwave_tracing::RwTracingService::disabled())
-        },
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
@@ -243,6 +234,7 @@ pub async fn compute_node_serve(
         let memory_collector = Arc::new(HummockMemoryCollector::new(
             storage.sstable_store(),
             memory_limiter,
+            storage_memory_config,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
@@ -257,14 +249,13 @@ pub async fn compute_node_serve(
     sub_tasks.push(MetaClient::start_heartbeat_loop(
         meta_client.clone(),
         Duration::from_millis(config.server.heartbeat_interval_ms as u64),
-        Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
         extra_info_sources,
     ));
 
     let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
         c => await_tree::ConfigBuilder::default()
-            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .verbose(c.is_verbose().unwrap())
             .build()
             .ok(),
     };

@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::ops::{Bound, RangeBounds};
-use std::pin::Pin;
+use std::pin::{pin, Pin};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -197,7 +197,6 @@ async fn compaction_test(
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(FilterKeyExtractorManager::default()),
         state_store_metrics.clone(),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         compactor_metrics.clone(),
     )
     .await?;
@@ -415,26 +414,25 @@ impl NormalState {
         right: &[u8],
         ignore_range_tombstone: bool,
     ) -> Vec<(Bytes, Bytes)> {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(Bytes::copy_from_slice(left)),
-                        Bound::Excluded(Bytes::copy_from_slice(right)),
-                    ),
-                    ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone,
-                        retention_seconds: None,
-                        table_id: self.table_id,
-                        read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
-                        cache_policy: CachePolicy::Fill(CachePriority::High),
-                    },
-                )
-                .await
-                .unwrap(),
-        );
+        let mut iter = pin!(self
+            .storage
+            .iter(
+                (
+                    Bound::Included(Bytes::copy_from_slice(left)),
+                    Bound::Excluded(Bytes::copy_from_slice(right)),
+                ),
+                ReadOptions {
+                    prefix_hint: None,
+                    ignore_range_tombstone,
+                    retention_seconds: None,
+                    table_id: self.table_id,
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill(CachePriority::High),
+                },
+            )
+            .await
+            .unwrap(),);
         let mut ret = vec![];
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();

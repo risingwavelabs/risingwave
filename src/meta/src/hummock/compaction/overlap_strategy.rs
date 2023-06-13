@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use std::cmp;
+use std::ops::Range;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 pub trait OverlapInfo {
     fn check_overlap(&self, a: &SstableInfo) -> bool;
-    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo>;
+    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize>;
+    fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize>;
     fn update(&mut self, table: &SstableInfo);
 }
 
@@ -35,7 +38,12 @@ pub trait OverlapStrategy: Send + Sync {
         for table in tables {
             info.update(table);
         }
-        info.check_multiple_overlap(others)
+        let range = info.check_multiple_overlap(others);
+        if range.is_empty() {
+            vec![]
+        } else {
+            others[range].to_vec()
+        }
     }
     fn check_overlap_with_tables(
         &self,
@@ -72,10 +80,9 @@ impl OverlapInfo for RangeOverlapInfo {
         }
     }
 
-    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Vec<SstableInfo> {
+    fn check_multiple_overlap(&self, others: &[SstableInfo]) -> Range<usize> {
         match self.target_range.as_ref() {
             Some(key_range) => {
-                let mut tables = vec![];
                 let overlap_begin = others.partition_point(|table_status| {
                     table_status
                         .key_range
@@ -85,19 +92,47 @@ impl OverlapInfo for RangeOverlapInfo {
                         == cmp::Ordering::Less
                 });
                 if overlap_begin >= others.len() {
-                    return vec![];
+                    return overlap_begin..overlap_begin;
                 }
+                let mut overlap_end = overlap_begin;
                 for table in &others[overlap_begin..] {
                     if key_range.compare_right_with(&table.key_range.as_ref().unwrap().left)
                         == cmp::Ordering::Less
                     {
                         break;
                     }
-                    tables.push(table.clone());
+                    overlap_end += 1;
                 }
-                tables
+                overlap_begin..overlap_end
             }
-            None => vec![],
+            None => others.len()..others.len(),
+        }
+    }
+
+    fn check_multiple_include(&self, others: &[SstableInfo]) -> Range<usize> {
+        match self.target_range.as_ref() {
+            Some(key_range) => {
+                let overlap_begin = others.partition_point(|table_status| {
+                    KeyComparator::compare_encoded_full_key(
+                        &table_status.key_range.as_ref().unwrap().left,
+                        &key_range.left,
+                    ) == cmp::Ordering::Less
+                });
+                if overlap_begin >= others.len() {
+                    return overlap_begin..overlap_begin;
+                }
+                let mut overlap_end = overlap_begin;
+                for table in &others[overlap_begin..] {
+                    if key_range.compare_right_with(&table.key_range.as_ref().unwrap().right)
+                        == cmp::Ordering::Less
+                    {
+                        break;
+                    }
+                    overlap_end += 1;
+                }
+                overlap_begin..overlap_end
+            }
+            None => others.len()..others.len(),
         }
     }
 

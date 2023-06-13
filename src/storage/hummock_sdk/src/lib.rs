@@ -19,9 +19,9 @@
 #![feature(map_many_mut)]
 #![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod key_cmp;
-
 use std::cmp::Ordering;
 
 pub use key_cmp::*;

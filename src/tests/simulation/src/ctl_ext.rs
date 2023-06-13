@@ -33,6 +33,9 @@ use crate::cluster::Cluster;
 
 /// Predicates used for locating fragments.
 pub mod predicate {
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::DispatcherType;
+
     use super::*;
 
     trait Predicate = Fn(&PbFragment) -> bool + Send + 'static;
@@ -96,10 +99,14 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of no-shuffle downstreams must be derived from the upstream
-        // `Materialize`, not specified by the user.
-        let p =
-            |f: &PbFragment| no_identity_contains("Chain")(f) && no_identity_contains("Lookup")(f);
+        let p = |f: &PbFragment| {
+            // The rescheduling of no-shuffle downstreams must be derived from the most upstream
+            // fragment. So if a fragment has no-shuffle upstreams, it cannot be rescheduled.
+            !any(root(f), &|n| {
+                let Some(NodeBody::Merge(merge)) = &n.node_body else { return false };
+                merge.upstream_dispatcher_type() == DispatcherType::NoShuffle
+            })
+        };
         Box::new(p)
     }
 
@@ -284,6 +291,18 @@ impl Cluster {
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
         let plan = plan.into();
 
+        let revision = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r.revision)
+            })
+            .await??;
+
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from([
@@ -292,6 +311,8 @@ impl Cluster {
                     "reschedule",
                     "--plan",
                     plan.as_ref(),
+                    "--revision",
+                    &format!("{}", revision),
                 ]);
                 risingwave_ctl::start(opts).await
             })

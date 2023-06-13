@@ -21,6 +21,7 @@ use either::Either;
 use etcd_client::ConnectOptions;
 use futures::future::join_all;
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -53,6 +54,7 @@ use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::batch::ServingVnodeMapping;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -73,7 +75,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, MetaResult};
+use crate::{batch, hummock, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -339,11 +341,30 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
 
+    let data_directory = system_params_reader.data_directory();
+    if !is_correct_data_directory(data_directory) {
+        return Err(MetaError::system_param(format!(
+            "The data directory {:?} is misconfigured. 
+            Please use a combination of uppercase and lowercase letters and numbers, i.e. [a-z, A-Z, 0-9]. 
+            The string cannot start or end with '/', and consecutive '/' are not allowed.
+            The data directory cannot be empty and its length should not exceed 800 characters.",
+            data_directory
+        )));
+    }
+
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
             .unwrap(),
     );
+    let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    batch::on_meta_start(
+        env.notification_manager_ref(),
+        cluster_manager.clone(),
+        fragment_manager.clone(),
+        serving_vnode_mapping.clone(),
+    )
+    .await;
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
@@ -511,6 +532,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         hummock_manager.clone(),
         fragment_manager.clone(),
         backup_manager.clone(),
+        serving_vnode_mapping.clone(),
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
@@ -557,6 +579,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
     sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
+    sub_tasks.push(
+        batch::start_serving_vnode_mapping_worker(
+            env.notification_manager_ref(),
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            serving_vnode_mapping,
+        )
+        .await,
+    );
 
     if cfg!(not(test)) {
         sub_tasks.push(
@@ -673,4 +704,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         .await
         .unwrap();
     Ok(())
+}
+
+fn is_correct_data_directory(data_directory: &str) -> bool {
+    let data_directory_regex = Regex::new(r"^[0-9a-zA-Z_/-]{1,}$").unwrap();
+    if data_directory.is_empty()
+        || !data_directory_regex.is_match(data_directory)
+        || data_directory.ends_with('/')
+        || data_directory.starts_with('/')
+        || data_directory.contains("//")
+        || data_directory.len() > 800
+    {
+        return false;
+    }
+    true
 }

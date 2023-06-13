@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
 
@@ -81,7 +80,6 @@ pub struct Binder {
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
-    epoch: Epoch,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -100,6 +98,8 @@ pub struct Binder {
     /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
     /// and so on.
     next_share_id: ShareId,
+
+    session_config: HashMap<String, String>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -198,23 +198,23 @@ impl ParameterTypes {
 
 impl Binder {
     fn new_inner(session: &SessionImpl, bind_for: BindFor, param_types: Vec<DataType>) -> Binder {
-        let epoch = session
-            .env()
-            .hummock_snapshot_manager()
-            .latest_snapshot_current_epoch();
-
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
-            epoch,
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
             next_values_id: 0,
             next_share_id: 0,
+            session_config: session
+                .config()
+                .get_all()
+                .into_iter()
+                .map(|var| (var.name, var.setting))
+                .collect(),
             search_path: session.config().get_search_path(),
             bind_for,
             shared_views: HashMap::new(),
@@ -254,6 +254,7 @@ impl Binder {
         matches!(self.bind_for, BindFor::Stream)
     }
 
+    #[expect(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }

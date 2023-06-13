@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
+use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -29,14 +27,13 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
     pub base: PlanBase,
-    pub logical: LogicalDelete,
+    pub logical: generic::Delete<PlanRef>,
 }
 
 impl BatchDelete {
-    pub fn new(logical: LogicalDelete) -> Self {
-        let ctx = logical.base.ctx.clone();
+    pub fn new(logical: generic::Delete<PlanRef>) -> Self {
         let base = PlanBase::new_batch(
-            ctx,
+            logical.ctx(),
             logical.schema().clone(),
             Distribution::Single,
             Order::any(),
@@ -45,19 +42,17 @@ impl BatchDelete {
     }
 }
 
-impl fmt::Display for BatchDelete {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchDelete")
-    }
-}
+impl_distill_by_unit!(BatchDelete, logical, "BatchDelete");
 
 impl PlanTreeNodeUnary for BatchDelete {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.logical.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut core = self.logical.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -74,9 +69,9 @@ impl ToDistributedBatch for BatchDelete {
 impl ToBatchPb for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
-            table_id: self.logical.table_id().table_id(),
-            table_version_id: self.logical.table_version_id(),
-            returning: self.logical.has_returning(),
+            table_id: self.logical.table_id.table_id(),
+            table_version_id: self.logical.table_version_id,
+            returning: self.logical.returning,
         })
     }
 }

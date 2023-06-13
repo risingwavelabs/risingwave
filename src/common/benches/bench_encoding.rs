@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::env;
-use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
@@ -118,13 +117,7 @@ fn bench_encoding(c: &mut Criterion) {
         // encoding.
         Case::new(
             "Struct of Bool (len = 100)",
-            DataType::Struct(Arc::new(StructType::new(vec![
-                (
-                    DataType::Boolean,
-                    "".to_string()
-                );
-                100
-            ]))),
+            DataType::Struct(StructType::new(vec![("", DataType::Boolean); 100])),
             ScalarImpl::Struct(StructValue::new(vec![Some(ScalarImpl::Bool(true)); 100])),
         ),
         Case::new(

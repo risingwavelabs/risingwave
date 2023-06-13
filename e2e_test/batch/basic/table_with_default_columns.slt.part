@@ -32,4 +32,36 @@ statement error
 update t1 set (v1, v2) = (0, default);
 
 statement ok
+create table t2 (v1 int, v2 int default 1.5);
+
+statement ok
+insert into t2 values (1), (2);
+
+query II
+select * from t2;
+----
+1 2
+2 2
+
+statement ok
+create table tt (v1 int, v2 timestamptz default now());
+
+statement ok
+insert into tt values (1);
+
+query II
+select v1, v2 >= date '2021-01-01' from tt;
+----
+1 t
+
+statement ok
+update tt set v2=default;
+
+statement ok
 drop table t1;
+
+statement ok
+drop table t2;
+
+statement ok
+drop table tt;

@@ -12,169 +12,87 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
-use anyhow::anyhow;
-use itertools::multizip;
-use num_traits::Zero;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, IntervalArray, TimestampArray,
-};
-use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use num_traits::One;
+use risingwave_common::types::{CheckedAdd, IsNegative};
+use risingwave_expr_macro::function;
 
 use super::*;
-use crate::ExprError;
 
-#[derive(Debug)]
-pub struct GenerateSeries<T: Array, S: Array, const STOP_INCLUSIVE: bool> {
-    start: BoxedExpression,
-    stop: BoxedExpression,
-    step: BoxedExpression,
-    chunk_size: usize,
-    _phantom: std::marker::PhantomData<(T, S)>,
-}
-
-impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> GenerateSeries<T, S, STOP_INCLUSIVE>
+#[function("generate_series(int32, int32) -> setof int32")]
+#[function("generate_series(int64, int64) -> setof int64")]
+#[function("generate_series(decimal, decimal) -> setof decimal")]
+fn generate_series<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
 where
-    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
-    for<'a> S::RefItem<'a>: IsNegative,
+    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
 {
-    fn new(
-        start: BoxedExpression,
-        stop: BoxedExpression,
-        step: BoxedExpression,
-        chunk_size: usize,
-    ) -> Self {
-        Self {
-            start,
-            stop,
-            step,
-            chunk_size,
-            _phantom: Default::default(),
-        }
-    }
-
-    fn eval_row(
-        &self,
-        start: T::RefItem<'_>,
-        stop: T::RefItem<'_>,
-        step: S::RefItem<'_>,
-    ) -> Result<ArrayRef> {
-        if step.is_zero() {
-            return Err(ExprError::InvalidParam {
-                name: "step",
-                reason: "must be non-zero".to_string(),
-            });
-        }
-
-        let mut builder = T::Builder::new(self.chunk_size);
-
-        let mut cur: T::OwnedItem = start.to_owned_scalar();
-
-        while if step.is_negative() {
-            if STOP_INCLUSIVE {
-                cur >= stop
-            } else {
-                cur > stop
-            }
-        } else if STOP_INCLUSIVE {
-            cur <= stop
-        } else {
-            cur < stop
-        } {
-            builder.append(Some(cur.as_scalar_ref()));
-            cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
-        }
-
-        Ok(Arc::new(builder.finish().into()))
-    }
+    range_generic::<_, _, true>(start, stop, T::one())
 }
 
-#[async_trait::async_trait]
-impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> TableFunction
-    for GenerateSeries<T, S, STOP_INCLUSIVE>
+#[function("generate_series(int32, int32, int32) -> setof int32")]
+#[function("generate_series(int64, int64, int64) -> setof int64")]
+#[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
+#[function("generate_series(timestamp, timestamp, interval) -> setof timestamp")]
+fn generate_series_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
 where
-    T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
-    T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
-    for<'a> S::RefItem<'a>: IsNegative,
-    for<'a> &'a T: From<&'a ArrayImpl>,
-    for<'a> &'a S: From<&'a ArrayImpl>,
+    T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
+    S: IsNegative + Copy,
 {
-    fn return_type(&self) -> DataType {
-        self.start.return_type()
-    }
-
-    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_start = self.start.eval_checked(input).await?;
-        let arr_start: &T = ret_start.as_ref().into();
-        let ret_stop = self.stop.eval_checked(input).await?;
-        let arr_stop: &T = ret_stop.as_ref().into();
-
-        let ret_step = self.step.eval_checked(input).await?;
-        let arr_step: &S = ret_step.as_ref().into();
-
-        let bitmap = input.visibility();
-        let mut output_arrays: Vec<ArrayRef> = vec![];
-
-        match bitmap {
-            Some(bitmap) => {
-                for ((start, stop, step), visible) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                        .zip_eq_debug(bitmap.iter())
-                {
-                    let array = if !visible {
-                        empty_array(self.return_type())
-                    } else if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-            None => {
-                for (start, stop, step) in
-                    multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                {
-                    let array = if let (Some(start), Some(stop), Some(step)) = (start, stop, step) {
-                        self.eval_row(start, stop, step)?
-                    } else {
-                        empty_array(self.return_type())
-                    };
-                    output_arrays.push(array);
-                }
-            }
-        }
-
-        Ok(output_arrays)
-    }
+    range_generic::<_, _, true>(start, stop, step)
 }
 
-pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
-    prost: &TableFunctionPb,
-    chunk_size: usize,
-) -> Result<BoxedTableFunction> {
-    let return_type = DataType::from(prost.get_return_type().unwrap());
-    let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
-    let [start, stop, step]: [_; 3] = args.try_into().unwrap();
+#[function("range(int32, int32) -> setof int32")]
+#[function("range(int64, int64) -> setof int64")]
+#[function("range(decimal, decimal) -> setof decimal")]
+fn range<T>(start: T, stop: T) -> Result<impl Iterator<Item = Result<T>>>
+where
+    T: CheckedAdd<Output = T> + PartialOrd + Copy + One + IsNegative,
+{
+    range_generic::<_, _, false>(start, stop, T::one())
+}
 
-    match return_type {
-        DataType::Timestamp => Ok(
-            GenerateSeries::<TimestampArray, IntervalArray, STOP_INCLUSIVE>::new(
-                start, stop, step, chunk_size,
-            )
-            .boxed(),
-        ),
-        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, STOP_INCLUSIVE>::new(
-            start, stop, step, chunk_size,
-        )
-        .boxed()),
-        _ => Err(ExprError::Internal(anyhow!(
-            "the return type of Generate Series Function is incorrect".to_string(),
-        ))),
+#[function("range(int32, int32, int32) -> setof int32")]
+#[function("range(int64, int64, int64) -> setof int64")]
+#[function("range(decimal, decimal, decimal) -> setof decimal")]
+#[function("range(timestamp, timestamp, interval) -> setof timestamp")]
+fn range_step<T, S>(start: T, stop: T, step: S) -> Result<impl Iterator<Item = Result<T>>>
+where
+    T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
+    S: IsNegative + Copy,
+{
+    range_generic::<_, _, false>(start, stop, step)
+}
+
+#[inline]
+fn range_generic<T, S, const INCLUSIVE: bool>(
+    start: T,
+    stop: T,
+    step: S,
+) -> Result<impl Iterator<Item = Result<T>>>
+where
+    T: CheckedAdd<S, Output = T> + PartialOrd + Copy,
+    S: IsNegative + Copy,
+{
+    if step.is_zero() {
+        return Err(ExprError::InvalidParam {
+            name: "step",
+            reason: "step size cannot equal zero".into(),
+        });
     }
+    let mut cur = start;
+    let neg = step.is_negative();
+    let mut next = move || {
+        match (INCLUSIVE, neg) {
+            (true, true) if cur < stop => return Ok(None),
+            (true, false) if cur > stop => return Ok(None),
+            (false, true) if cur <= stop => return Ok(None),
+            (false, false) if cur >= stop => return Ok(None),
+            _ => {}
+        };
+        let ret = cur;
+        cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
+        Ok(Some(ret))
+    };
+    Ok(std::iter::from_fn(move || next().transpose()))
 }
 
 #[cfg(test)]
@@ -189,135 +107,143 @@ mod tests {
     const CHUNK_SIZE: usize = 1024;
 
     #[tokio::test]
-    async fn test_generate_i32_series() {
-        generate_series_test_case(2, 4, 1).await;
-        generate_series_test_case(4, 2, -1).await;
-        generate_series_test_case(0, 9, 2).await;
-        generate_series_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
+    async fn test_generate_series_i32() {
+        generate_series_i32(2, 4, 1).await;
+        generate_series_i32(4, 2, -1).await;
+        generate_series_i32(0, 9, 2).await;
+        generate_series_i32(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
     }
 
-    async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
-        fn to_lit_expr(v: i32) -> BoxedExpression {
+    async fn generate_series_i32(start: i32, stop: i32, step: i32) {
+        fn literal(v: i32) -> BoxedExpression {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
-
-        let function = GenerateSeries::<I32Array, I32Array, true>::new(
-            to_lit_expr(start),
-            to_lit_expr(stop),
-            to_lit_expr(step),
+        let function = build(
+            PbType::GenerateSeries,
+            DataType::Int32,
             CHUNK_SIZE,
+            vec![literal(start), literal(stop), literal(step)],
         )
-        .boxed();
+        .unwrap();
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
-
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
-    async fn test_generate_time_series() {
+    async fn test_generate_series_timestamp() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = Interval::from_minutes(1);
         let one_hour_step = Interval::from_minutes(60);
         let one_day_step = Interval::from_days(1);
-        generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
-            .await;
-        generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
-        generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1).await;
-        generate_time_series_test_case(stop_time, start_time, -one_day_step, 8 + 1).await;
+        generate_series_timestamp(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1).await;
+        generate_series_timestamp(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
+        generate_series_timestamp(start_time, stop_time, one_day_step, 8 + 1).await;
+        generate_series_timestamp(stop_time, start_time, -one_day_step, 8 + 1).await;
     }
 
-    async fn generate_time_series_test_case(
+    async fn generate_series_timestamp(
         start: Timestamp,
         stop: Timestamp,
         step: Interval,
         expect_cnt: usize,
     ) {
-        fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
+        fn literal(ty: DataType, v: ScalarImpl) -> BoxedExpression {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
-
-        let function = GenerateSeries::<TimestampArray, IntervalArray, true>::new(
-            to_lit_expr(DataType::Timestamp, start.into()),
-            to_lit_expr(DataType::Timestamp, stop.into()),
-            to_lit_expr(DataType::Interval, step.into()),
+        let function = build(
+            PbType::GenerateSeries,
+            DataType::Timestamp,
             CHUNK_SIZE,
-        );
+            vec![
+                literal(DataType::Timestamp, start.into()),
+                literal(DataType::Timestamp, stop.into()),
+                literal(DataType::Interval, step.into()),
+            ],
+        )
+        .unwrap();
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
-
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
-    async fn test_i32_range() {
-        range_test_case(2, 4, 1).await;
-        range_test_case(4, 2, -1).await;
-        range_test_case(0, 9, 2).await;
-        range_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
+    async fn test_range_i32() {
+        range_i32(2, 4, 1).await;
+        range_i32(4, 2, -1).await;
+        range_i32(0, 9, 2).await;
+        range_i32(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
     }
 
-    async fn range_test_case(start: i32, stop: i32, step: i32) {
-        fn to_lit_expr(v: i32) -> BoxedExpression {
+    async fn range_i32(start: i32, stop: i32, step: i32) {
+        fn literal(v: i32) -> BoxedExpression {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
-
-        let function = GenerateSeries::<I32Array, I32Array, false>::new(
-            to_lit_expr(start),
-            to_lit_expr(stop),
-            to_lit_expr(step),
+        let function = build(
+            PbType::Range,
+            DataType::Int32,
             CHUNK_SIZE,
+            vec![literal(start), literal(stop), literal(step)],
         )
-        .boxed();
+        .unwrap();
         let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
-
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 
     #[tokio::test]
-    async fn test_time_range() {
+    async fn test_range_timestamp() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = Interval::from_minutes(1);
         let one_hour_step = Interval::from_minutes(60);
         let one_day_step = Interval::from_days(1);
-        time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8).await;
-        time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8).await;
-        time_range_test_case(start_time, stop_time, one_day_step, 8).await;
-        time_range_test_case(stop_time, start_time, -one_day_step, 8).await;
+        range_timestamp(start_time, stop_time, one_minute_step, 60 * 24 * 8).await;
+        range_timestamp(start_time, stop_time, one_hour_step, 24 * 8).await;
+        range_timestamp(start_time, stop_time, one_day_step, 8).await;
+        range_timestamp(stop_time, start_time, -one_day_step, 8).await;
     }
 
-    async fn time_range_test_case(
-        start: Timestamp,
-        stop: Timestamp,
-        step: Interval,
-        expect_cnt: usize,
-    ) {
-        fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
+    async fn range_timestamp(start: Timestamp, stop: Timestamp, step: Interval, expect_cnt: usize) {
+        fn literal(ty: DataType, v: ScalarImpl) -> BoxedExpression {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
-
-        let function = GenerateSeries::<TimestampArray, IntervalArray, false>::new(
-            to_lit_expr(DataType::Timestamp, start.into()),
-            to_lit_expr(DataType::Timestamp, stop.into()),
-            to_lit_expr(DataType::Interval, step.into()),
+        let function = build(
+            PbType::Range,
+            DataType::Timestamp,
             CHUNK_SIZE,
-        );
+            vec![
+                literal(DataType::Timestamp, start.into()),
+                literal(DataType::Timestamp, stop.into()),
+                literal(DataType::Interval, step.into()),
+            ],
+        )
+        .unwrap();
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).await.unwrap();
-
-        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
-        assert_eq!(cnt, expect_cnt);
+        let mut actual_cnt = 0;
+        let mut output = function.eval(&dummy_chunk).await;
+        while let Some(Ok(chunk)) = output.next().await {
+            actual_cnt += chunk.cardinality();
+        }
+        assert_eq!(actual_cnt, expect_cnt);
     }
 }

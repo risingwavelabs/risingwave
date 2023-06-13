@@ -13,15 +13,13 @@
 // limitations under the License.
 
 use std::hash::BuildHasher;
-use std::sync::Arc;
 use std::{fmt, usize};
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::data::PbDataChunk;
 
-use super::{Array, ArrayResult, StructArray, Vis};
-use crate::array::column::Column;
+use super::{Array, ArrayImpl, ArrayRef, ArrayResult, StructArray, Vis};
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
@@ -29,7 +27,7 @@ use crate::estimate_size::EstimateSize;
 use crate::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use crate::hash::HashCode;
 use crate::row::Row;
-use crate::types::{DataType, StructType, ToOwnedDatum, ToText};
+use crate::types::{DataType, DatumRef, StructType, ToOwnedDatum, ToText};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{
@@ -59,18 +57,18 @@ use crate::util::value_encoding::{
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {
-    columns: Vec<Column>,
+    columns: Vec<ArrayRef>,
     vis2: Vis,
 }
 
 impl DataChunk {
     /// Create a `DataChunk` with `columns` and visibility. The visibility can either be a `Bitmap`
     /// or a simple cardinality number.
-    pub fn new<V: Into<Vis>>(columns: Vec<Column>, vis: V) -> Self {
+    pub fn new<V: Into<Vis>>(columns: Vec<ArrayRef>, vis: V) -> Self {
         let vis: Vis = vis.into();
         let capacity = vis.len();
         for column in &columns {
-            assert_eq!(capacity, column.array_ref().len());
+            assert_eq!(capacity, column.len());
         }
 
         DataChunk { columns, vis2: vis }
@@ -93,7 +91,7 @@ impl DataChunk {
 
         for row in rows {
             for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
-                builder.append_datum(datum);
+                builder.append(datum);
             }
         }
 
@@ -118,7 +116,7 @@ impl DataChunk {
         }
     }
 
-    pub fn into_parts(self) -> (Vec<Column>, Vis) {
+    pub fn into_parts(self) -> (Vec<ArrayRef>, Vis) {
         (self.columns, self.vis2)
     }
 
@@ -166,26 +164,31 @@ impl DataChunk {
 
     pub fn set_vis(&mut self, vis: Vis) {
         for column in &self.columns {
-            assert_eq!(vis.len(), column.array_ref().len())
+            assert_eq!(vis.len(), column.len())
         }
         self.vis2 = vis;
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {
         for column in &self.columns {
-            assert_eq!(visibility.len(), column.array_ref().len())
+            assert_eq!(visibility.len(), column.len())
         }
         self.vis2 = Vis::Bitmap(visibility);
     }
 
-    pub fn column_at(&self, idx: usize) -> &Column {
+    pub fn column_at(&self, idx: usize) -> &ArrayRef {
         &self.columns[idx]
     }
 
-    pub fn columns(&self) -> &[Column] {
+    pub fn columns(&self) -> &[ArrayRef] {
         &self.columns
     }
 
+    /// Divides one chunk into two at an column index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `idx > columns.len()`.
     pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
         let (left, right) = self.columns.split_at(idx);
         let left = DataChunk::new(left.to_vec(), self.vis2.clone());
@@ -203,10 +206,9 @@ impl DataChunk {
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
-        for arr in &self.columns {
-            column_ref.push(arr.to_protobuf());
+        for array in &self.columns {
+            column_ref.push(array.to_protobuf());
         }
-
         proto
     }
 
@@ -232,7 +234,7 @@ impl DataChunk {
                     .columns
                     .into_iter()
                     .map(|col| {
-                        let array = col.array();
+                        let array = col;
                         array.compact(visibility, cardinality).into()
                     })
                     .collect::<Vec<_>>();
@@ -245,7 +247,7 @@ impl DataChunk {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
-            columns.push(Column::from_protobuf(any_col, cardinality)?);
+            columns.push(ArrayImpl::from_protobuf(any_col, cardinality)?.into());
         }
 
         let chunk = DataChunk::new(columns, proto.cardinality as usize);
@@ -283,7 +285,7 @@ impl DataChunk {
         let mut array_builders: Vec<ArrayBuilderImpl> = chunks[0]
             .columns
             .iter()
-            .map(|col| col.array_ref().create_builder(new_chunk_require))
+            .map(|col| col.create_builder(new_chunk_require))
             .collect();
         let mut array_len = new_chunk_require;
         let mut new_chunks = Vec::with_capacity(num_chunks);
@@ -296,11 +298,9 @@ impl DataChunk {
                 .iter_mut()
                 .zip_eq_fast(chunks[chunk_idx].columns())
                 .for_each(|(builder, column)| {
-                    let mut array_builder = column
-                        .array_ref()
-                        .create_builder(end_row_idx - start_row_idx + 1);
+                    let mut array_builder = column.create_builder(end_row_idx - start_row_idx + 1);
                     for row_idx in start_row_idx..=end_row_idx {
-                        array_builder.append_datum(column.array_ref().value_at(row_idx));
+                        array_builder.append(column.value_at(row_idx));
                     }
                     builder.append_array(&array_builder.finish());
                 });
@@ -315,14 +315,14 @@ impl DataChunk {
             total_capacity -= actual_acquire;
             // a new chunk receives enough rows, finalize it
             if new_chunk_require == 0 {
-                let new_columns: Vec<Column> = array_builders
+                let new_columns: Vec<ArrayRef> = array_builders
                     .drain(..)
                     .map(|builder| builder.finish().into())
                     .collect();
 
                 array_builders = new_columns
                     .iter()
-                    .map(|col_type| col_type.array_ref().create_builder(new_chunk_require))
+                    .map(|col_type| col_type.create_builder(new_chunk_require))
                     .collect();
 
                 let data_chunk = DataChunk::new(new_columns, array_len);
@@ -346,7 +346,7 @@ impl DataChunk {
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         // Compute hash for the specified columns.
         for column_idx in column_idxes {
-            let array = self.column_at(*column_idx).array();
+            let array = self.column_at(*column_idx);
             array.hash_vec(&mut states[..]);
         }
         finalize_hashers(&mut states[..])
@@ -394,6 +394,34 @@ impl DataChunk {
         table.to_string()
     }
 
+    /// Keep the specified columns and set the rest elements to null.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// i i i                            i i i
+    /// 1 2 3  --> keep_columns([1]) --> . 2 .
+    /// 4 5 6                            . 5 .
+    /// ```
+    pub fn keep_columns(&self, column_indices: &[usize]) -> Self {
+        let capacity: usize = self.capacity();
+        let columns = (self.columns.iter().enumerate())
+            .map(|(i, column)| {
+                if column_indices.contains(&i) {
+                    column.clone()
+                } else {
+                    let mut builder = column.create_builder(capacity);
+                    builder.append_n(capacity, None as DatumRef<'_>);
+                    builder.finish().into()
+                }
+            })
+            .collect();
+        DataChunk {
+            columns,
+            vis2: self.vis2.clone(),
+        }
+    }
+
     /// Reorder (and possibly remove) columns. e.g. if `column_mapping` is `[2, 1, 0]`, and
     /// the chunk contains column `[a, b, c]`, then the output will be
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
@@ -417,11 +445,11 @@ impl DataChunk {
         let mut array_builders: Vec<ArrayBuilderImpl> = self
             .columns
             .iter()
-            .map(|col| col.array_ref().create_builder(indexes.len()))
+            .map(|col| col.create_builder(indexes.len()))
             .collect();
         for &i in indexes {
             for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
-                builder.append_datum(col.array_ref().value_at(i));
+                builder.append(col.value_at(i));
             }
         }
         let columns = array_builders
@@ -431,12 +459,12 @@ impl DataChunk {
         DataChunk::new(columns, indexes.len())
     }
 
-    fn partition_sizes_for_columns(&self, col_indices: &[usize]) -> (usize, Vec<&Column>) {
-        let mut col_variable: Vec<&Column> = vec![];
+    fn partition_sizes_for_columns(&self, col_indices: &[usize]) -> (usize, Vec<&ArrayRef>) {
+        let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
         for i in col_indices {
             let col = &self.columns[*i];
-            if let Some(field_len) = try_get_exact_serialize_datum_size(&col.array()) {
+            if let Some(field_len) = try_get_exact_serialize_datum_size(col) {
                 row_len_fixed += field_len;
             } else {
                 col_variable.push(col);
@@ -453,11 +481,11 @@ impl DataChunk {
     ///
     /// Otherwise, for variable sized datatypes, such as `varchar`,
     /// we have to individually compute their sizes per row.
-    fn partition_sizes(&self) -> (usize, Vec<&Column>) {
-        let mut col_variable: Vec<&Column> = vec![];
+    fn partition_sizes(&self) -> (usize, Vec<&ArrayRef>) {
+        let mut col_variable: Vec<&ArrayRef> = vec![];
         let mut row_len_fixed: usize = 0;
         for c in &self.columns {
-            if let Some(field_len) = try_get_exact_serialize_datum_size(&c.array()) {
+            if let Some(field_len) = try_get_exact_serialize_datum_size(c) {
                 row_len_fixed += field_len;
             } else {
                 col_variable.push(c);
@@ -467,18 +495,18 @@ impl DataChunk {
     }
 
     unsafe fn compute_size_of_variable_cols_in_row(
-        variable_cols: &[&Column],
+        variable_cols: &[&ArrayRef],
         row_idx: usize,
     ) -> usize {
         variable_cols
             .iter()
-            .map(|col| estimate_serialize_datum_size(col.array_ref().value_at_unchecked(row_idx)))
+            .map(|col| estimate_serialize_datum_size(col.value_at_unchecked(row_idx)))
             .sum::<usize>()
     }
 
     unsafe fn init_buffer(
         row_len_fixed: usize,
-        variable_cols: &[&Column],
+        variable_cols: &[&ArrayRef],
         row_idx: usize,
     ) -> Vec<u8> {
         Vec::with_capacity(
@@ -542,7 +570,7 @@ impl DataChunk {
 
                 // Then do the actual serialization
                 for c in &self.columns {
-                    let c = c.array_ref();
+                    let c = c;
                     assert_eq!(c.len(), rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -564,7 +592,7 @@ impl DataChunk {
                     }
                 }
                 for c in &self.columns {
-                    let c = c.array_ref();
+                    let c = c;
                     assert_eq!(c.len(), *rows_num);
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -605,7 +633,7 @@ impl DataChunk {
             column_indices
                 .iter()
                 .map(|idx| {
-                    let datum = self.column_at(*idx).array_ref().datum_at(0);
+                    let datum = self.column_at(*idx).datum_at(0);
                     estimate_serialize_datum_size(datum)
                 })
                 .sum()
@@ -627,9 +655,8 @@ impl fmt::Debug for DataChunk {
 
 impl<'a> From<&'a StructArray> for DataChunk {
     fn from(array: &'a StructArray) -> Self {
-        let columns = array.fields().map(|array| array.clone().into()).collect();
         Self {
-            columns,
+            columns: array.fields().cloned().collect(),
             vis2: Vis::Compact(array.len()),
         }
     }
@@ -639,7 +666,7 @@ impl EstimateSize for DataChunk {
     fn estimated_heap_size(&self) -> usize {
         self.columns
             .iter()
-            .map(Column::estimated_heap_size)
+            .map(|a| a.estimated_heap_size())
             .sum::<usize>()
             + self.vis2.estimated_heap_size()
     }
@@ -724,13 +751,12 @@ impl DataChunkTestExt for DataChunk {
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
-                    DataType::Struct(Arc::new(StructType {
-                        fields: array[1..array.len() - 1]
+                    DataType::Struct(StructType::unnamed(
+                        array[1..array.len() - 1]
                             .split(',')
                             .map(parse_type)
-                            .collect_vec(),
-                        field_names: vec![],
-                    }))
+                            .collect(),
+                    ))
                 }
                 _ => todo!("unsupported type: {s:?}"),
             }
@@ -762,7 +788,7 @@ impl DataChunkTestExt for DataChunk {
                     "f" => Some(false.into()),
                     _ => Some(ScalarImpl::from_text(val_str.as_bytes(), ty).unwrap()),
                 };
-                builder.append_datum(datum);
+                builder.append(datum);
             }
             let visible = match token.next() {
                 None | Some("//") => true,
@@ -799,10 +825,10 @@ impl DataChunkTestExt for DataChunk {
         let new_cols = cols
             .into_iter()
             .map(|col| {
-                let arr = col.array_ref();
+                let arr = col;
                 let mut builder = arr.create_builder(n * 2);
                 for v in arr.iter() {
-                    builder.append_datum(&v.to_owned_datum());
+                    builder.append(&v.to_owned_datum());
                     builder.append_null();
                 }
 
@@ -819,7 +845,7 @@ impl DataChunkTestExt for DataChunk {
         let vis = &self.vis2;
         let n = vis.len();
         for col in cols.iter() {
-            assert_eq!(col.array().len(), n);
+            assert_eq!(col.len(), n);
         }
     }
 
@@ -838,7 +864,7 @@ impl DataChunkTestExt for DataChunk {
                 if *data_type == DataType::Varchar {
                     let datum = FieldGeneratorImpl::with_varchar(varchar_properties, Self::SEED)
                         .generate_datum(offset);
-                    array_builder.append_datum(&datum);
+                    array_builder.append(&datum);
                 } else {
                     let mut data_gen = FieldGeneratorImpl::with_number_random(
                         data_type.clone(),
@@ -848,7 +874,7 @@ impl DataChunkTestExt for DataChunk {
                     )
                     .unwrap();
                     let datum = data_gen.generate_datum(offset);
-                    array_builder.append_datum(datum);
+                    array_builder.append(datum);
                 }
                 // FIXME(kwannoel): This misses the case where it is neither Varchar or numeric.
             }
@@ -873,7 +899,6 @@ impl DataChunkTestExt for DataChunk {
 mod tests {
     use crate::array::*;
     use crate::row::Row;
-    use crate::{column, column_nonnull};
 
     #[test]
     fn test_rechunk() {
@@ -884,7 +909,7 @@ mod tests {
                 for i in chunk_size * chunk_idx..chunk_size * (chunk_idx + 1) {
                     builder.append(Some(i as i32));
                 }
-                let chunk = DataChunk::new(vec![builder.finish().into()], chunk_size);
+                let chunk = DataChunk::new(vec![Arc::new(builder.finish().into())], chunk_size);
                 chunks.push(chunk);
             }
 
@@ -913,7 +938,6 @@ mod tests {
                 assert_eq!(
                     new_chunks[chunk_idx]
                         .column_at(0)
-                        .array()
                         .as_int32()
                         .value_at(cur_idx)
                         .unwrap(),
@@ -944,7 +968,7 @@ mod tests {
                 builder.append(Some(i as i32));
             }
             let arr = builder.finish();
-            columns.push(arr.into())
+            columns.push(Arc::new(arr.into()))
         }
         let chunk: DataChunk = DataChunk::new(columns, length);
         for row in chunk.rows() {
@@ -959,8 +983,8 @@ mod tests {
     fn test_to_pretty_string() {
         let chunk = DataChunk::new(
             vec![
-                column_nonnull!(I64Array, [1, 2, 3, 4]),
-                column!(I64Array, [Some(6), None, Some(7), None]),
+                Arc::new(I64Array::from_iter([1, 2, 3, 4]).into()),
+                Arc::new(I64Array::from_iter([Some(6), None, Some(7), None]).into()),
             ],
             4,
         );

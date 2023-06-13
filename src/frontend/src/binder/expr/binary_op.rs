@@ -86,16 +86,41 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccessInner,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
-                match (bound_left.return_type(), bound_right.return_type()) {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
                     // array concatenation
-                    (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
-                    (DataType::List { .. }, _) => ExprType::ArrayAppend,
-                    (_, DataType::List { .. }) => ExprType::ArrayPrepend,
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayCat,
+                    (Some(DataType::List { .. }), Some(_)) => ExprType::ArrayAppend,
+                    (Some(_), Some(DataType::List { .. })) => ExprType::ArrayPrepend,
+
                     // string concatenation
-                    (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
+                    (Some(DataType::Varchar), _) | (_, Some(DataType::Varchar)) => {
+                        ExprType::ConcatOp
+                    }
+
+                    // jsonb, bytea (and varbit, tsvector, tsquery)
+                    (Some(t @ DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(t @ DataType::Jsonb), None)
+                    | (None, Some(t @ DataType::Jsonb))
+                    | (Some(t @ DataType::Bytea), Some(DataType::Bytea))
+                    | (Some(t @ DataType::Bytea), None)
+                    | (None, Some(t @ DataType::Bytea)) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator not implemented yet: {t} || {t}"
+                        ))
+                        .into())
+                    }
+
+                    // string concatenation
+                    (None, _) | (_, None) => ExprType::ConcatOp,
+
                     // invalid
-                    (left_type, right_type) => {
+                    (Some(left_type), Some(right_type)) => {
                         return Err(ErrorCode::BindError(format!(
                             "operator does not exist: {} || {}",
                             left_type, right_type

@@ -19,7 +19,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-await-tree = "0.1.1"
+await-tree = { workspace = true }
 bytes = "1"
 dyn-clone = "1"
 educe = "0.4"
@@ -27,16 +27,14 @@ either = "1"
 enum-as-inner = "0.5"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = "0.2"
+futures-async-stream = { workspace = true }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.10"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"
-memcomparable = "0.1"
-minitrace = "0.4"
-minstant = "0.1"
+memcomparable = "0.2"
 multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -45,7 +43,6 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
 risingwave_common = { path = "../common" }
-risingwave_common_proc_macro = { path = "../common/proc_macro" }
 risingwave_connector = { path = "../connector" }
 risingwave_expr = { path = "../expr" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
@@ -80,7 +77,12 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
-risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+expect-test = "1"
+risingwave_hummock_test = { path = "../storage/hummock_test", features = [
+    "test",
+] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 tracing-test = "0.2"
 
 [[bench]]
