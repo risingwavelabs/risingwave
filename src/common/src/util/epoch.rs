@@ -102,6 +102,15 @@ impl Epoch {
             Epoch((physical_time - relative_time_ms) << EPOCH_PHYSICAL_SHIFT_BITS)
         }
     }
+
+    pub fn create_root_span(self) -> tracing::Span {
+        tracing::info_span!(
+            parent: None,
+            "epoch",
+            "otel.name" = format!("Epoch {}", self.0),
+            epoch = self.0
+        )
+    }
 }
 
 impl From<u64> for Epoch {

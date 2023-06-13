@@ -20,7 +20,9 @@ use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_
 /// persistently to meta store. Add more states when needed.
 pub struct BarrierManagerState {
     /// The last sent `prev_epoch`
-    pub in_flight_prev_epoch: Epoch,
+    in_flight_prev_epoch: Epoch,
+
+    span: tracing::Span,
 }
 
 const BARRIER_MANAGER_STATE_KEY: &[u8] = b"barrier_manager_state";
@@ -40,13 +42,21 @@ impl BarrierManagerState {
         };
         Self {
             in_flight_prev_epoch,
+            span: in_flight_prev_epoch.create_root_span(),
         }
     }
 
-    pub async fn update_inflight_prev_epoch<S>(&self, store: &S) -> MetaStoreResult<()>
+    pub async fn update_inflight_prev_epoch<S>(
+        &mut self,
+        store: &S,
+        new_epoch: Epoch,
+    ) -> MetaStoreResult<()>
     where
         S: MetaStore,
     {
+        self.in_flight_prev_epoch = new_epoch;
+        self.span = new_epoch.create_root_span();
+
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
@@ -55,5 +65,13 @@ impl BarrierManagerState {
             )
             .await
             .map_err(Into::into)
+    }
+
+    pub fn in_flight_prev_epoch(&self) -> Epoch {
+        self.in_flight_prev_epoch
+    }
+
+    pub fn span(&self) -> &tracing::Span {
+        &self.span
     }
 }

@@ -213,6 +213,9 @@ pub struct CommandContext<S: MetaStore> {
     pub prev_epoch: Epoch,
     pub curr_epoch: Epoch,
 
+    pub prev_span: tracing::Span,
+    pub curr_span: tracing::Span,
+
     pub command: Command,
 
     pub checkpoint: bool,
@@ -228,6 +231,8 @@ impl<S: MetaStore> CommandContext<S> {
         info: BarrierActorInfo,
         prev_epoch: Epoch,
         curr_epoch: Epoch,
+        prev_span: tracing::Span,
+        curr_span: tracing::Span,
         command: Command,
         checkpoint: bool,
         source_manager: SourceManagerRef<S>,
@@ -238,6 +243,8 @@ impl<S: MetaStore> CommandContext<S> {
             info: Arc::new(info),
             prev_epoch,
             curr_epoch,
+            prev_span,
+            curr_span,
             command,
             checkpoint,
             source_manager,

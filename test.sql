@@ -9,8 +9,8 @@ create source bid (
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Bid',
-    nexmark.split.num = '2',
-    nexmark.min.event.gap.in.ns = '1000'
+    nexmark.split.num = '4',
+    nexmark.min.event.gap.in.ns = '100'
 );
 
 

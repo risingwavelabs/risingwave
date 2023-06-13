@@ -29,7 +29,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
-use tracing::event;
+use tracing::{event, Instrument};
 
 use super::exchange::output::{new_output, BoxedOutput};
 use super::Watermark;
@@ -266,7 +266,18 @@ impl StreamConsumer for DispatchExecutor {
                     Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
                     Message::Watermark(_) => (None, "dispatch_watermark"),
                 };
-                self.inner.dispatch(msg).instrument_await(span).await?;
+
+                let tracing_span = if let Some(_barrier) = &barrier {
+                    tracing::info_span!("dispatch_barrier")
+                } else {
+                    tracing::Span::none()
+                };
+
+                self.inner
+                    .dispatch(msg)
+                    .instrument(tracing_span)
+                    .instrument_await(span)
+                    .await?;
                 if let Some(barrier) = barrier {
                     yield barrier;
                 }

@@ -19,7 +19,6 @@ use std::time::{Duration, Instant};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::AddMutation;
@@ -168,6 +167,8 @@ where
                     info,
                     prev_epoch,
                     new_epoch,
+                    tracing::Span::none(), // TODO
+                    tracing::Span::none(),
                     command,
                     true,
                     self.source_manager.clone(),
@@ -190,12 +191,8 @@ where
 
                 let (barrier_complete_tx, mut barrier_complete_rx) =
                     tokio::sync::mpsc::unbounded_channel();
-                self.inject_barrier(
-                    command_ctx.clone(),
-                    TracingContext::for_test(),
-                    &barrier_complete_tx,
-                )
-                .await;
+                self.inject_barrier(command_ctx.clone(), &barrier_complete_tx)
+                    .await;
                 let res = match barrier_complete_rx.recv().await.unwrap().result {
                     Ok(response) => {
                         if let Err(err) = command_ctx.post_collect().await {
