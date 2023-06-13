@@ -155,6 +155,100 @@
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
+- name: group by output column ordinal ok
+  sql: |
+    select 4 + 5 group by 1;
+  logical_plan: |
+    LogicalProject { exprs: [$expr1] }
+    └─LogicalAgg { group_key: [$expr1], aggs: [] }
+      └─LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr1] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: group by const int expr
+  sql: |
+    select 4 + 5 group by 3 - 2; -- not folded
+  logical_plan: |
+    LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr2] }
+    └─LogicalAgg { group_key: [$expr1], aggs: [] }
+      └─LogicalProject { exprs: [(3:Int32 - 2:Int32) as $expr1] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: group by output column ordinal of agg
+  sql: |
+    select sum(2) group by 1;
+  planner_error: |-
+    Feature is not yet implemented: aggregate function inside GROUP BY
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: group by output column ordinal non-integer const
+  sql: |
+    select 4 + 5 group by null; -- no implicit cast
+  binder_error: 'Bind error: non-integer constant in GROUP BY'
+- name: group by output column ordinal bigint
+  sql: |
+    select 4 + 5 group by 2147483648;
+  binder_error: 'Bind error: non-integer constant in GROUP BY'
+- name: group by output column ordinal negative
+  sql: |
+    select 4 + 5 group by -2147483648;
+  binder_error: 'Bind error: GROUP BY position -2147483648 is not in select list'
+- name: group by output column ordinal zero
+  sql: |
+    select 4 + 5 group by 0;
+  binder_error: 'Bind error: GROUP BY position 0 is not in select list'
+- name: group by output column ordinal out of bound (excl extra order by exprs)
+  sql: |
+    select 4 + 5 group by 2 order by 7 + 8, 3 + 2;
+  binder_error: 'Bind error: GROUP BY position 2 is not in select list'
+- name: group by output column name ok
+  sql: |
+    select 4 + 5 as a group by a;
+  logical_plan: |
+    LogicalProject { exprs: [$expr1] }
+    └─LogicalAgg { group_key: [$expr1], aggs: [] }
+      └─LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr1] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: group by output column name ambiguous 2
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a group by a;
+  binder_error: 'Bind error: GROUP BY "a" is ambiguous'
+- name: group by output column name ambiguous 3
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as a group by a;
+  binder_error: 'Bind error: GROUP BY "a" is ambiguous'
+- name: group by output column name not ambiguous when unused
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as b group by b;
+  logical_plan: |
+    LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr2, (2:Int32 + 3:Int32) as $expr3, $expr1] }
+    └─LogicalAgg { group_key: [$expr1], aggs: [] }
+      └─LogicalProject { exprs: [(3:Int32 + 4:Int32) as $expr1] }
+        └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: group by output column name not ambiguous when input preferred
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a, 2 + 3 as a from t group by a;
+  logical_plan: |
+    LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr1, (2:Int32 + 3:Int32) as $expr2] }
+    └─LogicalAgg { group_key: [t.a], aggs: [] }
+      └─LogicalProject { exprs: [t.a] }
+        └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+- name: group by output column name expr disallowed
+  sql: |
+    select 4 + 5 as a group by a + 1;
+  binder_error: |-
+    Bind error: failed to bind expression: a + 1
+
+    Caused by:
+      Item not found: Invalid column: a
+- name: group by prefers input while order by prefers output
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a from t group by a order by a;
+  batch_plan: |
+    BatchExchange { order: [9:Int32 ASC], dist: Single }
+    └─BatchSort { order: [9:Int32 ASC] }
+      └─BatchProject { exprs: [9:Int32] }
+        └─BatchHashAgg { group_key: [t.a], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(t.a) }
+            └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
