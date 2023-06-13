@@ -440,7 +440,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     *compaction_group_id,
                     HashSet::from_iter(group_construct.table_ids.clone()),
                     group_construct.get_new_sst_start_id(),
-                    group_construct.version() == CompatibilityVersion::InitVersion,
+                    group_construct.version() == CompatibilityVersion::VersionUnspecified,
                 ));
             } else if let Some(group_change) = &summary.group_table_change {
                 sst_split_info.extend(self.init_with_parent_group(
@@ -448,7 +448,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                     group_change.target_group_id,
                     HashSet::from_iter(group_change.table_ids.clone()),
                     group_change.new_sst_start_id,
-                    group_change.version() == CompatibilityVersion::InitVersion,
+                    group_change.version() == CompatibilityVersion::VersionUnspecified,
                 ));
 
                 let levels = self
