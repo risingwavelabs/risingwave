@@ -665,10 +665,17 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
-        let request = RescheduleRequest { reschedules };
+    pub async fn reschedule(
+        &self,
+        reschedules: HashMap<u32, PbReschedule>,
+        revision: u64,
+    ) -> Result<(bool, u64)> {
+        let request = RescheduleRequest {
+            reschedules,
+            revision,
+        };
         let resp = self.inner.reschedule(request).await?;
-        Ok(resp.success)
+        Ok((resp.success, resp.revision))
     }
 
     pub async fn risectl_get_pinned_versions_summary(

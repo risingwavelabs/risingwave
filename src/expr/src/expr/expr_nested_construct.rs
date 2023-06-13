@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, ListArrayBuilder, ListValue, StructArray,
     StructValue,
 };
 use risingwave_common::row::OwnedRow;
@@ -45,11 +45,9 @@ impl Expression for NestedConstructExpression {
             columns.push(e.eval_checked(input).await?);
         }
 
-        if let DataType::Struct(_) = &self.data_type {
-            let mut builder =
-                StructArrayBuilder::with_type(input.capacity(), self.data_type.clone());
-            builder.append_array_refs(columns, input.capacity());
-            Ok(Arc::new(ArrayImpl::Struct(builder.finish())))
+        if let DataType::Struct(ty) = &self.data_type {
+            let array = StructArray::new(ty.clone(), columns, input.vis().to_bitmap());
+            Ok(Arc::new(ArrayImpl::Struct(array)))
         } else if let DataType::List { .. } = &self.data_type {
             let chunk = DataChunk::new(columns, input.vis().clone());
             let mut builder = ListArrayBuilder::with_type(input.capacity(), self.data_type.clone());

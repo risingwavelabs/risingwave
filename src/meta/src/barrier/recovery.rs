@@ -67,7 +67,7 @@ where
     /// Clean up all dirty streaming jobs.
     async fn clean_dirty_fragments(&self) -> MetaResult<()> {
         let stream_job_ids = self.catalog_manager.list_stream_job_ids().await?;
-        let table_fragments = self.fragment_manager.list_table_fragments().await?;
+        let table_fragments = self.fragment_manager.list_table_fragments().await;
         let to_drop_table_fragments = table_fragments
             .into_iter()
             .filter(|table_fragment| {

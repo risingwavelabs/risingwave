@@ -103,7 +103,7 @@ where
             .max_delay(Duration::from_secs(60))
             .map(jitter);
         match notification {
-            LocalNotification::WorkerNodeIsDeleted(worker_node) => {
+            LocalNotification::WorkerNodeDeleted(worker_node) => {
                 if worker_node.get_type().unwrap() == WorkerType::Compactor {
                     self.compactor_manager.remove_compactor(worker_node.id);
                 }
@@ -153,7 +153,7 @@ where
                 tracing::info!("Cancelled compaction task {}", task_id);
                 sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
             }
-            LocalNotification::SystemParamsChange(_) => {}
+            _ => {}
         }
     }
 }

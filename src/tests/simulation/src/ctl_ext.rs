@@ -320,6 +320,18 @@ impl Cluster {
     pub async fn reschedule(&mut self, plan: impl Into<String>) -> Result<()> {
         let plan = plan.into();
 
+        let revision = self
+            .ctl
+            .spawn(async move {
+                let r = risingwave_ctl::cmd_impl::meta::get_cluster_info(
+                    &risingwave_ctl::common::CtlContext::default(),
+                )
+                .await?;
+
+                Ok::<_, anyhow::Error>(r.revision)
+            })
+            .await??;
+
         self.ctl
             .spawn(async move {
                 let opts = risingwave_ctl::CliOpts::parse_from([
@@ -328,6 +340,8 @@ impl Cluster {
                     "reschedule",
                     "--plan",
                     plan.as_ref(),
+                    "--revision",
+                    &format!("{}", revision),
                 ]);
                 risingwave_ctl::start(opts).await
             })

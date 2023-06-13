@@ -174,9 +174,13 @@ where
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, Info::Node(worker.worker_node))
+                .notify_frontend(Operation::Add, Info::Node(worker.worker_node.clone()))
                 .await;
         }
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerNodeActivated(worker.worker_node))
+            .await;
 
         Ok(())
     }
@@ -233,7 +237,7 @@ where
         // local notification.
         self.env
             .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeIsDeleted(worker_node))
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker_node))
             .await;
 
         Ok(worker_type)
@@ -366,6 +370,12 @@ where
 
     /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
     /// running and schedulable
+    pub async fn list_active_serving_compute_nodes(&self) -> Vec<WorkerNode> {
+        let core = self.core.read().await;
+        core.list_serving_worker_node(Some(vec![State::Running]))
+    }
+
+    /// Get the cluster info used for scheduling a streaming job.
     pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
         core.get_streaming_cluster_info()
@@ -519,6 +529,13 @@ impl ClusterManagerCore {
     }
 
     // List all parallel units on running or cordoned nodes
+    pub fn list_serving_worker_node(&self, worker_state: Option<Vec<State>>) -> Vec<WorkerNode> {
+        self.list_worker_node(WorkerType::ComputeNode, worker_state)
+            .into_iter()
+            .filter(|w| w.property.as_ref().map_or(false, |p| p.is_serving))
+            .collect()
+    }
+
     fn list_active_streaming_parallel_units(&self) -> Vec<ParallelUnit> {
         let active_workers: HashSet<_> = self
             .list_streaming_worker_node(Some(vec![State::Running, State::Cordoned]))
