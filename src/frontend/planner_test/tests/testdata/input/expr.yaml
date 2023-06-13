@@ -423,3 +423,19 @@
   sql: select 1 / 0 t1;
   expected_outputs:
   - batch_error
+# functions in FROM clause
+- sql: |
+    select * from abs(-1);
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
+    select * from range(1,2);
+  expected_outputs:
+  - batch_plan
+  # TODO: support this
+  - stream_error
+- sql: |
+    select * from max();
+  expected_outputs:
+  - binder_error
