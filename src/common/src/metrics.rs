@@ -49,11 +49,14 @@ impl Atomic for TrAdderAtomic {
 
 pub type TrAdderGauge = GenericGauge<TrAdderAtomic>;
 
-pub struct CustomLayer {
+/// [`MetricsLayer`] is a struct used for monitoring the frequency of certain specific logs and
+/// counting them using Prometheus metrics. Currently, it is used to monitor the frequency of retry
+/// occurrences of aws sdk.
+pub struct MetricsLayer {
     pub aws_sdk_retry_counts: GenericCounter<AtomicU64>,
 }
 
-impl<S> Layer<S> for CustomLayer
+impl<S> Layer<S> for MetricsLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
@@ -61,12 +64,11 @@ where
         // Currently one retry will only generate one debug log,
         // so we can monitor the number of retry only through the metadata target.
         // Refer to <https://docs.rs/aws-smithy-client/0.55.3/src/aws_smithy_client/retry.rs.html>
-
         self.aws_sdk_retry_counts.inc();
     }
 }
 
-impl CustomLayer {
+impl MetricsLayer {
     pub fn new(registry: Registry) -> Self {
         let aws_sdk_retry_counts = register_int_counter_with_registry!(
             "aws_sdk_retry_counts",

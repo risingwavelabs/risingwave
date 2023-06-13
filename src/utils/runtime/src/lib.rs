@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
-use risingwave_common::metrics::CustomLayer;
+use risingwave_common::metrics::MetricsLayer;
 use tracing::Level;
 use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
@@ -282,7 +282,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
     let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
 
-    layers.push(Box::new(CustomLayer::new(registry).with_filter(filter)));
+    layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
