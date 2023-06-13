@@ -10,6 +10,9 @@ export SCCACHE_REGION=us-east-2
 export SCCACHE_IDLE_TIMEOUT=0
 export CARGO_INCREMENTAL=0
 export CARGO_MAKE_PRINT_TIME_SUMMARY=true
+export MINIO_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/minio
+export MCLI_DOWNLOAD_BIN=https://ci-deps-dist.s3.amazonaws.com/mc
+export GCLOUD_DOWNLOAD_TGZ=https://ci-deps-dist.s3.amazonaws.com/google-cloud-cli-406.0.0-linux-x86_64.tar.gz
 unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
