@@ -638,17 +638,17 @@ impl StageRunner {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        self.catalog_reader
-            .read_guard()
+    fn get_streaming_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
+        let reader = self.catalog_reader.read_guard();
+        let table = reader
             .get_table_by_id(table_id)
-            .map(|table| {
-                self.worker_node_manager
-                    .manager
-                    .get_streaming_fragment_mapping(&table.fragment_id)
-            })
-            .ok()
-            .flatten()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?;
+        self.worker_node_manager
+            .manager
+            .get_streaming_fragment_mapping(&table.fragment_id)
     }
 
     fn choose_worker(
@@ -659,7 +659,7 @@ impl StageRunner {
     ) -> SchedulerResult<Option<WorkerNode>> {
         let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
         let vnode_mapping = match dml_table_id {
-            Some(table_id) => self.get_streaming_vnode_mapping(&table_id),
+            Some(table_id) => Some(self.get_streaming_vnode_mapping(&table_id)?),
             None => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)

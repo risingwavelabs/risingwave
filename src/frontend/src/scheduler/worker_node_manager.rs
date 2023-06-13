@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 
-use anyhow::anyhow;
 use rand::seq::SliceRandom;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
@@ -151,13 +150,14 @@ impl WorkerNodeManager {
     pub fn get_streaming_fragment_mapping(
         &self,
         fragment_id: &FragmentId,
-    ) -> Option<ParallelUnitMapping> {
+    ) -> SchedulerResult<ParallelUnitMapping> {
         self.inner
             .read()
             .unwrap()
             .streaming_fragment_vnode_mapping
             .get(fragment_id)
             .cloned()
+            .ok_or_else(|| SchedulerError::StreamingVnodeMappingNotFound(*fragment_id))
     }
 
     pub fn insert_streaming_fragment_mapping(
@@ -202,7 +202,7 @@ impl WorkerNodeManager {
             .read()
             .unwrap()
             .get_serving_fragment_mapping(fragment_id)
-            .ok_or_else(|| SchedulerError::EmptyWorkerNodes)
+            .ok_or_else(|| SchedulerError::ServingVnodeMappingNotFound(fragment_id))
     }
 
     pub fn set_serving_fragment_mapping(&self, mappings: HashMap<FragmentId, ParallelUnitMapping>) {
@@ -284,14 +284,7 @@ impl WorkerNodeSelector {
         fragment_id: FragmentId,
     ) -> SchedulerResult<ParallelUnitMapping> {
         if self.enable_barrier_read {
-            self.manager
-                .get_streaming_fragment_mapping(&fragment_id)
-                .ok_or_else(|| {
-                    SchedulerError::Internal(anyhow!(
-                        "vnode mapping for fragment {} not found",
-                        fragment_id
-                    ))
-                })
+            self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
             self.manager.serving_fragment_mapping(fragment_id)
         }
