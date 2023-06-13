@@ -16,7 +16,7 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
     TableFunction<?> function;
     Method method;
     Function<Object, Object>[] processInputs;
-    int chunk_size = 1024;
+    int chunkSize = 1024;
 
     TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
         this.function = function;
@@ -51,19 +51,19 @@ class TableFunctionBatch extends UserDefinedFunctionBatch {
                 row[j] = this.processInputs[j].apply(val);
             }
             // call function
-            var size_before = this.function.size();
+            var sizeBefore = this.function.size();
             try {
                 this.method.invoke(this.function, row);
             } catch (IllegalAccessException | InvocationTargetException e) {
                 throw new RuntimeException(e);
             }
-            var size_after = this.function.size();
+            var sizeAfter = this.function.size();
             // add indexes
-            for (int j = size_before; j < size_after; j++) {
+            for (int j = sizeBefore; j < sizeAfter; j++) {
                 indexes.add(i);
             }
             // check if we need to flush
-            if (size_after >= this.chunk_size) {
+            if (sizeAfter >= this.chunkSize) {
                 buildChunk.run();
             }
         }
