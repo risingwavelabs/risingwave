@@ -58,7 +58,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::reschedule_request::PbReschedule;
+use risingwave_pb::meta::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;

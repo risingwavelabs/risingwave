@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::reschedule_request::Reschedule;
+use risingwave_pb::meta::{GetReschedulePlanRequest, GetReschedulePlanResponse, Reschedule};
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
@@ -184,5 +184,10 @@ where
             success: true,
             revision: next_revision.into(),
         }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn get_reschedule_plan(&self, _request: Request<GetReschedulePlanRequest>) -> Result<Response<GetReschedulePlanResponse>, Status> {
+        todo!()
     }
 }

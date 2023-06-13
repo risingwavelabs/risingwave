@@ -16,9 +16,9 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Error, Result};
 use regex::{Match, Regex};
-use risingwave_pb::meta::reschedule_request::Reschedule;
 use serde::{Deserialize, Serialize};
 use serde_yaml;
+use risingwave_pb::meta::Reschedule;
 
 use crate::CtlContext;
 
