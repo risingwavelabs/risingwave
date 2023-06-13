@@ -19,6 +19,7 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
+prometheus = { version = "0.13" }
 regex = "1"
 risingwave_rt = { path = "../../utils/runtime" }
 serde = { version = "1", features = ["derive"] }

@@ -555,6 +555,21 @@ def section_object_storage(outer_panels):
                         )
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Operation Retry Rate",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({metric('aws_sdk_retry_counts')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum(irate({metric('s3_read_request_retry_count')}[$__rate_interval])) by (instance, job, type)",
+                            "{{type}} - {{job}} @ {{instance}}",
+                        )
+                    ],
+                ),
                 panels.timeseries_dollar(
                     "Estimated S3 Cost (Realtime)",
                     "There are two types of operations: 1. GET, SELECT, and DELETE, they cost 0.0004 USD per 1000 "
