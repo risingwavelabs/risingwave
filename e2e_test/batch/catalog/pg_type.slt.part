@@ -1,16 +1,17 @@
-query ITIIIIIIITITT
-SELECT * FROM pg_catalog.pg_type;
+query ITITT
+SELECT oid, typname, typelem, typnotnull, typtype FROM pg_catalog.pg_type;
 ----
-16 bool 0 f 0 -1 0 0 0 b 0 NULL NULL
-20 int8 0 f 0 -1 0 0 0 b 0 NULL NULL
-21 int2 0 f 0 -1 0 0 0 b 0 NULL NULL
-23 int4 0 f 0 -1 0 0 0 b 0 NULL NULL
-700 float4 0 f 0 -1 0 0 0 b 0 NULL NULL
-701 float8 0 f 0 -1 0 0 0 b 0 NULL NULL
-1043 varchar 0 f 0 -1 0 0 0 b 0 NULL NULL
-1082 date 0 f 0 -1 0 0 0 b 0 NULL NULL
-1083 time 0 f 0 -1 0 0 0 b 0 NULL NULL
-1114 timestamp 0 f 0 -1 0 0 0 b 0 NULL NULL
-1184 timestamptz 0 f 0 -1 0 0 0 b 0 NULL NULL
-1186 interval 0 f 0 -1 0 0 0 b 0 NULL NULL
-1700 numeric 0 f 0 -1 0 0 0 b 0 NULL NULL
+16 bool 0 f b
+20 int8 0 f b
+21 int2 0 f b
+23 int4 0 f b
+25 text 0 f b
+700 float4 0 f b
+701 float8 0 f b
+1043 varchar 0 f b
+1082 date 0 f b
+1083 time 0 f b
+1114 timestamp 0 f b
+1184 timestamptz 0 f b
+1186 interval 0 f b
+1700 numeric 0 f b

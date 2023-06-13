@@ -21,13 +21,15 @@ use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
+use risingwave_common::util::value_encoding;
 use risingwave_expr::agg::AggKind;
-use risingwave_pb::expr::PbAggCall;
+use risingwave_pb::data::PbDatum;
+use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
+use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
@@ -669,6 +671,7 @@ pub struct PlanAggCall {
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
+    pub direct_args: Vec<Literal>,
 }
 
 impl fmt::Debug for PlanAggCall {
@@ -729,6 +732,16 @@ impl PlanAggCall {
             distinct: self.distinct,
             order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
+            direct_args: self
+                .direct_args
+                .iter()
+                .map(|x| PbConstant {
+                    datum: Some(PbDatum {
+                        body: value_encoding::serialize_datum(x.get_data()),
+                    }),
+                    r#type: Some(x.return_type().to_protobuf()),
+                })
+                .collect(),
         }
     }
 
@@ -775,6 +788,7 @@ impl PlanAggCall {
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
+            direct_args: vec![],
         }
     }
 

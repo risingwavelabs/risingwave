@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use apache_avro::types::Value;
 use apache_avro::{from_avro_datum, Schema};
-use futures_async_stream::try_stream;
 use itertools::Itertools;
 use reqwest::Url;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
@@ -27,7 +26,6 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::operators::*;
 use crate::common::UpsertMessage;
-use crate::impl_common_parser_logic;
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::{
     avro_field_to_column_desc, extract_inner_field_schema, from_avro_value,
@@ -35,15 +33,13 @@ use crate::parser::avro::util::{
 };
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{SourceColumnDesc, SourceContextRef};
+use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
 const OP: &str = "op";
 const PAYLOAD: &str = "payload";
-
-impl_common_parser_logic!(DebeziumAvroParser);
 
 // TODO: avoid duplicated codes with `AvroParser`
 #[derive(Debug)]
@@ -216,10 +212,13 @@ impl DebeziumAvroParser {
             return writer.delete(|column| {
                 let field_schema =
                     extract_inner_field_schema(&self.inner_schema, Some(&column.name))?;
-                from_avro_value(
-                    get_field_from_avro_value(&key, column.name.as_str())?.clone(),
-                    field_schema,
-                )
+                match get_field_from_avro_value(&key, column.name.as_str()) {
+                    Ok(value) => from_avro_value(value.clone(), field_schema),
+                    Err(err) => {
+                        tracing::error!(?err);
+                        Ok(None)
+                    }
+                }
             });
         }
 
@@ -288,6 +287,24 @@ impl DebeziumAvroParser {
                 "payload op is not a string ".to_owned(),
             )))
         }
+    }
+}
+
+impl ByteStreamSourceParser for DebeziumAvroParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

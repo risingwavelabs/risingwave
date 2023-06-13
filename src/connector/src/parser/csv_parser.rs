@@ -15,16 +15,15 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use futures_async_stream::try_stream;
 use risingwave_common::cast::{str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 
-use crate::impl_common_parser_logic;
+use super::ByteStreamSourceParser;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::{DataType, SourceColumnDesc, SourceContextRef};
-impl_common_parser_logic!(CsvParser);
+use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
+
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
         $v.parse::<$t>()
@@ -146,6 +145,24 @@ impl CsvParser {
                 }
             })
         }
+    }
+}
+
+impl ByteStreamSourceParser for CsvParser {
+    fn columns(&self) -> &[SourceColumnDesc] {
+        &self.rw_columns
+    }
+
+    fn source_ctx(&self) -> &SourceContext {
+        &self.source_ctx
+    }
+
+    async fn parse_one<'a>(
+        &'a mut self,
+        payload: Vec<u8>,
+        writer: SourceStreamChunkRowWriter<'a>,
+    ) -> Result<WriteGuard> {
+        self.parse_inner(payload, writer).await
     }
 }
 

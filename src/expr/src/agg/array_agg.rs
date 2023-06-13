@@ -66,6 +66,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
@@ -97,6 +98,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.output(&mut builder)?;
@@ -147,6 +149,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         })?;
         let mut builder = return_type.create_array_builder(0);
         agg.update_multi(&chunk, 0, chunk.cardinality()).await?;

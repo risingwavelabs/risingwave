@@ -23,7 +23,6 @@ mod stream_chunk_iterator;
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::{Arc, LazyLock};
 
@@ -32,7 +31,9 @@ use jni::objects::{
     AutoArray, GlobalRef, JClass, JMethodID, JObject, JStaticMethodID, JString, JValue, ReleaseMode,
 };
 use jni::signature::ReturnType;
-use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort, jvalue};
+use jni::sys::{
+    jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jobject, jshort, jsize, jvalue,
+};
 use jni::JNIEnv;
 use once_cell::sync::OnceCell;
 use prost::{DecodeError, Message};
@@ -40,6 +41,7 @@ use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::ScalarRefImpl;
+use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -200,7 +202,7 @@ where
     F: FnOnce() -> Result<Ret>,
     Ret: Default,
 {
-    match catch_unwind(std::panic::AssertUnwindSafe(inner)) {
+    match rw_catch_unwind(std::panic::AssertUnwindSafe(inner)) {
         Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
@@ -233,7 +235,6 @@ pub enum JavaBindingRowInner {
 #[derive(Default)]
 pub struct JavaClassMethodCache {
     big_decimal_ctor: OnceCell<(GlobalRef, JMethodID)>,
-    byte_array_input_stream_ctor: OnceCell<(GlobalRef, JMethodID)>,
     timestamp_ctor: OnceCell<(GlobalRef, JMethodID)>,
 
     date_ctor: OnceCell<(GlobalRef, JStaticMethodID)>,
@@ -690,25 +691,98 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetByteaValue
             .unwrap()
             .into_bytea();
         let bytes_value = env.byte_array_from_slice(bytes)?;
-        let (ts_class_ref, constructor) = pointer
-            .as_ref()
-            .class_cache
-            .byte_array_input_stream_ctor
-            .get_or_try_init(|| {
-                let cls = env.find_class("java/io/ByteArrayInputStream")?;
-                let init_method = env.get_method_id(cls, "<init>", "([B)V")?;
-                Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
-            })?;
-        let ts_class = JClass::from(ts_class_ref.as_obj());
-        unsafe {
-            let input_stream_obj = env.new_object_unchecked(
-                ts_class,
-                *constructor,
-                &[JValue::Object(JObject::from_raw(bytes_value))],
-            )?;
+        unsafe { Ok(JObject::from_raw(bytes_value)) }
+    })
+}
 
-            Ok(input_stream_obj)
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetArrayValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+    class: JClass<'a>,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let elems = pointer
+            .as_ref()
+            .datum_at(idx as usize)
+            .unwrap()
+            .into_list()
+            .iter();
+
+        // convert the Rust elements to a Java object array (Object[])
+        let jarray = env.new_object_array(elems.len() as jsize, class, JObject::null())?;
+
+        for (i, ele) in elems.enumerate() {
+            let index = i as jsize;
+            match ele {
+                None => env.set_object_array_element(jarray, i as jsize, JObject::null())?,
+                Some(val) => match val {
+                    ScalarRefImpl::Int16(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(S)Ljava.lang.Short;",
+                            &[JValue::from(v as jshort)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Int32(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(I)Ljava.lang.Integer;",
+                            &[JValue::from(v as jint)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Int64(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(J)Ljava.lang.Long;",
+                            &[JValue::from(v as jlong)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Float32(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(F)Ljava/lang/Float;",
+                            &[JValue::from(v.into_inner() as jfloat)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Float64(v) => {
+                        let obj = env.call_static_method(
+                            class,
+                            "valueOf",
+                            "(D)Ljava/lang/Double;",
+                            &[JValue::from(v.into_inner() as jdouble)],
+                        )?;
+                        if let JValue::Object(o) = obj {
+                            env.set_object_array_element(jarray, index, o)?
+                        }
+                    }
+                    ScalarRefImpl::Utf8(v) => {
+                        let obj = env.new_string(v)?;
+                        env.set_object_array_element(jarray, index, obj)?
+                    }
+                    _ => env.set_object_array_element(jarray, index, JObject::null())?,
+                },
+            }
         }
+        let output = unsafe { JObject::from_raw(jarray as jobject) };
+        Ok(output)
     })
 }
 

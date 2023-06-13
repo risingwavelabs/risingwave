@@ -13,19 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::default_provider::region::DefaultRegionChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_config::timeout::TimeoutConfig;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_credential_types::Credentials;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
-use aws_smithy_http::endpoint::Endpoint;
-use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
-use http::Uri;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use serde::{Deserialize, Serialize};
@@ -101,7 +98,7 @@ pub struct AwsConfigV2 {
     pub region: Option<String>,
     pub arn: Option<String>,
     pub credential: AwsCredentialV2,
-    pub endpoint: Option<EndpointWrapper>,
+    pub endpoint: Option<String>,
 }
 
 impl From<HashMap<String, String>> for AwsConfigV2 {
@@ -139,13 +136,7 @@ impl From<HashMap<String, String>> for AwsConfigV2 {
                         static_credential.2 = Some(config_value.to_string());
                     }
                     "endpoint_url" => {
-                        config.endpoint = Some(EndpointWrapper {
-                            uri: Uri::from_str(config_value.as_str())
-                                .map_err(|e| {
-                                    anyhow!("failed to parse url ({}): {}", config_value, e)
-                                })
-                                .unwrap(),
-                        });
+                        config.endpoint = Some(config_value.to_string());
                     }
                     _ => {
                         unreachable!()
@@ -169,12 +160,6 @@ impl From<HashMap<String, String>> for AwsConfigV2 {
         config.credential = credential;
         config
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EndpointWrapper {
-    #[serde(with = "http_serde::uri")]
-    pub uri: Uri,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -238,9 +223,8 @@ impl AwsConfigV2 {
             .region(region.clone())
             .credentials_provider(cred_provider);
 
-        if let Some(endpoint_uri) = &self.endpoint {
-            let endpoint_val = Endpoint::immutable(endpoint_uri.uri.clone());
-            config_loader = config_loader.endpoint_resolver(endpoint_val);
+        if let Some(endpoint) = &self.endpoint {
+            config_loader = config_loader.endpoint_url(endpoint);
         }
         config_loader.load().await
     }
@@ -283,7 +267,7 @@ impl AwsConfigV2 {
                 access_key,
                 secret_access,
                 session_token,
-            } => SharedCredentialsProvider::new(aws_types::Credentials::from_keys(
+            } => SharedCredentialsProvider::new(Credentials::from_keys(
                 access_key,
                 secret_access,
                 session_token.as_ref().cloned(),

@@ -129,8 +129,8 @@
   eowc_stream_plan: |
     StreamMaterialize { columns: [lag, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: "NoCheck" }
     └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamProject { exprs: [lag, _row_id] }
-        └─StreamEowcOverWindow { window_functions: [lag(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)] }
+      └─StreamProject { exprs: [first_value, _row_id] }
+        └─StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
           └─StreamSort { sort_column_index: 2 }
             └─StreamExchange { dist: HashShard(b) }
               └─StreamProject { exprs: [a, b, tm, _row_id], output_watermarks: [tm] }
@@ -144,8 +144,8 @@
     └──  StreamExchange Hash([1]) from 1
 
     Fragment 1
-    StreamProject { exprs: [lag, _row_id] }
-    └── StreamEowcOverWindow { window_functions: [lag(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND CURRENT ROW)] }
+    StreamProject { exprs: [first_value, _row_id] }
+    └── StreamEowcOverWindow { window_functions: [first_value(a) OVER(PARTITION BY b ORDER BY tm ASC ROWS BETWEEN 2 PRECEDING AND 2 PRECEDING)] }
         └── StreamSort { sort_column_index: 2 }
             └──  StreamExchange Hash([1]) from 2
 

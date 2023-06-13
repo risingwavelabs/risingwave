@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.sink;
 
-import com.risingwave.connector.api.TableSchema;
+import com.risingwave.connector.SinkStreamObserver;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkConfig;
 import com.risingwave.proto.Data.Op;
@@ -27,7 +28,7 @@ public class SinkStreamObserverTest {
 
     public SinkConfig fileSinkConfig =
             SinkConfig.newBuilder()
-                    .setTableSchema(TableSchema.getMockTableProto())
+                    .setTableSchema(TestUtils.getMockTableProto())
                     .setConnectorType("file")
                     .putAllProperties(Map.of("output.path", "/tmp/rw-connector"))
                     .build();
