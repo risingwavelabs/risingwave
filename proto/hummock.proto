@@ -58,7 +58,7 @@ message IntraLevelDelta {
 }
 
 enum CompatibilityVersion {
-  INIT_VERSION = 0;
+  VERSION_UNSPECIFIED = 0;
   NO_TRIVIAL_SPLIT = 1;
 }
 
