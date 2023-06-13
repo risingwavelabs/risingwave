@@ -6,15 +6,15 @@ set -eo pipefail
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
 
 function stop_cluster() {
-  cargo make k 1>/dev/null 2>&1 || true
+  cargo make --allow-private k 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {
-  cargo make clean-data 1>/dev/null 2>&1
+  cargo make --allow-private clean-data 1>/dev/null 2>&1
 }
 
 function clean_etcd_data() {
-  cargo make clean-etcd-data 1>/dev/null 2>&1
+  cargo make --allow-private clean-etcd-data 1>/dev/null 2>&1
 }
 
 function start_cluster() {

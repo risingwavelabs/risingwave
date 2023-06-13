@@ -1,5 +1,5 @@
 [tasks.do-apply-stream-integration-test]
-description = "Apply stream integration test output snapshots."
+description = "Apply stream integration test output snapshots"
 category = "RiseDev - Test"
 dependencies = ["install-nextest"]
 script = '''

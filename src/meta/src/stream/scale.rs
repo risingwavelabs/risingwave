@@ -39,9 +39,54 @@ use uuid::Uuid;
 use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::MetaStore;
+use crate::storage::{MetaStore, MetaStoreError, Transaction, DEFAULT_COLUMN_FAMILY};
 use crate::stream::GlobalStreamManager;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
+
+#[derive(Copy, Clone, Debug)]
+pub struct TableRevision(u64);
+
+const TABLE_REVISION_KEY: &[u8] = b"table_revision";
+
+impl From<TableRevision> for u64 {
+    fn from(value: TableRevision) -> Self {
+        value.0
+    }
+}
+
+impl TableRevision {
+    pub async fn get<S>(store: &S) -> MetaResult<Self>
+    where
+        S: MetaStore,
+    {
+        let version = match store
+            .get_cf(DEFAULT_COLUMN_FAMILY, TABLE_REVISION_KEY)
+            .await
+        {
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
+            Err(MetaStoreError::ItemNotFound(_)) => 0,
+            Err(e) => return Err(MetaError::from(e)),
+        };
+
+        Ok(Self(version))
+    }
+
+    pub fn next(&self) -> Self {
+        TableRevision(self.0 + 1)
+    }
+
+    pub fn store(&self, txn: &mut Transaction) {
+        txn.put(
+            DEFAULT_COLUMN_FAMILY.to_string(),
+            TABLE_REVISION_KEY.to_vec(),
+            memcomparable::to_vec(&self.0).unwrap(),
+        );
+    }
+
+    pub fn inner(&self) -> u64 {
+        self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct ParallelUnitReschedule {
@@ -557,6 +602,7 @@ where
             }
             return Err(e);
         }
+
         Ok(())
     }
 
@@ -1127,7 +1173,9 @@ where
         tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
+            .run_command_with_paused(Command::RescheduleFragment {
+                reschedules: reschedule_fragment,
+            })
             .await?;
 
         Ok(())

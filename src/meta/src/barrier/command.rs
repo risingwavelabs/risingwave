@@ -116,7 +116,9 @@ pub enum Command {
     ///
     /// Barriers from which actors should be collected, and the post behavior of this command are
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
-    RescheduleFragment(HashMap<FragmentId, Reschedule>),
+    RescheduleFragment {
+        reschedules: HashMap<FragmentId, Reschedule>,
+    },
 
     /// `ReplaceTable` command generates a `Update` barrier with the given `merge_updates`. This is
     /// essentially switching the downstream of the old table fragments to the new ones, and
@@ -159,7 +161,7 @@ impl Command {
             Command::CancelStreamingJob(table_fragments) => {
                 CommandChanges::DropTables(std::iter::once(table_fragments.table_id()).collect())
             }
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 let to_add = reschedules
                     .values()
                     .flat_map(|r| r.added_actors.iter().copied())
@@ -319,7 +321,7 @@ where
                 }))
             }
 
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules, .. } => {
                 let mut dispatcher_update = HashMap::new();
                 for (_fragment_id, reschedule) in reschedules.iter() {
                     for &(upstream_fragment_id, dispatcher_id) in
@@ -613,7 +615,7 @@ where
                     .await;
             }
 
-            Command::RescheduleFragment(reschedules) => {
+            Command::RescheduleFragment { reschedules } => {
                 let mut node_dropped_actors = HashMap::new();
                 for table_fragments in self.fragment_manager.list_table_fragments().await? {
                     for fragment_id in table_fragments.fragments.keys() {

@@ -8,6 +8,7 @@ GRAFANA_RELEASE = "grafana-${GRAFANA_VERSION}"
 GRAFANA_DOWNLOAD_TAR_GZ = "https://dl.grafana.com/oss/release/${GRAFANA_RELEASE}.${GRAFANA_SYSTEM}.tar.gz"
 
 [tasks.download-grafana]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
