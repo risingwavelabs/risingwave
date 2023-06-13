@@ -65,7 +65,7 @@ public interface JdbcDialect {
     default String getDeleteStatement(String tableName, List<String> conditionFields) {
         String conditionClause =
                 conditionFields.stream()
-                        .map(f -> format("%s = :%s", quoteIdentifier(f), f))
+                        .map(f -> format("%s = ?", quoteIdentifier(f)))
                         .collect(Collectors.joining(" AND "));
         return "DELETE FROM " + quoteIdentifier(tableName) + " WHERE " + conditionClause;
     }
