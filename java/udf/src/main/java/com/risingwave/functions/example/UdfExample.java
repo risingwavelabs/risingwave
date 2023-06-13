@@ -35,13 +35,13 @@ public class UdfExample {
         }
     }
 
-    public static class Int42 extends ScalarFunction {
+    public static class Int42 implements ScalarFunction {
         public static int eval() {
             return 42;
         }
     }
 
-    public static class Gcd extends ScalarFunction {
+    public static class Gcd implements ScalarFunction {
         public static int eval(int a, int b) {
             while (b != 0) {
                 int temp = b;
@@ -52,19 +52,19 @@ public class UdfExample {
         }
     }
 
-    public static class Gcd3 extends ScalarFunction {
+    public static class Gcd3 implements ScalarFunction {
         public static int eval(int a, int b, int c) {
             return Gcd.eval(Gcd.eval(a, b), c);
         }
     }
 
-    public static class ToString extends ScalarFunction {
+    public static class ToString implements ScalarFunction {
         public static String eval(String s) {
             return s;
         }
     }
 
-    public static class ExtractTcpInfo extends ScalarFunction {
+    public static class ExtractTcpInfo implements ScalarFunction {
         public static class TcpPacketInfo {
             public String srcAddr;
             public String dstAddr;
@@ -88,7 +88,7 @@ public class UdfExample {
         }
     }
 
-    public static class HexToDec extends ScalarFunction {
+    public static class HexToDec implements ScalarFunction {
         public static BigDecimal eval(String hex) {
             if (hex == null) {
                 return null;
@@ -97,13 +97,13 @@ public class UdfExample {
         }
     }
 
-    public static class ArrayAccess extends ScalarFunction {
+    public static class ArrayAccess implements ScalarFunction {
         public static String eval(String[] array, int index) {
             return array[index - 1];
         }
     }
 
-    public static class JsonbAccess extends ScalarFunction {
+    public static class JsonbAccess implements ScalarFunction {
         static Gson gson = new Gson();
 
         public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB") String json, int index) {
@@ -117,7 +117,7 @@ public class UdfExample {
         }
     }
 
-    public static class JsonbConcat extends ScalarFunction {
+    public static class JsonbConcat implements ScalarFunction {
         public static @DataTypeHint("JSONB") String eval(@DataTypeHint("JSONB[]") String[] jsons) {
             if (jsons == null)
                 return null;
@@ -125,13 +125,13 @@ public class UdfExample {
         }
     }
 
-    public static class JsonbArrayIdentity extends ScalarFunction {
+    public static class JsonbArrayIdentity implements ScalarFunction {
         public static @DataTypeHint("JSONB[]") String[] eval(@DataTypeHint("JSONB[]") String[] jsons) {
             return jsons;
         }
     }
 
-    public static class JsonbArrayStructIdentity extends ScalarFunction {
+    public static class JsonbArrayStructIdentity implements ScalarFunction {
         public static class Row {
             public @DataTypeHint("JSONB[]") String[] v;
             public int len;
@@ -142,7 +142,7 @@ public class UdfExample {
         }
     }
 
-    public static class Series extends TableFunction<Integer> {
+    public static class Series implements TableFunction<Integer> {
         public void eval(int n) {
             for (int i = 0; i < n; i++) {
                 collect(i);
@@ -150,7 +150,7 @@ public class UdfExample {
         }
     }
 
-    public static class Split extends TableFunction<Split.Row> {
+    public static class Split implements TableFunction<Split.Row> {
         public static class Row {
             public String word;
             public int length;

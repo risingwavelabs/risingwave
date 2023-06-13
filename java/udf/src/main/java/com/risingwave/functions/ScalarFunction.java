@@ -1,7 +1,7 @@
 package com.risingwave.functions;
 
 /**
- * Base class for a user-defined scalar function. A user-defined scalar function
+ * Base interface for a user-defined scalar function. A user-defined scalar function
  * maps zero, one, or multiple scalar values to a new scalar value.
  * 
  * <p>
@@ -20,14 +20,14 @@ package com.risingwave.functions;
  * <pre>
  * {@code
  * // a function that accepts two INT arguments and computes a sum
- * class SumFunction extends ScalarFunction {
+ * class SumFunction implements ScalarFunction {
  *     public Integer eval(Integer a, Integer b) {
  *         return a + b;
  *     }
  * }
  * 
  * // a function that returns a struct type
- * class StructFunction extends ScalarFunction {
+ * class StructFunction implements ScalarFunction {
  *     public static class KeyValue {
  *         public String key;
  *         public int value;
@@ -42,5 +42,5 @@ package com.risingwave.functions;
  * }
  * }</pre>
  */
-public abstract class ScalarFunction extends UserDefinedFunction {
+public abstract interface ScalarFunction extends UserDefinedFunction {
 }

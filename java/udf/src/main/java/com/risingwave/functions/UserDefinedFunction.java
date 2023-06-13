@@ -1,10 +1,10 @@
 package com.risingwave.functions;
 
 /**
- * Base class for all user-defined functions.
+ * Base interface for all user-defined functions.
  *
  * @see ScalarFunction
  * @see TableFunction
  */
-public abstract class UserDefinedFunction {
+public abstract interface UserDefinedFunction {
 }

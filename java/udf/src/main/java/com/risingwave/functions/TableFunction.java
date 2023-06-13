@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Base class for a user-defined table function. A user-defined table function
+ * Base interface for a user-defined table function. A user-defined table function
  * maps zero, one, or multiple scalar values to zero, one, or multiple rows (or
  * structured types). If an output record consists of only one field, the
  * structured record can be omitted, and a scalar value can be emitted that will
@@ -29,7 +29,7 @@ import java.util.List;
  * {@code
  * // a function that accepts an INT arguments and emits the range from 0 to the
  * // given number.
- * class Series extends TableFunction<Integer> {
+ * class Series implements TableFunction<Integer> {
  *     public void eval(int x) {
  *         for (int i = 0; i < n; i++) {
  *             collect(i);
@@ -39,7 +39,7 @@ import java.util.List;
  * 
  * // a function that accepts an String arguments and emits the words of the
  * // given string.
- * class Split extends TableFunction<Split.Row> {
+ * class Split implements TableFunction<Split.Row> {
  *     public static class Row {
  *         public String word;
  *         public int length;
@@ -56,25 +56,25 @@ import java.util.List;
  * }
  * }</pre>
  */
-public abstract class TableFunction<T> extends UserDefinedFunction {
+public abstract interface TableFunction<T> extends UserDefinedFunction {
 
     /** Collector used to emit rows. */
-    private transient List<Object> rows = new ArrayList<>();
+    List<Object> rows = new ArrayList<>();
 
     /** Takes all emitted rows. */
-    final Object[] take() {
+    default Object[] take() {
         var result = this.rows.toArray();
         this.rows.clear();
         return result;
     }
 
     /** Returns the number of emitted rows. */
-    final int size() {
+    default int size() {
         return this.rows.size();
     }
 
     /** Emits an output row. */
-    protected final void collect(T row) {
+    default void collect(T row) {
         this.rows.add(row);
     }
 }
