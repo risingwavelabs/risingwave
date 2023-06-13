@@ -495,7 +495,7 @@ impl Compactor {
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
-                    let message = tokio::select! {
+                    let message: Option<Result<SubscribeCompactTasksResponse, _>> = tokio::select! {
                         _ = task_progress_interval.tick() => {
                             let mut progress_list = Vec::new();
                             for (&task_id, progress) in task_progress.lock().iter() {

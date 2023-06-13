@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
@@ -100,9 +100,7 @@ impl fmt::Display for StreamTemporalJoin {
         let verbose = self.base.ctx.is_explain_verbose();
         builder.field("type", &self.logical.join_type);
 
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
+        let concat_schema = self.logical.concat_schema();
         builder.field(
             "predicate",
             &EqJoinPredicateDisplay {
@@ -124,11 +122,7 @@ impl fmt::Display for StreamTemporalJoin {
         };
 
         if verbose {
-            match IndicesDisplay::from(
-                &self.logical.output_indices,
-                self.logical.internal_column_num(),
-                &concat_schema,
-            ) {
+            match IndicesDisplay::from_join(&self.logical, &concat_schema) {
                 None => builder.field("output", &format_args!("all")),
                 Some(id) => builder.field("output", &id),
             };

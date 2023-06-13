@@ -4,7 +4,6 @@
 set -euo pipefail
 
 REPO_ROOT=${PWD}
-export GIT_SHA=${BUILDKITE_COMMIT}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -14,8 +13,8 @@ fi
 echo "--- Install java and maven"
 yum install -y java-11-openjdk wget python3
 pip3 install toml-cli
-wget https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz && tar -zxvf apache-maven-3.9.1-bin.tar.gz
-export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
+wget https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.tar.gz && tar -zxvf apache-maven-3.9.2-bin.tar.gz
+export PATH="${REPO_ROOT}/apache-maven-3.9.2/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
