@@ -112,6 +112,8 @@ where
 
         let upstream_table_id = self.upstream_table.table_id();
 
+        let schema = Arc::new(self.upstream.schema().clone());
+
         let mut upstream = self.upstream.execute();
 
         // Poll the upstream to get the first barrier.
@@ -141,7 +143,13 @@ where
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
-                let snapshot = Self::snapshot_read(&self.upstream_table, init_epoch, None, false);
+                let snapshot = Self::snapshot_read(
+                    schema.clone(),
+                    &self.upstream_table,
+                    init_epoch,
+                    None,
+                    false,
+                );
                 pin_mut!(snapshot);
                 snapshot.try_next().await?.unwrap().is_none()
             }
@@ -214,6 +222,7 @@ where
                 let left_upstream = upstream.by_ref().map(Either::Left);
 
                 let right_snapshot = pin!(Self::snapshot_read(
+                    schema.clone(),
                     &self.upstream_table,
                     snapshot_read_epoch,
                     current_pos.clone(),
@@ -409,6 +418,7 @@ where
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read(
+        schema: Arc<Schema>,
         upstream_table: &StateTable<S>,
         epoch: u64,
         current_pos: Option<OwnedRow>,
@@ -431,11 +441,11 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        // // TODO: iter over all vnodes of this state table.
+        // TODO: iter over all vnodes of this state table.
         let iter = upstream_table
             .iter_ordered_with_pk_range(&range_bounds, Default::default())
             .await?;
-        // // pin_mut!(iter);
+        // pin_mut!(iter);
         //
         // // TODO: these are rows instead...
         // #[for_await]
