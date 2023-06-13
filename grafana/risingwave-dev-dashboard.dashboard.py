@@ -843,7 +843,7 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(
-                            "stream_memory_usage",
+                            f"{metric('stream_memory_usage')}",
                             "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
                         ),
                     ],
