@@ -67,7 +67,7 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
-            SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
+            SYSTEM_SCHEMAS.iter().any(|(_, s)| *s == schema_name)
         }
 
         // define some helper functions converting catalog to bound relation

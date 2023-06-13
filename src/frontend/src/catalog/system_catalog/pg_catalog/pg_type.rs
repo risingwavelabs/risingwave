@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use itertools::Itertools;
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_ID;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -70,11 +73,7 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (1700, "numeric"),
 ];
 
-// FIXME(august): currently each database will have its own schemas `pg_catalog` and
-// `information_schema`. This behavior is different from postgreSQL and should be fixed. It's quite
-// dangerous that we have left some namespace fields as zero in some system catalog, which will lead
-// to some inconsistent result when join them together.
-pub fn get_pg_type_data(namespace_id: u32) -> Vec<OwnedRow> {
+pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
     PG_TYPE_DATA
         .iter()
         .map(|(oid, name)| {
@@ -87,7 +86,7 @@ pub fn get_pg_type_data(namespace_id: u32) -> Vec<OwnedRow> {
                 Some(ScalarImpl::Int32(-1)),
                 Some(ScalarImpl::Int32(0)),
                 Some(ScalarImpl::Int32(0)),
-                Some(ScalarImpl::Int32(namespace_id as i32)),
+                Some(ScalarImpl::Int32(PG_CATALOG_SCHEMA_ID as i32)),
                 Some(ScalarImpl::Utf8("b".into())),
                 Some(ScalarImpl::Int32(0)),
                 None,
@@ -96,4 +95,4 @@ pub fn get_pg_type_data(namespace_id: u32) -> Vec<OwnedRow> {
             ])
         })
         .collect_vec()
-}
+});

@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::{NON_RESERVED_PG_CATALOG_TABLE_ID, NON_RESERVED_USER_ID};
+use risingwave_common::catalog::{START_SCHEMA_ID, START_TABLE_ID, START_USER_ID};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use tokio::sync::RwLock;
 
@@ -176,14 +176,13 @@ where
             #[cfg(test)]
             test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
             database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
-            schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
+            schema: Arc::new(
+                StoredIdGenerator::new(meta_store.clone(), "schema", Some(START_SCHEMA_ID as u64))
+                    .await,
+            ),
             table: Arc::new(
-                StoredIdGenerator::new(
-                    meta_store.clone(),
-                    "table",
-                    Some(NON_RESERVED_PG_CATALOG_TABLE_ID as u64),
-                )
-                .await,
+                StoredIdGenerator::new(meta_store.clone(), "table", Some(START_TABLE_ID as u64))
+                    .await,
             ),
             function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
@@ -195,12 +194,8 @@ where
             ),
             actor: Arc::new(StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await),
             user: Arc::new(
-                StoredIdGenerator::new(
-                    meta_store.clone(),
-                    "user",
-                    Some(NON_RESERVED_USER_ID as u64),
-                )
-                .await,
+                StoredIdGenerator::new(meta_store.clone(), "user", Some(START_USER_ID as u64))
+                    .await,
             ),
             backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(

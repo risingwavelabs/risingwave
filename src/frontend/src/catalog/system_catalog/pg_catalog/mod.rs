@@ -75,7 +75,6 @@ pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{ScalarImpl, Timestamp};
@@ -159,12 +158,7 @@ fn get_acl_items(
 
 impl SysCatalogReaderImpl {
     pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
-        let schema_id = self
-            .catalog_reader
-            .read_guard()
-            .get_schema_by_name(&self.auth_context.database, PG_CATALOG_SCHEMA_NAME)?
-            .id();
-        Ok(get_pg_type_data(schema_id))
+        Ok(PG_TYPE_DATA_ROWS.clone())
     }
 
     pub(super) fn read_cast(&self) -> Result<Vec<OwnedRow>> {

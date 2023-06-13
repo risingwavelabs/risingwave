@@ -544,7 +544,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{TableId, START_SCHEMA_ID};
     use risingwave_common::hash::ParallelUnitMapping;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::add_worker_node_request::Property;
@@ -825,6 +825,8 @@ mod tests {
 
             let table = Table {
                 id: table_id.table_id(),
+                database_id: 0,
+                schema_id: START_SCHEMA_ID as u32,
                 ..Default::default()
             };
             let table_fragments = TableFragments::new(

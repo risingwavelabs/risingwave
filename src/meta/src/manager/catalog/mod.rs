@@ -29,7 +29,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
-    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
+    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -184,35 +184,28 @@ where
         let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
-        let mut schemas_added = vec![];
-        for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
-            let schema = Schema {
-                id: self
-                    .env
-                    .id_gen_manager()
-                    .generate::<{ IdCategory::Schema }>()
-                    .await? as u32,
-                database_id: database.id,
-                name: schema_name.to_string(),
-                owner: database.owner,
-            };
-            schemas.insert(schema.id, schema.clone());
-            schemas_added.push(schema);
-        }
 
+        let schema = Schema {
+            id: self
+                .env
+                .id_gen_manager()
+                .generate::<{ IdCategory::Schema }>()
+                .await? as u32,
+            database_id: database.id,
+            name: DEFAULT_SCHEMA_NAME.to_string(),
+            owner: database.owner,
+        };
+        schemas.insert(schema.id, schema.clone());
         commit_meta!(self, databases, schemas)?;
 
-        // database and schemas.
-        user_core.increase_ref_count(database.owner, 1 + schemas_added.len());
+        // database and schema.
+        user_core.increase_ref_count(database.owner, 2);
 
-        let mut version = self
-            .notify_frontend(Operation::Add, Info::Database(database.to_owned()))
+        self.notify_frontend(Operation::Add, Info::Database(database.to_owned()))
             .await;
-        for schema in schemas_added {
-            version = self
-                .notify_frontend(Operation::Add, Info::Schema(schema))
-                .await;
-        }
+        let version = self
+            .notify_frontend(Operation::Add, Info::Schema(schema))
+            .await;
 
         Ok(version)
     }

@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
+use risingwave_common::catalog::{
+    CatalogVersion, FunctionId, IndexId, TableId, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
+};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
@@ -125,26 +127,33 @@ impl Catalog {
         let name = db.name.clone();
         let id = db.id;
 
-        self.database_by_name
+        let database = self
+            .database_by_name
             .try_insert(name.clone(), db.into())
             .unwrap();
         self.db_name_by_id.try_insert(id, name).unwrap();
+        // Initialize system catalog.
+        for (schema_id, sys_schema) in SYSTEM_SCHEMAS {
+            database.create_schema(&PbSchema {
+                id: schema_id,
+                database_id: id,
+                name: sys_schema.to_string(),
+                owner: DEFAULT_SUPER_USER_ID,
+            });
+            let sys_tables = get_sys_catalogs_in_schema(sys_schema).unwrap();
+            sys_tables.into_iter().for_each(|sys_table| {
+                database
+                    .get_schema_mut(schema_id)
+                    .unwrap()
+                    .create_sys_table(sys_table);
+            });
+        }
     }
 
     pub fn create_schema(&mut self, proto: &PbSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .create_schema(proto);
-
-        if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
-            sys_tables.into_iter().for_each(|sys_table| {
-                self.get_database_mut(proto.database_id)
-                    .unwrap()
-                    .get_schema_mut(proto.id)
-                    .unwrap()
-                    .create_sys_table(sys_table);
-            });
-        }
     }
 
     pub fn create_table(&mut self, proto: &PbTable) {
@@ -473,7 +482,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    ) -> CatalogResult<&Arc<SystemCatalog>> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)

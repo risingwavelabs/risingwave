@@ -142,19 +142,19 @@ macro_rules! def_sys_catalog {
     };
 }
 
-pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<SystemCatalog>> {
+pub fn get_sys_catalogs_in_schema(schema_name: &str) -> Option<Vec<Arc<SystemCatalog>>> {
     SYS_CATALOG_MAP.get(schema_name).map(Clone::clone)
 }
 
 macro_rules! prepare_sys_catalog {
     ($( { $schema_name:expr, $catalog_name:ident, $pk:expr, $func:tt $($await:tt)? } ),* $(,)?) => {
         /// `SYS_CATALOG_MAP` includes all system catalogs.
-        pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<SystemCatalog>>> = LazyLock::new(|| {
-            let mut hash_map: HashMap<&str, Vec<SystemCatalog>> = HashMap::new();
+        pub(crate) static SYS_CATALOG_MAP: LazyLock<HashMap<&str, Vec<Arc<SystemCatalog>>>> = LazyLock::new(|| {
+            let mut hash_map: HashMap<&str, Vec<Arc<SystemCatalog>>> = HashMap::new();
             $(
                 paste!{
                     let sys_catalog = def_sys_catalog!(${index()} + 1, [<$catalog_name _TABLE_NAME>], [<$catalog_name _COLUMNS>], $pk);
-                    hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(sys_catalog);
+                    hash_map.entry([<$schema_name _SCHEMA_NAME>]).or_insert(vec![]).push(Arc::new(sys_catalog));
                 }
             )*
             hash_map

@@ -45,8 +45,11 @@ pub const INITIAL_TABLE_VERSION_ID: u64 = 0;
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
+pub const PG_CATALOG_SCHEMA_ID: u32 = 11;
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
+pub const INFORMATION_SCHEMA_SCHEMA_ID: u32 = 12;
 pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
+pub const RW_CATALOG_SCHEMA_ID: u32 = 13;
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
@@ -54,13 +57,17 @@ pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
-pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+// The first user id that rw assign to a non-system user.
+pub const START_USER_ID: i32 = 11;
+// The first table id that rw assign to a non-system table.
+pub const START_TABLE_ID: i32 = 1001;
+// The first id that rw assign to a non-system schema.
+pub const START_SCHEMA_ID: i32 = 1001;
 
-pub const SYSTEM_SCHEMAS: [&str; 3] = [
-    PG_CATALOG_SCHEMA_NAME,
-    INFORMATION_SCHEMA_SCHEMA_NAME,
-    RW_CATALOG_SCHEMA_NAME,
+pub const SYSTEM_SCHEMAS: [(u32, &str); 3] = [
+    (PG_CATALOG_SCHEMA_ID, PG_CATALOG_SCHEMA_NAME),
+    (INFORMATION_SCHEMA_SCHEMA_ID, INFORMATION_SCHEMA_SCHEMA_NAME),
+    (RW_CATALOG_SCHEMA_ID, RW_CATALOG_SCHEMA_NAME),
 ];
 
 pub const ROWID_PREFIX: &str = "_row_id";

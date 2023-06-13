@@ -24,7 +24,7 @@ use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, PG_CATALOG_SCHEMA_ID, START_TABLE_ID, START_USER_ID,
 };
 use risingwave_common::error::Result;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -200,8 +200,6 @@ impl CatalogWriter for MockCatalogWriter {
             owner,
         });
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
-            .await?;
-        self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
     }
@@ -450,18 +448,12 @@ impl MockCatalogWriter {
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
-        catalog.write().create_schema(&PbSchema {
-            id: 2,
-            name: PG_CATALOG_SCHEMA_NAME.to_string(),
-            database_id: 0,
-            owner: DEFAULT_SUPER_USER_ID,
-        });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
-        map.insert(2_u32, 0_u32);
+        map.insert(PG_CATALOG_SCHEMA_ID, 0_u32);
         Self {
             catalog,
-            id: AtomicU32::new(2),
+            id: AtomicU32::new(START_TABLE_ID as u32),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
         }
@@ -678,7 +670,7 @@ impl MockUserInfoWriter {
         });
         Self {
             user_info,
-            id: AtomicU32::new(NON_RESERVED_USER_ID as u32),
+            id: AtomicU32::new(START_USER_ID as u32),
         }
     }
 

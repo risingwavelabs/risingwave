@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{TableId, NON_RESERVED_PG_CATALOG_TABLE_ID};
+use risingwave_common::catalog::{TableId, START_TABLE_ID};
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::*;
@@ -304,7 +304,7 @@ where
         }
 
         // get internal_table_id by fragment_manager
-        if request.table_id >= NON_RESERVED_PG_CATALOG_TABLE_ID as u32 {
+        if request.table_id >= START_TABLE_ID as u32 {
             // We need to make sure to use the correct table_id to filter sst
             let table_id = TableId::new(request.table_id);
             if let Ok(table_fragment) = self
@@ -319,7 +319,7 @@ where
         assert!(option
             .internal_table_id
             .iter()
-            .all(|table_id| *table_id >= (NON_RESERVED_PG_CATALOG_TABLE_ID as u32)),);
+            .all(|table_id| *table_id >= (START_TABLE_ID as u32)));
 
         tracing::info!(
             "Try trigger_manual_compaction compaction_group_id {} option {:?}",
