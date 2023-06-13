@@ -108,7 +108,7 @@ pub async fn handle_create_as(
             append_only,
             Some(col_id_gen.into_version()),
         )?;
-        let mut graph: risingwave_pb::stream_plan::StreamFragmentGraph = build_graph(plan);
+        let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
             .get_streaming_parallelism()
