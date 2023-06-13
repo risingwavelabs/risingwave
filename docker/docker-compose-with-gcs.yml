@@ -25,7 +25,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: object_storage.env
+    env_file: multiple_object_storage.env
     container_name: compactor-0
     healthcheck:
       test:
@@ -60,7 +60,7 @@ services:
       - meta-node-0
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: object_storage.env
+    env_file: multiple_object_storage.env
     container_name: compute-node-0
     healthcheck:
       test:
@@ -207,7 +207,7 @@ services:
       - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
-    env_file: object_storage.env
+    env_file: multiple_object_storage.env
     container_name: meta-node-0
     healthcheck:
       test:

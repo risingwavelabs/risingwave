@@ -39,7 +39,7 @@ cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
-cargo make link-all-in-one-binaries
+cargo make --allow-private link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe

@@ -344,6 +344,15 @@ impl<S: MetaStore> HummockManager<S> {
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
+        for group_id in &groups_to_remove {
+            let max_level = versioning
+                .current_version
+                .get_compaction_group_levels(*group_id)
+                .get_levels()
+                .len();
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, max_level);
+        }
+
         let sst_split_info = versioning
             .current_version
             .apply_version_delta(&new_version_delta);
@@ -351,9 +360,6 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
 
-        for group_id in &groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, *group_id);
-        }
         self.notify_last_version_delta(versioning);
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
