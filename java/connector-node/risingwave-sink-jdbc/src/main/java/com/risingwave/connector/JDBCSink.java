@@ -248,8 +248,6 @@ public class JDBCSink extends SinkBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
-        // set parameters for each row
-        // and don't close the statement until the sink is closed
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
                 Optional<PreparedStatement> stmt;
@@ -271,7 +269,7 @@ public class JDBCSink extends SinkBase {
                                 .withDescription(
                                         String.format(
                                                 ERROR_REPORT_TEMPLATE,
-                                                e.getSQLState(),
+                                                stmt.get(),
                                                 e.getMessage()))
                                 .asRuntimeException();
                     }
@@ -308,9 +306,10 @@ public class JDBCSink extends SinkBase {
     public void drop() {
         try {
             conn.close();
+            upsertPreparedStmt.close();
+            deletePreparedStmt.close();
             updateDeleteConditionBuffer = null;
             updateDeleteValueBuffer = null;
-            upsertPreparedStmt.close();
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
