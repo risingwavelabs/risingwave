@@ -17,10 +17,12 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::utils::Distill;
 use super::{
     ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
@@ -58,14 +60,25 @@ pub struct LogicalMultiJoin {
     inner_i2o_mappings: Vec<ColIndexMapping>,
 }
 
+impl Distill for LogicalMultiJoin {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let fields = (self.inputs.iter())
+            .flat_map(|input| input.schema().fields.clone())
+            .collect();
+        let input_schema = Schema { fields };
+        let cond = Pretty::display(&ConditionDisplay {
+            condition: self.on(),
+            input_schema: &input_schema,
+        });
+        Pretty::childless_record("LogicalMultiJoin", vec![("on", cond)])
+    }
+}
 impl fmt::Display for LogicalMultiJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "LogicalMultiJoin {{ on: {} }}", {
-            let fields = self
-                .inputs
-                .iter()
+            let fields = (self.inputs.iter())
                 .flat_map(|input| input.schema().fields.clone())
-                .collect_vec();
+                .collect();
             let input_schema = Schema { fields };
             format!(
                 "{}",
