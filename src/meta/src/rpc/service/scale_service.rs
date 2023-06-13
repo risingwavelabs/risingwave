@@ -90,7 +90,7 @@ where
         let table_fragments = self
             .fragment_manager
             .list_table_fragments()
-            .await?
+            .await
             .iter()
             .map(|tf| tf.to_protobuf())
             .collect();
