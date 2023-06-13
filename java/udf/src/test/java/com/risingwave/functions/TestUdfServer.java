@@ -15,6 +15,9 @@
 package com.risingwave.functions;
 
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.stream.IntStream;
+
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocator;
 import org.apache.arrow.vector.IntVector;
@@ -26,10 +29,8 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import com.risingwave.functions.example.*;
-
 /**
- * Unit test for simple App.
+ * Unit test for UDF server.
  */
 public class TestUdfServer {
     private static UdfClient client;
@@ -39,9 +40,9 @@ public class TestUdfServer {
     @BeforeAll
     public static void setup() throws IOException {
         server = new UdfServer("localhost", 0);
-        server.addFunction("gcd", new UdfExample.Gcd());
-        server.addFunction("to_string", new UdfExample.ToString());
-        server.addFunction("series", new UdfExample.Series());
+        server.addFunction("gcd", new Gcd());
+        server.addFunction("to_string", new ToString());
+        server.addFunction("series", new Series());
         server.start();
 
         client = new UdfClient("localhost", server.getPort());
@@ -51,6 +52,17 @@ public class TestUdfServer {
     public static void teardown() throws InterruptedException {
         client.close();
         server.close();
+    }
+
+    public static class Gcd implements ScalarFunction {
+        public int eval(int a, int b) {
+            while (b != 0) {
+                int temp = b;
+                b = a % b;
+                a = temp;
+            }
+            return a;
+        }
     }
 
     @Test
@@ -74,6 +86,12 @@ public class TestUdfServer {
         }
     }
 
+    public static class ToString implements ScalarFunction {
+        public String eval(String s) {
+            return s;
+        }
+    }
+
     @Test
     public void to_string() throws Exception {
         var c0 = new VarCharVector("", allocator);
@@ -86,6 +104,12 @@ public class TestUdfServer {
             var output = stream.getRoot();
             assertTrue(stream.next());
             assertEquals(output.contentToTSVString().trim(), "string");
+        }
+    }
+
+    public static class Series implements TableFunction {
+        public Iterator<Integer> eval(int n) {
+            return IntStream.range(0, n).iterator();
         }
     }
 
