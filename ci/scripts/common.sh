@@ -4,7 +4,13 @@ export CARGO_HOME=/risingwave/.cargo
 export RISINGWAVE_CI=true
 export RUST_BACKTRACE=1
 export ENABLE_TELEMETRY=false
-
+export RUSTC_WRAPPER=sccache
+export SCCACHE_BUCKET=ci-sccache-bucket
+export SCCACHE_REGION=us-east-2
+export SCCACHE_IDLE_TIMEOUT=0
+export CARGO_INCREMENTAL=0
+export CARGO_MAKE_PRINT_TIME_SUMMARY=true
+unset LANG
 if [ -n "${BUILDKITE_COMMIT:-}" ]; then
   export GIT_SHA=$BUILDKITE_COMMIT
 fi
@@ -75,7 +81,7 @@ function download_and_prepare_rw() {
   echo -e "\033[33mPrepare RiseDev dev cluster\033[0m"
 
   cargo make pre-start-dev
-  cargo make link-all-in-one-binaries
+  cargo make --allow-private link-all-in-one-binaries
 }
 
 # Arguments:

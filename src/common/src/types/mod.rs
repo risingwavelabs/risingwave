@@ -21,7 +21,6 @@ use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::str::{FromStr, Utf8Error};
-use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
 use chrono::{Datelike, Timelike};
@@ -35,9 +34,9 @@ use serde::{Deserialize, Serialize};
 use strum_macros::EnumDiscriminants;
 
 use crate::array::{
-    ArrayBuilderImpl, ArrayError, ArrayResult, ListRef, ListValue, PrimitiveArrayItemType,
-    StructRef, StructValue, NULL_VAL_FOR_HASH,
+    ArrayBuilderImpl, ArrayError, ArrayResult, PrimitiveArrayItemType, NULL_VAL_FOR_HASH,
 };
+pub use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::error::{BoxedError, ErrorCode, Result as RwResult};
 use crate::estimate_size::EstimateSize;
 use crate::util::iter_util::ZipEqDebug;
@@ -61,7 +60,7 @@ mod to_text;
 
 // export data types
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal::Decimal;
+pub use self::decimal::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{test_utils, DateTimeField, Interval, IntervalDisplay};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::native_type::*;
@@ -117,7 +116,9 @@ macro_rules! for_all_type_pairs {
 /// The set of datatypes that are supported in RisingWave.
 // `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 // but without data fields.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Hash, EnumDiscriminants, FromStr)]
+#[derive(
+    Debug, Display, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, EnumDiscriminants, FromStr,
+)]
 #[strum_discriminants(derive(strum_macros::EnumIter, Hash, Ord, PartialOrd))]
 #[strum_discriminants(name(DataTypeName))]
 #[strum_discriminants(vis(pub))]
@@ -163,7 +164,7 @@ pub enum DataType {
     Interval,
     #[display("{0}")]
     #[from_str(ignore)]
-    Struct(Arc<StructType>),
+    Struct(StructType),
     #[display("{0}[]")]
     #[from_str(regex = r"(?i)^(?P<0>.+)\[\]$")]
     List(Box<DataType>),
@@ -244,13 +245,6 @@ impl DataTypeName {
 impl From<DataTypeName> for DataType {
     fn from(type_name: DataTypeName) -> Self {
         type_name.to_type().unwrap_or_else(|| panic!("Functions returning struct or list can not be inferred. Please use `FunctionCall::new_unchecked`."))
-    }
-}
-
-pub fn unnested_list_type(datatype: DataType) -> DataType {
-    match datatype {
-        DataType::List(datatype) => unnested_list_type(*datatype),
-        _ => datatype,
     }
 }
 
@@ -365,8 +359,8 @@ impl DataType {
         };
         match self {
             DataType::Struct(t) => {
-                pb.field_type = t.fields.iter().map(|f| f.to_protobuf()).collect_vec();
-                pb.field_names = t.field_names.clone();
+                pb.field_type = t.types().map(|f| f.to_protobuf()).collect();
+                pb.field_names = t.names().map(|s| s.into()).collect();
             }
             DataType::List(datatype) => {
                 pb.field_type = vec![datatype.to_protobuf()];
@@ -407,13 +401,7 @@ impl DataType {
     }
 
     pub fn new_struct(fields: Vec<DataType>, field_names: Vec<String>) -> Self {
-        Self::Struct(
-            StructType {
-                fields,
-                field_names,
-            }
-            .into(),
-        )
+        Self::Struct(StructType::from_parts(field_names, fields))
     }
 
     pub fn as_struct(&self) -> &StructType {
@@ -425,7 +413,7 @@ impl DataType {
 
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
-    pub fn min(&self) -> ScalarImpl {
+    pub fn min_value(&self) -> ScalarImpl {
         match self {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
@@ -447,13 +435,38 @@ impl DataType {
             DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
-                    .fields
-                    .iter()
-                    .map(|data_type| Some(data_type.min()))
+                    .types()
+                    .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
             DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
         }
+    }
+
+    /// Return a new type that removes the outer list.
+    ///
+    /// ```
+    /// use risingwave_common::types::DataType::*;
+    /// assert_eq!(List(Box::new(Int32)).unnest_list(), Int32);
+    /// assert_eq!(List(Box::new(List(Box::new(Int32)))).unnest_list(), Int32);
+    /// ```
+    pub fn unnest_list(&self) -> Self {
+        match self {
+            DataType::List(inner) => inner.unnest_list(),
+            _ => self.clone(),
+        }
+    }
+
+    /// Return the number of dimensions of this array/list type. Return `0` when this type is not an
+    /// array/list.
+    pub fn array_ndims(&self) -> usize {
+        let mut d = 0;
+        let mut t = self;
+        while let Self::List(inner) = t {
+            d += 1;
+            t = inner;
+        }
+        d
     }
 }
 
@@ -619,6 +632,23 @@ impl ToDatumRef for DatumRef<'_> {
         *self
     }
 }
+
+/// To make sure there is `as_scalar_ref` for all scalar ref types.
+pub trait SelfAsScalarRef {
+    fn as_scalar_ref(&self) -> Self;
+}
+macro_rules! impl_self_as_scalar_ref {
+    ($($t:ty),*) => {
+        $(
+            impl SelfAsScalarRef for $t {
+                fn as_scalar_ref(&self) -> Self {
+                    *self
+                }
+            }
+        )*
+    };
+}
+impl_self_as_scalar_ref! { &str, &[u8], Int256Ref<'_>, JsonbRef<'_>, ListRef<'_>, StructRef<'_>, ScalarRefImpl<'_> }
 
 /// `for_all_native_types` includes all native variants of our scalar types.
 ///
@@ -931,8 +961,8 @@ impl ScalarImpl {
                     ))
                     .into());
                 }
-                let mut fields = Vec::with_capacity(s.fields.len());
-                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(&s.fields) {
+                let mut fields = Vec::with_capacity(s.len());
+                for (s, ty) in str[1..str.len() - 1].split(',').zip_eq_debug(s.types()) {
                     fields.push(Some(Self::from_text(s.trim().as_bytes(), ty)?));
                 }
                 ScalarImpl::Struct(StructValue::new(fields))
@@ -1108,7 +1138,7 @@ impl ScalarImpl {
                 Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
-            Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
+            Ty::Struct(t) => StructValue::memcmp_deserialize(t.types(), de)?.to_scalar_value(),
             Ty::List(t) => ListValue::memcmp_deserialize(t, de)?.to_scalar_value(),
         })
     }
@@ -1178,6 +1208,8 @@ mod tests {
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
+        const_assert_eq!(std::mem::size_of::<StructType>(), 8);
+        const_assert_eq!(std::mem::size_of::<DataType>(), 16);
     }
 
     #[test]
@@ -1197,7 +1229,7 @@ mod tests {
             let mut builder = data_type.create_array_builder(6);
             for _ in 0..3 {
                 builder.append_null();
-                builder.append_datum(&datum);
+                builder.append(&datum);
             }
             let array = builder.finish();
 
@@ -1271,13 +1303,10 @@ mod tests {
                         ScalarImpl::Int64(233).into(),
                         ScalarImpl::Float64(23.33.into()).into(),
                     ])),
-                    DataType::Struct(
-                        StructType::new(vec![
-                            (DataType::Int64, "a".to_string()),
-                            (DataType::Float64, "b".to_string()),
-                        ])
-                        .into(),
-                    ),
+                    DataType::Struct(StructType::new(vec![
+                        ("a", DataType::Int64),
+                        ("b", DataType::Float64),
+                    ])),
                 ),
                 DataTypeName::List => (
                     ScalarImpl::List(ListValue::new(vec![

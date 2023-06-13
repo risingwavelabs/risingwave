@@ -473,8 +473,8 @@ async fn test_state_store_sync_inner(
 
     // ingest 16B batch
     let mut batch1 = vec![
-        (Bytes::from("\0\0aaaa"), StorageValue::new_put("1111")),
-        (Bytes::from("\0\0bbbb"), StorageValue::new_put("2222")),
+        (Bytes::from("aaaa"), StorageValue::new_put("1111")),
+        (Bytes::from("bbbb"), StorageValue::new_put("2222")),
     ];
 
     // Make sure the batch is sorted.
@@ -498,18 +498,9 @@ async fn test_state_store_sync_inner(
 
     // ingest 24B batch
     let mut batch2 = vec![
-        (
-            Bytes::copy_from_slice(b"\0\0cccc"),
-            StorageValue::new_put("3333"),
-        ),
-        (
-            Bytes::copy_from_slice(b"\0\0dddd"),
-            StorageValue::new_put("4444"),
-        ),
-        (
-            Bytes::copy_from_slice(b"\0\0eeee"),
-            StorageValue::new_put("5555"),
-        ),
+        (Bytes::from("cccc"), StorageValue::new_put("3333")),
+        (Bytes::from("dddd"), StorageValue::new_put("4444")),
+        (Bytes::from("eeee"), StorageValue::new_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     local
@@ -537,10 +528,7 @@ async fn test_state_store_sync_inner(
     local.seal_current_epoch(epoch);
 
     // ingest more 8B then will trigger a sync behind the scene
-    let mut batch3 = vec![(
-        Bytes::copy_from_slice(b"\0\0eeee"),
-        StorageValue::new_put("5555"),
-    )];
+    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("5555"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     local
         .ingest_batch(
@@ -1377,10 +1365,12 @@ async fn test_multiple_epoch_sync_inner(
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
+
     meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
         .await
         .unwrap();
+
     meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await

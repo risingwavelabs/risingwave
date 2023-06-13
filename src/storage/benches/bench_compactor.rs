@@ -201,6 +201,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
+        None,
     )
     .await
     .unwrap();

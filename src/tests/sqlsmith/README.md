@@ -19,8 +19,29 @@ This test will be run as a unit test:
 
 Take a look at [`gen_queries.sh`](scripts/gen_queries.sh).
 
-Caveat: Even with a given snapshot, certain parts of the system are non-determninistic.
-For instance with scheduler errors, the same query may not trigger errors when executed.
+Sometimes during the generation process some failed queries might be encountered.
+
+For instance if the logs produces:
+```sh
+[WARN] Cluster crashed while generating queries. see .risingwave/log/generate-22.log for more information.
+```
+
+You can re-run the failed query:
+```sh
+RUST_BACKTRACE=1 MADSIM_TEST_SEED=22 RUST_LOG=info \
+./target/sim/ci-sim/risingwave_simulation \
+  --run-sqlsmith-queries $SNAPSHOT_DIR/failed/22
+```
+
+The `failed query` is a summary of the full query set.
+In case it does not actually fail, it might be wrong.
+
+You can re-run the full query set as well in that case:
+```sh
+RUST_BACKTRACE=1 MADSIM_TEST_SEED=22 RUST_LOG=info \
+./target/sim/ci-sim/risingwave_simulation \
+ --run-sqlsmith-queries $SNAPSHOT_DIR/22
+```
 
 ## Running with Madsim
 

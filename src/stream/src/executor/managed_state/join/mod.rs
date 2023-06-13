@@ -36,6 +36,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -110,6 +111,12 @@ type PkType = Vec<u8>;
 pub type StateValueType = EncodedJoinRow;
 pub type HashValueType = Box<JoinEntryState>;
 
+impl EstimateSize for HashValueType {
+    fn estimated_heap_size(&self) -> usize {
+        self.as_ref().estimated_heap_size()
+    }
+}
+
 /// The wrapper for [`JoinEntryState`] which should be `Some` most of the time in the hash table.
 ///
 /// When the executor is operating on the specific entry of the map, it can hold the ownership of
@@ -119,7 +126,7 @@ struct HashValueWrapper(Option<HashValueType>);
 
 impl EstimateSize for HashValueWrapper {
     fn estimated_heap_size(&self) -> usize {
-        0
+        self.0.estimated_heap_size()
     }
 }
 
@@ -306,7 +313,15 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = new_with_hasher_in(watermark_epoch, PrecomputedBuildHasher, alloc);
+        let metrics_info = MetricsInfo::new(
+            metrics.clone(),
+            join_table_id,
+            actor_id,
+            &format!("hash join {}", side),
+        );
+
+        let cache =
+            new_with_hasher_in(watermark_epoch, metrics_info, PrecomputedBuildHasher, alloc);
 
         Self {
             inner: cache,

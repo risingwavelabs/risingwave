@@ -200,6 +200,10 @@ impl ObjectName {
             .collect::<Vec<_>>()
             .join(".")
     }
+
+    pub fn from_test_str(s: &str) -> Self {
+        ObjectName::from(vec![s.into()])
+    }
 }
 
 impl fmt::Display for ObjectName {
@@ -985,6 +989,7 @@ pub enum Statement {
     CreateView {
         or_replace: bool,
         materialized: bool,
+        if_not_exists: bool,
         /// View name
         name: ObjectName,
         columns: Vec<Ident>,
@@ -1357,6 +1362,7 @@ impl fmt::Display for Statement {
             Statement::CreateView {
                 name,
                 or_replace,
+                if_not_exists,
                 columns,
                 query,
                 materialized,
@@ -1365,9 +1371,10 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{materialized}VIEW {name}",
+                    "CREATE {or_replace}{materialized}VIEW {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
                 if let Some(emit_mode) = emit_mode {
@@ -1971,6 +1978,7 @@ pub struct Function {
     // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+    pub within_group: Option<Box<OrderByExpr>>,
 }
 
 impl Function {
@@ -1982,6 +1990,7 @@ impl Function {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }
     }
 }

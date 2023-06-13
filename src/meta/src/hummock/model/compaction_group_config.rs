@@ -82,7 +82,7 @@ impl MetadataModel for CompactionGroup {
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        prost.borrow().into()
+        (&prost).into()
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {

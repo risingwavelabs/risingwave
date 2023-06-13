@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 use std::marker::PhantomData;
 
 use futures::StreamExt;
@@ -72,13 +70,6 @@ impl Partition {
     fn is_ready(&self) -> bool {
         debug_assert!(self.is_aligned());
         self.states.iter().all(|state| state.curr_window().is_ready)
-    }
-
-    fn curr_window_key(&self) -> Option<&StateKey> {
-        debug_assert!(self.is_aligned());
-        self.states
-            .first()
-            .and_then(|state| state.curr_window().key)
     }
 }
 
@@ -275,7 +266,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         // Ignore ready windows (all ready windows were outputted before).
         while partition.is_ready() {
             for state in &mut partition.states {
-                state.output()?;
+                state.slide_forward();
             }
             partition.curr_row_buffer.pop_front();
         }
@@ -353,7 +344,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     let tmp: Vec<_> = partition
                         .states
                         .iter_mut()
-                        .map(|state| state.output().map(|o| (o.return_value, o.evict_hint)))
+                        .map(|state| -> StreamExecutorResult<_> {
+                            let ret_val = state.curr_output()?;
+                            let evict_hint = state.slide_forward();
+                            Ok((ret_val, evict_hint))
+                        })
                         .try_collect()?;
                     tmp.into_iter().unzip()
                 };
@@ -368,7 +363,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         .iter()
                         .chain(ret_values.iter().map(|v| v.to_datum_ref())),
                 ) {
-                    builder.append_datum(datum);
+                    builder.append(datum);
                 }
 
                 // Evict unneeded rows from state table.

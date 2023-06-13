@@ -271,7 +271,7 @@ fn bench_expr(c: &mut Criterion) {
             };
             children.push(InputRefExpression::new(DataType::from(*t), idx).boxed());
         }
-        let expr = build(sig.func, sig.ret_type.into(), children).unwrap();
+        let expr = build_func(sig.func, sig.ret_type.into(), children).unwrap();
         c.bench_function(&format!("{sig:?}"), |bencher| {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
@@ -292,6 +292,7 @@ fn bench_expr(c: &mut Criterion) {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }) {
             Ok(agg) => agg,
             Err(e) => {

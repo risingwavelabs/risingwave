@@ -91,6 +91,8 @@ pub struct MetaMetrics {
     pub min_pinned_version_id: IntGauge,
     /// The smallest version id that is being guarded by meta node safe points.
     pub min_safepoint_version_id: IntGauge,
+    /// Compaction groups that is in write stop state.
+    pub write_stop_compaction_groups: IntGaugeVec,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
@@ -259,6 +261,14 @@ impl MetaMetrics {
         let min_pinned_version_id = register_int_gauge_with_registry!(
             "storage_min_pinned_version_id",
             "min pinned version id",
+            registry
+        )
+        .unwrap();
+
+        let write_stop_compaction_groups = register_int_gauge_vec_with_registry!(
+            "storage_write_stop_compaction_groups",
+            "compaction groups of write stop state",
+            &["compaction_group_id"],
             registry
         )
         .unwrap();
@@ -500,6 +510,7 @@ impl MetaMetrics {
             checkpoint_version_id,
             min_pinned_version_id,
             min_safepoint_version_id,
+            write_stop_compaction_groups,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),

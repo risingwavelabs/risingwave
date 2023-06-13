@@ -95,12 +95,20 @@ impl WorkerNodeManager {
 
     pub fn add_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
+        // update
+        for w in &mut write_guard.worker_nodes {
+            if w.id == node.id {
+                *w = node;
+                return;
+            }
+        }
+        // insert
         write_guard.worker_nodes.push(node);
     }
 
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
-        write_guard.worker_nodes.retain(|x| *x != node);
+        write_guard.worker_nodes.retain(|x| x.id != node.id);
     }
 
     pub fn refresh(

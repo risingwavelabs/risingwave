@@ -30,9 +30,9 @@
 #![feature(macro_metavar_expr)]
 #![feature(slice_internals)]
 #![feature(min_specialization)]
-#![feature(is_some_and)]
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
+#![feature(impl_trait_in_assoc_type)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -136,6 +136,10 @@ struct OverrideConfigOpts {
     #[clap(long, env = "RW_METRICS_LEVEL")]
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<u32>,
+
+    #[clap(long, env = "RW_ENABLE_BARRIER_READ")]
+    #[override_opts(path = batch.enable_barrier_read)]
+    pub enable_barrier_read: Option<bool>,
 }
 
 impl Default for FrontendOpts {

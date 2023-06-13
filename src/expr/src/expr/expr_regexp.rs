@@ -42,6 +42,29 @@ impl RegexpContext {
                 .build()?,
         ))
     }
+
+    pub fn from_pattern(pattern: Datum) -> Result<Self> {
+        let pattern = match &pattern {
+            None => NULL_PATTERN,
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        Self::new(pattern, "")
+    }
+
+    pub fn from_pattern_flags(pattern: Datum, flags: Datum) -> Result<Self> {
+        let pattern = match (&pattern, &flags) {
+            (None, _) | (_, None) => NULL_PATTERN,
+            (Some(ScalarImpl::Utf8(s)), _) => s.as_ref(),
+            _ => bail!("invalid pattern: {pattern:?}"),
+        };
+        let flags = match &flags {
+            None => "",
+            Some(ScalarImpl::Utf8(s)) => s.as_ref(),
+            _ => bail!("invalid flags: {flags:?}"),
+        };
+        Self::new(pattern, flags)
+    }
 }
 
 /// <https://www.postgresql.org/docs/current/functions-matching.html#POSIX-EMBEDDED-OPTIONS-TABLE>
@@ -91,7 +114,7 @@ impl<'a> TryFrom<&'a ExprNode> for RegexpMatchExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::RegexpMatch);
+        ensure!(prost.get_function_type().unwrap() == Type::RegexpMatch);
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
             bail!("Expected RexNode::FuncCall");
         };
