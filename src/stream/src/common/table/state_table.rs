@@ -20,10 +20,12 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk, Vis};
+use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{
+    get_dist_key_in_pk_indices, ColumnDesc, Schema, TableId, TableOption,
+};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
@@ -36,7 +38,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, next_key, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
-use risingwave_storage::error::StorageError;
+use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
@@ -45,7 +47,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
-use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
+use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, TableIter};
 use risingwave_storage::StateStore;
 use tracing::trace;
 
@@ -1090,6 +1092,43 @@ where
             .may_exist(encoded_key_range_with_vnode, read_options)
             .await
             .map_err(Into::into)
+    }
+}
+
+// FIXME: Try merge this with the impl in `src/table/mod.rs`.
+async fn collect_data_chunk(
+    mut stream: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Unpin,
+    schema: &Schema,
+    chunk_size: Option<usize>,
+) -> StreamExecutorResult<Option<DataChunk>> {
+    let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0));
+
+    let mut row_count = 0;
+    for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+        match stream.next().await.transpose()? {
+            Some(row) => {
+                for (datum, builder) in row.iter().zip_eq_fast(builders.iter_mut()) {
+                    builder.append(datum);
+                }
+            }
+            None => break,
+        }
+
+        row_count += 1;
+    }
+
+    let chunk = {
+        let columns: Vec<_> = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        DataChunk::new(columns, row_count)
+    };
+
+    if chunk.cardinality() == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(chunk))
     }
 }
 
