@@ -56,11 +56,12 @@ use crate::ExprError;
 /// ----
 /// 1
 ///
-/// query error unknown type
+/// query error type unknown
 /// select array_length(null);
 /// ```
-#[function("array_length(list) -> int64")]
-fn array_length(array: ListRef<'_>) -> Result<i64, ExprError> {
+#[function("array_length(list) -> int32")]
+#[function("array_length(list) -> int64")] // for compatibility with plans from old version
+fn array_length<T: TryFrom<usize>>(array: ListRef<'_>) -> Result<T, ExprError> {
     array
         .len()
         .try_into()
@@ -126,8 +127,8 @@ fn array_length(array: ListRef<'_>) -> Result<i64, ExprError> {
 /// statement error
 /// select array_length(array[null, array[2]], 2);
 /// ```
-#[function("array_length(list, int32) -> int64")]
-fn array_length_d(array: ListRef<'_>, d: i32) -> Result<Option<i64>, ExprError> {
+#[function("array_length(list, int32) -> int32")]
+fn array_length_of_dim(array: ListRef<'_>, d: i32) -> Result<Option<i32>, ExprError> {
     match d {
         ..=0 => Ok(None),
         1 => array_length(array).map(Some),

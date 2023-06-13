@@ -23,7 +23,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_expr::agg::AggKind;
 use risingwave_expr::function::window::{
@@ -591,14 +591,11 @@ impl Binder {
                 (
                     "array_ndims",
                     guard_by_len(1, raw(|_binder, inputs| {
-                        let input = &inputs[0];
-                        if input.is_untyped() {
-                            return Err(ErrorCode::BindError("could not determine polymorphic type because input has type unknown".into()).into());
-                        }
-                        match input.return_type().array_ndims() {
-                            0 => Err(ErrorCode::BindError("array_ndims expects an array".into()).into()),
-                            n => Ok(ExprImpl::literal_int(n.try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?))
-                        }
+                        inputs[0].ensure_array_type()?;
+
+                        let n = inputs[0].return_type().array_ndims()
+                                .try_into().map_err(|_| ErrorCode::BindError("array_ndims integer overflow".into()))?;
+                        Ok(ExprImpl::literal_int(n))
                     })),
                 ),
                 (
@@ -746,6 +743,25 @@ impl Binder {
                         .into())
                     }
                 })),
+                ("current_setting", guard_by_len(1, raw(|binder, inputs| {
+                    let input = &inputs[0];
+                    let ExprImpl::Literal(literal) = input else {
+                        return Err(ErrorCode::ExprError(
+                            "Only literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    let Some(ScalarImpl::Utf8(input)) = literal.get_data() else {
+                        return Err(ErrorCode::ExprError(
+                            "Only string literal is supported in `current_setting`.".into(),
+                        )
+                        .into());
+                    };
+                    match binder.session_config.get(input.as_ref()) {
+                        Some(setting) => Ok(ExprImpl::literal_varchar(setting.into())),
+                        None => Err(ErrorCode::UnrecognizedConfigurationParameter(input.to_string()).into()),
+                    }
+                }))),
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),

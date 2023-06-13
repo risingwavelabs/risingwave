@@ -132,12 +132,20 @@ pub fn trigger_sst_stat(
     }
 
     tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
-    for ((select, target), compacting_task_count) in compacting_task_stat {
+    for ((select, target), compacting_task_count) in &compacting_task_stat {
         let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
         metrics
             .level_compact_task_cnt
             .with_label_values(&[&label_str])
-            .set(compacting_task_count as _);
+            .set(*compacting_task_count as _);
+    }
+
+    if compacting_task_stat.is_empty() {
+        let max_level: usize = current_version
+            .get_compaction_group_levels(compaction_group_id)
+            .get_levels()
+            .len();
+        remove_compacting_task_stat(metrics, compaction_group_id, max_level);
     }
 
     {
@@ -218,6 +226,7 @@ pub fn trigger_sst_stat(
 pub fn remove_compaction_group_in_sst_stat(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
+    max_level: usize,
 ) {
     let mut idx = 0;
     loop {
@@ -226,10 +235,12 @@ pub fn remove_compaction_group_in_sst_stat(
             .level_sst_num
             .remove_label_values(&[&level_label])
             .is_ok();
+
         metrics
             .level_file_size
             .remove_label_values(&[&level_label])
             .ok();
+
         metrics
             .level_compact_cnt
             .remove_label_values(&[&level_label])
@@ -250,6 +261,27 @@ pub fn remove_compaction_group_in_sst_stat(
         .level_sst_num
         .remove_label_values(&[&non_overlap_level_label])
         .ok();
+
+    remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+}
+
+pub fn remove_compacting_task_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    max_level: usize,
+) {
+    for select_level in 0..=max_level {
+        for target_level in 0..=max_level {
+            let label_str = format!(
+                "cg{} L{} -> L{}",
+                compaction_group_id, select_level, target_level
+            );
+            metrics
+                .level_compact_task_cnt
+                .remove_label_values(&[&label_str])
+                .ok();
+        }
+    }
 }
 
 pub fn trigger_pin_unpin_version_state(

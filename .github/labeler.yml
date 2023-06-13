@@ -25,6 +25,12 @@ labels:
 - label: "type/deprecate"
   title: "^deprecate.*"
 
+# If it's removed, or ticked.
 - label: "user-facing-changes"
   negate: true
-  body: 'My PR \*\*DOES NOT\*\* contain user-facing changes'
+  body: 'My PR contains user-facing changes'
+- label: "user-facing-changes"
+  body: '- \[x\] My PR contains user-facing changes'
+
+- label: "breaking-change"
+  body: '- \[x\] My PR contains breaking changes'
