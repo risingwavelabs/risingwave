@@ -31,13 +31,15 @@ pub async fn trace(
     info: Arc<ExecutorInfo>,
     _input_pos: usize,
     actor_id: ActorId,
-    _executor_id: u64,
+    executor_id: u64,
     metrics: Arc<StreamingMetrics>,
     input: impl MessageStream,
 ) {
     let actor_id_string = actor_id.to_string();
 
-    let new_span = || tracing::info_span!("executor", executor = info.identity, actor_id);
+    let span_name = pretty_identity(&info.identity, actor_id, executor_id);
+
+    let new_span = || tracing::info_span!("executor", "otel.name" = span_name);
     let mut span = new_span();
 
     pin_mut!(input);
@@ -58,23 +60,12 @@ pub async fn trace(
         match &message {
             Message::Chunk(_) | Message::Watermark(_) => yield message,
 
-            Message::Barrier(barrier) => {
-                let tracing_context = barrier.tracing_context().clone();
+            Message::Barrier(_) => {
+                let _ = std::mem::replace(&mut span, Span::none());
 
-                {
-                    let _barrier_span = tracing::info_span!(
-                        "barrier",
-                        upstream_executor = info.identity,
-                        upstream_actor_id = actor_id
-                    );
-                    yield message;
-                }
+                yield message;
 
-                if Span::current().is_none() {
-                    span = tracing_context.attach(new_span());
-                } else {
-                    span = new_span();
-                }
+                span = new_span();
             }
         }
     }

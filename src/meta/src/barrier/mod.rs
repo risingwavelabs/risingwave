@@ -329,6 +329,7 @@ where
         let span = tracing::info_span!(
             parent: None,
             "epoch",
+            "otel.name" = format!("Epoch {}", command_ctx.curr_epoch.0),
             prev_epoch = command_ctx.prev_epoch.0,
             curr_epoch = command_ctx.curr_epoch.0,
         );
@@ -702,7 +703,7 @@ where
     ) {
         let prev_epoch = command_context.prev_epoch.0;
         let result = self
-            .inject_barrier_inner(command_context.clone(), tracing_context)
+            .inject_barrier_inner(command_context.clone(), tracing_context.clone())
             .await;
         match result {
             Ok(node_need_collect) => {
@@ -711,6 +712,7 @@ where
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,
+                    tracing_context,
                     barrier_complete_tx.clone(),
                 ));
             }
@@ -785,6 +787,7 @@ where
         node_need_collect: HashMap<WorkerId, bool>,
         client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext<S>>,
+        tracing_context: TracingContext,
         barrier_complete_tx: UnboundedSender<BarrierCompletion>,
     ) {
         let prev_epoch = command_context.prev_epoch.0;
@@ -796,11 +799,13 @@ where
                 None
             } else {
                 let request_id = Uuid::new_v4().to_string();
+                let tracing_context = tracing_context.to_protobuf();
                 async move {
                     let client = client_pool.get(node).await?;
                     let request = BarrierCompleteRequest {
                         request_id,
                         prev_epoch,
+                        tracing_context,
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::barrier_complete",
