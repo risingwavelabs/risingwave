@@ -41,7 +41,7 @@ use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{collect_data_chunk, StateTable};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{PkIndices, StreamExecutorResult, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
@@ -441,24 +441,20 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        // TODO: iter over all vnodes of this state table.
-        let iter = upstream_table
+        let mut iter = upstream_table
             .iter_ordered_with_pk_range(&range_bounds, Default::default())
             .await?;
-        // pin_mut!(iter);
-        //
+        pin_mut!(iter);
         // // TODO: these are rows instead...
-        // #[for_await]
-        // for data_chunk in iter
-        // // .collect_data_chunk(upstream_table.schema(), Some(CHUNK_SIZE))
-        // // .instrument_await("backfill_snapshot_read")
-        // {
-        //     if data_chunk.cardinality() != 0 {
-        //         let ops = vec![Op::Insert; data_chunk.capacity()];
-        //         let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-        //         yield Some(stream_chunk);
-        //     }
-        // }
+        for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE)).await?
+        // .instrument_await("arrangement_backfill_snapshot_read")
+        {
+            if data_chunk.cardinality() != 0 {
+                let ops = vec![Op::Insert; data_chunk.capacity()];
+                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+                yield Some(stream_chunk);
+            }
+        }
 
         yield None;
     }

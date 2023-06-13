@@ -1096,7 +1096,7 @@ where
 }
 
 // FIXME: Try merge this with the impl in `src/table/mod.rs`.
-async fn collect_data_chunk(
+pub async fn collect_data_chunk(
     mut stream: impl Stream<Item = StreamExecutorResult<OwnedRow>> + Unpin,
     schema: &Schema,
     chunk_size: Option<usize>,
