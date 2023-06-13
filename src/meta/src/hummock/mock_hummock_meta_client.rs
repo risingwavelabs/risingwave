@@ -40,7 +40,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::hummock::compaction::{
     default_level_selector, LevelSelector, SpaceReclaimCompactionSelector,
 };
-use crate::hummock::compaction_scheduler::CompactionRequestChannel;
+use crate::hummock::compaction_scheduler::{CompactionRequestChannel, CompactionRequestItem};
 use crate::hummock::HummockManager;
 use crate::storage::MemStore;
 
@@ -199,30 +199,40 @@ impl HummockMetaClient for MockHummockMetaClient {
         let hummock_manager_compact = self.hummock_manager.clone();
         let (task_tx, task_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
-            while let Some((group, task_type)) = sched_rx.recv().await {
-                sched_channel.unschedule(group, task_type);
+            while let Some(item) = sched_rx.recv().await {
+                match item {
+                    CompactionRequestItem::Compact {
+                        compaction_group,
+                        task_type,
+                    } => {
+                        sched_channel.unschedule(compaction_group, task_type);
 
-                let mut selector: Box<dyn LevelSelector> = match task_type {
-                    compact_task::TaskType::Dynamic => default_level_selector(),
-                    compact_task::TaskType::SpaceReclaim => {
-                        Box::<SpaceReclaimCompactionSelector>::default()
+                        let mut selector: Box<dyn LevelSelector> = match task_type {
+                            compact_task::TaskType::Dynamic => default_level_selector(),
+                            compact_task::TaskType::SpaceReclaim => {
+                                Box::<SpaceReclaimCompactionSelector>::default()
+                            }
+
+                            _ => panic!(
+                                "Error type when mock_hummock_meta_client subscribe_compact_tasks"
+                            ),
+                        };
+                        if let Some(task) = hummock_manager_compact
+                            .get_compact_task(compaction_group, &mut selector)
+                            .await
+                            .unwrap()
+                        {
+                            hummock_manager_compact
+                                .assign_compaction_task(&task, context_id)
+                                .await
+                                .unwrap();
+                            let resp = SubscribeCompactTasksResponse {
+                                task: Some(Task::CompactTask(task)),
+                            };
+                            let _ = task_tx.send(Ok(resp));
+                        }
                     }
-
-                    _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
-                };
-                if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, &mut selector)
-                    .await
-                    .unwrap()
-                {
-                    hummock_manager_compact
-                        .assign_compaction_task(&task, context_id)
-                        .await
-                        .unwrap();
-                    let resp = SubscribeCompactTasksResponse {
-                        task: Some(Task::CompactTask(task)),
-                    };
-                    let _ = task_tx.send(Ok(resp));
+                    CompactionRequestItem::SplitLargeGroup(_) => (),
                 }
             }
         });

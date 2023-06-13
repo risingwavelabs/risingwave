@@ -22,7 +22,8 @@ use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
-use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+use risingwave_hummock_sdk::table_stats::PbTableStatsMap;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -44,15 +45,23 @@ use crate::storage::MetaStore;
 
 pub type CompactionSchedulerRef<S> = Arc<CompactionScheduler<S>>;
 pub type CompactionRequestChannelRef = Arc<CompactionRequestChannel>;
+const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 16;
 
-type CompactionRequestChannelItem = (CompactionGroupId, compact_task::TaskType);
+#[derive(Clone, Debug)]
+pub enum CompactionRequestItem {
+    Compact {
+        compaction_group: CompactionGroupId,
+        task_type: compact_task::TaskType,
+    },
+    SplitLargeGroup(PbTableStatsMap),
+}
 
 const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
 
 /// [`CompactionRequestChannel`] wrappers a mpsc channel and deduplicate requests from same
 /// compaction groups.
 pub struct CompactionRequestChannel {
-    request_tx: UnboundedSender<CompactionRequestChannelItem>,
+    request_tx: UnboundedSender<CompactionRequestItem>,
     scheduled: Mutex<HashSet<(CompactionGroupId, compact_task::TaskType)>>,
 }
 
@@ -66,7 +75,7 @@ pub enum ScheduleStatus {
 }
 
 impl CompactionRequestChannel {
-    pub fn new(request_tx: UnboundedSender<CompactionRequestChannelItem>) -> Self {
+    pub fn new(request_tx: UnboundedSender<CompactionRequestItem>) -> Self {
         Self {
             request_tx,
             scheduled: Default::default(),
@@ -78,15 +87,27 @@ impl CompactionRequestChannel {
         &self,
         compaction_group: CompactionGroupId,
         task_type: compact_task::TaskType,
-    ) -> Result<bool, SendError<CompactionRequestChannelItem>> {
+    ) -> Result<bool, SendError<CompactionRequestItem>> {
         let mut guard = self.scheduled.lock();
         let key = (compaction_group, task_type);
         if guard.contains(&key) {
             return Ok(false);
         }
-        self.request_tx.send(key)?;
+        self.request_tx.send(CompactionRequestItem::Compact {
+            compaction_group,
+            task_type,
+        })?;
         guard.insert(key);
         Ok(true)
+    }
+
+    /// Enqueues only if the target is not yet in queue.
+    pub fn try_split_groups(
+        &self,
+        stats: PbTableStatsMap,
+    ) -> Result<(), SendError<CompactionRequestItem>> {
+        self.request_tx
+            .send(CompactionRequestItem::SplitLargeGroup(stats))
     }
 
     pub fn unschedule(
@@ -125,8 +146,7 @@ where
     }
 
     pub async fn start(&self, shutdown_rx: Receiver<()>) {
-        let (sched_tx, sched_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
+        let (sched_tx, sched_rx) = tokio::sync::mpsc::unbounded_channel::<CompactionRequestItem>();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
 
         self.hummock_manager
@@ -331,22 +351,35 @@ where
                 Either::Left((event, _)) => {
                     if let Some(event) = event {
                         match event {
-                            SchedulerEvent::Channel((compaction_group, task_type)) => {
+                            SchedulerEvent::Channel(item) => {
                                 // recv
-                                if !self
-                                    .on_handle_compact(
+                                match item {
+                                    CompactionRequestItem::Compact {
                                         compaction_group,
-                                        &mut compaction_selectors,
                                         task_type,
-                                        sched_channel.clone(),
-                                    )
-                                    .await
-                                {
-                                    self.hummock_manager
-                                        .metrics
-                                        .compact_skip_frequency
-                                        .with_label_values(&["total", "no-compactor"])
-                                        .inc();
+                                    } => {
+                                        if !self
+                                            .on_handle_compact(
+                                                compaction_group,
+                                                &mut compaction_selectors,
+                                                task_type,
+                                                sched_channel.clone(),
+                                            )
+                                            .await
+                                        {
+                                            self.hummock_manager
+                                                .metrics
+                                                .compact_skip_frequency
+                                                .with_label_values(&["total", "no-compactor"])
+                                                .inc();
+                                        }
+                                    }
+                                    CompactionRequestItem::SplitLargeGroup(stats) => {
+                                        self.collect_table_write_throughput(
+                                            stats,
+                                            &mut group_infos,
+                                        );
+                                    }
                                 }
                             }
                             SchedulerEvent::DynamicTrigger => {
@@ -462,11 +495,25 @@ where
         true
     }
 
+    fn collect_table_write_throughput(
+        &self,
+        table_stats: PbTableStatsMap,
+        table_infos: &mut HashMap<u32, VecDeque<u64>>,
+    ) {
+        for (table_id, stat) in table_stats {
+            let throughput = (stat.total_value_size + stat.total_key_size) as u64;
+            let entry = table_infos.entry(table_id).or_default();
+            entry.push_back(throughput);
+            if entry.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
+                entry.pop_front();
+            }
+        }
+    }
+
     async fn on_handle_check_split_multi_group(
         &self,
-        history_table_infos: &mut HashMap<StateTableId, VecDeque<u64>>,
+        table_write_throughput: &HashMap<u32, VecDeque<u64>>,
     ) {
-        const HISTORY_TABLE_INFO_WINDOW_SIZE: usize = 4;
         let mut group_infos = self
             .hummock_manager
             .calculate_compaction_group_statistic()
@@ -475,109 +522,93 @@ where
         group_infos.reverse();
         let group_size_limit = self.env.opts.split_group_size_limit;
         let table_split_limit = self.env.opts.move_table_size_limit;
-        let mut table_infos = vec![];
-        // TODO: support move small state-table back to default-group to reduce IOPS.
-        for group in &group_infos {
-            if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
-                continue;
-            }
-            for (table_id, table_size) in &group.table_statistic {
-                let last_table_infos = history_table_infos
-                    .entry(*table_id)
-                    .or_insert_with(VecDeque::new);
-                last_table_infos.push_back(*table_size);
-                if last_table_infos.len() > HISTORY_TABLE_INFO_WINDOW_SIZE {
-                    last_table_infos.pop_front();
-                }
-                table_infos.push((*table_id, group.group_id, group.group_size));
-            }
-        }
-        table_infos.sort_by(|a, b| b.2.cmp(&a.2));
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let mut partition_vnode_count = self.env.opts.partition_vnode_count;
-        for (table_id, parent_group_id, parent_group_size) in table_infos {
-            let table_info = history_table_infos.get(&table_id).unwrap();
-            let table_size = *table_info.back().unwrap();
-            if table_size < table_split_limit
-                || (table_size < group_size_limit
-                    && table_info.len() < HISTORY_TABLE_INFO_WINDOW_SIZE)
-            {
+        for group in &group_infos {
+            if group.table_statistic.len() == 1 {
                 continue;
             }
 
-            let mut target_compact_group_id = None;
-            let mut allow_split_by_table = false;
-            if table_size < group_size_limit {
-                let mut increase = true;
-                for idx in 1..table_info.len() {
-                    if table_info[idx] < table_info[idx - 1] {
-                        increase = false;
-                        break;
-                    }
-                }
-
-                if !increase {
+            for (table_id, table_size) in &group.table_statistic {
+                if *table_size < table_split_limit {
                     continue;
                 }
 
-                // do not split a large table and a small table because it would increase IOPS of
-                // small table.
-                if parent_group_id != default_group_id && parent_group_id != mv_group_id {
-                    let rest_group_size = parent_group_size - table_size;
-                    if rest_group_size < table_size && rest_group_size < table_split_limit {
-                        continue;
+                let mut is_high_write_throughput = false;
+                if let Some(history) = table_write_throughput.get(table_id) {
+                    if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
+                        is_high_write_throughput = history
+                            .iter()
+                            .filter(|throughput| {
+                                **throughput > self.env.opts.table_write_throughput_limit
+                            })
+                            .count()
+                            > HISTORY_TABLE_INFO_WINDOW_SIZE / 2
+                            || history.iter().sum::<u64>()
+                                > (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
+                                    * self.env.opts.table_write_throughput_limit;
                     }
                 }
 
-                let increase_data_size = table_size.saturating_sub(*table_info.front().unwrap());
-                let increase_slow = increase_data_size < table_split_limit;
+                if *table_size < group_size_limit && !is_high_write_throughput {
+                    continue;
+                }
 
-                // if the size of this table increases too fast, we shall create one group for it.
-                if increase_slow
-                    && (parent_group_id == mv_group_id || parent_group_id == default_group_id)
-                {
-                    for group in &group_infos {
-                        // do not move to mv group or state group
-                        if !group.split_by_table || group.group_id == mv_group_id
-                            || group.group_id == default_group_id
-                            || group.group_id == parent_group_id
-                            // do not move state-table to a large group.
-                            || group.group_size + table_size > group_size_limit
-                            // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
-                            || group.group_size + table_size > parent_group_size - table_size
-                        {
+                let parent_group_id = group.group_id;
+                let mut target_compact_group_id = None;
+                let mut allow_split_by_table = false;
+                if !is_high_write_throughput {
+                    // do not split a large table and a small table because it would increase IOPS
+                    // of small table.
+                    if parent_group_id != default_group_id && parent_group_id != mv_group_id {
+                        let rest_group_size = group.group_size - *table_size;
+                        if rest_group_size < *table_size && rest_group_size < table_split_limit {
                             continue;
                         }
-                        target_compact_group_id = Some(group.group_id);
+                    } else {
+                        for group in &group_infos {
+                            // do not move to mv group or state group
+                            if !group.split_by_table || group.group_id == mv_group_id
+                                || group.group_id == default_group_id
+                                || group.group_id == parent_group_id
+                                // do not move state-table to a large group.
+                                || group.group_size + *table_size > group_size_limit
+                                // do not move state-table from group A to group B if this operation would make group B becomes larger than A.
+                                || group.group_size + *table_size > group.group_size - table_size
+                            {
+                                continue;
+                            }
+                            target_compact_group_id = Some(group.group_id);
+                        }
+                        allow_split_by_table = true;
+                        partition_vnode_count = 1;
                     }
-                    allow_split_by_table = true;
-                    partition_vnode_count = 1;
                 }
-            }
 
-            let ret = self
-                .hummock_manager
-                .move_state_table_to_compaction_group(
-                    parent_group_id,
-                    &[table_id],
-                    target_compact_group_id,
-                    allow_split_by_table,
-                    partition_vnode_count,
-                )
-                .await;
-            match ret {
-                Ok(_) => {
-                    info!(
+                let ret = self
+                    .hummock_manager
+                    .move_state_table_to_compaction_group(
+                        parent_group_id,
+                        &[*table_id],
+                        target_compact_group_id,
+                        allow_split_by_table,
+                        partition_vnode_count,
+                    )
+                    .await;
+                match ret {
+                    Ok(_) => {
+                        info!(
                         "move state table [{}] from group-{} to group-{:?} success, Allow split by table: {}",
                         table_id, parent_group_id, target_compact_group_id, allow_split_by_table
                     );
-                    return;
+                        return;
+                    }
+                    Err(e) => info!(
+                        "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
+                        table_id, parent_group_id, target_compact_group_id, e
+                    ),
                 }
-                Err(e) => info!(
-                    "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
-                    table_id, parent_group_id, target_compact_group_id, e
-                ),
             }
         }
     }
@@ -585,7 +616,7 @@ where
 
 #[derive(Clone)]
 pub enum SchedulerEvent {
-    Channel((CompactionGroupId, compact_task::TaskType)),
+    Channel(CompactionRequestItem),
     DynamicTrigger,
     SpaceReclaimTrigger,
     TtlReclaimTrigger,
@@ -598,7 +629,7 @@ where
     S: MetaStore,
 {
     fn scheduler_event_stream(
-        sched_rx: UnboundedReceiver<(CompactionGroupId, compact_task::TaskType)>,
+        sched_rx: UnboundedReceiver<CompactionRequestItem>,
         periodic_space_reclaim_compaction_interval_sec: u64,
         periodic_ttl_reclaim_compaction_interval_sec: u64,
         periodic_compaction_interval_sec: u64,
@@ -672,7 +703,7 @@ mod tests {
 
     use crate::hummock::compaction::default_level_selector;
     use crate::hummock::compaction_scheduler::{
-        CompactionRequestChannel, CompactionRequestChannelItem, ScheduleStatus,
+        CompactionRequestChannel, CompactionRequestItem, ScheduleStatus,
     };
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactionScheduler;
@@ -686,7 +717,7 @@ mod tests {
             CompactionScheduler::new(env, hummock_manager.clone(), compactor_manager.clone());
 
         let (request_tx, _request_rx) =
-            tokio::sync::mpsc::unbounded_channel::<CompactionRequestChannelItem>();
+            tokio::sync::mpsc::unbounded_channel::<CompactionRequestItem>();
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         // Add a compactor with invalid context_id.

@@ -247,6 +247,9 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
+
+    #[serde(default = "default::meta::table_write_throughput_limit")]
+    pub table_write_throughput_limit: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -642,6 +645,10 @@ mod default {
 
         pub fn partition_vnode_count() -> u32 {
             64
+        }
+
+        pub fn table_write_throughput_limit() -> u64 {
+            64 * 1024 * 1024 // 64MB
         }
     }
 
