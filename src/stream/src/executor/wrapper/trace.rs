@@ -39,7 +39,7 @@ pub async fn trace(
 
     let span_name = pretty_identity(&info.identity, actor_id, executor_id);
 
-    let new_span = || tracing::info_span!("executor", "otel.name" = span_name);
+    let new_span = || tracing::info_span!(parent: None, "executor", "otel.name" = span_name);
     let mut span = new_span();
 
     pin_mut!(input);
@@ -60,12 +60,13 @@ pub async fn trace(
         match &message {
             Message::Chunk(_) | Message::Watermark(_) => yield message,
 
-            Message::Barrier(_) => {
+            Message::Barrier(barrier) => {
                 let _ = std::mem::replace(&mut span, Span::none());
+                let tracing_context = barrier.tracing_context().clone();
 
+                span = tracing_context.attach(new_span());
                 yield message;
 
-                span = new_span();
             }
         }
     }

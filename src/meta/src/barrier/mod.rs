@@ -655,6 +655,10 @@ where
             .unwrap();
         let new_span = state.span().clone();
 
+        prev_span.in_scope(|| {
+            tracing::info!(epoch = new_epoch.0, "new barrier enqueued");
+        });
+
         let command_ctx = Arc::new(CommandContext::new(
             self.fragment_manager.clone(),
             self.env.stream_client_pool_ref(),
