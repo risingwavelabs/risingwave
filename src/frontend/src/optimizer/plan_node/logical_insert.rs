@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{Field, Schema, TableVersionId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::utils::Distill;
 use super::{
     gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -51,10 +53,6 @@ impl LogicalInsert {
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self { base, core }
-    }
-
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name)
     }
 
     // Get the column indexes in which to insert to
@@ -101,9 +99,15 @@ impl PlanTreeNodeUnary for LogicalInsert {
 
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
+impl Distill for LogicalInsert {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        Pretty::childless_record("LogicalInsert", vec)
+    }
+}
 impl fmt::Display for LogicalInsert {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalInsert")
+        self.core.fmt_with_name(f, "LogicalInsert")
     }
 }
 
