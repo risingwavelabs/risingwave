@@ -61,12 +61,13 @@ message WorkerNode {
     UNSPECIFIED = 0;
     STARTING = 1;
     RUNNING = 2;
-    CORDONED = 3;
+    CORDONED = 3; // TODO: remove this
   }
   // Fields in `Property` that doesn't fit current worker type are just ignored by receiver.
   message Property {
     bool is_streaming = 1;
     bool is_serving = 2;
+    bool is_schedulable = 3;
   }
   uint32 id = 1;
   WorkerType type = 2;

@@ -390,6 +390,7 @@ where
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
+                is_schedulable: worker_property.is_schedulable,
             })
         } else {
             None
