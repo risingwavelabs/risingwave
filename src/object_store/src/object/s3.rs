@@ -367,7 +367,9 @@ impl ObjectStore for S3ObjectStore {
                 {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
-                        if let SdkError::DispatchFailure(e) = &err && e.is_timeout() {
+                        if let SdkError::DispatchFailure(e) = &err
+                            && e.is_timeout()
+                        {
                             self.metrics
                                 .request_retry_count
                                 .with_label_values(&["read"])
@@ -444,11 +446,13 @@ impl ObjectStore for S3ObjectStore {
                 match self.obj_store_request(path, start_pos, None).send().await {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
-                        if let SdkError::DispatchFailure(e) = &err&& e.is_timeout() {
-                                self.metrics
-                                    .request_retry_count
-                                    .with_label_values(&["streaming_read"])
-                                    .inc();
+                        if let SdkError::DispatchFailure(e) = &err
+                            && e.is_timeout()
+                        {
+                            self.metrics
+                                .request_retry_count
+                                .with_label_values(&["streaming_read"])
+                                .inc();
                         }
 
                         Err(err)

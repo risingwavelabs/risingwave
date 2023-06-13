@@ -157,7 +157,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
-            .with_target("aws_smithy_client::retry", Level::DEBUG)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
@@ -280,7 +279,10 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 });
         });
     };
-    layers.push(Box::new(CustomLayer::new(registry)));
+
+    let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
+
+    layers.push(Box::new(CustomLayer::new(registry).with_filter(filter)));
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
