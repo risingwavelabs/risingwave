@@ -18,6 +18,10 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.Iterator;
+import java.util.stream.Stream;
+import java.util.stream.IntStream;
+
 import com.google.gson.Gson;
 
 import com.risingwave.functions.DataTypeHint;
@@ -156,27 +160,25 @@ public class UdfExample {
         }
     }
 
-    public static class Series implements TableFunction<Integer> {
-        public void eval(int n) {
-            for (int i = 0; i < n; i++) {
-                collect(i);
-            }
+    public static class Series implements TableFunction {
+        public static Iterator<Integer> eval(int n) {
+            return IntStream.range(0, n).iterator();
         }
     }
 
-    public static class Split implements TableFunction<Split.Row> {
+    public static class Split implements TableFunction {
         public static class Row {
             public String word;
             public int length;
         }
 
-        public void eval(String str) {
-            for (var s : str.split(" ")) {
-                var row = new Row();
+        public static Iterator<Row> eval(String str) {
+            return Stream.of(str.split(" ")).map(s -> {
+                Row row = new Row();
                 row.word = s;
                 row.length = s.length();
-                collect(row);
-            }
+                return row;
+            }).iterator();
         }
     }
 }

@@ -28,6 +28,7 @@ import java.math.BigDecimal;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -150,23 +151,14 @@ class TypeUtils {
     /**
      * Get the output schema of a table function from a Java class.
      */
-    static Schema tableFunctionToOutputSchema(Class<?> type) {
-        var hint = type.getAnnotation(DataTypeHint.class);
-        ParameterizedType parameterizedType = null;
-        for (var iface : type.getGenericInterfaces()) {
-            if (iface instanceof ParameterizedType) {
-                var ptype = (ParameterizedType) iface;
-                if (ptype.getRawType().equals(TableFunction.class)) {
-                    parameterizedType = ptype;
-                }
-            }
+    static Schema tableFunctionToOutputSchema(Method method) {
+        var hint = method.getAnnotation(DataTypeHint.class);
+        var type = method.getReturnType();
+        if (!Iterator.class.isAssignableFrom(type)) {
+            throw new IllegalArgumentException("Table function must return Iterator");
         }
-        if (parameterizedType == null) {
-            throw new IllegalArgumentException("Class " + type + " does not implement TableFunction");
-        }
-        var typeArguments = parameterizedType.getActualTypeArguments();
+        var typeArguments = ((ParameterizedType) method.getGenericReturnType()).getActualTypeArguments();
         type = (Class<?>) typeArguments[0];
-
         var row_index = Field.nullable("row_index", new ArrowType.Int(32, true));
         return new Schema(Arrays.asList(row_index, classToField(type, hint, "")));
     }

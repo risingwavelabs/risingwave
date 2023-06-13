@@ -26,63 +26,60 @@ import java.util.function.Function;
  * Batch-processing wrapper over a user-defined table function.
  */
 class TableFunctionBatch extends UserDefinedFunctionBatch {
-    TableFunction<?> function;
+    TableFunction function;
     MethodHandle methodHandle;
     Function<Object, Object>[] processInputs;
     int chunkSize = 1024;
 
-    TableFunctionBatch(TableFunction<?> function, BufferAllocator allocator) {
+    TableFunctionBatch(TableFunction function, BufferAllocator allocator) {
         this.function = function;
         this.allocator = allocator;
         var method = Reflection.getEvalMethod(function);
         this.methodHandle = Reflection.getMethodHandle(method);
         this.inputSchema = TypeUtils.methodToInputSchema(method);
-        this.outputSchema = TypeUtils.tableFunctionToOutputSchema(function.getClass());
+        this.outputSchema = TypeUtils.tableFunctionToOutputSchema(method);
         this.processInputs = TypeUtils.methodToProcessInputs(method);
     }
 
     @Override
     Iterator<VectorSchemaRoot> evalBatch(VectorSchemaRoot batch) {
-        // TODO: incremental compute and output
-        // due to the lack of generator support in Java, we can not yield from a
-        // function call.
         var outputs = new ArrayList<VectorSchemaRoot>();
-        var row = new Object[batch.getSchema().getFields().size() + 1];
-        row[0] = this.function;
+        var row = new Object[batch.getSchema().getFields().size()];
         var indexes = new ArrayList<Integer>();
+        var values = new ArrayList<Object>();
         Runnable buildChunk = () -> {
-            var indexVector = TypeUtils.createVector(this.outputSchema.getFields().get(0), this.allocator,
-                    indexes.toArray());
+            var fields = this.outputSchema.getFields();
+            var indexVector = TypeUtils.createVector(fields.get(0), this.allocator, indexes.toArray());
+            var valueVector = TypeUtils.createVector(fields.get(1), this.allocator, values.toArray());
             indexes.clear();
-            var valueVector = TypeUtils.createVector(this.outputSchema.getFields().get(1), this.allocator,
-                    this.function.take());
+            values.clear();
             var outputBatch = VectorSchemaRoot.of(indexVector, valueVector);
             outputs.add(outputBatch);
         };
         for (int i = 0; i < batch.getRowCount(); i++) {
             // prepare input row
-            for (int j = 0; j < row.length - 1; j++) {
+            for (int j = 0; j < row.length; j++) {
                 var val = batch.getVector(j).getObject(i);
-                row[j + 1] = this.processInputs[j].apply(val);
+                row[j] = this.processInputs[j].apply(val);
             }
             // call function
-            var sizeBefore = this.function.size();
+            Iterator<?> iterator;
             try {
-                this.methodHandle.invokeWithArguments(row);
+                iterator = (Iterator<?>) this.methodHandle.invokeWithArguments(row);
             } catch (Throwable e) {
                 throw new RuntimeException(e);
             }
-            var sizeAfter = this.function.size();
-            // add indexes
-            for (int j = sizeBefore; j < sizeAfter; j++) {
+            // push values
+            while (iterator.hasNext()) {
                 indexes.add(i);
-            }
-            // check if we need to flush
-            if (sizeAfter >= this.chunkSize) {
-                buildChunk.run();
+                values.add(iterator.next());
+                // check if we need to flush
+                if (indexes.size() >= this.chunkSize) {
+                    buildChunk.run();
+                }
             }
         }
-        if (this.function.size() > 0) {
+        if (indexes.size() > 0) {
             buildChunk.run();
         }
         return outputs.iterator();

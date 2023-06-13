@@ -107,7 +107,7 @@ class UdfProducer extends NoOpFlightProducer {
         if (function instanceof ScalarFunction) {
             udf = new ScalarFunctionBatch((ScalarFunction) function, this.allocator);
         } else if (function instanceof TableFunction) {
-            udf = new TableFunctionBatch((TableFunction<?>) function, this.allocator);
+            udf = new TableFunctionBatch((TableFunction) function, this.allocator);
         } else {
             throw new IllegalArgumentException("Unknown function type: " + function.getClass().getName());
         }
