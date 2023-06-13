@@ -51,4 +51,8 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     public String getSinkType() {
         return sinkType;
     }
+
+    public boolean isUpsertSink() {
+        return "upsert".equalsIgnoreCase(sinkType);
+    }
 }

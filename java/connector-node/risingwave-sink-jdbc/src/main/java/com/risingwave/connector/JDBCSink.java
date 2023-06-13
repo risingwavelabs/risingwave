@@ -17,12 +17,15 @@ package com.risingwave.connector;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.jdbc.JdbcDialect;
+import com.risingwave.connector.jdbc.PostgresDialect;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.commons.lang3.StringUtils;
@@ -37,41 +40,73 @@ enum DatabaseType {
 }
 
 public class JDBCSink extends SinkBase {
-    public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
     private static final String DELETE_TEMPLATE = "DELETE FROM %s WHERE %s";
     private static final String UPDATE_TEMPLATE = "UPDATE %s SET %s WHERE %s";
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
+    private final JdbcDialect jdbcDialect;
     private final JDBCSinkConfig config;
     private final Connection conn;
     private final List<String> pkColumnNames;
-    private final DatabaseType targetDbType;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
+
+    private final PreparedStatement upsertPreparedStmt;
+    private PreparedStatement deletePreparedStmt;
 
     private String updateDeleteConditionBuffer;
     private Object[] updateDeleteValueBuffer;
 
+    private boolean updateFlag = false;
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
-        if (jdbcUrl.startsWith("jdbc:mysql")) {
-            this.targetDbType = DatabaseType.MYSQL;
-        } else if (jdbcUrl.startsWith("jdbc:postgresql")) {
-            this.targetDbType = DatabaseType.POSTGRES;
-        } else {
+        var factory = JdbcUtils.getDialectFactory(jdbcUrl);
+        if (factory.isEmpty()) {
             throw Status.INVALID_ARGUMENT
                     .withDescription("Unsupported jdbc url: " + jdbcUrl)
                     .asRuntimeException();
         }
-
+        this.jdbcDialect = factory.get().create();
         this.config = config;
         try {
             this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
             this.pkColumnNames = getPkColumnNames(conn, config.getTableName());
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+
+        // Upsert sink must have primary key
+        if (config.isUpsertSink() && pkColumnNames.isEmpty()) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription(
+                            "No primary key in downstream for table " + config.getTableName())
+                    .asRuntimeException();
+        }
+
+        try {
+            var upsertSql =
+                    jdbcDialect.getUpsertStatement(
+                            config.getTableName(),
+                            List.of(tableSchema.getColumnNames()),
+                            pkColumnNames);
+            // MySQL and Postgres have upsert SQL
+            assert (upsertSql.isPresent());
+            this.upsertPreparedStmt =
+                    conn.prepareStatement(upsertSql.get(), Statement.RETURN_GENERATED_KEYS);
+            // upsert sink will handle DELETE events
+            if (config.isUpsertSink()) {
+                var deleteSql =
+                        jdbcDialect.getDeleteStatement(config.getTableName(), pkColumnNames);
+                this.deletePreparedStmt =
+                        conn.prepareStatement(deleteSql, Statement.RETURN_GENERATED_KEYS);
+            }
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -97,129 +132,166 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    private PreparedStatement prepareStatement(SinkRow row) {
-        switch (row.getOp()) {
-            case INSERT:
-                String columnsRepr = String.join(",", getTableSchema().getColumnNames());
-                String valuesRepr =
-                        IntStream.range(0, row.size())
-                                .mapToObj(row::get)
-                                .map((Object o) -> "?")
-                                .collect(Collectors.joining(","));
-                String insertStmt =
-                        String.format(
-                                INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
-
-                try {
-                    return generatePreparedStatement(insertStmt, row, null);
-                } catch (SQLException e) {
-                    throw io.grpc.Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .withCause(e)
-                            .asRuntimeException();
-                }
-            case DELETE:
-                if (this.pkColumnNames.isEmpty()) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    "downstream jdbc table should have primary key to handle delete event")
-                            .asRuntimeException();
-                }
-                String deleteCondition =
-                        this.pkColumnNames.stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-
-                String deleteStmt =
-                        String.format(DELETE_TEMPLATE, config.getTableName(), deleteCondition);
-                try {
-                    int placeholderIdx = 1;
-                    PreparedStatement stmt =
-                            conn.prepareStatement(deleteStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (String primaryKey : this.pkColumnNames) {
-                        Object fromRow = getTableSchema().getFromRow(primaryKey, row);
-                        stmt.setObject(placeholderIdx++, fromRow);
+    private Optional<PreparedStatement> prepareUpsertStatement(SinkRow row) {
+        try {
+            switch (row.getOp()) {
+                case INSERT:
+                    bindUpsertStatementValues(upsertPreparedStmt, row);
+                    return Optional.of(upsertPreparedStmt);
+                case UPDATE_DELETE:
+                    updateFlag = true;
+                    return Optional.empty();
+                case UPDATE_INSERT:
+                    if (!updateFlag) {
+                        throw Status.FAILED_PRECONDITION
+                                .withDescription("an UPDATE_DELETE should precede an UPDATE_INSERT")
+                                .asRuntimeException();
                     }
-                    return stmt;
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .asRuntimeException();
-                }
-            case UPDATE_DELETE:
-                if (this.pkColumnNames.isEmpty()) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    "downstream jdbc table should have primary key to handle update_delete event")
-                            .asRuntimeException();
-                }
-                updateDeleteConditionBuffer =
-                        this.pkColumnNames.stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-                updateDeleteValueBuffer =
-                        this.pkColumnNames.stream()
-                                .map(key -> getTableSchema().getFromRow(key, row))
-                                .toArray();
-
-                LOG.debug(
-                        "update delete condition: {} on values {}",
-                        updateDeleteConditionBuffer,
-                        updateDeleteValueBuffer);
-                return null;
-            case UPDATE_INSERT:
-                if (updateDeleteConditionBuffer == null) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
-                            .asRuntimeException();
-                }
-                String updateColumns =
-                        IntStream.range(0, getTableSchema().getNumColumns())
-                                .mapToObj(
-                                        index -> getTableSchema().getColumnNames()[index] + " = ?")
-                                .collect(Collectors.joining(","));
-                String updateStmt =
-                        String.format(
-                                UPDATE_TEMPLATE,
-                                config.getTableName(),
-                                updateColumns,
-                                updateDeleteConditionBuffer);
-                try {
-                    PreparedStatement stmt =
-                            generatePreparedStatement(updateStmt, row, updateDeleteValueBuffer);
-                    updateDeleteConditionBuffer = null;
-                    updateDeleteValueBuffer = null;
-                    return stmt;
-                } catch (SQLException e) {
-                    throw Status.INTERNAL
-                            .withDescription(
-                                    String.format(
-                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                            .asRuntimeException();
-                }
-            default:
-                throw Status.INVALID_ARGUMENT
-                        .withDescription("unspecified row operation")
-                        .asRuntimeException();
+                    bindUpsertStatementValues(upsertPreparedStmt, row);
+                    updateFlag = false;
+                    return Optional.of(upsertPreparedStmt);
+                default:
+                    return Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
         }
     }
 
+    private Optional<PreparedStatement> prepareDeleteStatement(SinkRow row) {
+        assert row.getOp() == Data.Op.DELETE;
+        if (!config.isUpsertSink()) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("Non-upsert sink cannot handle DELETE event")
+                    .asRuntimeException();
+        }
+        if (pkColumnNames.isEmpty()) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            "downstream jdbc table should have primary key to handle DELETE event")
+                    .asRuntimeException();
+        }
+
+        try {
+            int placeholderIdx = 1;
+            for (String primaryKey : pkColumnNames) {
+                Object fromRow = getTableSchema().getFromRow(primaryKey, row);
+                deletePreparedStmt.setObject(placeholderIdx++, fromRow);
+            }
+            return Optional.of(deletePreparedStmt);
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+    }
+
+    // private PreparedStatement prepareUpdateOrDeleteStatement(SinkRow row) {
+    //     switch (row.getOp()) {
+    //         case DELETE:
+    //             if (this.pkColumnNames.isEmpty()) {
+    //                 throw Status.INTERNAL
+    //                         .withDescription(
+    //                                 "downstream jdbc table should have primary key to handle delete event")
+    //                         .asRuntimeException();
+    //             }
+    //             String deleteCondition =
+    //                     this.pkColumnNames.stream()
+    //                             .map(key -> key + " = ?")
+    //                             .collect(Collectors.joining(" AND "));
+    //
+    //             String deleteStmt =
+    //                     String.format(DELETE_TEMPLATE, config.getTableName(), deleteCondition);
+    //             try {
+    //                 int placeholderIdx = 1;
+    //                 PreparedStatement stmt =
+    //                         conn.prepareStatement(deleteStmt, Statement.RETURN_GENERATED_KEYS);
+    //                 for (String primaryKey : this.pkColumnNames) {
+    //                     Object fromRow = getTableSchema().getFromRow(primaryKey, row);
+    //                     stmt.setObject(placeholderIdx++, fromRow);
+    //                 }
+    //                 return stmt;
+    //             } catch (SQLException e) {
+    //                 throw Status.INTERNAL
+    //                         .withDescription(
+    //                                 String.format(
+    //                                         ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+    //                         .asRuntimeException();
+    //             }
+    //         case UPDATE_DELETE:
+    //             if (this.pkColumnNames.isEmpty()) {
+    //                 throw Status.INTERNAL
+    //                         .withDescription(
+    //                                 "downstream jdbc table should have primary key to handle update_delete event")
+    //                         .asRuntimeException();
+    //             }
+    //             updateDeleteConditionBuffer =
+    //                     this.pkColumnNames.stream()
+    //                             .map(key -> key + " = ?")
+    //                             .collect(Collectors.joining(" AND "));
+    //             updateDeleteValueBuffer =
+    //                     this.pkColumnNames.stream()
+    //                             .map(key -> getTableSchema().getFromRow(key, row))
+    //                             .toArray();
+    //
+    //             LOG.debug(
+    //                     "update delete condition: {} on values {}",
+    //                     updateDeleteConditionBuffer,
+    //                     updateDeleteValueBuffer);
+    //             return null;
+    //         case UPDATE_INSERT:
+    //             if (updateDeleteConditionBuffer == null) {
+    //                 throw Status.FAILED_PRECONDITION
+    //                         .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
+    //                         .asRuntimeException();
+    //             }
+    //             String updateColumns =
+    //                     IntStream.range(0, getTableSchema().getNumColumns())
+    //                             .mapToObj(
+    //                                     index -> getTableSchema().getColumnNames()[index] + " = ?")
+    //                             .collect(Collectors.joining(","));
+    //             String updateStmt =
+    //                     String.format(
+    //                             UPDATE_TEMPLATE,
+    //                             config.getTableName(),
+    //                             updateColumns,
+    //                             updateDeleteConditionBuffer);
+    //             try {
+    //                 PreparedStatement stmt =
+    //                         conn.prepareStatement(updateStmt, Statement.RETURN_GENERATED_KEYS);
+    //                 bindUpsertStatementValues(stmt, row, updateDeleteValueBuffer);
+    //                 updateDeleteConditionBuffer = null;
+    //                 updateDeleteValueBuffer = null;
+    //                 return stmt;
+    //             } catch (SQLException e) {
+    //                 throw Status.INTERNAL
+    //                         .withDescription(
+    //                                 String.format(
+    //                                         ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+    //                         .asRuntimeException();
+    //             }
+    //         default:
+    //             throw Status.INTERNAL
+    //                     .withDescription("enter unreachable code")
+    //                     .asRuntimeException();
+    //     }
+    // }
+
     /**
-     * Generates sql statement for insert/update
+     * Bind prepared statement parameters for insert/update command.
      *
-     * @param inputStmt insert/update template string
+     * @param stmt prepared statement for
      * @param row column values to fill into statement
-     * @param updateDeleteValueBuffer pk values for update condition, pass null for insert
      * @return prepared sql statement for insert/delete
      * @throws SQLException
      */
-    private PreparedStatement generatePreparedStatement(
-            String inputStmt, SinkRow row, Object[] updateDeleteValueBuffer) throws SQLException {
-        PreparedStatement stmt = conn.prepareStatement(inputStmt, Statement.RETURN_GENERATED_KEYS);
+    private void bindUpsertStatementValues(PreparedStatement stmt, SinkRow row)
+            throws SQLException {
         var columnDescs = getTableSchema().getColumnDescs();
         int placeholderIdx = 1;
         for (int i = 0; i < row.size(); i++) {
@@ -229,14 +301,14 @@ public class JDBCSink extends SinkBase {
                     stmt.setBigDecimal(placeholderIdx++, (java.math.BigDecimal) row.get(i));
                     break;
                 case INTERVAL:
-                    if (targetDbType == DatabaseType.POSTGRES) {
+                    if (jdbcDialect instanceof PostgresDialect) {
                         stmt.setObject(placeholderIdx++, new PGInterval((String) row.get(i)));
                     } else {
                         stmt.setObject(placeholderIdx++, row.get(i));
                     }
                     break;
                 case JSONB:
-                    if (targetDbType == DatabaseType.POSTGRES) {
+                    if (jdbcDialect instanceof PostgresDialect) {
                         // reference: https://github.com/pgjdbc/pgjdbc/issues/265
                         var pgObj = new PGobject();
                         pgObj.setType("jsonb");
@@ -253,12 +325,12 @@ public class JDBCSink extends SinkBase {
                     var val = row.get(i);
                     assert (val instanceof Object[]);
                     Object[] objArray = (Object[]) val;
-                    if (targetDbType == DatabaseType.POSTGRES) {
+                    if (jdbcDialect instanceof PostgresDialect) {
+                        assert (column.getDataType().getFieldTypeCount() == 1);
                         var fieldType = column.getDataType().getFieldType(0);
-                        var sqlType =
-                                JdbcUtils.getDbSqlType(
-                                        targetDbType, fieldType.getTypeName(), fieldType);
-                        stmt.setArray(i + 1, conn.createArrayOf(sqlType, objArray));
+                        stmt.setArray(
+                                i + 1,
+                                conn.createArrayOf(fieldType.getTypeName().name(), objArray));
                     } else {
                         // convert Array type to a string for other database
                         // reference:
@@ -272,26 +344,28 @@ public class JDBCSink extends SinkBase {
                     break;
             }
         }
-        if (updateDeleteValueBuffer != null) {
-            for (Object value : updateDeleteValueBuffer) {
-                stmt.setObject(placeholderIdx++, value);
-            }
-        }
-        return stmt;
     }
 
     @Override
     public void write(Iterator<SinkRow> rows) {
+        // set parameters for each row
+        // and don't close the statement until the sink is closed
         while (rows.hasNext()) {
             try (SinkRow row = rows.next()) {
-                PreparedStatement stmt = prepareStatement(row);
+                Optional<PreparedStatement> stmt;
+                if (row.getOp() != Data.Op.DELETE) {
+                    stmt = prepareUpsertStatement(row);
+                } else {
+                    stmt = prepareDeleteStatement(row);
+                }
                 if (row.getOp() == Data.Op.UPDATE_DELETE) {
                     continue;
                 }
-                if (stmt != null) {
-                    try (stmt) {
-                        LOG.debug("Executing statement: {}", stmt);
-                        stmt.executeUpdate();
+                if (stmt.isPresent()) {
+                    try {
+                        LOG.debug("Executing statement: {}", stmt.get());
+                        stmt.get().executeUpdate();
+                        stmt.get().clearParameters();
                     } catch (SQLException e) {
                         throw Status.INTERNAL
                                 .withDescription(
@@ -334,6 +408,9 @@ public class JDBCSink extends SinkBase {
     public void drop() {
         try {
             conn.close();
+            updateDeleteConditionBuffer = null;
+            updateDeleteValueBuffer = null;
+            upsertPreparedStmt.close();
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
