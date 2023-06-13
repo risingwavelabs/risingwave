@@ -18,7 +18,7 @@
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
-use risingwave_common::catalog::{is_row_id_column_name, PG_CATALOG_SCHEMA_NAME, ROWID_PREFIX};
+use risingwave_common::catalog::{is_row_id_column_name, is_system_schema, ROWID_PREFIX};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
@@ -65,7 +65,7 @@ pub fn check_valid_column_name(column_name: &str) -> Result<()> {
 
 /// Check if modifications happen to system catalog.
 pub fn check_schema_writable(schema: &str) -> Result<()> {
-    if schema == PG_CATALOG_SCHEMA_NAME {
+    if is_system_schema(schema) {
         Err(ErrorCode::ProtocolError(format!(
             "permission denied to write on \"{}\", System catalog modifications are currently disallowed.",
             schema

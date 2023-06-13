@@ -70,6 +70,10 @@ pub const SYSTEM_SCHEMAS: [(u32, &str); 3] = [
     (RW_CATALOG_SCHEMA_ID, RW_CATALOG_SCHEMA_NAME),
 ];
 
+pub fn is_system_schema(schema_name: &str) -> bool {
+    SYSTEM_SCHEMAS.iter().any(|(_, s)| *s == schema_name)
+}
+
 pub const ROWID_PREFIX: &str = "_row_id";
 
 pub fn row_id_column_name() -> String {

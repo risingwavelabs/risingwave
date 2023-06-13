@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::{is_system_schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -33,6 +33,9 @@ pub struct DatabaseCatalog {
 
 impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: &PbSchema) {
+        if is_system_schema(&proto.name) {
+            return self.create_sys_schema_tmp(proto);
+        }
         let name = proto.name.clone();
         let id = proto.id;
         let schema = proto.into();
@@ -40,6 +43,17 @@ impl DatabaseCatalog {
             .try_insert(name.clone(), schema)
             .unwrap();
         self.schema_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    // For backward compatibility, since we didn't reject some operations on `rw_catalog` and
+    // `information_schema`: 1.drop schema, 2. create relations in them, here we have to replace
+    // back these schemas in frontend.
+    fn create_sys_schema_tmp(&mut self, proto: &PbSchema) {
+        let name = proto.name.clone();
+        let id = proto.id;
+        let schema = proto.into();
+        self.schema_by_name.insert(name.clone(), schema);
+        self.schema_name_by_id.insert(id, name);
     }
 
     pub fn drop_schema(&mut self, schema_id: SchemaId) {

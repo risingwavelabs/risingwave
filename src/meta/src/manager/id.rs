@@ -58,7 +58,14 @@ where
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
-            Ok(value) => memcomparable::from_slice(&value).unwrap(),
+            Ok(value) => {
+                let stored_id = memcomparable::from_slice(&value).unwrap();
+                if let Some(start) = start && start > stored_id {
+                    start
+                } else {
+                    stored_id
+                }
+            }
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };

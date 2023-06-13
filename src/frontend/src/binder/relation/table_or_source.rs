@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, SYSTEM_SCHEMAS};
+use risingwave_common::catalog::{is_system_schema, Field};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -66,10 +66,6 @@ impl Binder {
         alias: Option<TableAlias>,
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
-        fn is_system_schema(schema_name: &str) -> bool {
-            SYSTEM_SCHEMAS.iter().any(|(_, s)| *s == schema_name)
-        }
-
         // define some helper functions converting catalog to bound relation
         let resolve_sys_table_relation = |sys_table_catalog: &SystemCatalog| {
             let table = BoundSystemTable {

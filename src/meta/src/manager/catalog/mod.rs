@@ -29,7 +29,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, TableOption, DEFAULT_DATABASE_NAME,
     DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG,
-    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID,
+    DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, START_SCHEMA_ID,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -88,6 +88,7 @@ macro_rules! commit_meta {
 }
 pub(crate) use commit_meta;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 
@@ -130,12 +131,95 @@ where
         let core = Mutex::new(CatalogManagerCore::new(env.clone()).await?);
         let catalog_manager = Self { env, core };
         catalog_manager.init().await?;
+        catalog_manager.temp_replace_schema_id().await?;
         Ok(catalog_manager)
     }
 
     async fn init(&self) -> MetaResult<()> {
         self.init_user().await?;
         self.init_database().await?;
+        Ok(())
+    }
+
+    async fn temp_replace_schema_id(&self) -> MetaResult<()> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        // re-assign schema id if less that START_SCHEMA_ID.
+        let to_update_ids = database_core
+            .schemas
+            .keys()
+            .cloned()
+            .filter(|&id| id < START_SCHEMA_ID as u32)
+            .collect_vec();
+        if to_update_ids.is_empty() {
+            return Ok(());
+        }
+        let cnt = to_update_ids.len();
+        let start_id = self
+            .env
+            .id_gen_manager()
+            .generate_interval::<{ IdCategory::Schema }>(cnt as u64)
+            .await? as SchemaId;
+        let mapping: HashMap<SchemaId, SchemaId> = to_update_ids
+            .into_iter()
+            .zip_eq_fast(start_id..start_id + cnt as SchemaId)
+            .collect();
+
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+
+        for (old_schema, new_schema) in &mapping {
+            let mut schema = schemas.remove(*old_schema).unwrap();
+            schema.id = *new_schema;
+            schemas.insert(*new_schema, schema);
+        }
+        /// `update_schema_id` updates the schema id based on the mapping.
+        macro_rules! update_schema_id {
+            ($val_tx:expr) => {{
+                let ids_to_update = $val_tx
+                    .tree_ref()
+                    .values()
+                    .filter(|rel| mapping.contains_key(&rel.schema_id))
+                    .map(|rel| rel.id)
+                    .collect_vec();
+                ids_to_update.into_iter().for_each(|id| {
+                    let mut relation = $val_tx.remove(id).unwrap();
+                    relation.schema_id = mapping[&relation.schema_id];
+                    $val_tx.insert(id, relation);
+                });
+            }};
+        }
+        update_schema_id!(tables);
+        update_schema_id!(sources);
+        update_schema_id!(indexes);
+        update_schema_id!(sinks);
+        update_schema_id!(views);
+        update_schema_id!(functions);
+        update_schema_id!(connections);
+
+        // update user info.
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+        Self::replace_user_schema_privileges(&mut users, &mapping);
+
+        commit_meta!(
+            self,
+            schemas,
+            tables,
+            sources,
+            indexes,
+            sinks,
+            views,
+            functions,
+            connections,
+            users
+        )?;
         Ok(())
     }
 
@@ -150,6 +234,10 @@ where
     S: MetaStore,
 {
     async fn init_database(&self) -> MetaResult<()> {
+        if !self.core.lock().await.database.databases.is_empty() {
+            // already initialized and the default database might have been dropped, ignore it.
+            return Ok(());
+        }
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
@@ -285,9 +373,21 @@ where
                         .map(|function| Object::FunctionId(function.id)),
                 )
                 .collect_vec();
-            let users_need_update = Self::update_user_privileges(&mut users, &objects);
+            let users_need_update = Self::drop_user_privileges(&mut users, &objects);
 
-            commit_meta!(self, databases, schemas, sources, sinks, tables, indexes, views, users)?;
+            commit_meta!(
+                self,
+                databases,
+                schemas,
+                sources,
+                sinks,
+                tables,
+                indexes,
+                views,
+                functions,
+                connections,
+                users
+            )?;
 
             std::iter::once(database.owner)
                 .chain(schemas_to_drop.iter().map(|schema| schema.owner))
@@ -302,6 +402,11 @@ where
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
                 .chain(functions_to_drop.iter().map(|function| function.owner))
+                .chain(
+                    connections_to_drop
+                        .iter()
+                        .map(|connection| connection.owner),
+                )
                 .for_each(|owner_id| user_core.decrease_ref(owner_id));
 
             // Update relation ref count.
@@ -463,7 +568,7 @@ where
         let schema = schemas.remove(schema_id).unwrap();
 
         let users_need_update =
-            Self::update_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
+            Self::drop_user_privileges(&mut users, &[Object::SchemaId(schema_id)]);
 
         commit_meta!(self, schemas, users)?;
 
@@ -530,7 +635,7 @@ where
             ))),
             None => {
                 let users_need_update =
-                    Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
+                    Self::drop_user_privileges(&mut users, &[Object::ViewId(view_id)]);
                 commit_meta!(self, views, users)?;
 
                 user_core.decrease_ref(view.owner);
@@ -588,7 +693,7 @@ where
             .ok_or_else(|| anyhow!("function not found"))?;
 
         let objects = &[Object::FunctionId(function_id)];
-        let users_need_update = Self::update_user_privileges(&mut users, objects);
+        let users_need_update = Self::drop_user_privileges(&mut users, objects);
 
         commit_meta!(self, functions, users)?;
 
@@ -862,7 +967,7 @@ where
                     .chain([&table_id])
                     .collect_vec();
 
-                Self::update_user_privileges(
+                Self::drop_user_privileges(
                     &mut users,
                     &table_to_drop_ids
                         .into_iter()
@@ -989,7 +1094,7 @@ where
                         .map(Object::TableId)
                         .collect_vec();
 
-                    let users_need_update = Self::update_user_privileges(&mut users, &objects);
+                    let users_need_update = Self::drop_user_privileges(&mut users, &objects);
 
                     commit_meta!(self, tables, indexes, users)?;
 
@@ -1416,7 +1521,7 @@ where
             ))),
             None => {
                 let users_need_update =
-                    Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
+                    Self::drop_user_privileges(&mut users, &[Object::SourceId(source_id)]);
                 commit_meta!(self, sources, users)?;
 
                 user_core.decrease_ref(source.owner);
@@ -1679,7 +1784,7 @@ where
                     )
                     .collect_vec();
 
-                let users_need_update = Self::update_user_privileges(&mut users, &objects);
+                let users_need_update = Self::drop_user_privileges(&mut users, &objects);
 
                 // Commit point
                 commit_meta!(self, tables, sources, indexes, users)?;
@@ -1994,7 +2099,7 @@ where
                     })
                     .collect_vec();
 
-                let users_need_update = Self::update_user_privileges(&mut users, objects);
+                let users_need_update = Self::drop_user_privileges(&mut users, objects);
 
                 commit_meta!(self, sinks, tables, users)?;
 
@@ -2244,6 +2349,10 @@ where
 {
     async fn init_user(&self) -> MetaResult<()> {
         let core = &mut self.core.lock().await.user;
+        if !core.user_info.is_empty() {
+            // already initialized and the default users might have been dropped, ignore it.
+            return Ok(());
+        }
         for (user, id) in [
             (DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_ID),
             (DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID),
@@ -2678,10 +2787,10 @@ where
         Ok(version)
     }
 
-    /// `update_user_privileges` removes the privileges with given object from given users, it will
+    /// `drop_user_privileges` removes the privileges with given object from given users, it will
     /// be called when a database/schema/table/source/sink is dropped.
     #[inline(always)]
-    fn update_user_privileges(
+    fn drop_user_privileges(
         users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
         objects: &[Object],
     ) -> Vec<UserInfo> {
@@ -2697,5 +2806,32 @@ where
             }
         }
         users_need_update
+    }
+
+    /// `replace_user_schema_privileges` replaces the schema privileges with given mapping.
+    #[inline(always)]
+    fn replace_user_schema_privileges(
+        users: &mut BTreeMapTransaction<'_, UserId, UserInfo>,
+        mapping: &HashMap<SchemaId, SchemaId>,
+    ) {
+        let user_keys = users.tree_ref().keys().copied().collect_vec();
+        for user_id in user_keys {
+            let mut user = users.get_mut(user_id).unwrap();
+            for privilege in &mut user.grant_privileges {
+                if let Some(obj) = &mut privilege.object {
+                    let schema_id = match obj {
+                        Object::SchemaId(schema_id) => Some(schema_id),
+                        Object::AllTablesSchemaId(schema_id) => Some(schema_id),
+                        Object::AllSourcesSchemaId(schema_id) => Some(schema_id),
+                        _ => None,
+                    };
+                    if let Some(schema_id) = schema_id {
+                        if let Some(new_schema_id) = mapping.get(schema_id) {
+                            *schema_id = *new_schema_id;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
