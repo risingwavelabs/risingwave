@@ -44,9 +44,6 @@ public class JDBCSink extends SinkBase {
     private final PreparedStatement upsertPreparedStmt;
     private PreparedStatement deletePreparedStmt;
 
-    private String updateDeleteConditionBuffer;
-    private Object[] updateDeleteValueBuffer;
-
     private boolean updateFlag = false;
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
@@ -268,9 +265,7 @@ public class JDBCSink extends SinkBase {
                         throw Status.INTERNAL
                                 .withDescription(
                                         String.format(
-                                                ERROR_REPORT_TEMPLATE,
-                                                stmt.get(),
-                                                e.getMessage()))
+                                                ERROR_REPORT_TEMPLATE, stmt.get(), e.getMessage()))
                                 .asRuntimeException();
                     }
                 } else {
@@ -286,7 +281,7 @@ public class JDBCSink extends SinkBase {
 
     @Override
     public void sync() {
-        if (updateDeleteConditionBuffer != null || updateDeleteValueBuffer != null) {
+        if (updateFlag) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
@@ -308,8 +303,6 @@ public class JDBCSink extends SinkBase {
             conn.close();
             upsertPreparedStmt.close();
             deletePreparedStmt.close();
-            updateDeleteConditionBuffer = null;
-            updateDeleteValueBuffer = null;
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL
                     .withDescription(
