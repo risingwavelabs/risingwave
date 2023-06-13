@@ -50,7 +50,7 @@ use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_names, bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns,
-    ColumnIdGenerator,
+    ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
@@ -770,6 +770,7 @@ pub async fn handle_create_source(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
+    ensure_table_constraints_supported(&stmt.constraints)?;
 
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 

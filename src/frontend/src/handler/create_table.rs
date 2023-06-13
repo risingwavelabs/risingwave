@@ -294,7 +294,7 @@ pub fn bind_sql_column_constraints(
     Ok(())
 }
 
-fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
+pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint]) -> Result<()> {
     for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
@@ -351,6 +351,10 @@ fn multiple_pk_definition_err() -> RwError {
     ErrorCode::BindError("multiple primary keys are not allowed".into()).into()
 }
 
+/// Binds primary keys defined in SQL.
+///
+/// It returns the columns together with `pk_column_ids`, and an optional row id column index if
+/// added.
 pub fn bind_pk_on_relation(
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
@@ -388,63 +392,6 @@ pub fn bind_pk_on_relation(
     Ok((columns, pk_column_ids, row_id_index))
 }
 
-/// Binds constraints that can be specified in both column definitions and table definition.
-///
-/// It returns the columns together with `pk_column_ids`, and an optional row id column index if
-/// added.
-pub fn bind_sql_table_column_constraints(
-    columns_descs: Vec<ColumnDesc>,
-    columns_defs: Vec<ColumnDef>,
-    table_constraints: Vec<TableConstraint>,
-) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-    ensure_table_constraints_supported(&table_constraints)?;
-    // Mapping from column name to column id.
-    let name_to_id = columns_descs
-        .iter()
-        .map(|c| (c.name.as_str(), c.column_id))
-        .collect::<HashMap<_, _>>();
-
-    let pk_column_names = bind_pk_names(&columns_defs, &table_constraints)?;
-
-    let mut pk_column_ids: Vec<_> = pk_column_names
-        .iter()
-        .map(|name| {
-            name_to_id.get(name.as_str()).copied().ok_or_else(|| {
-                ErrorCode::BindError(format!("column \"{name}\" named in key does not exist"))
-            })
-        })
-        .try_collect()?;
-
-    let mut columns_catalog = columns_descs
-        .into_iter()
-        .map(|c| {
-            // All columns except `_row_id` or starts with `_rw` should be visible.
-            let is_hidden = c.name.starts_with("_rw");
-            ColumnCatalog {
-                column_desc: c,
-                is_hidden,
-            }
-        })
-        .collect_vec();
-
-    // Add `_row_id` column if `pk_column_ids` is empty.
-    let row_id_index = pk_column_ids.is_empty().then(|| {
-        let column = ColumnCatalog::row_id_column();
-        let index = columns_catalog.len();
-        pk_column_ids = vec![column.column_id()];
-        columns_catalog.push(column);
-        index
-    });
-
-    if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {
-        Err(ErrorCode::InvalidInputSyntax(format!(
-            "column \"{col}\" specified more than once"
-        )))?;
-    }
-
-    Ok((columns_catalog, pk_column_ids, row_id_index))
-}
-
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
 #[allow(clippy::too_many_arguments)]
@@ -465,6 +412,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
     let mut properties = context.with_options().inner().clone().into_iter().collect();
 
+    ensure_table_constraints_supported(&constraints)?;
     let pk_names: Vec<String> = bind_pk_names(&column_defs, &constraints)?;
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
@@ -562,6 +510,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     append_only: bool,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+    ensure_table_constraints_supported(&constraints)?;
     let pk_names = bind_pk_names(&column_defs, &constraints)?;
     let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
@@ -921,6 +870,7 @@ mod tests {
                 for c in &mut columns {
                     c.column_desc.column_id = col_id_gen.generate(c.name())
                 }
+                ensure_table_constraints_supported(&constraints)?;
                 let pk_names = bind_pk_names(&column_defs, &constraints)?;
                 let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
                 Ok(pk_column_ids)
