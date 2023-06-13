@@ -18,6 +18,7 @@ use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, CordonWorkerNodeRequest, CordonWorkerNodeResponse,
     DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest, ListAllNodesResponse,
+    UncordonWorkerNodeRequest, UncordonWorkerNodeResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -77,6 +78,21 @@ where
             .cordon_worker_node(host_address)
             .await?;
         Ok(Response::new(CordonWorkerNodeResponse { status: None }))
+    }
+
+    /// mark node as schedulable. Nodes are schedulable unless they are cordoned
+    async fn uncordon_worker_node(
+        &self,
+        req: Request<UncordonWorkerNodeRequest>,
+    ) -> Result<Response<UncordonWorkerNodeResponse>, Status> {
+        let host_address = match req.into_inner().host {
+            None => return Err(Status::invalid_argument("request did not have host")),
+            Some(ha) => ha,
+        };
+        self.cluster_manager
+            .uncordon_worker_node(host_address)
+            .await?;
+        Ok(Response::new(UncordonWorkerNodeResponse { status: None }))
     }
 
     async fn activate_worker_node(

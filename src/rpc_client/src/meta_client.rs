@@ -560,10 +560,17 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    /// Unregister the current node to the cluster.
+    /// Mark the current node as unschedulable.
     pub async fn cordon_worker(&self, host: HostAddress) -> Result<CordonWorkerNodeResponse> {
         let request = CordonWorkerNodeRequest { host: Some(host) };
         let resp = self.inner.cordon_worker_node(request).await?;
+        Ok(resp)
+    }
+
+    /// Mark the current node as schedulable. Nodes are schedulable unless the are cordoned
+    pub async fn uncordon_worker(&self, host: HostAddress) -> Result<UncordonWorkerNodeResponse> {
+        let request = UncordonWorkerNodeRequest { host: Some(host) };
+        let resp = self.inner.uncordon_worker_node(request).await?;
         Ok(resp)
     }
 
@@ -1443,6 +1450,7 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             //(not used) ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, cordon_worker_node, CordonWorkerNodeRequest, CordonWorkerNodeResponse }
+            ,{ cluster_client, uncordon_worker_node, UncordonWorkerNodeRequest, UncordonWorkerNodeResponse }
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }

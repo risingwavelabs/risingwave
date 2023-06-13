@@ -43,12 +43,8 @@ fn str_to_addr(ip: &str) -> anyhow::Result<HostAddress> {
 // Mark a compute node as unschedulable
 pub async fn cordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
     let addr = str_to_addr(ip.as_str())?;
-    tracing::info!("trying to cordon {:?}", addr);
-    return Err(anyhow!("cordon is unimplemented")); // TODO: remove
-    return Err(anyhow!("Please provide a valid IP, e.g. 127.0.0.1:1234"));
-    let _meta_client = context.meta_client().await?;
-    //  meta_client.cordon(addr).await?; // TODO
-
+    let meta_client = context.meta_client().await?;
+    meta_client.cordon_worker(addr).await?;
     Ok(())
 }
 
@@ -56,9 +52,8 @@ pub async fn cordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
 pub async fn uncordon(context: &CtlContext, ip: String) -> anyhow::Result<()> {
     let addr = str_to_addr(ip.as_str())?;
     tracing::info!("trying to uncordon {:?}", addr);
-    return Err(anyhow!("uncordon is unimplemented")); // TODO: remove
-    let _meta_client = context.meta_client().await?;
-    //  meta_client.uncordon(addr).await?; // TODO
+    let meta_client = context.meta_client().await?;
+    meta_client.uncordon_worker(addr).await?;
 
     Ok(())
 }

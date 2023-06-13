@@ -19,8 +19,7 @@ use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_pb::common::HostAddress;
-use risingwave_pb::meta::table_fragments::State;
-use risingwave_pb::meta::{CordonWorkerNodeResponse, GetClusterInfoResponse};
+use risingwave_pb::meta::{table_fragments, CordonWorkerNodeResponse, GetClusterInfoResponse};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::FragmentTypeFlag;
 
@@ -129,9 +128,9 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
 
     let cross_out_if_creating = |cell: Cell, fid: u32| -> Cell {
         match fragment_states[&fid] {
-            State::Unspecified => unreachable!(),
-            State::Creating => cell.add_attribute(Attribute::CrossedOut),
-            State::Created | State::Initial => cell,
+            table_fragments::State::Unspecified => unreachable!(),
+            table_fragments::State::Creating => cell.add_attribute(Attribute::CrossedOut),
+            table_fragments::State::Created | table_fragments::State::Initial => cell,
         }
     };
 
@@ -157,9 +156,10 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
         } else {
             last_worker_id = Some(worker.id);
             Cell::new(format!(
-                "{}@{}",
+                "{}@{} ({})",
                 worker.id,
-                HostAddr::from(worker.get_host().unwrap())
+                HostAddr::from(worker.get_host().unwrap()),
+                worker.state().as_str_name()
             ))
             .add_attribute(Attribute::Bold)
         });

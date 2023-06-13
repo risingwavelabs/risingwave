@@ -181,6 +181,33 @@ where
         Ok(())
     }
 
+    // mark a worker node as schedulable. Nodes are schedulable, unless they are cordoned
+    pub async fn uncordon_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
+        let mut core = self.core.write().await;
+        let worker = core
+            .workers
+            .get_mut(&WorkerKey(host_address.clone()))
+            .ok_or_else(|| anyhow!("Worker node does not exist!"))?;
+        let worker_type = worker.worker_type();
+
+        if worker_type != WorkerType::ComputeNode {
+            tracing::warn!("Cordoning non-compute node. Cordon should be used with compute nodes");
+        }
+
+        // TODO
+        // We need to handle the deleting state once we introduce it
+        // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
+
+        if worker.worker_node.state != State::Cordoned as i32 {
+            return Ok(worker_type);
+        }
+
+        worker.worker_node.state = State::Running as i32;
+        Worker::insert(worker, self.env.meta_store()).await?;
+
+        Ok(worker_type)
+    }
+
     // mark a worker node as unschedulable
     pub async fn cordon_worker_node(&self, host_address: HostAddress) -> MetaResult<WorkerType> {
         let mut core = self.core.write().await;
