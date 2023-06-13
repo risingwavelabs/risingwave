@@ -445,9 +445,9 @@ where
             .iter_ordered_with_pk_range(&range_bounds, Default::default())
             .await?;
         pin_mut!(iter);
-        // // TODO: these are rows instead...
-        for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE)).await?
-        // .instrument_await("arrangement_backfill_snapshot_read")
+        for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE))
+            .instrument_await("arrangement_backfill_snapshot_read")
+            .await?
         {
             if data_chunk.cardinality() != 0 {
                 let ops = vec![Op::Insert; data_chunk.capacity()];
