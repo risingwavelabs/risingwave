@@ -636,6 +636,18 @@
 - sql: |
     select * from max();
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in FROM'
-- sql: |
-    select * from hop(t);
-  binder_error: 'Catalog error: table or source not found: t'
+- name: Grafana issue-10134
+  sql: |
+    SELECT * FROM
+    generate_series(
+      array_lower(string_to_array(current_setting('search_path'),','),1),
+      array_upper(string_to_array(current_setting('search_path'),','),1)
+    ) as i,
+    string_to_array(current_setting('search_path'),',') s
+  batch_plan: |
+    BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+    ├─BatchTableFunction { GenerateSeries(1:Int32, 2:Int32) }
+    └─BatchValues { rows: [[ARRAY["$user",  public]:List(Varchar)]] }
+  stream_error: |-
+    Feature is not yet implemented: LogicalTableFunction::logical_rewrite_for_stream
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

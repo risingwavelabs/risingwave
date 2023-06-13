@@ -439,3 +439,14 @@
     select * from max();
   expected_outputs:
   - binder_error
+- name: Grafana issue-10134
+  sql: |
+    SELECT * FROM
+    generate_series(
+      array_lower(string_to_array(current_setting('search_path'),','),1),
+      array_upper(string_to_array(current_setting('search_path'),','),1)
+    ) as i,
+    string_to_array(current_setting('search_path'),',') s
+  expected_outputs:
+  - batch_plan
+  - stream_error
