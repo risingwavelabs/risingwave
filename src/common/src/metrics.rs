@@ -57,15 +57,12 @@ impl<S> Layer<S> for CustomLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+    fn on_event(&self, _event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         // Currently one retry will only generate one debug log,
         // so we can monitor the number of retry only through the metadata target.
         // Refer to <https://docs.rs/aws-smithy-client/0.55.3/src/aws_smithy_client/retry.rs.html>
-        if event.metadata().target() == "aws_smithy_client::retry"
-            && event.metadata().level() == &tracing::Level::DEBUG
-        {
-            self.aws_sdk_retry_counts.inc();
-        }
+
+        self.aws_sdk_retry_counts.inc();
     }
 }
 
