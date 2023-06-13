@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -35,7 +35,7 @@ use super::{
     SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
 use crate::common::KafkaCommon;
-use crate::sink::{datum_to_json_object, record_to_json, Result};
+use crate::sink::{datum_to_json_object, record_to_json, NoSinkCoordinator, Result, SinkWriter};
 use crate::source::kafka::PrivateLinkProducerContext;
 use crate::{
     deserialize_bool_from_string, deserialize_duration_from_string, deserialize_u32_from_string,
@@ -138,37 +138,36 @@ impl KafkaConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
-enum KafkaSinkState {
-    Init,
-    // State running with epoch.
-    Running(u64),
-}
-
-pub struct KafkaSink<const APPEND_ONLY: bool> {
+#[derive(Debug)]
+pub struct KafkaSink {
     pub config: KafkaConfig,
-    pub conductor: KafkaTransactionConductor,
-    state: KafkaSinkState,
     schema: Schema,
     pk_indices: Vec<usize>,
-    in_transaction_epoch: Option<u64>,
+    is_append_only: bool,
 }
 
-impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
-    pub async fn new(config: KafkaConfig, schema: Schema, pk_indices: Vec<usize>) -> Result<Self> {
-        Ok(KafkaSink {
-            config: config.clone(),
-            conductor: KafkaTransactionConductor::new(config).await?,
-            in_transaction_epoch: None,
-            state: KafkaSinkState::Init,
+impl KafkaSink {
+    pub fn new(
+        config: KafkaConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Self {
+        Self {
+            config,
             schema,
             pk_indices,
-        })
+            is_append_only,
+        }
     }
 
-    pub async fn validate(config: KafkaConfig, pk_indices: Vec<usize>) -> Result<()> {
+    pub async fn validate(
+        config: KafkaConfig,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Result<()> {
         // For upsert Kafka sink, the primary key must be defined.
-        if !APPEND_ONLY && pk_indices.is_empty() {
+        if !is_append_only && pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "primary key not defined for {} kafka sink (please define in `primary_key` field)",
                 config.r#type
@@ -180,6 +179,58 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         KafkaTransactionConductor::new(config).await?;
 
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Sink for KafkaSink {
+    type Coordinator = NoSinkCoordinator;
+    type Writer = KafkaSinkWriter;
+
+    async fn new_writer(&self) -> Result<Self::Writer> {
+        KafkaSinkWriter::new(
+            self.config.clone(),
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.is_append_only,
+        )
+        .await
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, enum_as_inner::EnumAsInner)]
+enum KafkaSinkState {
+    Init,
+    // State running with epoch.
+    Running(u64),
+}
+
+pub struct KafkaSinkWriter {
+    pub config: KafkaConfig,
+    pub conductor: KafkaTransactionConductor,
+    state: KafkaSinkState,
+    schema: Schema,
+    pk_indices: Vec<usize>,
+    in_transaction_epoch: Option<u64>,
+    is_append_only: bool,
+}
+
+impl KafkaSinkWriter {
+    pub async fn new(
+        config: KafkaConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+    ) -> Result<Self> {
+        Ok(KafkaSinkWriter {
+            config: config.clone(),
+            conductor: KafkaTransactionConductor::new(config).await?,
+            in_transaction_epoch: None,
+            state: KafkaSinkState::Init,
+            schema,
+            pk_indices,
+            is_append_only,
+        })
     }
 
     // any error should report to upper level and requires revert to previous epoch.
@@ -396,9 +447,9 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
 }
 
 #[async_trait::async_trait]
-impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
+impl SinkWriter for KafkaSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if APPEND_ONLY {
+        if self.is_append_only {
             // Append-only
             self.append_only(chunk).await
         } else {
@@ -454,12 +505,6 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
         tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
-    }
-}
-
-impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
-    fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
-        unimplemented!();
     }
 }
 
@@ -785,7 +830,7 @@ mod test {
         ]);
         let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema, pk_indices)
+        let mut sink = KafkaSinkWriter::new(kafka_config.clone(), schema, pk_indices, true)
             .await
             .unwrap();
 

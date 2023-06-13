@@ -23,6 +23,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use base64::engine::general_purpose;
 use base64::Engine as _;
+use bytes::Bytes;
 use chrono::{Datelike, NaiveDateTime, Timelike};
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
@@ -32,7 +33,6 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_rpc_client::error::RpcError;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 pub use tracing;
@@ -52,6 +52,17 @@ pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[async_trait]
 pub trait Sink {
+    type Writer: SinkWriter;
+    type Coordinator: SinkCoordinator;
+
+    async fn new_writer(&self) -> Result<Self::Writer>;
+    async fn new_coordinator(&self) -> Result<Option<Self::Coordinator>> {
+        Ok(None)
+    }
+}
+
+#[async_trait]
+pub trait SinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()>;
 
     // the following interface is for transactions, if not supported, return Ok(())
@@ -66,6 +77,29 @@ pub trait Sink {
     async fn abort(&mut self) -> Result<()>;
 }
 
+pub struct SinkWriterInfo {
+    // TODO: add fields
+}
+
+#[async_trait]
+pub trait SinkCoordinator {
+    async fn init(&mut self, writer_info: Vec<SinkWriterInfo>) -> Result<()>;
+    async fn commit(&mut self, epoch: u64, metadata: Vec<Bytes>) -> Result<()>;
+}
+
+pub struct NoSinkCoordinator;
+
+#[async_trait]
+impl SinkCoordinator for NoSinkCoordinator {
+    async fn init(&mut self, _writer_info: Vec<SinkWriterInfo>) -> Result<()> {
+        unreachable!("no init call for no sink coordinator")
+    }
+
+    async fn commit(&mut self, _epoch: u64, _metadata: Vec<Bytes>) -> Result<()> {
+        unreachable!("no commit call for no sink coordinator")
+    }
+}
+
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
     Redis(RedisConfig),
@@ -74,21 +108,23 @@ pub enum SinkConfig {
     BlackHole,
 }
 
-#[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
-pub enum SinkState {
-    Kafka,
-    Redis,
-    Remote,
-    Blackhole,
-}
-
 pub const BLACKHOLE_SINK: &str = "blackhole";
 
 #[derive(Debug)]
-pub struct BlockHoleSink;
+pub struct BlackHoleSink;
 
 #[async_trait]
-impl Sink for BlockHoleSink {
+impl Sink for BlackHoleSink {
+    type Coordinator = NoSinkCoordinator;
+    type Writer = Self;
+
+    async fn new_writer(&self) -> Result<Self::Writer> {
+        Ok(Self)
+    }
+}
+
+#[async_trait]
+impl SinkWriter for BlackHoleSink {
     async fn write_batch(&mut self, _chunk: StreamChunk) -> Result<()> {
         Ok(())
     }
@@ -141,11 +177,9 @@ impl SinkConfig {
 #[derive(Debug)]
 pub enum SinkImpl {
     Redis(RedisSink),
-    Kafka(KafkaSink<true>),
-    UpsertKafka(KafkaSink<false>),
-    Remote(RemoteSink<true>),
-    UpsertRemote(RemoteSink<false>),
-    BlackHole(BlockHoleSink),
+    Kafka(KafkaSink),
+    Remote(RemoteSink),
+    BlackHole(BlackHoleSink),
 }
 
 #[macro_export]
@@ -156,16 +190,14 @@ macro_rules! dispatch_sink {
         match $impl {
             SinkImpl::Redis($sink) => $body,
             SinkImpl::Kafka($sink) => $body,
-            SinkImpl::UpsertKafka($sink) => $body,
             SinkImpl::Remote($sink) => $body,
-            SinkImpl::UpsertRemote($sink) => $body,
             SinkImpl::BlackHole($sink) => $body,
         }
     }};
 }
 
 impl SinkImpl {
-    pub async fn new(
+    pub fn new(
         cfg: SinkConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
@@ -175,37 +207,20 @@ impl SinkImpl {
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(RedisSink::new(cfg, schema)?),
-            SinkConfig::Kafka(cfg) => {
-                if sink_type.is_append_only() {
-                    // Append-only Kafka sink
-                    SinkImpl::Kafka(KafkaSink::<true>::new(*cfg, schema, pk_indices).await?)
-                } else {
-                    // Upsert Kafka sink
-                    SinkImpl::UpsertKafka(KafkaSink::<false>::new(*cfg, schema, pk_indices).await?)
-                }
-            }
-            SinkConfig::Remote(cfg) => {
-                if sink_type.is_append_only() {
-                    // Append-only remote sink
-                    SinkImpl::Remote(
-                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params, sink_id)
-                            .await?,
-                    )
-                } else {
-                    // Upsert remote sink
-                    SinkImpl::UpsertRemote(
-                        RemoteSink::<false>::new(
-                            cfg,
-                            schema,
-                            pk_indices,
-                            connector_params,
-                            sink_id,
-                        )
-                        .await?,
-                    )
-                }
-            }
-            SinkConfig::BlackHole => SinkImpl::BlackHole(BlockHoleSink),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(KafkaSink::new(
+                *cfg,
+                schema,
+                pk_indices,
+                sink_type.is_append_only(),
+            )),
+            SinkConfig::Remote(cfg) => SinkImpl::Remote(RemoteSink::new(
+                cfg,
+                schema,
+                pk_indices,
+                connector_params,
+                sink_id,
+            )),
+            SinkConfig::BlackHole => SinkImpl::BlackHole(BlackHoleSink),
         })
     }
 
@@ -217,18 +232,15 @@ impl SinkImpl {
         match cfg {
             SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
             SinkConfig::Kafka(cfg) => {
-                if sink_catalog.sink_type.is_append_only() {
-                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
-                } else {
-                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
-                }
+                KafkaSink::validate(
+                    *cfg,
+                    sink_catalog.downstream_pk_indices(),
+                    sink_catalog.sink_type.is_append_only(),
+                )
+                .await
             }
             SinkConfig::Remote(cfg) => {
-                if sink_catalog.sink_type.is_append_only() {
-                    RemoteSink::<true>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
-                } else {
-                    RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
-                }
+                RemoteSink::validate(cfg, sink_catalog, connector_rpc_endpoint).await
             }
             SinkConfig::BlackHole => Ok(()),
         }

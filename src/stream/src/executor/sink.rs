@@ -25,7 +25,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
+use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl, SinkWriter};
 use risingwave_connector::{dispatch_sink, ConnectorParams};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
@@ -52,7 +52,7 @@ struct SinkMetrics {
     sink_commit_duration_metrics: Histogram,
 }
 
-async fn build_sink(
+fn build_sink(
     config: SinkConfig,
     schema: Schema,
     pk_indices: PkIndices,
@@ -67,8 +67,7 @@ async fn build_sink(
         connector_params,
         sink_type,
         sink_id,
-    )
-    .await?)
+    )?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -109,8 +108,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             connector_params,
             sink_type,
             sink_id,
-        )
-        .await?;
+        )?;
         Ok(Self {
             input: materialize_executor,
             metrics,
@@ -209,11 +207,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     async fn execute_consume_log<S: Sink, R: LogReader>(
-        mut sink: S,
+        sink: S,
         mut log_reader: R,
         sink_metrics: SinkMetrics,
     ) -> StreamExecutorResult<Message> {
         log_reader.init().await?;
+        let mut sink_writer = sink.new_writer().await?;
 
         enum LogConsumerState {
             /// Mark that the log consumer is not initialized yet
@@ -235,7 +234,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 LogStoreReadItem::StreamChunk(chunk) => {
                     state = match state {
                         LogConsumerState::Uninitialized => {
-                            sink.begin_epoch(epoch).await?;
+                            sink_writer.begin_epoch(epoch).await?;
                             LogConsumerState::Writing { curr_epoch: epoch }
                         }
                         LogConsumerState::Writing { curr_epoch } => {
@@ -254,13 +253,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 epoch,
                                 prev_epoch
                             );
-                            sink.begin_epoch(epoch).await?;
+                            sink_writer.begin_epoch(epoch).await?;
                             LogConsumerState::Writing { curr_epoch: epoch }
                         }
                     };
 
-                    if let Err(e) = sink.write_batch(chunk.clone()).await {
-                        sink.abort().await?;
+                    if let Err(e) = sink_writer.write_batch(chunk.clone()).await {
+                        sink_writer.abort().await?;
                         return Err(e.into());
                     }
                 }
@@ -278,7 +277,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             );
                             if is_checkpoint {
                                 let start_time = Instant::now();
-                                sink.commit().await?;
+                                sink_writer.commit().await?;
                                 sink_metrics
                                     .sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
