@@ -32,7 +32,7 @@ use crate::hummock::utils::{
 };
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::value_serde::ValueRowSerde;
+use crate::row_serde::value_serde::ValueRowSerde;
 
 #[derive(Clone, Debug)]
 pub enum KeyOp {

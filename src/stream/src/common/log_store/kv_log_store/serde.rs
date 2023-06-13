@@ -35,7 +35,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk_with_vnode;
 use risingwave_storage::store::StateStoreReadIterStream;
 use risingwave_storage::table::{compute_vnode, Distribution};
-use risingwave_storage::value_serde::ValueRowSerdeNew;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 use crate::common::log_store::kv_log_store::{
     ReaderTruncationOffsetType, RowOpCodeType, SeqIdType,

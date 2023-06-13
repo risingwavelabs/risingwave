@@ -37,7 +37,7 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::value_serde::ValueRowSerdeNew;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 use crate::common::HummockServiceOpts;
 use crate::CtlContext;

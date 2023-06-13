@@ -53,7 +53,6 @@ pub mod monitor;
 pub mod panic_store;
 pub mod row_serde;
 pub mod storage_value;
-pub mod value_serde;
 #[macro_use]
 pub mod store;
 pub mod error;

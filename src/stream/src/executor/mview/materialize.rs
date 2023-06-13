@@ -35,7 +35,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
-use risingwave_storage::value_serde::ValueRowSerde;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ManagedLruCache};

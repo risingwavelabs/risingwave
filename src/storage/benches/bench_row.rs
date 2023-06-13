@@ -26,7 +26,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::{
     BasicSerde, ValueRowDeserializer, ValueRowSerializer,
 };
-use risingwave_storage::value_serde::ValueRowSerdeNew;
+use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 
 struct Case {
     name: String,
