@@ -17,8 +17,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use minitrace::prelude::*;
-use tracing::event;
+use tracing::{event, Instrument};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -39,17 +38,19 @@ pub async fn trace(
     let span_name = format!("{}_{}_next", info.identity, input_pos);
     let actor_id_string = actor_id.to_string();
 
-    let span = || {
-        let mut span = Span::enter_with_local_parent("next");
-        span.add_property(|| ("otel.name", span_name.to_string()));
-        span.add_property(|| ("next", info.identity.to_string()));
-        span.add_property(|| ("input_pos", input_pos.to_string()));
-        span
-    };
-
     pin_mut!(input);
 
-    while let Some(message) = input.next().in_span(span()).await.transpose()? {
+    while let Some(message) = input
+        .next()
+        .instrument(tracing::trace_span!(
+            "next",
+            otel.name = span_name.as_str(),
+            next = info.identity,
+            input_pos = input_pos
+        ))
+        .await
+        .transpose()?
+    {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
                 if enable_executor_row_count {
