@@ -481,7 +481,7 @@ impl Binder {
                     let col_name = if let Some(alias) = &alias {
                         alias.name.real_value()
                     } else {
-                        tf.name().to_string()
+                        tf.name()
                     };
                     vec![(false, Field::with_name(tf.return_type(), col_name))]
                 };
