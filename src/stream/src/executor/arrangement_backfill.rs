@@ -441,9 +441,7 @@ where
             } else {
                 (Bound::Unbounded, Bound::Unbounded)
             };
-        let mut iter = upstream_table
-            .iter_ordered_with_pk_range(&range_bounds, Default::default())
-            .await?;
+        let mut iter = upstream_table.iter_ordered_with_pk_range(&range_bounds, Default::default());
         pin_mut!(iter);
         for data_chunk in collect_data_chunk(iter, &schema, Some(CHUNK_SIZE))
             .instrument_await("arrangement_backfill_snapshot_read")
