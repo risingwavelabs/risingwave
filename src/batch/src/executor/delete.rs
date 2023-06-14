@@ -129,7 +129,15 @@ impl DeleteExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+            let data_chunk = match data_chunk {
+                Ok(data_chunk) => data_chunk,
+                Err(err) => {
+                    write_handle
+                        .write_txn_msg(TxnMsg::Rollback(self.txn_id))
+                        .await?;
+                    return Err(err);
+                }
+            };
             if self.returning {
                 yield data_chunk.clone();
             }

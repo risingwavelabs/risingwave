@@ -21,7 +21,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
@@ -58,7 +57,21 @@ pub struct DmlExecutor {
     actor_id: ActorId,
 }
 
+/// If a transaction's data is less than `MAX_CHUNK_FOR_ATOMICITY` * `CHUNK_SIZE`, we can provide
+/// atomicity. Otherwise, it is possible that part of transaction's data is sent to the downstream
+/// without barrier boundaries. There are some cases that could cause non-atomicity for large
+/// transaction. 1. The system crashes.
+/// 2. Actor scale-in or migration.
+/// 3. Dml's batch query error occurs at the middle of its execution. (e.g. Remove UDF function
+/// server become unavailable).
 const MAX_CHUNK_FOR_ATOMICITY: usize = 32;
+
+#[derive(Debug, Default)]
+struct TxnBuffer {
+    vec: Vec<StreamChunk>,
+    // When vec size exceeds `MAX_CHUNK_FOR_ATOMICITY`, set true to `overflow`.
+    overflow: bool,
+}
 
 impl DmlExecutor {
     #[allow(clippy::too_many_arguments)]
@@ -117,13 +130,10 @@ impl DmlExecutor {
             stream.pause_stream();
         }
 
-        // Current epoch
-        let mut current_epoch = Epoch(barrier.epoch.curr);
-
         yield Message::Barrier(barrier);
 
         // Active transactions: txn_id -> (the epoch of `Begin`, transaction chunks).
-        let mut active_txn_map: BTreeMap<TxnId, (Epoch, Vec<StreamChunk>)> = Default::default();
+        let mut active_txn_map: BTreeMap<TxnId, TxnBuffer> = Default::default();
 
         while let Some(input_msg) = stream.next().await {
             match input_msg? {
@@ -140,12 +150,14 @@ impl DmlExecutor {
                             }
                         }
 
-                        current_epoch = barrier.epoch.curr.into();
-
                         // Stop barrier. It could be issued by scaling or DDLs(e.g. add column).
                         if barrier.is_stop(self.actor_id) {
                             self.dml_manager
                                 .unregister_changes_sender(self.table_id, self.actor_id);
+                        }
+
+                        if !active_txn_map.is_empty() {
+                            println!("dangling transaction")
                         }
                     }
                     yield msg;
@@ -155,40 +167,41 @@ impl DmlExecutor {
                     match txn_msg {
                         TxnMsg::Begin(txn_id) => {
                             active_txn_map
-                                .try_insert(txn_id, (current_epoch, vec![]))
+                                .try_insert(txn_id, TxnBuffer::default())
                                 .expect("Transaction id collision.");
                         }
                         TxnMsg::End(txn_id) => {
-                            match active_txn_map.remove(&txn_id) {
-                                Some((_, mut vec)) => {
-                                    for chunk in vec.drain(..) {
-                                        yield Message::Chunk(chunk);
-                                    }
-                                }
-                                None => {
-                                    tracing::warn!("txn_id={} TxnMsg::End receives but not in the active_txn_map. Maybe this transaction is too large to provide atomicity.", txn_id);
-                                }
-                            };
+                            let mut txn_buffer = active_txn_map.remove(&txn_id).expect(&format!("Receive an unexpected transaction end message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
+                            for chunk in txn_buffer.vec.drain(..) {
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        TxnMsg::Rollback(txn_id) => {
+                            let txn_buffer = active_txn_map.remove(&txn_id).expect(&format!("Receive an unexpected transaction rollback message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id));
+                            if txn_buffer.overflow {
+                                tracing::warn!("txn_id={} large transaction tries to rollback, but part of its data has already been sent to the downstream.", txn_id);
+                            }
                         }
                         TxnMsg::Data(txn_id, chunk) => {
                             match active_txn_map.get_mut(&txn_id) {
-                                Some((_, vec)) => {
-                                    vec.push(chunk);
-                                    if vec.len() > MAX_CHUNK_FOR_ATOMICITY {
+                                Some(txn_buffer) => {
+                                    // This transaction is too large, we can't provide atomicity,
+                                    // so yield chunk ASAP.
+                                    if txn_buffer.overflow {
+                                        yield Message::Chunk(chunk);
+                                        continue;
+                                    }
+                                    txn_buffer.vec.push(chunk);
+                                    if txn_buffer.vec.len() > MAX_CHUNK_FOR_ATOMICITY {
                                         // Too many chunks for atomicity. Drain and yield them.
                                         tracing::warn!("txn_id={} Too many chunks for atomicity. Sent them to the downstream anyway.", txn_id);
-                                        for chunk in vec.drain(..) {
+                                        for chunk in txn_buffer.vec.drain(..) {
                                             yield Message::Chunk(chunk);
                                         }
-                                        // Remove this large transaction from map.
-                                        active_txn_map.remove(&txn_id);
+                                        txn_buffer.overflow = true;
                                     }
                                 }
-                                None => {
-                                    // Maybe this transaction is too large, we can't provide
-                                    // atomicity, so yield chunk ASAP.
-                                    yield Message::Chunk(chunk);
-                                }
+                                None => unreachable!("Receive an unexpected transaction data message. Active transaction map doesn't contain this transaction txn_id = {}.", txn_id),
                             };
                         }
                     }

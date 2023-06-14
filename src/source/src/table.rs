@@ -163,7 +163,7 @@ impl TableStreamReader {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match txn_msg {
-                TxnMsg::Begin(_) | TxnMsg::End(_) => {
+                TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
                     _ = notifier.send(0);
                 }
                 TxnMsg::Data(_, chunk) => {
@@ -179,7 +179,7 @@ impl TableStreamReader {
         while let Some((txn_msg, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             match &txn_msg {
-                TxnMsg::Begin(_) | TxnMsg::End(_) => {
+                TxnMsg::Begin(_) | TxnMsg::End(_) | TxnMsg::Rollback(_) => {
                     _ = notifier.send(0);
                     yield txn_msg;
                 }

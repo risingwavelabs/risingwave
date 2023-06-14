@@ -16,12 +16,13 @@ use std::fmt;
 
 use crate::array::StreamChunk;
 use crate::transaction::transaction_id::TxnId;
-use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End};
+use crate::transaction::transaction_message::TxnMsg::{Begin, Data, End, Rollback};
 
 pub enum TxnMsg {
     Begin(TxnId),
     Data(TxnId, StreamChunk),
     End(TxnId),
+    Rollback(TxnId),
 }
 
 impl TxnMsg {
@@ -30,12 +31,13 @@ impl TxnMsg {
             Begin(txn_id) => *txn_id,
             Data(txn_id, _) => *txn_id,
             End(txn_id) => *txn_id,
+            Rollback(txn_id) => *txn_id,
         }
     }
 
     pub fn as_stream_chunk(&self) -> Option<&StreamChunk> {
         match self {
-            Begin(_) | Self::End(_) => None,
+            Begin(_) | End(_) | Rollback(_) => None,
             Data(_, chunk) => Some(chunk),
         }
     }
@@ -49,6 +51,7 @@ impl fmt::Debug for TxnMsg {
                 write!(f, "Data {{ txn_id: {}, chunk: \n{:?}\n }}", txn_id, chunk,)
             }
             End(txn_id) => write!(f, "End {{ txn_id: {} }}", txn_id,),
+            Rollback(txn_id) => write!(f, "Rollback {{ txn_id: {} }}", txn_id,),
         }
     }
 }

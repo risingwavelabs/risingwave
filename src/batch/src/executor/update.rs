@@ -149,12 +149,28 @@ impl UpdateExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
+            let data_chunk = match data_chunk {
+                Ok(data_chunk) => data_chunk,
+                Err(err) => {
+                    write_handle
+                        .write_txn_msg(TxnMsg::Rollback(self.txn_id))
+                        .await?;
+                    return Err(err);
+                }
+            };
 
             let updated_data_chunk = {
                 let mut columns = Vec::with_capacity(self.exprs.len());
                 for expr in &mut self.exprs {
-                    let column = expr.eval(&data_chunk).await?;
+                    let column = match expr.eval(&data_chunk).await {
+                        Ok(column) => column,
+                        Err(err) => {
+                            write_handle
+                                .write_txn_msg(TxnMsg::Rollback(self.txn_id))
+                                .await?;
+                            return Err(err.into());
+                        }
+                    };
                     columns.push(column);
                 }
 
