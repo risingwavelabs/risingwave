@@ -25,7 +25,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::memcmp_encoding::encode_chunk;
+use risingwave_common::util::memcmp_encoding::{encode_chunk, MemcmpEncoded};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -200,7 +200,7 @@ impl TopNHeap {
 
 #[derive(Clone, EstimateSize)]
 pub struct HeapElem {
-    encoded_row: Vec<u8>,
+    encoded_row: MemcmpEncoded,
     row: OwnedRow,
 }
 
@@ -225,7 +225,7 @@ impl Ord for HeapElem {
 }
 
 impl HeapElem {
-    pub fn new(encoded_row: Vec<u8>, row: impl Row) -> Self {
+    pub fn new(encoded_row: MemcmpEncoded, row: impl Row) -> Self {
         Self {
             encoded_row,
             row: row.into_owned_row(),
