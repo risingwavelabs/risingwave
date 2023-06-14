@@ -195,6 +195,7 @@ mod tests {
         let serving_property = Property {
             is_streaming: false,
             is_serving: true,
+            is_schedulable: true,
         };
         let mut gen_pus_for_worker =
             |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {

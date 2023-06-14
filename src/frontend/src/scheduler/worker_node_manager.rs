@@ -342,6 +342,7 @@ mod tests {
                 parallel_units: vec![],
                 property: Some(Property {
                     is_streaming: true,
+                    is_schedulable: true,
                     is_serving: true,
                 }),
             },
@@ -353,6 +354,7 @@ mod tests {
                 parallel_units: vec![],
                 property: Some(Property {
                     is_streaming: false,
+                    is_schedulable: true,
                     is_serving: true,
                 }),
             },

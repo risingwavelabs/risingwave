@@ -109,12 +109,12 @@ where
         let worker_states = if req.include_starting_nodes {
             None
         } else {
-            Some(vec![State::Running, State::Cordoned])
+            Some(vec![State::Running]) // TODO: correct?
         };
 
         let node_list = self
             .cluster_manager
-            .list_worker_node(worker_type, worker_states)
+            .list_worker_node(worker_type, worker_states, true)
             .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,

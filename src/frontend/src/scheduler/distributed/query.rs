@@ -601,6 +601,7 @@ pub(crate) mod tests {
             property: Some(Property {
                 is_streaming: true,
                 is_serving: true,
+                is_schedulable: true,
             }),
         };
         let worker2 = WorkerNode {
@@ -614,6 +615,7 @@ pub(crate) mod tests {
             parallel_units: generate_parallel_units(8, 1),
             property: Some(Property {
                 is_streaming: true,
+                is_schedulable: true,
                 is_serving: true,
             }),
         };
@@ -627,6 +629,7 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             parallel_units: generate_parallel_units(16, 2),
             property: Some(Property {
+                is_schedulable: true,
                 is_streaming: true,
                 is_serving: true,
             }),
