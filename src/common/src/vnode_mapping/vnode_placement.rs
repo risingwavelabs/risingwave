@@ -193,9 +193,9 @@ mod tests {
         let mut pu_id_counter: ParallelUnitId = 0;
         let mut pu_to_worker: HashMap<ParallelUnitId, u32> = Default::default();
         let serving_property = Property {
-            is_streaming: false,
-            is_serving: true,
             is_schedulable: true,
+            is_serving: true,
+            is_streaming: false,
         };
         let mut gen_pus_for_worker =
             |worker_node_id: u32, number: u32, pu_to_worker: &mut HashMap<ParallelUnitId, u32>| {

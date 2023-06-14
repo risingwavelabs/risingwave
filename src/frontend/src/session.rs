@@ -47,6 +47,7 @@ use risingwave_common_service::MetricsManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
@@ -186,11 +187,14 @@ impl FrontendEnv {
         info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
+        let mut p = Property::default();
+        p.is_schedulable = true;
+
         let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
-            Default::default(),
+            p,
             &config.meta,
         )
         .await?;

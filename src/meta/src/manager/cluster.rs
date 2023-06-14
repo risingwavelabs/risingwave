@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::{Property, State};
 use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
-use risingwave_pb::meta::add_worker_node_request::Property as RegisterProperty;
+use risingwave_pb::meta::add_worker_node_request::Property as AddNodeProperty;
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -99,11 +99,19 @@ where
         &self,
         r#type: WorkerType,
         host_address: HostAddress,
-        property: RegisterProperty,
+        property: AddNodeProperty,
     ) -> MetaResult<WorkerNode> {
         let worker_node_parallelism = property.worker_node_parallelism as usize;
         let property = self.parse_property(r#type, property);
         let mut core = self.core.write().await;
+
+        // TODO: remove this
+        let is_schedulable = match property.as_ref() {
+            None => true,
+            Some(p) => p.is_schedulable,
+        };
+        // assert!(is_schedulable);
+
         if let Some(worker) = core.get_worker_by_host_mut(host_address.clone()) {
             // TODO: update parallelism when the worker exists.
             worker.update_ttl(self.max_heartbeat_interval);
@@ -141,6 +149,7 @@ where
             parallel_units,
             property,
         };
+
         let worker = Worker::from_protobuf(worker_node.clone());
         // Persist worker node.
         worker.insert(self.env.meta_store()).await?;
@@ -159,11 +168,15 @@ where
         }
 
         let is_schedulable = match worker.worker_node.get_property() {
-            Ok(prop) => prop.is_schedulable,
-            Err(_) => true,
+            Ok(p) => p.is_schedulable,
+            Err(_) => false,
         };
 
-        if is_schedulable {
+        // todo: do mot use expect
+        if !is_schedulable
+            && worker.worker_node.get_type().expect("did not have type") == WorkerType::ComputeNode
+        {
+            // assert!(false); // TODO: remove this part. Debugging only
             tracing::warn!("activating cordoned worker. Ignoring request");
             return Ok(());
         }
@@ -207,20 +220,32 @@ where
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
+        // TODO: write this with ok_else
         let is_schedulable = match worker.worker_node.get_property() {
             Ok(prop) => prop.is_schedulable,
             Err(_) => true,
         };
 
-        if is_schedulable {
+        if !is_schedulable {
             return Ok(worker_type);
         }
 
-        let old_prop = worker.worker_node.get_property()?; // TODO: handle error case
+        let old_prop = match worker.worker_node.get_property() {
+            Ok(p) => p.clone(),
+            Err(_) => {
+                //   assert!(false); // TODO: remove this
+                tracing::warn!("worker did not have property");
+                Property {
+                    is_schedulable: true,
+                    is_serving: true,
+                    is_streaming: true,
+                }
+            }
+        };
         let new_prop = Property {
-            is_streaming: old_prop.is_streaming,
+            is_schedulable: false, // TODO False, because we are cordoning the worker
             is_serving: old_prop.is_serving,
-            is_schedulable: true, // TODO: why is this false?
+            is_streaming: old_prop.is_streaming,
         };
 
         worker.worker_node.property = Some(new_prop);
@@ -402,9 +427,10 @@ where
     fn parse_property(
         &self,
         worker_type: WorkerType,
-        worker_property: RegisterProperty,
+        worker_property: AddNodeProperty,
     ) -> Option<Property> {
         if worker_type == WorkerType::ComputeNode {
+            // assert!(worker_property.is_schedulable); // TODO: remove this
             Some(Property {
                 is_streaming: worker_property.is_streaming,
                 is_serving: worker_property.is_serving,
@@ -502,11 +528,32 @@ impl ClusterManagerCore {
     fn add_worker_node(&mut self, worker: Worker) {
         self.parallel_units
             .extend(worker.worker_node.parallel_units.clone());
+
+        // TODO: remove debugging only
+        let is_schedulable = worker
+            .worker_node
+            .get_property()
+            .map_or(false, |p| p.is_schedulable);
+
+        // TODO: remove
+        if worker.worker_type() == WorkerType::ComputeNode {
+            //    assert!(is_schedulable); // TODO: remove
+        }
+
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
 
     fn update_worker_node(&mut self, worker: Worker) {
+        // TODO: remove debugging only
+        let is_schedulable = worker
+            .worker_node
+            .get_property()
+            .map_or(false, |p| p.is_schedulable);
+        if worker.worker_type() == WorkerType::ComputeNode {
+            //    assert!(is_schedulable); // TODO: remove
+        }
+
         self.workers
             .insert(WorkerKey(worker.key().unwrap()), worker);
     }
@@ -550,13 +597,14 @@ impl ClusterManagerCore {
                 if list_cordoned {
                     true
                 } else {
-                    w.property.as_ref().map_or(false, |p| p.is_schedulable)
+                    w.property.as_ref().map_or(true, |p| p.is_schedulable)
                 }
             })
             .cloned()
             .collect_vec();
 
-        assert!(x.len() == y.len()); // TODO: remove this
+        // TODO: how can this never fire during the cordon tests?
+        //   assert!(x.len() == y.len()); // TODO: remove this
         y
     }
 
@@ -665,7 +713,7 @@ mod tests {
                 .add_worker_node(
                     WorkerType::ComputeNode,
                     fake_host_address,
-                    RegisterProperty {
+                    AddNodeProperty {
                         worker_node_parallelism: fake_parallelism as _,
                         is_streaming: true,
                         is_serving: true,
@@ -736,7 +784,7 @@ mod tests {
             .add_worker_node(
                 WorkerType::ComputeNode,
                 fake_host_address_2,
-                RegisterProperty {
+                AddNodeProperty {
                     worker_node_parallelism: fake_parallelism as _,
                     is_streaming: true,
                     is_serving: true,

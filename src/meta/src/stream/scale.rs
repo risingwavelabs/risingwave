@@ -391,6 +391,8 @@ where
             bail!("unable to move actor to cordoned node");
         }
 
+        //  assert!(cordoned_nodes.is_empty()); // TODO: remove
+
         // Associating ParallelUnit with Worker
         let parallel_unit_id_to_worker_id: BTreeMap<_, _> = self
             .cluster_manager

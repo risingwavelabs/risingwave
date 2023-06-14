@@ -54,6 +54,7 @@ where
         let property = req
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
+        //  assert!(property.is_schedulable); // TODO: remove this. Debugging only
         let worker_node = self
             .cluster_manager
             .add_worker_node(worker_type, host, property)

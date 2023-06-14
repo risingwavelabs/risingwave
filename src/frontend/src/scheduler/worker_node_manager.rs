@@ -92,6 +92,9 @@ impl WorkerNodeManager {
     }
 
     pub fn add_worker_node(&self, node: WorkerNode) {
+        let is_schedulable = node.get_property().map_or(false, |x| x.is_schedulable);
+        // assert!(is_schedulable); // TODO: remove this. Debugging only
+
         let mut write_guard = self.inner.write().unwrap();
         // update
         for w in &mut write_guard.worker_nodes {
@@ -341,9 +344,9 @@ mod tests {
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
                 property: Some(Property {
-                    is_streaming: true,
                     is_schedulable: true,
                     is_serving: true,
+                    is_streaming: true,
                 }),
             },
             WorkerNode {
@@ -353,9 +356,9 @@ mod tests {
                 state: worker_node::State::Running as i32,
                 parallel_units: vec![],
                 property: Some(Property {
-                    is_streaming: false,
                     is_schedulable: true,
                     is_serving: true,
+                    is_streaming: false,
                 }),
             },
         ];
