@@ -21,8 +21,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
+use risingwave_common::metrics::MetricsLayer;
 use tracing::Level;
-use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
+use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
@@ -138,7 +139,7 @@ pub fn set_panic_hook() {
 ///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
-pub fn init_risingwave_logger(settings: LoggerSettings) {
+pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     let mut layers = vec![];
 
     // fmt layer (formatting and logging to stdout)
@@ -156,8 +157,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
-            .with_target("aws_smithy_types", Level::INFO)
-            .with_target("aws_credential_types", LevelFilter::INFO)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("hyper", Level::WARN)
@@ -281,6 +280,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         });
     };
 
+    let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
+
+    layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future

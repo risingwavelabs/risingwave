@@ -20,8 +20,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use minitrace::future::FutureExt;
-use minitrace::Span;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{
@@ -31,6 +29,7 @@ use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
+use tracing::Instrument;
 
 use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
@@ -692,7 +691,7 @@ impl HummockVersionReader {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
-                .in_span(Span::enter_with_local_parent("get_sstable"))
+                .instrument(tracing::trace_span!("get_sstable"))
                 .await?;
 
             if !table_holder
@@ -784,7 +783,7 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(&sstables[0], &mut local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
+                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     if !sstable.value().meta.monotonic_tombstone_events.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -825,7 +824,7 @@ impl HummockVersionReader {
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, &mut local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
+                        .instrument(tracing::trace_span!("get_sstable"))
                         .await?;
                     assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     if !sstable.value().meta.monotonic_tombstone_events.is_empty()
@@ -890,7 +889,7 @@ impl HummockVersionReader {
         );
         user_iter
             .rewind()
-            .in_span(Span::enter_with_local_parent("rewind"))
+            .instrument(tracing::trace_span!("rewind"))
             .await?;
         local_stats.found_key = user_iter.is_valid();
         local_stats.sub_iter_count = local_stats.staging_imm_iter_count

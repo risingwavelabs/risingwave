@@ -131,11 +131,10 @@ class TableFunction(UserDefinedFunction):
                 """Returns the number of rows in the RecordBatch being built."""
                 return len(self.columns[0])
 
-            def append(self, index: int, args: Tuple):
+            def append(self, index: int, value: Any):
                 """Appends a new row to the RecordBatch being built."""
                 self.columns[0].append(index)
-                for column, val in zip(self.columns[1:], args):
-                    column.append(val)
+                self.columns[1].append(value)
 
             def build(self) -> pa.RecordBatch:
                 """Builds the RecordBatch from the accumulated data and clears the state."""
@@ -153,10 +152,8 @@ class TableFunction(UserDefinedFunction):
         # Iterate through rows in the input RecordBatch
         for row_index in range(batch.num_rows):
             row = tuple(column[row_index].as_py() for column in batch)
-            for result_row in self.eval(*row):
-                if not isinstance(result_row, tuple):
-                    result_row = (result_row,)
-                builder.append(row_index, result_row)
+            for result in self.eval(*row):
+                builder.append(row_index, result)
                 if builder.len() == self.BATCH_SIZE:
                     yield builder.build()
         if builder.len() != 0:
@@ -200,6 +197,9 @@ class UserDefinedTableFunctionWrapper(TableFunction):
 
     def __init__(self, func, input_types, result_types, name=None):
         self._func = func
+        self._name = name or (
+            func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
+        )
         self._input_schema = pa.schema(
             zip(
                 inspect.getfullargspec(func)[0],
@@ -207,11 +207,15 @@ class UserDefinedTableFunctionWrapper(TableFunction):
             )
         )
         self._result_schema = pa.schema(
-            [("row_index", pa.int64())]
-            + [("", _to_data_type(t)) for t in _to_list(result_types)]
-        )
-        self._name = name or (
-            func.__name__ if hasattr(func, "__name__") else func.__class__.__name__
+            [
+                ("row_index", pa.int32()),
+                (
+                    self._name,
+                    pa.struct([("", _to_data_type(t)) for t in result_types])
+                    if isinstance(result_types, list)
+                    else _to_data_type(result_types),
+                ),
+            ]
         )
 
     def __call__(self, *args):
