@@ -975,9 +975,10 @@ where
     }
 
     #[try_stream(ok=OwnedRow, error=StreamExecutorError)]
-    pub async fn iter_all_with_pk_range(
-        &self,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+    pub async fn iter_ordered_with_pk_range(
+        // FIXME
+        &'_async0 self,
+        pk_range: &(Bound<OwnedRow>, Bound<OwnedRow>),
         prefetch_options: PrefetchOptions,
     ) {
         let stream = self
