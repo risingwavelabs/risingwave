@@ -26,6 +26,7 @@ use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
+use risingwave_pb::meta::get_reschedule_plan_request::{Policy, ResizePolicy};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
@@ -1472,5 +1473,104 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<S> GlobalStreamManager<S>
+where
+    S: MetaStore,
+{
+    async fn generate_resize_plan(
+        &self,
+        policy: ResizePolicy,
+    ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
+        let ResizePolicy {
+            fragment_ids,
+            worker_ids,
+        } = policy;
+
+        let target_worker_ids: HashSet<_> = worker_ids.into_iter().collect();
+
+        let workers = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let target_workers = workers
+            .into_iter()
+            .filter(|worker| target_worker_ids.contains(&worker.id))
+            .collect_vec();
+
+        if target_workers.len() != target_worker_ids.len() {
+            let found_worker_ids = target_workers.iter().map(|worker| worker.id).collect();
+            let not_found_worker_ids: HashSet<_> =
+                target_worker_ids.difference(&found_worker_ids).collect();
+
+            bail!("Worker ids {:?} not found", not_found_worker_ids);
+        }
+
+        let target_parallel_unit_ids: HashSet<_> = target_workers
+            .iter()
+            .flat_map(|worker| {
+                worker
+                    .parallel_units
+                    .iter()
+                    .map(|unit| unit.id as ParallelUnitId)
+            })
+            .collect();
+
+        let all_table_fragments = self.fragment_manager.list_table_fragments().await?;
+
+        let mut target_plan = HashMap::with_capacity(fragment_ids.len());
+
+        for table_fragments in all_table_fragments {
+            for (fragment_id, fragment) in &table_fragments.fragments {
+                if !fragment_ids.contains(fragment_id) {
+                    continue;
+                }
+
+                let fragment_parallel_unit_ids: HashSet<_> = fragment
+                    .actors
+                    .iter()
+                    .map(|actor| {
+                        table_fragments
+                            .actor_status
+                            .get(&actor.actor_id)
+                            .and_then(|status| status.parallel_unit.clone())
+                            .unwrap()
+                            .id as ParallelUnitId
+                    })
+                    .collect();
+
+                let to_expand_parallel_units = target_parallel_unit_ids
+                    .difference(&fragment_parallel_unit_ids)
+                    .cloned()
+                    .collect_vec();
+
+                let to_shrink_parallel_units = fragment_parallel_unit_ids
+                    .difference(&target_parallel_unit_ids)
+                    .cloned()
+                    .collect_vec();
+
+                target_plan.insert(
+                    *fragment_id,
+                    ParallelUnitReschedule {
+                        added_parallel_units: to_expand_parallel_units,
+                        removed_parallel_units: to_shrink_parallel_units,
+                    },
+                );
+            }
+        }
+
+        Ok(target_plan)
+    }
+
+    pub async fn get_reschedule_plan(
+        &self,
+        policy: Policy,
+    ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
+        match policy {
+            Policy::ResizePolicy(resize) => self.generate_resize_plan(resize).await,
+        }
     }
 }

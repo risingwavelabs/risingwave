@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::{GetReschedulePlanRequest, GetReschedulePlanResponse, Reschedule};
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
-    GetClusterInfoRequest, GetClusterInfoResponse, PauseRequest, PauseResponse, RescheduleRequest,
+    GetClusterInfoRequest, GetClusterInfoResponse, GetReschedulePlanRequest,
+    GetReschedulePlanResponse, PauseRequest, PauseResponse, Reschedule, RescheduleRequest,
     RescheduleResponse, ResumeRequest, ResumeResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
@@ -187,7 +187,53 @@ where
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn get_reschedule_plan(&self, _request: Request<GetReschedulePlanRequest>) -> Result<Response<GetReschedulePlanResponse>, Status> {
-        todo!()
+    async fn get_reschedule_plan(
+        &self,
+        request: Request<GetReschedulePlanRequest>,
+    ) -> Result<Response<GetReschedulePlanResponse>, Status> {
+        let req = request.into_inner();
+
+        let _streaming_job_lock = self.stream_manager.streaming_job_lock.lock().await;
+
+        let current_revision = self.fragment_manager.get_revision().await;
+
+        if req.revision != current_revision.inner() {
+            return Ok(Response::new(GetReschedulePlanResponse {
+                success: false,
+                revision: current_revision.inner(),
+                reschedules: Default::default(),
+            }));
+        }
+
+        let policy = req
+            .policy
+            .ok_or_else(|| Status::invalid_argument("policy is required"))?;
+
+        let map = self.stream_manager.get_reschedule_plan(policy).await?;
+
+        let next_revision = self.fragment_manager.get_revision().await;
+
+        Ok(Response::new(GetReschedulePlanResponse {
+            success: true,
+            revision: next_revision.into(),
+            reschedules: map
+                .into_iter()
+                .map(|(fragment_id, reschedule)| {
+                    (
+                        fragment_id,
+                        Reschedule {
+                            added_parallel_units: reschedule
+                                .added_parallel_units
+                                .into_iter()
+                                .collect(),
+                            removed_parallel_units: reschedule
+                                .removed_parallel_units
+                                .into_iter()
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }))
     }
 }

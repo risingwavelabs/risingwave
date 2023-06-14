@@ -367,12 +367,23 @@ message RescheduleResponse {
 
 message GetReschedulePlanRequest {
   uint64 revision = 1;
+
+  message ResizePolicy {
+    repeated uint32 fragment_ids = 1;
+    repeated uint32 worker_ids = 2;
+  }
+
+  oneof policy {
+    ResizePolicy resize_policy = 4;
+  }
 }
 
 message GetReschedulePlanResponse {
+  uint64 revision = 1;
   // reschedule plan for each fragment
-  map<uint32, Reschedule> reschedules = 1;
-  uint64 revision = 2;
+  map<uint32, Reschedule> reschedules = 2;
+  // todo, refactor needed
+  bool success = 3;
 }
 
 service ScaleService {
