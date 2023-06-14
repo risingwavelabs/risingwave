@@ -819,7 +819,10 @@ impl StageRunner {
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
         let worker_node_addr = worker.host.unwrap();
-        let mask_failed_worker = || {
+        let mask_failed_serving_worker = || {
+            if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+                return;
+            }
             let duration = std::cmp::max(
                 Duration::from_secs(
                     self.ctx
@@ -839,14 +842,14 @@ impl StageRunner {
             .compute_client_pool
             .get_by_addr((&worker_node_addr).into())
             .await
-            .inspect_err(|_| mask_failed_worker())
+            .inspect_err(|_| mask_failed_serving_worker())
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
-            .inspect_err(|_| mask_failed_worker())
+            .inspect_err(|_| mask_failed_serving_worker())
             .map_err(|e| anyhow!(e))?
             .fuse();
 
