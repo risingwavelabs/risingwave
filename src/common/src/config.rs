@@ -248,8 +248,13 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::partition_vnode_count")]
     pub partition_vnode_count: u32,
 
-    #[serde(default = "default::meta::table_write_throughput_limit")]
-    pub table_write_throughput_limit: u64,
+    #[serde(default = "default::meta::table_write_throughput_threshold")]
+    pub table_write_throughput_threshold: u64,
+
+    #[serde(default = "default::meta::min_table_split_write_throughput")]
+    /// If the size of one table is smaller than `min_table_split_write_throughput`, we would not
+    /// split it to an single group.
+    pub min_table_split_write_throughput: u64,
 }
 
 /// The section `[server]` in `risingwave.toml`.
@@ -647,8 +652,12 @@ mod default {
             64
         }
 
-        pub fn table_write_throughput_limit() -> u64 {
-            64 * 1024 * 1024 // 64MB
+        pub fn table_write_throughput_threshold() -> u64 {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn min_table_split_write_throughput() -> u64 {
+            48 * 1024 * 1024 // 48MB
         }
     }
 

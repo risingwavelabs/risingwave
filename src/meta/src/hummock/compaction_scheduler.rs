@@ -423,8 +423,7 @@ where
                                 if self.env.opts.compaction_deterministic_test {
                                     continue;
                                 }
-                                self.on_handle_check_split_multi_group(&mut group_infos)
-                                    .await;
+                                self.on_handle_check_split_multi_group(&group_infos).await;
                             }
                             SchedulerEvent::CheckDeadTaskTrigger => {
                                 self.hummock_manager.check_dead_task().await;
@@ -536,18 +535,16 @@ where
                 }
 
                 let mut is_high_write_throughput = false;
+                let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
-                        is_high_write_throughput = history
-                            .iter()
-                            .filter(|throughput| {
-                                **throughput > self.env.opts.table_write_throughput_limit
-                            })
-                            .count()
-                            > HISTORY_TABLE_INFO_WINDOW_SIZE / 2
-                            || history.iter().sum::<u64>()
-                                > (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
-                                    * self.env.opts.table_write_throughput_limit;
+                        let window_total_size = history.iter().sum::<u64>();
+                        is_high_write_throughput = history.iter().all(|throughput| {
+                            **throughput > self.env.opts.table_write_throughput_threshold
+                        });
+                        is_low_write_throughput = window_total_size
+                            < (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
+                                * self.env.opts.min_table_split_write_throughput;
                     }
                 }
 
@@ -558,7 +555,7 @@ where
                 let parent_group_id = group.group_id;
                 let mut target_compact_group_id = None;
                 let mut allow_split_by_table = false;
-                if !is_high_write_throughput {
+                if *table_size > group_size_limit && is_low_write_throughput {
                     // do not split a large table and a small table because it would increase IOPS
                     // of small table.
                     if parent_group_id != default_group_id && parent_group_id != mv_group_id {
