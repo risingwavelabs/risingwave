@@ -1529,6 +1529,8 @@ where
                     continue;
                 }
 
+                // todo: handle single
+
                 let fragment_parallel_unit_ids: HashSet<_> = fragment
                     .actors
                     .iter()
@@ -1561,6 +1563,8 @@ where
                 );
             }
         }
+
+        // todo: handle NoShuffle
 
         Ok(target_plan)
     }
