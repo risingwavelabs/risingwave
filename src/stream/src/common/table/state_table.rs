@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{DataChunk, Op, StreamChunk, Vis};
@@ -63,15 +63,15 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
 // FIXME: This is duplicated from batch iter utils.
-struct Node<'a, S: StateStore, SD: ValueRowSerde + 'a> {
-    stream: RowStreamWithPk<'a, S, SD>,
+pub struct Node<S> {
+    stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
     peeked: (Bytes, OwnedRow),
 }
 
-impl<'a, S: StateStore, SD: ValueRowSerde + 'a> PartialEq for Node<'a, S, SD> {
+impl<S> PartialEq for Node<S> {
     fn eq(&self, other: &Self) -> bool {
         match self.peeked.0 == other.peeked.0 {
             true => unreachable!("primary key from different iters should be unique"),
@@ -79,15 +79,15 @@ impl<'a, S: StateStore, SD: ValueRowSerde + 'a> PartialEq for Node<'a, S, SD> {
         }
     }
 }
-impl<'a, S: StateStore, SD: ValueRowSerde + 'a> Eq for Node<'a, S, SD> {}
+impl<S> Eq for Node<S> {}
 
-impl<'a, S: StateStore, SD: ValueRowSerde + 'a> PartialOrd for Node<'a, S, SD> {
+impl<S> PartialOrd for Node<S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<'a, S: StateStore, SD: ValueRowSerde + 'a> Ord for Node<'a, S, SD> {
+impl<S> Ord for Node<S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
         self.peeked.0.cmp(&other.peeked.0).reverse()
@@ -989,6 +989,21 @@ where
             let v = value?;
             yield v.1;
         }
+    }
+
+    pub async fn collect_heap<'a, R>(streams: Vec<R>) -> StreamExecutorResult<BinaryHeap<Node<R>>>
+    where
+        S: 'a,
+        SD: 'a,
+        R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a + Unpin,
+    {
+        let mut heap = BinaryHeap::new();
+        for mut stream in streams {
+            if let Some(peeked) = stream.next().await.transpose()? {
+                heap.push(Node { stream, peeked });
+            }
+        }
+        Ok(heap)
     }
 
     pub async fn iter_key_and_val_with_pk_range(
