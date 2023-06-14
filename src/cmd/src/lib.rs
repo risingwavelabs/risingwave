@@ -17,6 +17,7 @@ use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta::MetaNodeOpts;
+use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 
 /// Define the `main` function for a component.
 #[macro_export]
@@ -39,29 +40,27 @@ macro_rules! main {
 // Entry point functions.
 
 pub fn compute(opts: ComputeNodeOpts) {
-    risingwave_rt::init_risingwave_logger(
-        risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
-    );
-    risingwave_rt::main_okk(risingwave_compute::start(opts));
+    init_risingwave_logger(LoggerSettings::new("compute").enable_tokio_console(false));
+    main_okk(risingwave_compute::start(opts));
 }
 
 pub fn meta(opts: MetaNodeOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_meta::start(opts));
+    init_risingwave_logger(LoggerSettings::new("meta"));
+    main_okk(risingwave_meta::start(opts));
 }
 
 pub fn frontend(opts: FrontendOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_frontend::start(opts));
+    init_risingwave_logger(LoggerSettings::new("frontend"));
+    main_okk(risingwave_frontend::start(opts));
 }
 
 pub fn compactor(opts: CompactorOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
-    risingwave_rt::main_okk(risingwave_compactor::start(opts));
+    init_risingwave_logger(LoggerSettings::new("compactor"));
+    main_okk(risingwave_compactor::start(opts));
 }
 
 pub fn ctl(opts: CtlOpts) {
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+    init_risingwave_logger(LoggerSettings::new("ctl"));
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need

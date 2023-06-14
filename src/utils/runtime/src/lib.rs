@@ -26,6 +26,7 @@ use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
+use uuid::Uuid;
 
 // ============================================================================
 // BEGIN SECTION: frequently used log configurations for debugging
@@ -75,22 +76,26 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
 // ===========================================================================
 
 pub struct LoggerSettings {
+    /// The name of the service.
+    name: String,
     /// Enable tokio console output.
     enable_tokio_console: bool,
     /// Enable colorful output in console.
     colorful: bool,
+    /// Override default target settings.
     targets: Vec<(String, tracing::metadata::LevelFilter)>,
 }
 
 impl Default for LoggerSettings {
     fn default() -> Self {
-        Self::new()
+        Self::new("risingwave")
     }
 }
 
 impl LoggerSettings {
-    pub fn new() -> Self {
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
+            name: name.into(),
             enable_tokio_console: false,
             colorful: console::colors_enabled_stderr() && console::colors_enabled(),
             targets: vec![],
@@ -283,10 +288,34 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
     {
         // TODO: install tokio
-        let otel_tracer = opentelemetry_jaeger::new_agent_pipeline()
-            .with_service_name(std::process::id().to_string())
-            .install_simple()
-            .unwrap();
+        // TODO: unique service name
+
+        use opentelemetry::{sdk, KeyValue};
+
+        let otel_tracer = {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_name("risingwave-otel")
+                .worker_threads(2)
+                .build()
+                .unwrap();
+            let runtime = Box::leak(Box::new(runtime));
+
+            let _entered = runtime.enter();
+
+            opentelemetry_otlp::new_pipeline()
+                .tracing()
+                .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+                .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
+                    KeyValue::new(
+                        "service.name",
+                        format!("{}-{}", settings.name, std::process::id()),
+                    ),
+                ])))
+                .install_batch(opentelemetry::runtime::Tokio)
+                .unwrap()
+        };
+
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
             .with_filter(filter::Targets::new().with_default(Level::INFO));
