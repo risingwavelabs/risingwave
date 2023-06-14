@@ -14,8 +14,8 @@
         <module>connector-node/connector-api</module>
         <module>connector-node/risingwave-sink-iceberg</module>
         <module>connector-node/risingwave-sink-deltalake</module>
+        <module>connector-node/risingwave-sink-es</module>
         <module>connector-node/risingwave-sink-jdbc</module>
-        <!--<module>connector-node/risingwave-sink-es</module>-->
         <module>connector-node/risingwave-source-cdc</module>
         <module>connector-node/risingwave-connector-test</module>
         <module>connector-node/risingwave-connector-service</module>
@@ -208,16 +208,14 @@
             </dependency>
             <dependency>
                 <groupId>com.risingwave.java</groupId>
-                <artifactId>risingwave-sink-jdbc</artifactId>
-                <version>${module.version}</version>
-            </dependency>
-            <!--
-            <dependency>
-                <groupId>com.risingwave.java</groupId>
                 <artifactId>risingwave-sink-es</artifactId>
                 <version>${module.version}</version>
             </dependency>
-            -->
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
+                <artifactId>risingwave-sink-jdbc</artifactId>
+                <version>${module.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.google.code.gson</groupId>
                 <artifactId>gson</artifactId>

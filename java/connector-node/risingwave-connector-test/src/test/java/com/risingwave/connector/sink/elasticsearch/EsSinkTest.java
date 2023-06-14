@@ -1,4 +1,3 @@
 package com.risingwave.connector.sink.elasticsearch;
 
-public class EsSinkTest {
-}
+public class EsSinkTest {}

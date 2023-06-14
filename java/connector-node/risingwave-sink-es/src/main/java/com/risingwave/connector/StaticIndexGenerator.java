@@ -12,4 +12,3 @@ final class StaticIndexGenerator extends IndexGeneratorBase {
         return index;
     }
 }
-

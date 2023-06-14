@@ -1,20 +1,15 @@
 package com.risingwave.connector;
 
-import java.time.ZoneId;
-import java.util.List;
-
 final class IndexGeneratorFactory {
 
-    private IndexGeneratorFactory() {
-    }
+    private IndexGeneratorFactory() {}
 
     // only support static index currently
-    public static IndexGenerator createIndexGenerator(
-            String index
+    public static IndexGenerator createIndexGenerator(String index
             // List<String> fieldNames,
             // List<DataType> dataTypes,
             // ZoneId localTimeZoneId
-    ) {
+            ) {
         return new StaticIndexGenerator(index);
         /*
         final IndexHelper indexHelper = new IndexHelper();
@@ -31,4 +26,3 @@ final class IndexGeneratorFactory {
         */
     }
 }
-

@@ -1,11 +1,9 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.sink.SinkRow;
-
 import java.io.Serializable;
 
 /** This interface is responsible to generate index name from given {@link SinkRow} record. */
-
 interface IndexGenerator extends Serializable {
 
     /**
