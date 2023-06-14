@@ -76,6 +76,7 @@ pub enum HummockEvent {
         table_id: TableId,
         new_read_version_sender:
             oneshot::Sender<(Arc<RwLock<HummockReadVersion>>, LocalInstanceGuard)>,
+        is_replicated: bool,
     },
 
     DestroyReadVersion {
@@ -116,7 +117,11 @@ impl HummockEvent {
             HummockEvent::RegisterReadVersion {
                 table_id,
                 new_read_version_sender: _,
-            } => format!("RegisterReadVersion table_id {:?}", table_id,),
+                is_replicated,
+            } => format!(
+                "RegisterReadVersion table_id {:?}, is_replicated: {:?}",
+                table_id, is_replicated
+            ),
 
             HummockEvent::DestroyReadVersion {
                 table_id,

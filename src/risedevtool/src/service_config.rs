@@ -220,9 +220,6 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
-    // 's3_compatible' is true means using other s3 compatible object store, and the access key
-    // id and access key secret is configured in a specific profile.
-    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

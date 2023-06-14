@@ -24,9 +24,7 @@ profile:
 
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
-      #   bucket: test-bucket
-      # If you want to use other s3 compatible object store, open this flag:
-      #   s3-compatible: false
+        # bucket: test-bucket
 
       # If you want to create CDC source table, uncomment the following line
       # - use: connector-node
@@ -599,13 +597,13 @@ profile:
         exporter-port: 1225
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 4
       - use: compute-node
         port: 5686
         exporter-port: 1226
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 8
       - use: frontend
         port: 4565
         exporter-port: 2222
@@ -1066,8 +1064,6 @@ template:
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
 
-    # used to support other s3 compatible object store.
-    s3-compatible: false
 
   # Apache Kafka service
   kafka:
