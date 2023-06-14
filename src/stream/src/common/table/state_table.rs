@@ -901,7 +901,8 @@ where
             .map(get_second))
     }
 
-    // NOTE: Same as above, but uses the macro to yield instead.
+    // NOTE: Same as `iter_with_pk_prefix` directly above,
+    // but uses the macro to yield instead.
     /// This function scans rows from the relational table with specific `pk_prefix`.
     #[try_stream(ok = OwnedRow, error=StreamExecutorError)]
     pub async fn iter_with_pk_prefix_v2(
