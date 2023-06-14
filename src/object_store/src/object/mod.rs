@@ -142,7 +142,6 @@ pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
-    S3Compatible(MonitoredObjectStore<S3ObjectStore>),
 }
 
 macro_rules! dispatch_async {
@@ -169,9 +168,6 @@ macro_rules! object_store_impl_method_body {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, path $(, $args)*)
                 },
-                ObjectStoreImpl::S3Compatible(s3) => {
-                    $dispatch_macro!(s3, $method_name, path $(, $args)*)
-                },
             }
         }
     };
@@ -196,9 +192,6 @@ macro_rules! object_store_impl_method_body_slice {
                 ObjectStoreImpl::S3(s3) => {
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
-                ObjectStoreImpl::S3Compatible(s3) => {
-                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
-                }
             }
         }
     };
@@ -265,7 +258,6 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::S3Compatible(store) => store.inner.get_object_prefix(obj_id),
         }
     }
 }
@@ -738,19 +730,20 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
-        s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
-            ObjectStoreImpl::S3Compatible(
-                S3ObjectStore::new_s3_compatible(
-                    s3_compatible
-                        .strip_prefix("s3-compatible://")
-                        .unwrap()
-                        .to_string(),
-                    metrics.clone(),
-                )
-                .await
-                .monitored(metrics),
+
+        s3_compatible if s3_compatible.starts_with("s3-compatible://") => ObjectStoreImpl::S3(
+            // For backward compatibility, s3-compatible is still reserved.
+            // todo: remove this after this change has been applied for downstream projects.
+            S3ObjectStore::new(
+                s3_compatible
+                    .strip_prefix("s3-compatible://")
+                    .unwrap()
+                    .to_string(),
+                metrics.clone(),
             )
-        }
+            .await
+            .monitored(metrics),
+        ),
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await

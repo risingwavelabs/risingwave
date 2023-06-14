@@ -85,6 +85,88 @@
     select v1 from t group by v1 + v2;
   expected_outputs:
   - planner_error
+- name: group by output column ordinal ok
+  sql: |
+    select 4 + 5 group by 1;
+  expected_outputs:
+  - logical_plan
+- name: group by const int expr
+  sql: |
+    select 4 + 5 group by 3 - 2; -- not folded
+  expected_outputs:
+  - logical_plan
+- name: group by output column ordinal of agg
+  sql: |
+    select sum(2) group by 1;
+  expected_outputs:
+  - planner_error
+- name: group by output column ordinal non-integer const
+  sql: |
+    select 4 + 5 group by null; -- no implicit cast
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal bigint
+  sql: |
+    select 4 + 5 group by 2147483648;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal negative
+  sql: |
+    select 4 + 5 group by -2147483648;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal zero
+  sql: |
+    select 4 + 5 group by 0;
+  expected_outputs:
+  - binder_error
+- name: group by output column ordinal out of bound (excl extra order by exprs)
+  sql: |
+    select 4 + 5 group by 2 order by 7 + 8, 3 + 2;
+  expected_outputs:
+  - binder_error
+- name: group by output column name ok
+  sql: |
+    select 4 + 5 as a group by a;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name ambiguous 2
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a group by a;
+  expected_outputs:
+  - binder_error
+- name: group by output column name ambiguous 3
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as a group by a;
+  expected_outputs:
+  - binder_error
+- name: group by output column name not ambiguous when unused
+  sql: |
+    select 4 + 5 as a, 2 + 3 as a, 3 + 4 as b group by b;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name not ambiguous when input preferred
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a, 2 + 3 as a from t group by a;
+  expected_outputs:
+  - logical_plan
+- name: group by output column name expr disallowed
+  sql: |
+    select 4 + 5 as a group by a + 1;
+  expected_outputs:
+  - binder_error
+- name: group by prefers input while order by prefers output
+  sql: |
+    create table t (a int);
+    select 4 + 5 as a from t group by a order by a;
+  expected_outputs:
+  - batch_plan
+- name: group by column not found
+  sql: |
+    select 4 + 5 as a group by b;
+  expected_outputs:
+  - binder_error
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
