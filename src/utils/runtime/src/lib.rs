@@ -26,7 +26,6 @@ use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{filter, EnvFilter};
-use uuid::Uuid;
 
 // ============================================================================
 // BEGIN SECTION: frequently used log configurations for debugging
@@ -144,19 +143,8 @@ pub fn set_panic_hook() {
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    let mut layers = vec![];
-
-    // fmt layer (formatting and logging to stdout)
-    {
-        let fmt_layer = tracing_subscriber::fmt::layer()
-            .compact()
-            .with_ansi(settings.colorful);
-        let fmt_layer = if ENABLE_PRETTY_LOG {
-            fmt_layer.pretty().boxed()
-        } else {
-            fmt_layer.boxed()
-        };
-
+    // Default filter for logging to stdout and tracing.
+    let filter = {
         let filter = filter::Targets::new()
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
@@ -176,12 +164,12 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         let filter = configure_risingwave_targets_fmt(filter);
 
-        // Enable DEBUG level for all other crates
-        #[cfg(debug_assertions)]
-        let filter = filter.with_default(Level::DEBUG);
-
-        #[cfg(not(debug_assertions))]
-        let filter = filter.with_default(Level::INFO);
+        // For all other crates
+        let filter = filter.with_default(if cfg!(debug_assertions) {
+            Level::DEBUG
+        } else {
+            Level::INFO
+        });
 
         let filter = settings
             .targets
@@ -190,8 +178,25 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 filter.with_target(target, level)
             });
 
-        layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
+        move || to_env_filter(filter.clone())
     };
+
+    let mut layers = vec![];
+
+    // fmt layer (formatting and logging to stdout)
+    {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .compact()
+            .with_ansi(settings.colorful);
+        let fmt_layer = if ENABLE_PRETTY_LOG {
+            fmt_layer.pretty().boxed()
+        } else {
+            fmt_layer.boxed()
+        };
+
+        layers.push(fmt_layer.with_filter(filter()).boxed());
+    };
+
     let default_query_log_path = "./".to_string();
 
     let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
@@ -287,7 +292,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     };
 
     {
-        // TODO: install tokio
         // TODO: unique service name
 
         use opentelemetry::{sdk, KeyValue};
@@ -318,7 +322,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         let layer = tracing_opentelemetry::layer()
             .with_tracer(otel_tracer)
-            .with_filter(filter::Targets::new().with_default(Level::INFO));
+            .with_filter(filter());
 
         layers.push(layer.boxed());
     }
