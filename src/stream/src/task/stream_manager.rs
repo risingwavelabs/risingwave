@@ -552,7 +552,6 @@ impl LocalStreamManagerCore {
             actor_context.id,
             executor_id,
             self.streaming_metrics.clone(),
-            self.config.developer.enable_executor_row_count,
         )
         .boxed();
 

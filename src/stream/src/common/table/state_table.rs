@@ -189,11 +189,11 @@ where
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let local_state_store = store
-            .new_local(NewLocalOptions {
+            .new_local(NewLocalOptions::new(
                 table_id,
                 is_consistent_op,
                 table_option,
-            })
+            ))
             .await;
 
         let pk_data_types = pk_indices
@@ -384,11 +384,11 @@ where
         is_consistent_op: bool,
     ) -> Self {
         let local_state_store = store
-            .new_local(NewLocalOptions {
+            .new_local(NewLocalOptions::new(
                 table_id,
                 is_consistent_op,
-                table_option: TableOption::default(),
-            })
+                TableOption::default(),
+            ))
             .await;
 
         let pk_data_types = pk_indices

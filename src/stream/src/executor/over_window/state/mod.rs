@@ -17,10 +17,10 @@ use std::collections::{BTreeSet, VecDeque};
 use educe::Educe;
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
 use risingwave_common::types::{Datum, DefaultOrdered, ScalarImpl};
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_expr::function::window::{WindowFuncCall, WindowFuncKind};
 use smallvec::SmallVec;
 
-use super::MemcmpEncoded;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 mod buffer;

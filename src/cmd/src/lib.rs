@@ -32,35 +32,39 @@ macro_rules! main {
         #[cfg_attr(coverage, no_coverage)]
         fn main() {
             let opts = clap::Parser::parse();
-            $crate::$component(opts);
+            let registry = prometheus::Registry::new();
+            $crate::$component(opts, registry);
         }
     };
 }
 
 // Entry point functions.
 
-pub fn compute(opts: ComputeNodeOpts) {
-    init_risingwave_logger(LoggerSettings::new("compute").enable_tokio_console(false));
-    main_okk(risingwave_compute::start(opts));
+pub fn compute(opts: ComputeNodeOpts, registry: prometheus::Registry) {
+    init_risingwave_logger(
+        LoggerSettings::new("compute").enable_tokio_console(false),
+        registry.clone(),
+    );
+    main_okk(risingwave_compute::start(opts, registry));
 }
 
-pub fn meta(opts: MetaNodeOpts) {
-    init_risingwave_logger(LoggerSettings::new("meta"));
+pub fn meta(opts: MetaNodeOpts, registry: prometheus::Registry) {
+    init_risingwave_logger(LoggerSettings::new("meta"), registry);
     main_okk(risingwave_meta::start(opts));
 }
 
-pub fn frontend(opts: FrontendOpts) {
-    init_risingwave_logger(LoggerSettings::new("frontend"));
+pub fn frontend(opts: FrontendOpts, registry: prometheus::Registry) {
+    init_risingwave_logger(LoggerSettings::new("frontend"), registry);
     main_okk(risingwave_frontend::start(opts));
 }
 
-pub fn compactor(opts: CompactorOpts) {
-    init_risingwave_logger(LoggerSettings::new("compactor"));
+pub fn compactor(opts: CompactorOpts, registry: prometheus::Registry) {
+    init_risingwave_logger(LoggerSettings::new("compactor"), registry);
     main_okk(risingwave_compactor::start(opts));
 }
 
-pub fn ctl(opts: CtlOpts) {
-    init_risingwave_logger(LoggerSettings::new("ctl"));
+pub fn ctl(opts: CtlOpts, registry: prometheus::Registry) {
+    init_risingwave_logger(LoggerSettings::new("ctl"), registry);
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need

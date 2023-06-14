@@ -20,7 +20,10 @@ use risingwave_backup::error::BackupResult;
 fn main() -> BackupResult<()> {
     use clap::Parser;
     let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new("backup_restore"));
+    risingwave_rt::init_risingwave_logger(
+        risingwave_rt::LoggerSettings::new("backup_restore"),
+        prometheus::Registry::new(),
+    );
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

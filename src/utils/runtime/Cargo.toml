@@ -24,6 +24,7 @@ opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12" }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
+prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
