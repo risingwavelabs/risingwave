@@ -117,6 +117,7 @@ impl Planner {
     }
 
     pub(super) fn plan_table_function(&mut self, table_function: ExprImpl) -> Result<PlanRef> {
+        // TODO: maybe we can unify LogicalTableFunction with LogicalValues
         match table_function {
             ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),
             expr => {
