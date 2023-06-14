@@ -556,14 +556,17 @@ impl LocalStreamManagerCore {
         .boxed();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
-        // TODO(bugen): subtask does not work with tracing spans.
-        // let executor = if has_stateful && is_stateful {
-        //     let (subtask, executor) = subtask::wrap(executor, actor_context.id);
-        //     subtasks.push(subtask);
-        //     executor.boxed()
-        // } else {
-        //     executor
-        // };
+        let executor = if has_stateful && is_stateful {
+            // TODO(bugen): subtask does not work with tracing spans.
+            // let (subtask, executor) = subtask::wrap(executor, actor_context.id);
+            // subtasks.push(subtask);
+            // executor.boxed()
+
+            let _ = subtasks;
+            executor
+        } else {
+            executor
+        };
 
         Ok(executor)
     }
