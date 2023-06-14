@@ -159,7 +159,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
             .with_target("aws_config", Level::WARN)
             // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
-            .with_target("aws_credential_types::cache::lazy_caching", Level::INFO)
+            .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
             .with_target("hyper", Level::WARN)
             .with_target("h2", Level::WARN)
             .with_target("tower", Level::WARN)
