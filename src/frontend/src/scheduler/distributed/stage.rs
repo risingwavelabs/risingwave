@@ -817,39 +817,20 @@ impl StageRunner {
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
-        let worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
-        let worker_node_addr = worker.host.unwrap();
-        let mask_failed_serving_worker = || {
-            if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
-                return;
-            }
-            let duration = std::cmp::max(
-                Duration::from_secs(
-                    self.ctx
-                        .session
-                        .env()
-                        .meta_config()
-                        .max_heartbeat_interval_secs as _,
-                ) / 10,
-                Duration::from_secs(1),
-            );
-            self.worker_node_manager
-                .manager
-                .mask_worker_node(worker.id, duration);
-        };
-
+        let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
+        let worker_node_addr = worker.host.take().unwrap();
         let compute_client = self
             .compute_client_pool
             .get_by_addr((&worker_node_addr).into())
             .await
-            .inspect_err(|_| mask_failed_serving_worker())
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
-            .inspect_err(|_| mask_failed_serving_worker())
+            .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?
             .fuse();
 
@@ -982,5 +963,24 @@ impl StageRunner {
 
     fn is_root_stage(&self) -> bool {
         self.stage.id == 0
+    }
+
+    fn mask_failed_serving_worker(&self, worker: &WorkerNode) {
+        if !worker.property.as_ref().map_or(false, |p| p.is_serving) {
+            return;
+        }
+        let duration = std::cmp::max(
+            Duration::from_secs(
+                self.ctx
+                    .session
+                    .env()
+                    .meta_config()
+                    .max_heartbeat_interval_secs as _,
+            ) / 10,
+            Duration::from_secs(1),
+        );
+        self.worker_node_manager
+            .manager
+            .mask_worker_node(worker.id, duration);
     }
 }
