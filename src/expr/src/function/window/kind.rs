@@ -28,9 +28,6 @@ pub enum WindowFuncKind {
     DenseRank,
     Lag,
     Lead,
-    // FirstValue,
-    // LastValue,
-    // NthValue,
 
     // Aggregate functions that are used with `OVER`.
     #[display("{0}")]

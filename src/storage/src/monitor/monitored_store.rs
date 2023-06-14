@@ -21,6 +21,7 @@ use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use tokio::time::Instant;
 use tracing::error;
 
 use super::MonitoredStorageMetrics;
@@ -69,7 +70,7 @@ impl<S> MonitoredStateStore<S> {
         iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
     ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
         // start time takes iterator build time into account
-        let start_time = minstant::Instant::now();
+        let start_time = Instant::now();
         let table_id_label = table_id.to_string();
 
         // wait for iterator creation (e.g. seek)
@@ -94,7 +95,7 @@ impl<S> MonitoredStateStore<S> {
             stats: MonitoredStateStoreIterStats {
                 total_items: 0,
                 total_size: 0,
-                scan_time: minstant::Instant::now(),
+                scan_time: Instant::now(),
                 storage_metrics: self.storage_metrics.clone(),
                 table_id,
             },
@@ -340,7 +341,7 @@ pub struct MonitoredStateStoreIter<S> {
 struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
-    scan_time: minstant::Instant,
+    scan_time: Instant,
     storage_metrics: Arc<MonitoredStorageMetrics>,
 
     table_id: TableId,

@@ -9,6 +9,7 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  message NowRexNode {}
   // TODO: move this into `FunctionCall`.
   enum Type {
     // `InputRef`, `Constant`, and `UserDefinedFunction` are indicated by the viriant of `rex_node`.
@@ -209,6 +210,7 @@ message ExprNode {
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
+    NowRexNode now = 8;
   }
 }
 
@@ -368,9 +370,6 @@ message WindowFunction {
     // NTILE = 6;
     LAG = 7;
     LEAD = 8;
-    // FIRST_VALUE = 9;
-    // LAST_VALUE = 10;
-    // NTH_VALUE = 11;
   }
 
   oneof type {

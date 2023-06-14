@@ -4,7 +4,6 @@
 set -euo pipefail
 
 REPO_ROOT=${PWD}
-export GIT_SHA=${BUILDKITE_COMMIT}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -14,8 +13,8 @@ fi
 echo "--- Install java and maven"
 yum install -y java-11-openjdk wget python3
 pip3 install toml-cli
-wget https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz && tar -zxvf apache-maven-3.9.1-bin.tar.gz
-export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
+wget https://dlcdn.apache.org/maven/maven-3/3.9.2/binaries/apache-maven-3.9.2-bin.tar.gz && tar -zxvf apache-maven-3.9.2-bin.tar.gz
+export PATH="${REPO_ROOT}/apache-maven-3.9.2/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
@@ -41,7 +40,7 @@ curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Check risingwave release version"
-if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+if [[ -n "${BUILDKITE_TAG}" ]]; then
   CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
   if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
     echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
@@ -65,7 +64,7 @@ elif [[ -n "${BINARY_NAME+x}" ]]; then
     aws s3 cp risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
 fi
 
-if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Install gh cli"
   yum install -y dnf
   dnf install -y 'dnf-command(config-manager)'

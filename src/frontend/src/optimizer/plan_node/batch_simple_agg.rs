@@ -49,7 +49,6 @@ impl BatchSimpleAgg {
         self.logical.can_two_phase_agg() && self.two_phase_agg_enabled()
     }
 }
-impl_distill_by_unit!(BatchSimpleAgg, logical, "BatchSimpleAgg");
 
 impl PlanTreeNodeUnary for BatchSimpleAgg {
     fn input(&self) -> PlanRef {
@@ -64,6 +63,7 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
     }
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
+impl_distill_by_unit!(BatchSimpleAgg, logical, "BatchSimpleAgg");
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
