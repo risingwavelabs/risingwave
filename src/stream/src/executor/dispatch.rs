@@ -29,6 +29,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
+use tokio::time::Instant;
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
@@ -65,7 +66,7 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
-        let start_time = minstant::Instant::now();
+        let start_time = Instant::now();
         match msg {
             Message::Watermark(watermark) => {
                 for dispatcher in &mut self.dispatchers {

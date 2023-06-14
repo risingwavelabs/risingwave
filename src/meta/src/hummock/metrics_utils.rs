@@ -141,11 +141,10 @@ pub fn trigger_sst_stat(
     }
 
     if compacting_task_stat.is_empty() {
-        let max_level: usize = current_version
-            .get_compaction_group_levels(compaction_group_id)
-            .get_levels()
-            .len();
-        remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+        if let Some(levels) = current_version.levels.get(&compaction_group_id) {
+            let max_level = levels.levels.len();
+            remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+        }
     }
 
     {
