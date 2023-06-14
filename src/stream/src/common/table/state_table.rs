@@ -1006,6 +1006,24 @@ where
         Ok(heap)
     }
 
+    #[try_stream(ok=(Bytes, OwnedRow), error=StreamExecutorError)]
+    pub async fn iter_heap<R>(mut heap: BinaryHeap<Node<R>>)
+    where
+        R: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + Unpin,
+    {
+        while let Some(mut node) = heap.peek_mut() {
+            // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
+            // This is acceptable since we're not going to handle errors from cell-based table
+            // iteration, so where to fail does not matter. Or we need an `Option` for this.
+            yield match node.stream.next().await.transpose()? {
+                // There still remains data in the stream, take and update the peeked value.
+                Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
+                // This stream is exhausted, remove it from the heap.
+                None => PeekMut::pop(node).peeked,
+            };
+        }
+    }
+
     pub async fn iter_key_and_val_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
