@@ -141,6 +141,7 @@ where
         Ok(())
     }
 
+    /// `temp_replace_schema_id` is only used to ensure backward compatibility in the early version.
     async fn temp_replace_schema_id(&self) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
