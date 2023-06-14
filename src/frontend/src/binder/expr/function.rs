@@ -159,8 +159,14 @@ impl Binder {
             ))
             .into());
         }
+        if kind == AggKind::Mode && !f.args.is_empty() {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "no arguments are expected in mode agg".to_string(),
+            )
+            .into());
+        }
         self.ensure_aggregate_allowed()?;
-        let inputs: Vec<ExprImpl> = if f.within_group.is_some() {
+        let mut inputs: Vec<ExprImpl> = if f.within_group.is_some() {
             f.within_group
                 .iter()
                 .map(|x| self.bind_function_expr_arg(FunctionArgExpr::Expr(x.expr.clone())))
@@ -173,6 +179,15 @@ impl Binder {
                 .flatten_ok()
                 .try_collect()?
         };
+        if kind == AggKind::PercentileCont {
+            inputs[0] = inputs
+                .iter()
+                .exactly_one()
+                .unwrap()
+                .clone()
+                .cast_implicit(DataType::Float64)?;
+        }
+
         if f.distinct {
             match &kind {
                 AggKind::Count if inputs.is_empty() => {
@@ -280,13 +295,23 @@ impl Binder {
                 .cast_implicit(DataType::Float64)?
                 .fold_const()
             {
-                Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                if casted
+                    .clone()
+                    .is_some_and(|x| !(0.0..=1.0).contains(&Into::<f64>::into(*x.as_float64())))
+                {
+                    Err(ErrorCode::InvalidInputSyntax(format!(
+                        "arg in {} must between 0 and 1",
+                        kind
+                    ))
+                    .into())
+                } else {
+                    Ok::<_, RwError>(vec![Literal::new(casted, DataType::Float64)])
+                }
             } else {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "arg in {} must be double precision",
-                    kind
-                ))
-                .into())
+                Err(
+                    ErrorCode::InvalidInputSyntax(format!("arg in {} must be float64", kind))
+                        .into(),
+                )
             }
         } else {
             Ok(vec![])

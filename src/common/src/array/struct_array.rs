@@ -154,15 +154,6 @@ pub struct StructArray {
     heap_size: usize,
 }
 
-impl StructArrayBuilder {
-    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) {
-        self.bitmap.append_n(len, true);
-        for (a, r) in self.children_array.iter_mut().zip_eq_fast(refs.iter()) {
-            a.append_array(r);
-        }
-    }
-}
-
 impl Array for StructArray {
     type Builder = StructArrayBuilder;
     type OwnedItem = StructValue;
