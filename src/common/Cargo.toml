@@ -47,6 +47,7 @@ itertools = "0.10"
 itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
+num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
 parking_lot = "0.12"

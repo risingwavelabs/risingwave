@@ -17,8 +17,6 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc", "executor"] }
-minitrace = "0.4"
-minitrace-jaeger = "0.4"
 rand = "0.8"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "sync",
