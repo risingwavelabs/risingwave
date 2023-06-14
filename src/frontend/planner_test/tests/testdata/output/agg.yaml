@@ -249,6 +249,14 @@
         └─BatchHashAgg { group_key: [t.a], aggs: [] }
           └─BatchExchange { order: [], dist: HashShard(t.a) }
             └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
+- name: group by column not found
+  sql: |
+    select 4 + 5 as a group by b;
+  binder_error: |-
+    Bind error: failed to bind expression: b
+
+    Caused by:
+      Item not found: Invalid column: b
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;

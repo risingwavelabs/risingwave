@@ -162,6 +162,11 @@
     select 4 + 5 as a from t group by a order by a;
   expected_outputs:
   - batch_plan
+- name: group by column not found
+  sql: |
+    select 4 + 5 as a group by b;
+  expected_outputs:
+  - binder_error
 - sql: |
     create table t(v1 int, v2 int);
     select count(v1 + v2) as cnt, sum(v1 + v2) as sum from t;
