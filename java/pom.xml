@@ -8,6 +8,7 @@
     <version>1.0-SNAPSHOT</version>
     <modules>
         <module>proto</module>
+        <module>udf</module>
         <module>java-binding</module>
         <module>common-utils</module>
         <module>java-binding-integration-test</module>

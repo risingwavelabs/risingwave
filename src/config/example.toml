@@ -44,7 +44,6 @@ async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
 
 [streaming.developer]
-stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 stream_unsafe_extreme_cache_size = 10
 stream_chunk_size = 1024
@@ -55,6 +54,7 @@ stream_exchange_concurrent_barriers = 2
 [storage]
 share_buffers_sync_parallelism = 1
 share_buffer_compaction_worker_threads_number = 4
+shared_buffer_flush_ratio = 0.800000011920929
 imm_merge_threshold = 4
 write_conflict_detection_enabled = true
 disable_remote_compactor = false

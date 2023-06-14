@@ -462,10 +462,28 @@ impl Binder {
                     .into());
                 };
                 let columns = if let DataType::Struct(s) = tf.return_type() {
+                    // If the table function returns a struct, it's fields can be accessed just
+                    // like a table's columns.
                     let schema = Schema::from(&s);
                     schema.fields.into_iter().map(|f| (false, f)).collect_vec()
                 } else {
-                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
+                    // If there is an table alias, we should use the alias as the table function's
+                    // column name. If column aliases are also provided, they
+                    // are handled in bind_table_to_context.
+                    //
+                    // Note: named return value should take precedence over table alias.
+                    // But we don't support it yet.
+                    // e.g.,
+                    // ```
+                    // > create function foo(ret out int) language sql as 'select 1';
+                    // > select t.ret from foo() as t;
+                    // ```
+                    let col_name = if let Some(alias) = &alias {
+                        alias.name.real_value()
+                    } else {
+                        tf.name()
+                    };
+                    vec![(false, Field::with_name(tf.return_type(), col_name))]
                 };
 
                 self.bind_table_to_context(columns, tf.name(), alias)?;

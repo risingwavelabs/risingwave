@@ -167,6 +167,7 @@ pub async fn compactor_serve(
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         sstable_store.clone(),
         output_memory_limiter.clone(),
+        storage_memory_config,
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(

@@ -14,11 +14,13 @@
 
 use std::fmt;
 
+use pretty_xmlish::Pretty;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
+use super::utils::Distill;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -59,6 +61,12 @@ impl BatchProject {
 impl fmt::Display for BatchProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.logical.fmt_with_name(f, "BatchProject", self.schema())
+    }
+}
+
+impl Distill for BatchProject {
+    fn distill<'a>(&self) -> Pretty<'a> {
+        Pretty::childless_record("BatchProject", self.logical.fields_pretty(self.schema()))
     }
 }
 

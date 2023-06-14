@@ -16,14 +16,16 @@ use std::cmp;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aws_sdk_s3::client::fluent_builders::GetObject;
-use aws_sdk_s3::error::GetObjectError;
-use aws_sdk_s3::model::{
+use aws_sdk_s3::config::{Credentials, Region};
+use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
+use aws_sdk_s3::operation::get_object::GetObjectError;
+use aws_sdk_s3::operation::upload_part::UploadPartOutput;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
-use aws_sdk_s3::output::UploadPartOutput;
-use aws_sdk_s3::{Client, Credentials, Endpoint, Region};
+use aws_sdk_s3::Client;
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
@@ -284,7 +286,7 @@ impl StreamingUploader for S3StreamingUploader {
     }
 }
 
-fn get_upload_body(data: Vec<Bytes>) -> aws_sdk_s3::types::ByteStream {
+fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
     SdkBody::retryable(move || {
         Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
     })
@@ -318,7 +320,7 @@ impl ObjectStore for S3ObjectStore {
             self.client
                 .put_object()
                 .bucket(&self.bucket)
-                .body(aws_sdk_s3::types::ByteStream::from(obj))
+                .body(ByteStream::from(obj))
                 .key(path)
                 .send()
                 .await?;
@@ -358,9 +360,25 @@ impl ObjectStore for S3ObjectStore {
         let resp = tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
             || async {
-                self.obj_store_request(path, start_pos, end_pos)
+                match self
+                    .obj_store_request(path, start_pos, end_pos)
                     .send()
                     .await
+                {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        if let SdkError::DispatchFailure(e) = &err
+                            && e.is_timeout()
+                        {
+                            self.metrics
+                                .request_retry_count
+                                .with_label_values(&["read"])
+                                .inc();
+                        }
+
+                        Err(err)
+                    }
+                }
             },
             Self::should_retry,
         )
@@ -424,7 +442,23 @@ impl ObjectStore for S3ObjectStore {
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
             Self::get_retry_strategy(),
-            || async { self.obj_store_request(path, start_pos, None).send().await },
+            || async {
+                match self.obj_store_request(path, start_pos, None).send().await {
+                    Ok(resp) => Ok(resp),
+                    Err(err) => {
+                        if let SdkError::DispatchFailure(e) = &err
+                            && e.is_timeout()
+                        {
+                            self.metrics
+                                .request_retry_count
+                                .with_label_values(&["streaming_read"])
+                                .inc();
+                        }
+
+                        Err(err)
+                    }
+                }
+            },
             Self::should_retry,
         )
         .await?;
@@ -530,54 +564,45 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
+        // The following code is for compatibility.
+        if std::env::var("S3_COMPATIBLE_REGION").is_ok() {
+            std::env::set_var("AWS_REGION", std::env::var("S3_COMPATIBLE_REGION").unwrap())
+        }
+
+        if std::env::var("S3_COMPATIBLE_ENDPOINT").is_ok() {
+            std::env::set_var(
+                "RW_S3_ENDPOINT",
+                std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap(),
+            )
+        }
+
+        if std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").is_ok() {
+            std::env::set_var(
+                "AWS_ACCESS_KEY_ID",
+                std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap(),
+            )
+        }
+
+        if std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").is_ok() {
+            std::env::set_var(
+                "AWS_SECRET_ACCESS_KEY",
+                std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap(),
+            )
+        }
+
         // Retry 3 times if we get server-side errors or throttling errors
-        let sdk_config = aws_config::from_env()
-            .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .load()
-            .await;
+        let sdk_config_loader =
+            aws_config::from_env().retry_config(RetryConfig::standard().with_max_attempts(4));
+        let sdk_config = match std::env::var("RW_S3_ENDPOINT") {
+            Ok(endpoint) => sdk_config_loader.endpoint_url(endpoint).load().await,
+            Err(_) => sdk_config_loader.load().await,
+        };
+
         let client = Client::new(&sdk_config);
 
         Self {
             client,
             bucket,
-            part_size: S3_PART_SIZE,
-            metrics,
-        }
-    }
-
-    pub async fn new_s3_compatible(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        // Retry 3 times if we get server-side errors or throttling errors
-        // load from env
-        let region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_REGION not found from environment variables")
-        });
-        let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
-        });
-        let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
-            panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
-        });
-        let access_key_secret =
-            std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY").unwrap_or_else(|_| {
-                panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
-            });
-        let sdk_config = aws_config::from_env()
-            .region(Region::new(region))
-            .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .credentials_provider(Credentials::from_keys(
-                access_key_id,
-                access_key_secret,
-                None,
-            ))
-            .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
-            .load()
-            .await;
-
-        let client = Client::new(&sdk_config);
-
-        Self {
-            client,
-            bucket: bucket.to_string(),
             part_size: S3_PART_SIZE,
             metrics,
         }
@@ -594,14 +619,13 @@ impl S3ObjectStore {
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
         let builder =
-            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await);
+            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
+                .force_path_style(true);
 
         let config = builder
             .region(Region::new("custom"))
-            .endpoint_resolver(Endpoint::immutable(
-                format!("http://{}", address).try_into().unwrap(),
-            ))
-            .credentials_provider(aws_sdk_s3::Credentials::from_keys(
+            .endpoint_url(format!("http://{}", address))
+            .credentials_provider(Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
                 None,
@@ -633,7 +657,7 @@ impl S3ObjectStore {
         path: &str,
         start_pos: Option<usize>,
         end_pos: Option<usize>,
-    ) -> GetObject {
+    ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
         match (start_pos, end_pos) {
@@ -739,7 +763,7 @@ impl S3ObjectStore {
     fn should_retry(err: &SdkError<GetObjectError>) -> bool {
         if let SdkError::DispatchFailure(e) = err {
             if e.is_timeout() {
-                tracing::warn!("{:?} occurs, trying to retry S3 get_object request.", e);
+                tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
                 return true;
             }
         }

@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
+use risingwave_common::metrics::MetricsLayer;
 use tracing::Level;
 use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
@@ -113,7 +114,8 @@ impl LoggerSettings {
     }
 }
 
-/// Set panic hook to abort the process (without losing debug info and stack trace).
+/// Set panic hook to abort the process if we're not catching unwind, without losing the information
+/// of stack trace and await-tree.
 pub fn set_panic_hook() {
     std::panic::update_hook(|default_hook, info| {
         default_hook(info);
@@ -123,7 +125,9 @@ pub fn set_panic_hook() {
             println!("{}\n", context);
         }
 
-        std::process::abort();
+        if !risingwave_common::util::panic::is_catching_unwind() {
+            std::process::abort();
+        }
     });
 }
 
@@ -135,7 +139,7 @@ pub fn set_panic_hook() {
 ///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
 /// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
 ///   turned on.
-pub fn init_risingwave_logger(settings: LoggerSettings) {
+pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Registry) {
     let mut layers = vec![];
 
     // fmt layer (formatting and logging to stdout)
@@ -276,6 +280,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         });
     };
 
+    let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);
+
+    layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
