@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::mem;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
@@ -816,21 +817,36 @@ impl StageRunner {
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
-        let worker_node_addr = worker
-            .unwrap_or(self.worker_node_manager.next_random_worker()?)
-            .host
-            .unwrap();
+        let worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
+        let worker_node_addr = worker.host.unwrap();
+        let mask_failed_worker = || {
+            let duration = std::cmp::max(
+                Duration::from_secs(
+                    self.ctx
+                        .session
+                        .env()
+                        .meta_config()
+                        .max_heartbeat_interval_secs as _,
+                ) / 10,
+                Duration::from_secs(1),
+            );
+            self.worker_node_manager
+                .manager
+                .mask_worker_node(worker.id, duration);
+        };
 
         let compute_client = self
             .compute_client_pool
             .get_by_addr((&worker_node_addr).into())
             .await
+            .inspect_err(|_| mask_failed_worker())
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
             .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
+            .inspect_err(|_| mask_failed_worker())
             .map_err(|e| anyhow!(e))?
             .fuse();
 
