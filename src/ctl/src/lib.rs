@@ -229,6 +229,9 @@ enum MetaCommands {
 
     /// List all existing connections in the catalog
     ListConnections,
+
+    /// List fragment to parallel units mapping for serving
+    ListServingFragmentMapping,
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -362,6 +365,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::ListConnections) => {
             cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::ListServingFragmentMapping) => {
+            cmd_impl::meta::list_serving_fragment_mappings(context).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

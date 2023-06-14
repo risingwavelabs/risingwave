@@ -27,6 +27,7 @@ use itertools::Itertools;
 use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::{MetaConfig, MAX_CONNECTION_WINDOW_SIZE};
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -59,6 +60,7 @@ use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
+use risingwave_pb::meta::serving_service_client::ServingServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
@@ -896,6 +898,22 @@ impl MetaClient {
         let resp = self.inner.get_tables(req).await?;
         Ok(resp.tables)
     }
+
+    pub async fn list_serving_vnode_mappings(&self) -> Result<HashMap<u32, ParallelUnitMapping>> {
+        let req = GetServingVnodeMappingsRequest {};
+        let resp = self.inner.get_serving_vnode_mappings(req).await?;
+        let mappings = resp
+            .mappings
+            .into_iter()
+            .map(|p| {
+                (
+                    p.fragment_id,
+                    ParallelUnitMapping::from_protobuf(p.mapping.as_ref().unwrap()),
+                )
+            })
+            .collect();
+        Ok(mappings)
+    }
 }
 
 #[async_trait]
@@ -1081,6 +1099,7 @@ struct GrpcMetaClientCore {
     backup_client: BackupServiceClient<Channel>,
     telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
+    serving_client: ServingServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1096,7 +1115,8 @@ impl GrpcMetaClientCore {
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
         let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
-        let system_params_client = SystemParamsServiceClient::new(channel);
+        let system_params_client = SystemParamsServiceClient::new(channel.clone());
+        let serving_client = ServingServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1111,6 +1131,7 @@ impl GrpcMetaClientCore {
             backup_client,
             telemetry_client,
             system_params_client,
+            serving_client,
         }
     }
 }
@@ -1528,6 +1549,7 @@ macro_rules! for_all_meta_rpc {
             ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
+            ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
         }
     };
 }

@@ -411,3 +411,13 @@ service SystemParamsService {
   rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
   rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }
+
+message GetServingVnodeMappingsRequest {}
+
+message GetServingVnodeMappingsResponse {
+  repeated FragmentParallelUnitMapping mappings = 1;
+}
+
+service ServingService {
+  rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
+}
