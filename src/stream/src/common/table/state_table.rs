@@ -874,7 +874,7 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<'a, S, SD, W> StateTableInner<S, SD, W>
+impl<S, SD, W> StateTableInner<S, SD, W>
 where
     S: StateStore,
     SD: ValueRowSerde,
