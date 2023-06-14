@@ -557,7 +557,7 @@ where
 
         self.local_store
             .get(serialized_pk, read_options)
-            .instrument(tracing::debug_span!("get_row"))
+            .instrument(tracing::trace_span!("get_row"))
             .await
             .map_err(Into::into)
     }

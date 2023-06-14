@@ -305,10 +305,6 @@ pub struct StreamingConfig {
     #[serde(default)]
     pub actor_runtime_worker_threads_num: Option<usize>,
 
-    /// Enable reporting tracing information to jaeger.
-    #[serde(default = "default::streaming::enable_jaegar_tracing")]
-    pub enable_jaeger_tracing: bool,
-
     /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,

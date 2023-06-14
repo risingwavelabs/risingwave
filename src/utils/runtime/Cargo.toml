@@ -19,6 +19,7 @@ await-tree = { workspace = true }
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+hostname = "0.3"
 opentelemetry = { version = "0.19", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12" }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
@@ -36,7 +37,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 tracing-opentelemetry = "0.19"
 tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
-uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

@@ -1,7 +1,14 @@
 use risingwave_common::util::epoch::Epoch;
 
 /// A wrapper of [`Epoch`] with tracing span, used for issuing epoch-based tracing from the barrier
-/// manager on the meta service.
+/// manager on the meta service. This structure is free to clone, which'll extend the lifetime of
+/// the underlying span.
+///
+/// - A new [`TracedEpoch`] is created when the barrier manager is going to inject a new barrier.
+///   The span will be created automatically and the start time is recorded.
+/// - Then, the previous and the current [`TracedEpoch`]s are stored in the command context.
+/// - When the barrier is successfully collected and committed, the command context will be dropped,
+///   then the previous span will be automatically closed.
 #[derive(Debug, Clone)]
 pub struct TracedEpoch {
     epoch: Epoch,

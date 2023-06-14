@@ -39,7 +39,6 @@ minitrace = "0.4"
 minstant = "0.1"
 multimap = "0.8"
 num-traits = "0.2"
-opentelemetry = "0.19"
 parking_lot = "0.12"
 pin-project = "1"
 prometheus = { version = "0.13", features = ["process"] }
@@ -70,7 +69,6 @@ tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-tracing-opentelemetry = "0.19"
 
 [target.'cfg(enable_task_local_alloc)'.dependencies]
 task_stats_alloc = { path = "../utils/task_stats_alloc" }

@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig, add_jaeger_endpoint};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -158,6 +158,9 @@ impl MetaNodeService {
         }
 
         cmd.arg("--data-directory").arg("hummock_001");
+
+        let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
+        add_jaeger_endpoint(provide_jaeger, cmd)?;
 
         Ok(())
     }

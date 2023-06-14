@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
+use opentelemetry_otlp::WithExportConfig;
 use tracing::Level;
 use tracing_subscriber::filter::{Directive, LevelFilter, Targets};
 use tracing_subscriber::layer::SubscriberExt;
@@ -291,9 +292,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         });
     };
 
-    {
-        // TODO: unique service name
-
+    if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
         use opentelemetry::{sdk, KeyValue};
 
         let otel_tracer = {
@@ -309,11 +308,24 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
             opentelemetry_otlp::new_pipeline()
                 .tracing()
-                .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+                .with_exporter(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_endpoint(endpoint),
+                )
                 .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
                     KeyValue::new(
                         "service.name",
-                        format!("{}-{}", settings.name, std::process::id()),
+                        // TODO(bugen): better service name
+                        format!(
+                            "{}-{}-{}",
+                            settings.name,
+                            hostname::get()
+                                .ok()
+                                .and_then(|o| o.into_string().ok())
+                                .unwrap_or_default(),
+                            std::process::id()
+                        ),
                     ),
                 ])))
                 .install_batch(opentelemetry::runtime::Tokio)

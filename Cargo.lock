@@ -2954,6 +2954,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hostname"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c731c3e10504cc8ed35cfe2f1db4c9274c3d35fa486e3b31df46f068ef3e867"
+dependencies = [
+ "libc",
+ "match_cfg",
+ "winapi",
+]
+
+[[package]]
 name = "http"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3733,6 +3744,12 @@ name = "maplit"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
+name = "match_cfg"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffbee8634e0d45d258acb448e7eaab3fce7a0a467395d4d9f228e3c1f01fb2e4"
 
 [[package]]
 name = "matchers"
@@ -6654,6 +6671,7 @@ dependencies = [
  "console",
  "console-subscriber",
  "futures",
+ "hostname",
  "madsim-tokio",
  "opentelemetry 0.19.0",
  "opentelemetry-otlp",
@@ -6663,7 +6681,6 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry 0.19.0",
  "tracing-subscriber",
- "uuid",
  "workspace-hack",
 ]
 
@@ -6898,7 +6915,6 @@ dependencies = [
  "minstant",
  "multimap",
  "num-traits",
- "opentelemetry 0.19.0",
  "parking_lot 0.12.1",
  "pin-project",
  "prometheus",
@@ -6923,7 +6939,6 @@ dependencies = [
  "tokio-metrics",
  "tokio-stream",
  "tracing",
- "tracing-opentelemetry 0.19.0",
  "tracing-test",
  "workspace-hack",
 ]

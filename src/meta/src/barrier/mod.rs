@@ -863,7 +863,6 @@ where
             if let Some(timer) = node.timer {
                 timer.observe_duration();
             }
-            // TODO: tracing
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }

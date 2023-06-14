@@ -191,16 +191,7 @@ pub async fn compute_node_serve(
         state_store_metrics.clone(),
         object_store_metrics,
         TieredCacheMetricsBuilder::new(registry.clone()),
-        if config.streaming.enable_jaeger_tracing {
-            Arc::new(
-                risingwave_tracing::RwTracingService::new(risingwave_tracing::TracingConfig::new(
-                    "127.0.0.1:6831".to_string(),
-                ))
-                .unwrap(),
-            )
-        } else {
-            Arc::new(risingwave_tracing::RwTracingService::disabled())
-        },
+        Arc::new(risingwave_tracing::RwTracingService::disabled()),
         storage_metrics.clone(),
         compactor_metrics.clone(),
     )
