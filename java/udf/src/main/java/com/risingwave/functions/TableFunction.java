@@ -40,7 +40,7 @@ package com.risingwave.functions;
  * // given number.
  * class Series implements TableFunction {
  *     public Iterator<Integer> eval(int n) {
- *         return IntStream.range(0, n).iterator();
+ *         return java.util.stream.IntStream.range(0, n).iterator();
  *     }
  * }
  * 
