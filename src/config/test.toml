@@ -1,5 +1,0 @@
-[streaming.developer]
-stream_exchange_concurrent_barriers = 100000
-
-[system]
-checkpoint_frequency = 1
