@@ -4308,7 +4308,7 @@ dependencies = [
  "lazy_static",
  "opentelemetry 0.17.0",
  "opentelemetry-http",
- "opentelemetry-semantic-conventions",
+ "opentelemetry-semantic-conventions 0.9.0",
  "thiserror",
  "thrift",
  "tokio",
@@ -4352,6 +4352,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985cc35d832d412224b2cffe2f9194b1b89b6aa5d0bef76d080dce09d90e62bd"
 dependencies = [
  "opentelemetry 0.17.0",
+]
+
+[[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24e33428e6bf08c6f7fcea4ddb8e358fab0fe48ab877a87c70c6ebe20f673ce5"
+dependencies = [
+ "opentelemetry 0.19.0",
 ]
 
 [[package]]
@@ -6534,6 +6543,7 @@ dependencies = [
  "madsim-tokio",
  "opentelemetry 0.19.0",
  "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions 0.11.0",
  "parking_lot 0.12.1",
  "pprof",
  "prometheus",
@@ -8997,6 +9007,7 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -9022,6 +9033,8 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "opentelemetry 0.19.0",
+ "opentelemetry_sdk",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.7",
  "petgraph",
@@ -9058,6 +9071,7 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-core",
+ "tracing-futures",
  "tracing-subscriber",
  "url",
  "uuid",

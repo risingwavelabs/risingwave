@@ -50,7 +50,7 @@ memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
 num-traits = "0.2"
 number_prefix = "0.4.0"
-opentelemetry = "0.19"
+opentelemetry = { version = "0.19", default-features = false }
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"

@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig, add_jaeger_endpoint};
+use crate::{add_hummock_backend, add_jaeger_endpoint, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,

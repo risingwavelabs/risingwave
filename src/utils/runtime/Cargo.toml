@@ -20,8 +20,9 @@ console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry = { version = "0.19", features = ["rt-tokio"] }
+opentelemetry = { version = "0.19", default-features = false, features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.12" }
+opentelemetry-semantic-conventions = "0.11"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
 prometheus = { version = "0.13" }

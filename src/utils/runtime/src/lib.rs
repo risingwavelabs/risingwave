@@ -295,6 +295,16 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
     // Tracing layer
     if let Ok(endpoint) = std::env::var("RW_TRACING_ENDPOINT") {
         use opentelemetry::{sdk, KeyValue};
+        use opentelemetry_semantic_conventions::resource;
+
+        let id = format!(
+            "{}-{}",
+            hostname::get()
+                .ok()
+                .and_then(|o| o.into_string().ok())
+                .unwrap_or_default(),
+            std::process::id()
+        );
 
         let otel_tracer = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -316,18 +326,14 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
                 )
                 .with_trace_config(sdk::trace::config().with_resource(sdk::Resource::new([
                     KeyValue::new(
-                        "service.name",
+                        resource::SERVICE_NAME,
                         // TODO(bugen): better service name
-                        format!(
-                            "{}-{}-{}",
-                            settings.name,
-                            hostname::get()
-                                .ok()
-                                .and_then(|o| o.into_string().ok())
-                                .unwrap_or_default(),
-                            std::process::id()
-                        ),
+                        // https://github.com/jaegertracing/jaeger-ui/issues/336
+                        format!("{}-{}", settings.name, id),
                     ),
+                    KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
+                    KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+                    KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
                 ])))
                 .install_batch(opentelemetry::runtime::Tokio)
                 .unwrap()
@@ -346,7 +352,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings, registry: prometheus::Re
 
         layers.push(Box::new(MetricsLayer::new(registry).with_filter(filter)));
     }
-
 
     tracing_subscriber::registry().with(layers).init();
 

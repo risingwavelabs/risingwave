@@ -46,12 +46,10 @@ pub async fn trace(
     while let Some(message) = input.next().instrument(span.clone()).await.transpose()? {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
-                if enable_executor_row_count {
-                    metrics
-                        .executor_row_count
-                        .with_label_values(&[&actor_id_string, &info.identity])
-                        .inc_by(chunk.cardinality() as u64);
-                }
+                metrics
+                    .executor_row_count
+                    .with_label_values(&[&actor_id_string, &info.identity])
+                    .inc_by(chunk.cardinality() as u64);
                 tracing::trace!(prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
             }
         }

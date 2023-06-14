@@ -735,10 +735,6 @@ mod default {
             10000
         }
 
-        pub fn enable_jaegar_tracing() -> bool {
-            false
-        }
-
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::default()
         }
