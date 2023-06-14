@@ -2027,6 +2027,39 @@ def section_hummock(panels):
                 ),
             ],
         ),
+
+        panels.timeseries_count(
+            "Move State Table Count",
+            "",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_move_state_table_count')}[$__rate_interval])) by (group)",
+                    "move table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "State Table Count By CG",
+            "",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_state_table_count')}[$__rate_interval])) by (group)",
+                    "state table cg{{group}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Branched SST Count",
+            "",
+            [
+                panels.target(
+                    f"sum(irate({table_metric('storage_branched_sst_count')}[$__rate_interval])) by (group)",
+                    "branched sst cg{{group}}",
+                ),
+            ],
+        ),
     ]
 
 
