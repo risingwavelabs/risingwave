@@ -473,6 +473,7 @@ mod tests {
                             table_option: TracedTableOption {
                                 retention_seconds: None,
                             },
+                            is_replicated: false,
                         },
                     ),
                 );

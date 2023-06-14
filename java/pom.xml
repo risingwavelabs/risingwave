@@ -9,6 +9,7 @@
     <modules>
         <module>proto</module>
         <module>udf</module>
+        <module>udf-example</module>
         <module>java-binding</module>
         <module>common-utils</module>
         <module>java-binding-integration-test</module>
