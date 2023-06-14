@@ -901,12 +901,12 @@ where
             .map(get_second))
     }
 
-    // Same as above, but uses the macro to yield instead.
+    // NOTE: Same as above, but uses the macro to yield instead.
     /// This function scans rows from the relational table with specific `pk_prefix`.
     #[try_stream(ok = OwnedRow, error=StreamExecutorError)]
     pub async fn iter_with_pk_prefix_v2(
         &self,
-        pk_prefix: impl Row + '_async0,
+        pk_prefix: impl Row + '_async0, // <-------- HACKS HERE
         prefetch_options: PrefetchOptions,
     ) {
         let stream = self
