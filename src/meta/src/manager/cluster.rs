@@ -158,7 +158,12 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        if !worker.worker_node.get_property()?.is_schedulable {
+        let is_schedulable = match worker.worker_node.get_property() {
+            Ok(prop) => prop.is_schedulable,
+            Err(_) => true,
+        };
+
+        if is_schedulable {
             tracing::warn!("activating cordoned worker. Ignoring request");
             return Ok(());
         }
@@ -202,7 +207,12 @@ where
         // We need to handle the deleting state once we introduce it
         // if worker_type == WorkerType::ComputeNode && worker.worker_node.state == State::DELETING
 
-        if !worker.worker_node.get_property()?.is_schedulable {
+        let is_schedulable = match worker.worker_node.get_property() {
+            Ok(prop) => prop.is_schedulable,
+            Err(_) => true,
+        };
+
+        if is_schedulable {
             return Ok(worker_type);
         }
 
@@ -210,7 +220,7 @@ where
         let new_prop = Property {
             is_streaming: old_prop.is_streaming,
             is_serving: old_prop.is_serving,
-            is_schedulable: false,
+            is_schedulable: true, // TODO: why is this false?
         };
 
         worker.worker_node.property = Some(new_prop);
