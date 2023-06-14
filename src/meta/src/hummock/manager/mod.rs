@@ -2113,6 +2113,7 @@ where
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
             const STAT_REPORT_PERIOD_SEC: u64 = 10;
+            const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
                 GroupSplit,
@@ -2137,8 +2138,9 @@ where
             let stat_report_trigger =
                 IntervalStream::new(stat_report_interval).map(|_| HummockTimerEvent::Report);
 
-            let mut compaction_heartbeat_interval =
-                tokio::time::interval(std::time::Duration::from_millis(1000));
+            let mut compaction_heartbeat_interval = tokio::time::interval(
+                std::time::Duration::from_secs(COMPACTION_HEARTBEAT_PERIOD_SEC),
+            );
             compaction_heartbeat_interval
                 .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             compaction_heartbeat_interval.reset();
@@ -2175,6 +2177,11 @@ where
 
             let shutdown_rx_shared = shutdown_rx.shared();
             let mut group_infos = HashMap::default();
+
+            tracing::info!(
+                "Hummock timer task tracing [GroupSplit interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                    periodic_check_split_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+            );
 
             loop {
                 let item =
@@ -2266,6 +2273,7 @@ where
                     }
 
                     Either::Right((_, _shutdown)) => {
+                        tracing::info!("Hummock timer loop is stopped");
                         break;
                     }
                 }
