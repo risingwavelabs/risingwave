@@ -285,7 +285,7 @@ impl Cluster {
                 .name(format!("compute-{i}"))
                 .ip([192, 168, 3, i as u8].into())
                 .cores(conf.compute_node_cores)
-                .init(move || risingwave_compute::start(opts.clone()))
+                .init(move || risingwave_compute::start(opts.clone(), prometheus::Registry::new()))
                 .build();
         }
 

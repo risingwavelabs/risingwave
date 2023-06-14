@@ -54,6 +54,7 @@ use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::batch::ServingVnodeMapping;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -74,7 +75,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, MetaError, MetaResult};
+use crate::{batch, hummock, MetaError, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -356,6 +357,14 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
             .await
             .unwrap(),
     );
+    let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    batch::on_meta_start(
+        env.notification_manager_ref(),
+        cluster_manager.clone(),
+        fragment_manager.clone(),
+        serving_vnode_mapping.clone(),
+    )
+    .await;
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
 
     let compactor_manager = Arc::new(
@@ -523,6 +532,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         hummock_manager.clone(),
         fragment_manager.clone(),
         backup_manager.clone(),
+        serving_vnode_mapping.clone(),
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
@@ -568,6 +578,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager).await);
+    sub_tasks.push(
+        batch::start_serving_vnode_mapping_worker(
+            env.notification_manager_ref(),
+            cluster_manager.clone(),
+            fragment_manager.clone(),
+            serving_vnode_mapping,
+        )
+        .await,
+    );
 
     if cfg!(not(test)) {
         sub_tasks.push(
