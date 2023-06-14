@@ -975,36 +975,19 @@ where
     }
 
     #[try_stream(ok=OwnedRow, error=StreamExecutorError)]
-    pub async fn iter_ordered_with_pk_range(
+    pub async fn iter_all_with_pk_range(
         &self,
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         prefetch_options: PrefetchOptions,
     ) {
-        yield todo!()
-        // // FIXME: Just iterate over all vnode ranges using:
-        // // self.vnodes.vnode_ranges()
-        // let stream = self
-        //     .iter_key_and_val_with_pk_range(pk_range, VirtualNode::ZERO, prefetch_options)
-        //     .await?;
-        // let streams = vec![Box::pin(stream)];
-        // let mut heap = BinaryHeap::with_capacity(streams.len());
-        // for mut stream in streams {
-        //     if let Some(peeked) = stream.next().await.transpose()? {
-        //         heap.push(Node { stream, peeked });
-        //     }
-        // }
-        //
-        // while let Some(mut node) = heap.peek_mut() {
-        //     // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
-        //     // This is acceptable since we're not going to handle errors from cell-based table
-        //     // iteration, so where to fail does not matter. Or we need an `Option` for this.
-        //     yield match node.stream.next().await.transpose()? {
-        //         // There still remains data in the stream, take and update the peeked value.
-        //         Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked).1,
-        //         // This stream is exhausted, remove it from the heap.
-        //         None => PeekMut::pop(node).peeked.1,
-        //     };
-        // }
+        let stream = self
+            .iter_key_and_val_with_pk_range(pk_range, VirtualNode::ZERO, prefetch_options)
+            .await?;
+        #[for_await]
+        for value in stream {
+            let v = value?;
+            yield v.1;
+        }
     }
 
     pub async fn iter_key_and_val_with_pk_range(
@@ -1248,3 +1231,30 @@ fn to_memcomparable<R: Row>(
         }
     }
 }
+
+// /// Merge multiple streams of primary key and rows into a single stream, sorted by primary key.
+// /// We should ensure that the primary key from different streams are unique.
+// #[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
+// pub(super) async fn merge_sort<S>(streams: Vec<S>)
+// where
+//     S: PkAndRowStream + Unpin,
+// {
+//     let mut heap = BinaryHeap::with_capacity(streams.len());
+//     for mut stream in streams {
+//         if let Some(peeked) = stream.next().await.transpose()? {
+//             heap.push(Node { stream, peeked });
+//         }
+//     }
+//
+//     while let Some(mut node) = heap.peek_mut() {
+//         // Note: If the `next` returns `Err`, we'll fail to yield the previous item.
+//         // This is acceptable since we're not going to handle errors from cell-based table
+//         // iteration, so where to fail does not matter. Or we need an `Option` for this.
+//         yield match node.stream.next().await.transpose()? {
+//             // There still remains data in the stream, take and update the peeked value.
+//             Some(new_peeked) => std::mem::replace(&mut node.peeked, new_peeked),
+//             // This stream is exhausted, remove it from the heap.
+//             None => PeekMut::pop(node).peeked,
+//         };
+//     }
+// }
