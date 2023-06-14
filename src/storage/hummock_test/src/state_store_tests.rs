@@ -1365,10 +1365,12 @@ async fn test_multiple_epoch_sync_inner(
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
     let sync_result3 = hummock_storage.seal_and_sync_epoch(epoch3).await.unwrap();
     test_get().await;
+
     meta_client
         .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
         .await
         .unwrap();
+
     meta_client
         .commit_epoch(epoch3, sync_result3.uncommitted_ssts)
         .await
