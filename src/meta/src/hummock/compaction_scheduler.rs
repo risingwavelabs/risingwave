@@ -530,10 +530,6 @@ where
             }
 
             for (table_id, table_size) in &group.table_statistic {
-                if *table_size < table_split_limit {
-                    continue;
-                }
-
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
