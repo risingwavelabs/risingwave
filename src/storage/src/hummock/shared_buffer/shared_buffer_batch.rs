@@ -379,7 +379,8 @@ impl SharedBufferBatch {
         batch_items
             .iter()
             .map(|(k, v)| {
-                k.len() + {
+                std::mem::size_of::<HummockValue<Bytes>>() +
+                std::mem::size_of::<Bytes>() + k.len() + {
                     match v {
                         HummockValue::Put(val) => val.len(),
                         HummockValue::Delete => 0,
