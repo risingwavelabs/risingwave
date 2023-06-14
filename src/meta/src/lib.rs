@@ -265,7 +265,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
                 split_group_size_limit: config.meta.split_group_size_limit,
                 move_table_size_limit: config.meta.move_table_size_limit,
-                table_write_throughput_threshold: config.meta.table_write_throughput_limit,
+                table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
                 min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
                 partition_vnode_count: config.meta.partition_vnode_count,
                 do_not_config_object_storage_lifecycle: config

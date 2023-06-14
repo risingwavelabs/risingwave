@@ -644,29 +644,11 @@ impl<S: MetaStore> HummockManager<S> {
 
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let mut infos = vec![];
-        {
+        let mut infos = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let table_infos = versioning_guard.version_stats.table_stats.clone();
-
-            for (group_id, group) in &versioning_guard.current_version.levels {
-                let mut group_info = TableGroupInfo {
-                    group_id: *group_id,
-                    ..Default::default()
-                };
-                for table_id in &group.member_table_ids {
-                    if let Some(stats) = table_infos.get(table_id) {
-                        let table_size = stats.total_key_size + stats.total_value_size;
-                        group_info
-                            .table_statistic
-                            .insert(*table_id, table_size as u64);
-                        group_info.group_size += table_size as u64;
-                    } else {
-                        group_info.table_statistic.insert(*table_id, 0);
-                    }
-                }
-                infos.push(group_info);
-            }
+            versioning_guard
+                .current_version
+                .calculate_compaction_group_statistic()
         };
         let manager = self.compaction_group_manager.read().await;
         for info in &mut infos {

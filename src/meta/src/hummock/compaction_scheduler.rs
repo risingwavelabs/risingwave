@@ -540,7 +540,7 @@ where
                     if history.len() >= HISTORY_TABLE_INFO_WINDOW_SIZE {
                         let window_total_size = history.iter().sum::<u64>();
                         is_high_write_throughput = history.iter().all(|throughput| {
-                            **throughput > self.env.opts.table_write_throughput_threshold
+                            *throughput > self.env.opts.table_write_throughput_threshold
                         });
                         is_low_write_throughput = window_total_size
                             < (HISTORY_TABLE_INFO_WINDOW_SIZE as u64)
