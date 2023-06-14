@@ -326,7 +326,7 @@ impl Distill for LogicalScan {
             vec.push((
                 "predicate",
                 Pretty::display(&ConditionDisplay {
-                    condition: &self.predicate(),
+                    condition: self.predicate(),
                     input_schema: &input_schema,
                 }),
             ))
