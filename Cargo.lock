@@ -144,7 +144,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.15.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=waruto/modify-decimal#efcc7b9f42d90c96eb8ac71e785cdbba3d32b0dc"
+source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#016b8f48980e52c1725fb14f8e8e4d8222230e2c"
 dependencies = [
  "byteorder",
  "bzip2",
