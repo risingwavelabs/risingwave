@@ -123,8 +123,6 @@ pub struct HummockStorage {
 
     read_version_mapping: Arc<ReadVersionMappingType>,
 
-    tracing: Arc<risingwave_tracing::RwTracingService>,
-
     backup_reader: BackupReaderRef,
 
     /// current_epoch < min_current_epoch cannot be read.
@@ -143,7 +141,6 @@ impl HummockStorage {
         notification_client: impl NotificationClient,
         filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
-        tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
@@ -217,7 +214,6 @@ impl HummockStorage {
                 shutdown_sender: event_tx,
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
-            tracing,
             backup_reader,
             min_current_epoch,
             write_limiter,
@@ -245,7 +241,6 @@ impl HummockStorage {
             self.hummock_version_reader.clone(),
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
-            self.tracing.clone(),
             self.write_limiter.clone(),
             option,
         )
@@ -333,7 +328,6 @@ impl HummockStorage {
             notification_client,
             Arc::new(FilterKeyExtractorManager::default()),
             Arc::new(HummockStateStoreMetrics::unused()),
-            Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),
         )
         .await

@@ -958,6 +958,7 @@ impl ExprImpl {
                     ret_type,
                 )?))
             }
+            RexNode::Now(_) => Self::Now(Box::new(Now {})),
         })
     }
 }

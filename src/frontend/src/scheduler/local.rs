@@ -465,25 +465,26 @@ impl LocalQueryExecution {
     }
 
     #[inline(always)]
-    fn get_streaming_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
-        let reader = self.front_env.catalog_reader().read_guard();
-        reader
+    fn get_streaming_vnode_mapping(
+        &self,
+        table_id: &TableId,
+    ) -> SchedulerResult<ParallelUnitMapping> {
+        let fragment_id = self
+            .front_env
+            .catalog_reader()
+            .read_guard()
             .get_table_by_id(table_id)
-            .map(|table| {
-                self.worker_node_manager
-                    .manager
-                    .get_streaming_fragment_mapping(&table.fragment_id)
-            })
-            .ok()
-            .flatten()
+            .map_err(|e| SchedulerError::Internal(anyhow!(e)))?
+            .fragment_id;
+        self.worker_node_manager
+            .manager
+            .get_streaming_fragment_mapping(&fragment_id)
     }
 
     fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
         if let Some(table_id) = stage.dml_table_id.as_ref() {
             // dml should use streaming vnode mapping
-            let vnode_mapping = self
-                .get_streaming_vnode_mapping(table_id)
-                .ok_or_else(|| SchedulerError::EmptyWorkerNodes)?;
+            let vnode_mapping = self.get_streaming_vnode_mapping(table_id)?;
             let worker_node = {
                 let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
                 let candidates = self
