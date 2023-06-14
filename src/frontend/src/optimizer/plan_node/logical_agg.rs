@@ -358,7 +358,7 @@ impl LogicalAggBuilder {
             }
         });
 
-        // order by is disallowed occur with distinct because we can not diectly rewrite agg with
+        // order by is disallowed occur with distinct because we can not directly rewrite agg with
         // order by into 2-phase agg.
         if has_distinct && has_order_by {
             return Err(ErrorCode::InvalidInputSyntax(
