@@ -64,9 +64,11 @@ mod notifier;
 mod progress;
 mod recovery;
 mod schedule;
+mod trace;
 
 pub use self::command::{Command, Reschedule};
 pub use self::schedule::BarrierScheduler;
+pub use self::trace::TracedEpoch;
 
 /// Status of barrier manager.
 enum BarrierManagerStatus {
@@ -212,11 +214,9 @@ where
     }
 
     fn cancel_command(&mut self, cancelled_command: TrackingCommand<S>) {
-        if let Some(index) = self
-            .command_ctx_queue
-            .iter()
-            .position(|x| x.command_ctx.prev_epoch == cancelled_command.context.prev_epoch)
-        {
+        if let Some(index) = self.command_ctx_queue.iter().position(|x| {
+            x.command_ctx.prev_epoch.value() == cancelled_command.context.prev_epoch.value()
+        }) {
             self.command_ctx_queue.remove(index);
             self.remove_changes(cancelled_command.context.command.changes());
         }
@@ -341,7 +341,7 @@ where
         if let Some(node) = self
             .command_ctx_queue
             .iter_mut()
-            .find(|x| x.command_ctx.prev_epoch.0 == prev_epoch)
+            .find(|x| x.command_ctx.prev_epoch.value().0 == prev_epoch)
         {
             assert!(matches!(node.state, InFlight));
             node.wait_commit_timer = Some(wait_commit_timer);
@@ -398,7 +398,7 @@ where
     pub fn contains_epoch(&self, epoch: u64) -> bool {
         self.command_ctx_queue
             .iter()
-            .any(|x| x.command_ctx.prev_epoch.0 == epoch)
+            .any(|x| x.command_ctx.prev_epoch.value().0 == epoch)
     }
 
     /// After some command is committed, the changes will be applied to the meta store so we can
@@ -557,8 +557,6 @@ where
 
             // XXX(bugen): why we need this?
             let new_epoch = state.in_flight_prev_epoch().next();
-            assert!(new_epoch > state.in_flight_prev_epoch());
-            // state.in_flight_prev_epoch = new_epoch;
 
             self.set_status(BarrierManagerStatus::Recovering).await;
             let new_epoch = self.recovery(new_epoch).await;
@@ -640,23 +638,15 @@ where
         let info = self.resolve_actor_info(checkpoint_control, &command).await;
 
         let prev_epoch = state.in_flight_prev_epoch();
-        let prev_span = state.span().clone();
 
         let new_epoch = prev_epoch.next();
-        assert!(
-            new_epoch > prev_epoch,
-            "new{:?},prev{:?}",
-            new_epoch,
-            prev_epoch
-        );
         state
-            .update_inflight_prev_epoch(self.env.meta_store(), new_epoch)
+            .update_inflight_prev_epoch(self.env.meta_store(), new_epoch.clone())
             .await
             .unwrap();
-        let new_span = state.span().clone();
 
-        prev_span.in_scope(|| {
-            tracing::info!(epoch = new_epoch.0, "new barrier enqueued");
+        prev_epoch.span().in_scope(|| {
+            tracing::info!(epoch = new_epoch.value().0, "new barrier enqueued");
         });
 
         let command_ctx = Arc::new(CommandContext::new(
@@ -665,8 +655,6 @@ where
             info,
             prev_epoch,
             new_epoch,
-            prev_span,
-            new_span,
             command,
             checkpoint,
             self.source_manager.clone(),
@@ -685,7 +673,7 @@ where
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: &UnboundedSender<BarrierCompletion>,
     ) {
-        let prev_epoch = command_context.prev_epoch.0;
+        let prev_epoch = command_context.prev_epoch.value().0;
         let result = self.inject_barrier_inner(command_context.clone()).await;
         match result {
             Ok(node_need_collect) => {
@@ -729,11 +717,11 @@ where
                 let request_id = Uuid::new_v4().to_string();
                 let barrier = Barrier {
                     epoch: Some(risingwave_pb::data::Epoch {
-                        curr: command_context.curr_epoch.0,
-                        prev: command_context.prev_epoch.0,
+                        curr: command_context.curr_epoch.value().0,
+                        prev: command_context.prev_epoch.value().0,
                     }),
                     mutation,
-                    tracing_context: TracingContext::from_span(&command_context.curr_span)
+                    tracing_context: TracingContext::from_span(command_context.curr_epoch.span())
                         .to_protobuf(),
                     checkpoint: command_context.checkpoint,
                     passed_actors: vec![],
@@ -769,8 +757,9 @@ where
         command_context: Arc<CommandContext<S>>,
         barrier_complete_tx: UnboundedSender<BarrierCompletion>,
     ) {
-        let prev_epoch = command_context.prev_epoch.0;
-        let tracing_context = TracingContext::from_span(&command_context.prev_span).to_protobuf();
+        let prev_epoch = command_context.prev_epoch.value().0;
+        let tracing_context =
+            TracingContext::from_span(command_context.prev_epoch.span()).to_protobuf();
 
         let info = command_context.info.clone();
         let client_pool = client_pool_ref.deref();
@@ -904,7 +893,7 @@ where
         node: &mut EpochNode<S>,
         checkpoint_control: &mut CheckpointControl<S>,
     ) -> MetaResult<()> {
-        let prev_epoch = node.command_ctx.prev_epoch.0;
+        let prev_epoch = node.command_ctx.prev_epoch.value().0;
         match &mut node.state {
             Completed(resps) => {
                 // We must ensure all epochs are committed in ascending order,
@@ -923,7 +912,11 @@ where
                 } else if checkpoint {
                     new_snapshot = self
                         .hummock_manager
-                        .commit_epoch(node.command_ctx.prev_epoch.0, synced_ssts, sst_to_worker)
+                        .commit_epoch(
+                            node.command_ctx.prev_epoch.value().0,
+                            synced_ssts,
+                            sst_to_worker,
+                        )
                         .await?;
                 } else {
                     new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));

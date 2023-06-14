@@ -244,6 +244,7 @@ pub struct Barrier {
     pub mutation: Option<Arc<Mutation>>,
     pub checkpoint: bool,
 
+    /// Tracing context for the **current** epoch of this barrier.
     tracing_context: TracingContext,
 
     /// The actors that this barrier has passed locally. Used for debugging only.
@@ -256,7 +257,7 @@ impl Barrier {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             checkpoint: true,
-            tracing_context: TracingContext::for_test(),
+            tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
         }
@@ -266,7 +267,7 @@ impl Barrier {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
             checkpoint: true,
-            tracing_context: TracingContext::for_test(),
+            tracing_context: TracingContext::none(),
             mutation: Default::default(),
             passed_actors: Default::default(),
         }
@@ -366,6 +367,7 @@ impl Barrier {
         Epoch(self.epoch.curr)
     }
 
+    /// Retrieve the tracing context for the **current** epoch of this barrier.
     pub fn tracing_context(&self) -> &TracingContext {
         &self.tracing_context
     }

@@ -18,31 +18,39 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+/// Context for tracing used for propagating tracing information in a distributed system.
+///
+/// See [Trace Context](https://www.w3.org/TR/trace-context/) for more information.
 #[derive(Debug, Clone)]
 pub struct TracingContext(opentelemetry::Context);
 
+type Propagator = TraceContextPropagator;
+
 impl TracingContext {
+    /// Create a new tracing context from a tracing span.
     pub fn from_span(span: &tracing::Span) -> Self {
         Self(span.context())
     }
 
+    /// Create a no-op tracing context.
+    pub fn none() -> Self {
+        Self(opentelemetry::Context::new())
+    }
+
+    /// Attach the given span as a child of the context. Returns the attached span.
     pub fn attach(&self, span: tracing::Span) -> tracing::Span {
         span.set_parent(self.0.clone());
         span
     }
 
-    pub fn for_test() -> Self {
-        Self(opentelemetry::Context::new())
-    }
-
     pub fn to_protobuf(&self) -> HashMap<String, String> {
         let mut fields = HashMap::new();
-        TraceContextPropagator::new().inject_context(&self.0, &mut fields);
+        Propagator::new().inject_context(&self.0, &mut fields);
         fields
     }
 
     pub fn from_protobuf(fields: &HashMap<String, String>) -> Self {
-        let context = TraceContextPropagator::new().extract(fields);
+        let context = Propagator::new().extract(fields);
         Self(context)
     }
 }

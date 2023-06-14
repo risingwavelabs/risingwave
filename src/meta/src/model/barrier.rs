@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::INVALID_EPOCH;
 
+use crate::barrier::TracedEpoch;
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
 
 /// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
 /// persistently to meta store. Add more states when needed.
 pub struct BarrierManagerState {
     /// The last sent `prev_epoch`
-    in_flight_prev_epoch: Epoch,
-
-    span: tracing::Span,
+    in_flight_prev_epoch: TracedEpoch,
 }
 
 const BARRIER_MANAGER_STATE_KEY: &[u8] = b"barrier_manager_state";
@@ -41,37 +40,32 @@ impl BarrierManagerState {
             Err(e) => panic!("{:?}", e),
         };
         Self {
-            in_flight_prev_epoch,
-            span: in_flight_prev_epoch.create_root_span(),
+            in_flight_prev_epoch: TracedEpoch::new(in_flight_prev_epoch),
         }
     }
 
     pub async fn update_inflight_prev_epoch<S>(
         &mut self,
         store: &S,
-        new_epoch: Epoch,
+        new_epoch: TracedEpoch,
     ) -> MetaStoreResult<()>
     where
         S: MetaStore,
     {
-        self.in_flight_prev_epoch = new_epoch;
-        self.span = new_epoch.create_root_span();
-
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 BARRIER_MANAGER_STATE_KEY.to_vec(),
-                memcomparable::to_vec(&self.in_flight_prev_epoch.0).unwrap(),
+                memcomparable::to_vec(&new_epoch.value().0).unwrap(),
             )
-            .await
-            .map_err(Into::into)
+            .await?;
+
+        self.in_flight_prev_epoch = new_epoch;
+
+        Ok(())
     }
 
-    pub fn in_flight_prev_epoch(&self) -> Epoch {
-        self.in_flight_prev_epoch
-    }
-
-    pub fn span(&self) -> &tracing::Span {
-        &self.span
+    pub fn in_flight_prev_epoch(&self) -> TracedEpoch {
+        self.in_flight_prev_epoch.clone()
     }
 }

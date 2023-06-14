@@ -164,7 +164,8 @@ where
 
         let span_name = format!("Actor {id}");
 
-        let new_span = || tracing::info_span!("actor", "otel.name" = span_name, actor_id = id);
+        let new_span =
+            || tracing::info_span!(parent: None, "actor", "otel.name" = span_name, actor_id = id);
         let mut span = new_span();
 
         let mut last_epoch: Option<EpochPair> = None;
