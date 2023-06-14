@@ -910,7 +910,7 @@ if [ $# -gt 0 ]; then
   ARGS=("$@")
 
   echo "Applying clippy --fix for $@ (including dirty and staged files)"
-  cargo clippy ${ARGS[@]/#/--package risingwave_} ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
   echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
