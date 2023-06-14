@@ -41,8 +41,9 @@ We also know that a table `t` needs to have `watermark` in order for us to do
 We also note that due to implementation limitations of `EOWC`, `EOWC` is supported for 1 column,
 so we will take note of this in the implementation.
 
-### Drafting
+### Drafting Implementation
 
 Let's list the changes required:
 1. Update `table` to store watermark column index.
-2. We need to provide a branch which generates `EOWC`, if there exists some `watermark` column we can use.
+2. We need to provide a branch which generates `EOWC` query, if there exists some `watermark` column we can use.
+3. Also add constraint that we can only have `EOWC` if querying a single table.
