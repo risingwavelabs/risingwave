@@ -20,9 +20,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::{enumerate, Itertools};
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, HummockVersionExt,
+    object_size_map, BranchedSstInfo, HummockVersionExt,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+};
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -429,4 +431,36 @@ pub fn trigger_write_stop_stats(
             .with_label_values(&[&cg.to_string()])
             .set(1);
     }
+}
+
+pub fn trigger_split_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    member_table_id_len: usize,
+    brnached_ssts: &BTreeMap<
+        // SST object id
+        HummockSstableObjectId,
+        BranchedSstInfo,
+    >,
+) {
+    let group_label = compaction_group_id.to_string();
+    metrics
+        .state_table_count
+        .with_label_values(&[&group_label])
+        .set(member_table_id_len as _);
+
+    let branched_sst_count = brnached_ssts
+        .values()
+        .map(|branched_map| branched_map.iter())
+        .flat_map(|branched_map| {
+            branched_map
+                .filter(|(group_id, _sst_id)| **group_id == compaction_group_id)
+                .map(|(_, v)| v)
+        })
+        .sum::<u64>();
+
+    metrics
+        .branched_sst_count
+        .with_label_values(&[&group_label])
+        .set(branched_sst_count as _);
 }

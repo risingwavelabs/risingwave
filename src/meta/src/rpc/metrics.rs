@@ -129,6 +129,9 @@ pub struct MetaMetrics {
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
+    pub move_state_table_count: IntCounterVec,
+    pub state_table_count: IntGaugeVec,
+    pub branched_sst_count: IntGaugeVec,
 
     /// ********************************** Object Store ************************************
     // Object store related metrics (for backup/restore and version checkpoint)
@@ -477,6 +480,30 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let move_state_table_count = register_int_counter_vec_with_registry!(
+            "storage_move_state_table_count",
+            "Count of trigger move state table",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let state_table_count = register_int_gauge_vec_with_registry!(
+            "storage_state_table_count",
+            "Count of stable table per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let branched_sst_count = register_int_gauge_vec_with_registry!(
+            "storage_branched_sst_count",
+            "Count of branched sst per compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
@@ -527,6 +554,9 @@ impl MetaMetrics {
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
+            move_state_table_count,
+            state_table_count,
+            branched_sst_count,
         }
     }
 
