@@ -155,10 +155,6 @@ impl DmlExecutor {
                             self.dml_manager
                                 .unregister_changes_sender(self.table_id, self.actor_id);
                         }
-
-                        if !active_txn_map.is_empty() {
-                            println!("dangling transaction")
-                        }
                     }
                     yield msg;
                 }

@@ -26,6 +26,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_source::WriteHandle;
 
 use crate::error::BatchError;
 use crate::executor::{
@@ -41,12 +42,16 @@ pub struct DeleteExecutor {
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
-    child: BoxedExecutor,
+    // Use option to make it possible to impl drop trait.
+    child: Option<BoxedExecutor>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
     returning: bool,
     txn_id: TxnId,
+    write_handle: Option<WriteHandle>,
+    // Indicate whether `TxnMsg::End` or `TxnMsg::Rollback` have been sent to the write channel.
+    finished: bool,
 }
 
 impl DeleteExecutor {
@@ -65,7 +70,7 @@ impl DeleteExecutor {
             table_id,
             table_version_id,
             dml_manager,
-            child,
+            child: Some(child),
             chunk_size,
             schema: if returning {
                 table_schema
@@ -77,6 +82,22 @@ impl DeleteExecutor {
             identity,
             returning,
             txn_id,
+            write_handle: None,
+            finished: false,
+        }
+    }
+}
+
+impl Drop for DeleteExecutor {
+    fn drop(&mut self) {
+        // If this executor is not finished, try to rollback.
+        if !self.finished {
+            if let Some(write_handle) = self.write_handle.take() {
+                let txn_id = self.txn_id;
+                tokio::spawn(async move {
+                    let _ = write_handle.write_txn_msg(TxnMsg::Rollback(txn_id)).await;
+                });
+            }
         }
     }
 }
@@ -97,14 +118,15 @@ impl Executor for DeleteExecutor {
 
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    async fn do_execute(self: Box<Self>) {
-        let data_types = self.child.schema().data_types();
+    async fn do_execute(mut self: Box<Self>) {
+        let data_types = self.child.as_ref().unwrap().schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        let write_handle = table_dml_handle.write_handle(self.txn_id)?;
+        self.write_handle = Some(table_dml_handle.write_handle(self.txn_id)?);
+        let write_handle = self.write_handle.as_ref().unwrap();
 
         let mut notifiers = Vec::new();
 
@@ -128,13 +150,14 @@ impl DeleteExecutor {
         );
 
         #[for_await]
-        for data_chunk in self.child.execute() {
+        for data_chunk in self.child.take().unwrap().execute() {
             let data_chunk = match data_chunk {
                 Ok(data_chunk) => data_chunk,
                 Err(err) => {
                     write_handle
                         .write_txn_msg(TxnMsg::Rollback(self.txn_id))
                         .await?;
+                    self.finished = true;
                     return Err(err);
                 }
             };
@@ -151,6 +174,7 @@ impl DeleteExecutor {
         }
 
         notifiers.push(write_handle.write_txn_msg(TxnMsg::End(self.txn_id)).await?);
+        self.finished = true;
 
         // Wait for all chunks to be taken / written.
         let rows_deleted = try_join_all(notifiers)
