@@ -52,6 +52,7 @@ pub enum Clause {
     GroupBy,
     Having,
     Filter,
+    From,
 }
 
 /// A `BindContext` that is only visible if the `LATERAL` keyword

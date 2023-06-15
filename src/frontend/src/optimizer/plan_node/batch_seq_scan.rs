@@ -183,19 +183,8 @@ impl Distill for BatchSeqScan {
     fn distill<'a>(&self) -> Pretty<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::display(&self.logical.table_name)));
-        vec.push((
-            "columns",
-            Pretty::Array(
-                match verbose {
-                    true => self.logical.column_names_with_table_prefix(),
-                    false => self.logical.column_names(),
-                }
-                .into_iter()
-                .map(Pretty::from)
-                .collect(),
-            ),
-        ));
+        vec.push(("table", Pretty::from(self.logical.table_name.clone())));
+        vec.push(("columns", self.logical.columns_pretty(verbose)));
 
         if !self.scan_ranges.is_empty() {
             let range_strs = self.scan_ranges_as_strs(verbose);
