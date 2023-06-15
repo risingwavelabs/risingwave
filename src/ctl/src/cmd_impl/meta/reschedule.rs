@@ -52,7 +52,12 @@ const RESCHEDULE_ADDED_KEY: &str = "added";
 //         removed_parallel_units: [],
 //     },
 // }
-pub async fn reschedule(context: &CtlContext, mut plan: String, dry_run: bool) -> Result<()> {
+pub async fn reschedule(
+    context: &CtlContext,
+    mut plan: String,
+    dry_run: bool,
+    revision: u64,
+) -> Result<()> {
     let meta_client = context.meta_client().await?;
 
     let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
@@ -114,8 +119,18 @@ pub async fn reschedule(context: &CtlContext, mut plan: String, dry_run: bool) -
 
     if !dry_run {
         println!("---------------------------");
-        let resp = meta_client.reschedule(reschedules).await?;
-        println!("Response from meta {}", resp);
+        let (success, revision) = meta_client.reschedule(reschedules, revision).await?;
+
+        if !success {
+            println!(
+                "Reschedule failed, please check the plan or the revision, current revision is {}",
+                revision
+            );
+
+            return Err(anyhow!("reschedule failed"));
+        }
+
+        println!("Reschedule success, current revision is {}", revision);
     }
 
     Ok(())

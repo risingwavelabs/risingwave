@@ -204,7 +204,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                             .project(&self.state_table_order_col_indices),
                         &mut cache_key,
                     );
-                    cache_key
+                    cache_key.into()
                 };
                 let cache_value = self
                     .state_table_arg_col_indices
@@ -297,6 +297,7 @@ mod tests {
             column_orders: vec![],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         }
     }
 
@@ -993,6 +994,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 
@@ -1094,6 +1096,7 @@ mod tests {
             ],
             filter: None,
             distinct: false,
+            direct_args: vec![],
         };
         let group_key = None;
 

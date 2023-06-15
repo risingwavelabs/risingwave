@@ -17,8 +17,7 @@ use std::sync::Arc;
 use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
-use minitrace::prelude::*;
-use tracing::event;
+use tracing::{event, Instrument};
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -28,7 +27,6 @@ use crate::task::ActorId;
 /// Streams wrapped by `trace` will print data passing in the stream graph to stdout.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn trace(
-    enable_executor_row_count: bool,
     info: Arc<ExecutorInfo>,
     input_pos: usize,
     actor_id: ActorId,
@@ -39,25 +37,25 @@ pub async fn trace(
     let span_name = format!("{}_{}_next", info.identity, input_pos);
     let actor_id_string = actor_id.to_string();
 
-    let span = || {
-        let mut span = Span::enter_with_local_parent("next");
-        span.add_property(|| ("otel.name", span_name.to_string()));
-        span.add_property(|| ("next", info.identity.to_string()));
-        span.add_property(|| ("input_pos", input_pos.to_string()));
-        span
-    };
-
     pin_mut!(input);
 
-    while let Some(message) = input.next().in_span(span()).await.transpose()? {
+    while let Some(message) = input
+        .next()
+        .instrument(tracing::trace_span!(
+            "next",
+            otel.name = span_name.as_str(),
+            next = info.identity,
+            input_pos = input_pos
+        ))
+        .await
+        .transpose()?
+    {
         if let Message::Chunk(chunk) = &message {
             if chunk.cardinality() > 0 {
-                if enable_executor_row_count {
-                    metrics
-                        .executor_row_count
-                        .with_label_values(&[&actor_id_string, &info.identity])
-                        .inc_by(chunk.cardinality() as u64);
-                }
+                metrics
+                    .executor_row_count
+                    .with_label_values(&[&actor_id_string, &info.identity])
+                    .inc_by(chunk.cardinality() as u64);
                 event!(tracing::Level::TRACE, prev = %info.identity, msg = "chunk", "input = \n{:#?}", chunk);
             }
         }
@@ -69,7 +67,6 @@ pub async fn trace(
 /// Streams wrapped by `metrics` will update actor metrics.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn metrics(
-    enable_executor_row_count: bool,
     actor_id: ActorId,
     executor_id: u64,
     metrics: Arc<StreamingMetrics>,
@@ -80,14 +77,12 @@ pub async fn metrics(
     pin_mut!(input);
 
     while let Some(message) = input.next().await.transpose()? {
-        if enable_executor_row_count {
-            if let Message::Chunk(chunk) = &message {
-                if chunk.cardinality() > 0 {
-                    metrics
-                        .executor_row_count
-                        .with_label_values(&[&actor_id_string, &executor_id_string])
-                        .inc_by(chunk.cardinality() as u64);
-                }
+        if let Message::Chunk(chunk) = &message {
+            if chunk.cardinality() > 0 {
+                metrics
+                    .executor_row_count
+                    .with_label_values(&[&actor_id_string, &executor_id_string])
+                    .inc_by(chunk.cardinality() as u64);
             }
         }
 
