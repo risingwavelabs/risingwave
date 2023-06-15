@@ -160,15 +160,12 @@ where
             core.update_worker_node(worker.clone());
         }
 
-        let is_schedulable = match worker.worker_node.get_property() {
-            Ok(p) => p.is_schedulable,
-            Err(_) => false,
-        };
-
-        // todo: do mot use expect
-        if !is_schedulable
-            && worker.worker_node.get_type().expect("did not have type") == WorkerType::ComputeNode
-        {
+        let is_schedulable = worker
+            .worker_node
+            .get_property()
+            .map_or(false, |p| p.is_schedulable);
+        let worker_type = worker.worker_type();
+        if !is_schedulable && worker_type == WorkerType::ComputeNode {
             tracing::warn!("activating cordoned worker. Ignoring request");
             return Ok(());
         }
@@ -180,7 +177,6 @@ where
 
         // Notify frontends of new compute node.
         // Always notify because a running worker's property may have been changed.
-        let worker_type = worker.worker_type();
         if worker_type == WorkerType::ComputeNode {
             self.env
                 .notification_manager()
@@ -570,7 +566,7 @@ impl ClusterManagerCore {
 
     pub fn list_streaming_worker_node(
         &self,
-        worker_state: Option<State>, // TODO: This should be state and not vec state
+        worker_state: Option<State>,
         list_cordoned: bool,
     ) -> Vec<WorkerNode> {
         self.list_worker_node(WorkerType::ComputeNode, worker_state, list_cordoned)
