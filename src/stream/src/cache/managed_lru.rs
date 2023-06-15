@@ -232,12 +232,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
 
 pub fn new_unbounded<K: Hash + Eq + EstimateSize, V: EstimateSize>(
     watermark_epoch: Arc<AtomicU64>,
-) -> ManagedLruCache<K, V> {
-    ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, None)
-}
-
-pub fn new_unbounded_with_metrics<K: Hash + Eq + EstimateSize, V: EstimateSize>(
-    watermark_epoch: Arc<AtomicU64>,
     metrics_info: MetricsInfo,
 ) -> ManagedLruCache<K, V> {
     ManagedLruCache::new_inner(LruCache::unbounded(), watermark_epoch, Some(metrics_info))
