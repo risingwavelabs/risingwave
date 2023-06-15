@@ -89,11 +89,21 @@ impl TableRevision {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParallelUnitReschedule {
     pub added_parallel_units: Vec<ParallelUnitId>,
     pub removed_parallel_units: Vec<ParallelUnitId>,
 }
+
+// impl PartialEq<Self> for ParallelUnitReschedule {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.added_parallel_units.
+//     }
+// }
+//
+// impl Eq for ParallelUnitReschedule {
+//
+// }
 
 pub(crate) struct RescheduleContext {
     /// Index used to map `ParallelUnitId` to `WorkerId`
@@ -418,24 +428,12 @@ where
 
         let mut fragment_dispatcher_map = HashMap::new();
 
-        for actor in actor_map.values() {
-            for dispatcher in &actor.dispatcher {
-                for downstream_actor_id in &dispatcher.downstream_actor_id {
-                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
-                        fragment_dispatcher_map
-                            .entry(actor.fragment_id)
-                            .or_insert(HashMap::new())
-                            .insert(downstream_actor.fragment_id, dispatcher.r#type());
-
-                        // Checking for no shuffle dispatchers
-                        if dispatcher.r#type() == DispatcherType::NoShuffle {
-                            no_shuffle_source_fragment_ids.insert(actor.fragment_id);
-                            no_shuffle_target_fragment_ids.insert(downstream_actor.fragment_id);
-                        }
-                    }
-                }
-            }
-        }
+        Self::fulfill_no_shuffle_index(
+            &actor_map,
+            &mut no_shuffle_source_fragment_ids,
+            &mut no_shuffle_target_fragment_ids,
+            &mut fragment_dispatcher_map,
+        );
 
         // Then, we collect all available upstreams
         let mut upstream_dispatchers: HashMap<
@@ -610,6 +608,32 @@ where
             no_shuffle_source_fragment_ids,
             fragment_dispatcher_map,
         })
+    }
+
+    fn fulfill_no_shuffle_index(
+        actor_map: &HashMap<ActorId, StreamActor>,
+        no_shuffle_source_fragment_ids: &mut HashSet<u32>,
+        no_shuffle_target_fragment_ids: &mut HashSet<u32>,
+        fragment_dispatcher_map: &mut HashMap<u32, HashMap<u32, DispatcherType>>,
+    ) {
+        for actor in actor_map.values() {
+            for dispatcher in &actor.dispatcher {
+                for downstream_actor_id in &dispatcher.downstream_actor_id {
+                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
+                        fragment_dispatcher_map
+                            .entry(actor.fragment_id)
+                            .or_insert(HashMap::new())
+                            .insert(downstream_actor.fragment_id, dispatcher.r#type());
+
+                        // Checking for no shuffle dispatchers
+                        if dispatcher.r#type() == DispatcherType::NoShuffle {
+                            no_shuffle_source_fragment_ids.insert(actor.fragment_id);
+                            no_shuffle_target_fragment_ids.insert(downstream_actor.fragment_id);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn reschedule_actors(
@@ -1523,13 +1547,24 @@ where
 
         let mut target_plan = HashMap::with_capacity(fragment_ids.len());
 
+        let mut actor_map = HashMap::new();
+        let mut fragment_map = HashMap::new();
+
         for table_fragments in all_table_fragments {
             for (fragment_id, fragment) in &table_fragments.fragments {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, actor))
+                    .for_each(|(id, actor)| {
+                        actor_map.insert(id as ActorId, actor.clone());
+                    });
+
+                fragment_map.insert(*fragment_id, fragment.clone());
+
                 if !fragment_ids.contains(fragment_id) {
                     continue;
                 }
-
-                // todo: handle single
 
                 let fragment_parallel_unit_ids: HashSet<_> = fragment
                     .actors
@@ -1544,29 +1579,125 @@ where
                     })
                     .collect();
 
-                let to_expand_parallel_units = target_parallel_unit_ids
-                    .difference(&fragment_parallel_unit_ids)
-                    .cloned()
-                    .collect_vec();
+                match fragment.get_distribution_type().unwrap() {
+                    FragmentDistributionType::Unspecified => unreachable!(),
+                    FragmentDistributionType::Single => {
+                        assert_eq!(fragment_parallel_unit_ids.len(), 1);
 
-                let to_shrink_parallel_units = fragment_parallel_unit_ids
-                    .difference(&target_parallel_unit_ids)
-                    .cloned()
-                    .collect_vec();
+                        let single_parallel_unit_id =
+                            fragment_parallel_unit_ids.iter().exactly_one().unwrap();
 
-                target_plan.insert(
-                    *fragment_id,
-                    ParallelUnitReschedule {
-                        added_parallel_units: to_expand_parallel_units,
-                        removed_parallel_units: to_shrink_parallel_units,
-                    },
-                );
+                        if !target_parallel_unit_ids.contains(single_parallel_unit_id) {
+                            // todo: choose a target parallel unit by single actor count
+                            let chosen_target_parallel_unit_id =
+                                target_parallel_unit_ids.iter().next().unwrap();
+
+                            target_plan.insert(
+                                *fragment_id,
+                                ParallelUnitReschedule {
+                                    added_parallel_units: vec![*chosen_target_parallel_unit_id],
+                                    removed_parallel_units: vec![*single_parallel_unit_id],
+                                },
+                            );
+                        }
+                    }
+                    FragmentDistributionType::Hash => {
+                        let to_expand_parallel_units = target_parallel_unit_ids
+                            .difference(&fragment_parallel_unit_ids)
+                            .sorted()
+                            .cloned()
+                            .collect_vec();
+
+                        let to_shrink_parallel_units = fragment_parallel_unit_ids
+                            .difference(&target_parallel_unit_ids)
+                            .sorted()
+                            .cloned()
+                            .collect_vec();
+
+                        target_plan.insert(
+                            *fragment_id,
+                            ParallelUnitReschedule {
+                                added_parallel_units: to_expand_parallel_units,
+                                removed_parallel_units: to_shrink_parallel_units,
+                            },
+                        );
+                    }
+                }
             }
         }
 
-        // todo: handle NoShuffle
+        Self::clone_no_shuffle_plan(&mut target_plan, fragment_ids, &actor_map, &fragment_map);
 
         Ok(target_plan)
+    }
+
+    fn clone_no_shuffle_plan(
+        target_plan: &mut HashMap<FragmentId, ParallelUnitReschedule>,
+        fragment_ids: Vec<u32>,
+        actor_map: &HashMap<ActorId, StreamActor>,
+        fragment_map: &HashMap<FragmentId, Fragment>,
+    ) {
+        let mut no_shuffle_source_fragment_ids = HashSet::new();
+        let mut no_shuffle_target_fragment_ids = HashSet::new();
+
+        let mut fragment_dispatcher_map = HashMap::new();
+
+        Self::fulfill_no_shuffle_index(
+            actor_map,
+            &mut no_shuffle_source_fragment_ids,
+            &mut no_shuffle_target_fragment_ids,
+            &mut fragment_dispatcher_map,
+        );
+
+        let mut queue: VecDeque<_> = fragment_ids.iter().cloned().collect();
+
+        while let Some(fragment_id) = queue.pop_front() {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
+                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
+            {
+                continue;
+            }
+
+            // for upstream
+            for upstream_fragment_id in &fragment_map
+                .get(&fragment_id)
+                .unwrap()
+                .upstream_fragment_ids
+            {
+                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
+                    continue;
+                }
+
+                if let Some(_plan) = target_plan.get(upstream_fragment_id) {
+                    continue;
+                }
+
+                let plan = target_plan.get(&fragment_id).unwrap();
+                target_plan.insert(*upstream_fragment_id, plan.clone());
+
+                queue.push_back(*upstream_fragment_id);
+            }
+
+            // for downstream
+            if let Some(downstream_fragments) = fragment_dispatcher_map.get(&fragment_id) {
+                // We cannot use `no_shuffle_target_fragment_ids` to determine this because our
+                // downstream may be a no_shuffle target, but it may not be the target we owned.
+                for (downstream_fragment_id, dispatcher_type) in downstream_fragments {
+                    if *dispatcher_type != DispatcherType::NoShuffle {
+                        continue;
+                    }
+
+                    if let Some(_plan) = target_plan.get(downstream_fragment_id) {
+                        continue;
+                    }
+
+                    let plan = target_plan.get(&fragment_id).unwrap();
+                    target_plan.insert(*downstream_fragment_id, plan.clone());
+
+                    queue.push_back(*downstream_fragment_id);
+                }
+            }
+        }
     }
 
     pub async fn get_reschedule_plan(
