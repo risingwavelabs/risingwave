@@ -30,6 +30,7 @@ use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
+use crate::common::metrics::MetricsInfo;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
@@ -206,6 +207,13 @@ impl<S: StateStore> LookupExecutor<S> {
             "mismatched output schema"
         );
 
+        let metrics_info = MetricsInfo::new(
+            ctx.streaming_metrics.clone(),
+            storage_table.table_id().table_id(),
+            ctx.id,
+            "Lookup",
+        );
+
         Self {
             ctx,
             chunk_data_types,
@@ -230,7 +238,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(watermark_epoch),
+            lookup_cache: LookupCache::new(watermark_epoch, metrics_info),
             chunk_size,
         }
     }
