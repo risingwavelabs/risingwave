@@ -70,15 +70,17 @@ impl TableCatalogBuilder {
         column_idx
     }
 
-    /// Extend the columns with column ids reset. This method does not change the column names and
-    /// does not perform duplicate column name check.
+    /// Extend the columns with column ids reset. The input columns should NOT have duplicate names.
     ///
     /// Returns the indices of the extended columns.
     pub fn extend_columns(&mut self, columns: &[ColumnCatalog]) -> Vec<usize> {
         let base_idx = self.columns.len();
         columns.iter().enumerate().for_each(|(i, col)| {
-            let mut new_col = col.clone();
+            assert!(!self.column_names.contains_key(col.name()));
+            self.column_names.insert(col.name().to_string(), 0);
+
             // Reset the column id for the columns.
+            let mut new_col = col.clone();
             new_col.column_desc.column_id = ColumnId::new((base_idx + i) as _);
             self.columns.push(new_col);
         });

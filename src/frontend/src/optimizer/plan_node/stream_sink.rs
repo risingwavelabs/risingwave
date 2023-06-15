@@ -247,8 +247,8 @@ impl StreamSink {
         }
     }
 
-    /// The table schema is: | epoch | seq_id | row_op | sink columns |
-    /// Pk is: | epoch | seq_id |
+    /// The table schema is: | epoch | seq id | row op | sink columns |
+    /// Pk is: | epoch | seq id |
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         let mut table_catalog_builder =
             TableCatalogBuilder::new(self.input.ctx().with_options().internal_table_subset());
