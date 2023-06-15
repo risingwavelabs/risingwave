@@ -41,7 +41,7 @@ use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema,
-    SourceSchema, SourceWatermark, TableConstraint,
+    SourceSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -183,18 +183,17 @@ fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
         .filter(|c| {
-            c.options.iter().all(|option| match option.option {
-                ColumnOption::GeneratedColumns(_) => false,
-                _ => true,
-            })
+            c.options
+                .iter()
+                .all(|option| !matches!(option.option, ColumnOption::GeneratedColumns(_)))
         })
         .cloned()
         .collect()
 }
 
-/// resolve the schema of the source from external schema file, return the relation's columns. see https://www.risingwave.dev/docs/current/sql-create-source for more information.
-/// return (columns, pk_names, source info)
-pub(crate) async fn bind_source_schema(
+/// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+/// return `(columns, pk_names, source info)`
+pub(crate) async fn try_bind_columns_from_source(
     source_schema: &SourceSchema,
     sql_defined_pk_names: Vec<String>,
     sql_defined_columns: &[ColumnDef],
@@ -446,10 +445,10 @@ pub(crate) async fn bind_source_schema(
                     )));
                 }
                 if let Some(key_data_type) = &non_generated_sql_defined_columns[0].data_type {
-                    let key_data_type = bind_data_type(&key_data_type)?;
+                    let key_data_type = bind_data_type(key_data_type)?;
                     match key_data_type {
                         DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
-                            columns[0].column_desc.data_type = key_data_type.clone();
+                            columns[0].column_desc.data_type = key_data_type;
                         }
                         _ => {
                             return Err(RwError::from(ProtocolError(
@@ -461,7 +460,7 @@ pub(crate) async fn bind_source_schema(
                     }
                 }
                 if let Some(value_data_type) = &non_generated_sql_defined_columns[1].data_type {
-                    if !matches!(bind_data_type(&value_data_type)?, DataType::Jsonb) {
+                    if !matches!(bind_data_type(value_data_type)?, DataType::Jsonb) {
                         return Err(RwError::from(ProtocolError(
                             "the `payload` column of the source with row format DebeziumMongoJson
                              must be Jsonb datatype"
@@ -470,7 +469,7 @@ pub(crate) async fn bind_source_schema(
                     }
                 }
             }
-            let pk_names = if (sql_defined_pk) {
+            let pk_names = if sql_defined_pk {
                 sql_defined_pk_names
             } else {
                 vec!["_id".to_string()]
@@ -1073,20 +1072,21 @@ pub async fn handle_create_source(
     }
 
     let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
-    validate_compatibility(&&stmt.source_schema, with_properties)?;
+    validate_compatibility(&stmt.source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, pk_names, source_info) = bind_source_schema(
+    let (columns_from_resolve_source, pk_names, source_info) = try_bind_columns_from_source(
         &stmt.source_schema,
         pk_names,
         &stmt.columns,
         &with_properties,
     )
     .await?;
+    let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
-    let mut columns = bind_sql_columns(&stmt.columns)?;
+    let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
 
     check_and_add_timestamp_column(&with_properties, &mut columns);
 
@@ -1094,9 +1094,6 @@ pub async fn handle_create_source(
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
     }
-    ensure_table_constraints_supported(&stmt.constraints)?;
-
-    let pk_names = bind_pk_names(&stmt.columns, &stmt.constraints)?;
 
     if !pk_names.is_empty() {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -1106,18 +1103,7 @@ pub async fn handle_create_source(
         .into());
     }
 
-    let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_pk_on_relation(columns, pk_names)?;
-
-    let source_info = resolve_source_schema(
-        stmt.source_schema,
-        &mut columns,
-        &mut with_properties,
-        &mut row_id_index,
-        &mut pk_column_ids,
-        false,
-    )
-    .await?;
+    let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     debug_assert!(is_column_ids_dedup(&columns));
 
@@ -1129,13 +1115,6 @@ pub async fn handle_create_source(
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
-
-    if row_id_index.is_none() && columns.iter().any(|c| c.is_generated()) {
-        // TODO(yuhao): allow delete from a non append only source
-        return Err(RwError::from(ErrorCode::BindError(
-            "Generated columns are only allowed in an append only source.".to_string(),
-        )));
-    }
 
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
