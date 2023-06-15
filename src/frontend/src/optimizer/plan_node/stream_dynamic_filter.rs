@@ -77,7 +77,7 @@ impl fmt::Display for StreamDynamicFilter {
 
         self.core.fmt_fields_with_builder(&mut builder);
         let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        if watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
             builder.field(
                 "output_watermarks",
