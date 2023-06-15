@@ -57,7 +57,6 @@ impl CacheRefillPolicy {
                                 if self.sstable_store.is_hot_sstable(sst_id) {
                                     hit_count += 1;
                                 }
-                                total_file_count += 1;
                             }
                         }
                         ssts.extend(level_delta.inserted_table_infos.clone());
