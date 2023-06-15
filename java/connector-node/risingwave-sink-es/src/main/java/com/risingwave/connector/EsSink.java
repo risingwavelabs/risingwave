@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
@@ -25,15 +39,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Note:
- * 1. If no primary key is defined on the DDL, the connector can only operate in append mode
- *    for exchanging INSERT only messages with external system.
- * 2. Index like flink? Currently, index is fixed.
- * 3. The Elasticsearch sink can work in either upsert mode or append mode, depending on
- *    whether a primary key is defined. If a primary key is defined, the Elasticsearch sink works in
- *    upsert mode which can consume queries containing UPDATE/DELETE messages.
- * 4. settings like flink
- *    https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/elasticsearch/
+ * Note: 1. TODO: If no primary key is defined on the DDL, the connector can only operate in append
+ * mode for exchanging INSERT only messages with external system. 2. Currently, index is fixed. 3.
+ * Possible settings from flink:
+ * https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/connectors/table/elasticsearch/
+ * 4. bulkprocessor and high-level-client are deprecated in es 8 java api.
  */
 public class EsSink extends SinkBase {
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
@@ -44,7 +54,6 @@ public class EsSink extends SinkBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     // For bulk listener
     private final List<Integer> primaryKeyIndexes;
-    private final IndexGenerator indexGenerator;
 
     public EsSink(EsSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
@@ -59,16 +68,28 @@ public class EsSink extends SinkBase {
         this.client =
                 new RestHighLevelClient(
                         configureRestClientBuilder(RestClient.builder(host), config));
+        // Test connection
+        try {
+            boolean isConnected = this.client.ping(RequestOptions.DEFAULT);
+            if (!isConnected) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Cannot connect to " + config.getEsUrl())
+                        .asRuntimeException();
+            }
+        } catch (Exception e) {
+            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+        }
         this.bulkProcessor = createBulkProcessor();
+
         primaryKeyIndexes = new ArrayList();
         for (String primaryKey : tableSchema.getPrimaryKeys()) {
             primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
         }
-        indexGenerator = IndexGeneratorFactory.createIndexGenerator(config.getIndex());
     }
 
     private static RestClientBuilder configureRestClientBuilder(
             RestClientBuilder builder, EsSinkConfig config) {
+        // Possible config:
         // 1. Connection path prefix
         // 2. Username and password
         // 3. Timeout
@@ -79,9 +100,7 @@ public class EsSink extends SinkBase {
             RestHighLevelClient client, EsSinkConfig config, BulkProcessor.Listener listener) {
         BulkProcessor.Builder builder =
                 BulkProcessor.builder(
-                        new BulkRequestConsumerFactory() { // This cannot be inlined as a
-                            // lambda because then
-                            // deserialization fails
+                        new BulkRequestConsumerFactory() {
                             @Override
                             public void accept(
                                     BulkRequest bulkRequest,
@@ -93,6 +112,7 @@ public class EsSink extends SinkBase {
                             }
                         },
                         listener);
+        // Possible feature: move these to config
         // execute the bulk every 10 000 requests
         builder.setBulkActions(1000);
         // flush the bulk every 5mb
@@ -131,6 +151,12 @@ public class EsSink extends SinkBase {
         public void afterBulk(long executionId, BulkRequest request, Throwable failure) {}
     }
 
+    /**
+     * Kind of serialization.
+     *
+     * @param row
+     * @return Map from Field name to Value
+     */
     private Map<String, Object> buildDoc(SinkRow row) {
         Map<String, Object> doc = new HashMap<String, Object>();
         for (int i = 0; i < getTableSchema().getNumColumns(); i++) {
@@ -140,8 +166,7 @@ public class EsSink extends SinkBase {
     }
 
     /**
-     * if we don't have primary key, use the first element by default? primary keys are splitted by
-     * _, may
+     * use primary keys as id concatenated by '_'
      *
      * @param row
      * @return
@@ -164,13 +189,13 @@ public class EsSink extends SinkBase {
         final String key = buildId(row);
 
         UpdateRequest updateRequest =
-                new UpdateRequest(indexGenerator.generate(row), "doc", key).doc(doc).upsert(doc);
+                new UpdateRequest(config.getIndex(), "doc", key).doc(doc).upsert(doc);
         bulkProcessor.add(updateRequest);
     }
 
     private void processDelete(SinkRow row) {
         final String key = buildId(row);
-        DeleteRequest deleteRequest = new DeleteRequest(indexGenerator.generate(row), "doc", key);
+        DeleteRequest deleteRequest = new DeleteRequest(config.getIndex(), "doc", key);
         bulkProcessor.add(deleteRequest);
     }
 
@@ -202,10 +227,15 @@ public class EsSink extends SinkBase {
         }
     }
 
-    /** TODO: fine-grained control */
     @Override
     public void sync() {
-        bulkProcessor.flush();
+        try {
+            bulkProcessor.flush();
+        } catch (Exception e) {
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
+                    .asRuntimeException();
+        }
     }
 
     @Override
@@ -218,5 +248,9 @@ public class EsSink extends SinkBase {
                     .withDescription(String.format(ERROR_REPORT_TEMPLATE, e.getMessage()))
                     .asRuntimeException();
         }
+    }
+
+    public RestHighLevelClient getClient() {
+        return client;
     }
 }

@@ -20,7 +20,13 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.proto.Catalog;
+import io.grpc.Status;
+import java.io.IOException;
 import java.util.Map;
+import org.apache.http.HttpHost;
+import org.elasticsearch.client.RequestOptions;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestHighLevelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,9 +49,33 @@ public class EsSinkFactory implements SinkFactory {
         EsSinkConfig config = mapper.convertValue(tableProperties, EsSinkConfig.class);
 
         String esUrl = config.getEsUrl();
-        String index = config.getIndex();
 
         // 1. check url
-        // 2. The user is not allowed to define the primary key for upsert es sink.
+        HttpHost host;
+        try {
+            host = HttpHost.create(config.getEsUrl());
+        } catch (IllegalArgumentException e) {
+            throw Status.INVALID_ARGUMENT.withDescription(e.getMessage()).asRuntimeException();
+        }
+
+        // 2. check connection
+        RestHighLevelClient client = new RestHighLevelClient(RestClient.builder(host));
+        // Test connection
+        try {
+            boolean isConnected = client.ping(RequestOptions.DEFAULT);
+            if (!isConnected) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Cannot connect to " + config.getEsUrl())
+                        .asRuntimeException();
+            }
+        } catch (Exception e) {
+            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+        }
+        // 3. close client
+        try {
+            client.close();
+        } catch (IOException e) {
+            throw Status.INTERNAL.withDescription(e.getMessage()).asRuntimeException();
+        }
     }
 }
